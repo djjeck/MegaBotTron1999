@@ -1,0 +1,31 @@
+{
+  "name": "@megabottron1999/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MegaBotTron1999's web UI: the owner's admin pages, a React app built by Vite, and its server behind a login",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*",
+    "./test/*": "./test/*"
+  },
+  "imports": {
+    "#src/*": "./src/*",
+    "#test/*": "./test/*"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@megabottron1999/core": "0.1.0"
+  },
+  "devDependencies": {
+    "@xyflow/react": "12.12.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "vite": "8.3.5"
+  }
+}

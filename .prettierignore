@@ -1,0 +1,4 @@
+# Coverage reports (npm run test:coverage).
+coverage/
+# The web UI as Vite builds it.
+dist/

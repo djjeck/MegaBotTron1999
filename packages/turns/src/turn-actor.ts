@@ -1,0 +1,346 @@
+/**
+ * The base turn-actor (docs/bot-os-api.md §5): one plugin, run as one instance per game bot
+ * that may be automated (P3, P17), each bound by its ports to the private
+ * chat with its bot and to its bot's parser. An instance sends its `command` (by default
+ * `/play`; set it to the bot's own turn command) to its `chat`, from the owner's account, at a
+ * person's pace:
+ *
+ * - its planner (packages/turns/src/schedule.ts) counts from the owner's last turn with the
+ *   bot: its own, or one sent by hand in that chat (from any device), which plans afresh; the last
+ *   one is kept in its store (`state`), so a restart never sends sooner; with no recent turn, it
+ *   sends within a few minutes, each instance at its own moment;
+ * - before it sends, it asks its parser whether the bot rests (`state.rest`: its rest after a
+ *   turn, 30 minutes after a fight lost, a "too soon"), and if it does, it waits it
+ *   out, coming back a few minutes after;
+ * - its next send is the durable timer `turn`, kept across restarts; one that came due while the
+ *   client was down for more than `PLAN_GRACE_MS` is dropped, and it plans afresh;
+ * - it plays only in `dry-run` (logged, nothing sent) or `live`, and not while paused (drift on
+ *   its parser, which it requires), off, or killed (its safety stop: `read-only`);
+ * - in `live`, it waits for the account to be connected, and tells its parser each turn sent, so
+ *   the parser matches the bot's reply to it;
+ * - a failed send is planned again two minutes later.
+ *
+ * It declares no chat command (two instances would clash on its name): the owner's `/plugins <id>`
+ * gives each its state and mode, and its read `status` its last and next send. It keeps nothing in
+ * its factory's closure: everything hangs off its instance (§2.1). Each step is published as
+ * `turn-actor.step`, with the instance's id, and printed.
+ */
+import { definePlugin, type Plugin, type PluginContext } from '@megabottron1999/core';
+import { Rng } from '@megabottron1999/core/rng.ts';
+import { z } from 'zod';
+import {
+  DEFAULT_SCHEDULE,
+  hash,
+  type Plan,
+  Planner,
+  type ScheduleParams,
+  scheduleProblem,
+} from '#src/schedule.ts';
+import { isTurnCommand, TURN_PARSER_MEMBERS, type TurnParserInterface } from './turn-parser.ts';
+
+export const TURN_ACTOR = 'turn-actor';
+/** The timer of the next turn. */
+export const TURN_TIMER = 'turn';
+/** How late a kept plan may still fire after a restart. */
+export const PLAN_GRACE_MS = 10 * 60_000;
+/** How long a failed send waits before the next try. */
+export const RETRY_MS = 2 * 60_000;
+/** How often a turn due waits for the account to connect. */
+export const CONNECT_WAIT_MS = 60_000;
+/** The turn command when the configuration names none: a placeholder, since each bot has its own. */
+export const DEFAULT_TURN_COMMAND = '/play';
+
+const scheduleShape = z
+  .object({
+    minGapMin: z.number(),
+    maxGapMin: z.number(),
+    skipChance: z.number(),
+    bedtime: z.string(),
+    wake: z.string(),
+    jitterMin: z.number(),
+    wakeDelayMaxMin: z.number(),
+    timeZone: z.string(),
+  })
+  .partial();
+
+/** An instance's configuration: where it plays, what it sends, and its pace. */
+export const turnActorConfig = z.object({
+  /** The private chat with its bot, by the bot's `@username`. */
+  chat: z.string().regex(/^@\w{4,}$/u, 'expected the bot’s @username'),
+  /** Its turn command. */
+  command: z
+    .string()
+    .regex(/^\/\w+$/u, 'expected a command')
+    .default(DEFAULT_TURN_COMMAND),
+  /** Changes to the planner's defaults (packages/turns/src/schedule.ts). */
+  schedule: scheduleShape
+    .default({})
+    .transform((s) => ({ ...DEFAULT_SCHEDULE, ...s }) as ScheduleParams)
+    .superRefine((s, ctx) => {
+      const problem = scheduleProblem(s);
+      if (problem !== undefined) ctx.addIssue({ code: 'custom', message: problem });
+    }),
+  /**
+   * The night's salt: the instances with the same one sleep the same nights (one person), drawn
+   * from the date; by default every instance's.
+   */
+  nightSalt: z.string().default(''),
+  /** The seed of its draws; by default the clock's and its id's. */
+  seed: z.number().int().optional(),
+});
+export type TurnActorConfig = z.output<typeof turnActorConfig>;
+
+export interface TurnActorState {
+  /** the owner's last turn with the bot, in ms. */
+  last?: number;
+}
+
+export interface TurnStatus {
+  chat: string;
+  command: string;
+  last?: number;
+  next?: number;
+}
+
+const stepSchema = z.object({
+  actor: z.string(),
+  chat: z.string(),
+  event: z.enum(['planned', 'sent', 'seen', 'rest', 'waiting', 'failed', 'stopped']),
+  detail: z.string(),
+});
+export type TurnStep = z.infer<typeof stepSchema>;
+
+const clock = (t: number) => new Date(t).toISOString().slice(11, 16);
+
+/** An instance's line in the owner's summary: its bot, its mode, its last and next turn. */
+export function turnSummary(id: string, mode: string, s: TurnStatus | undefined): string {
+  const parts = [
+    ...(s?.last === undefined ? [] : [`last ${clock(s.last)}`]),
+    ...(s?.next === undefined ? [] : [`next ${clock(s.next)}`]),
+  ];
+  return `${s?.chat ?? id}: ${mode}${parts.length > 0 ? `, ${parts.join(', ')} UTC` : ''}`;
+}
+
+/** The turn-actor plugin, of which the wiring makes one instance per bot (`withInstances`). */
+export function turnActorPlugin(): Plugin {
+  return definePlugin({
+    manifest: {
+      id: TURN_ACTOR,
+      version: '0.1.0',
+      kinds: ['actor'],
+      description:
+        "A game bot's turn, from the owner's account, in its private chat, at a person's pace",
+      config: turnActorConfig,
+      games: { registers: [TURN_ACTOR] },
+      events: { [`${TURN_ACTOR}.step`]: stepSchema },
+      inputs: {
+        chat: {
+          type: 'chat',
+          network: 'telegram',
+          help: "the owner's own account: the private chat with its bot, and its turn command only",
+        },
+        parser: {
+          type: 'interface',
+          members: TURN_PARSER_MEMBERS,
+          help: "Its bot's parser: the bot's rest, and the turns it sent",
+        },
+      },
+      interface: {
+        state: {
+          status: {
+            help: 'Its chat and command, and its last and next turn',
+            output: z.object({
+              chat: z.string(),
+              command: z.string(),
+              last: z.number().optional(),
+              next: z.number().optional(),
+            }),
+          },
+        },
+      },
+    },
+    create: (ctx) => new TurnActor(ctx).instance(),
+  });
+}
+
+/** One instance: its plan, its last turn, and its hooks. */
+class TurnActor {
+  private readonly ctx: PluginContext;
+  private readonly c: TurnActorConfig;
+  private readonly planner: Planner;
+  private last: number | undefined;
+  private plan: Plan | undefined;
+  private paused = false;
+  private sending = false;
+  /** Told once while it waits for the account. */
+  private waiting = false;
+
+  constructor(ctx: PluginContext) {
+    this.ctx = ctx;
+    this.c = ctx.config as TurnActorConfig;
+    const seed = this.c.seed ?? (ctx.clock.now() ^ hash(ctx.id)) >>> 0;
+    this.planner = new Planner(this.c.schedule, new Rng(seed), this.c.nightSalt);
+    this.last = ctx.store.read<TurnActorState>('state')?.last;
+    this.plan = ctx.scheduler.get(TURN_TIMER)?.payload as Plan | undefined;
+  }
+
+  instance() {
+    const bot = this.c.chat.slice(1);
+    const commands = [this.c.command];
+    // A turn the owner sends by hand in the chat, from any device, restarts the count.
+    this.ctx.connector('chat').onMessage((m) => {
+      if (m.own !== true || m.chat.toLowerCase() !== this.c.chat.toLowerCase()) return;
+      if (!isTurnCommand(m.text, commands, bot)) return;
+      if (this.last !== undefined && m.time <= this.last) return;
+      this.remember(m.time);
+      this.step('seen', `sent by hand at ${clock(m.time)}`);
+      if (this.plan !== undefined) this.replan();
+    });
+    this.ctx.mode.onChange(() => this.settle());
+    return {
+      start: () => this.settle(),
+      onTimer: (name: string) => {
+        if (name === TURN_TIMER) void this.due();
+      },
+      pause: () => {
+        this.paused = true;
+        this.drop('paused');
+      },
+      resume: () => {
+        this.paused = false;
+        this.settle();
+      },
+      off: () => this.drop('the bot is off'),
+      on: () => {
+        this.settle();
+        return this.plan === undefined
+          ? undefined
+          : `${this.c.chat}: next ${clock(this.plan.at)} UTC`;
+      },
+      // Its safety stop: nothing more goes out until the owner sets a mode again.
+      kill: () => {
+        this.ctx.mode.set('read-only', 'safety');
+        return `${this.c.chat}: read-only`;
+      },
+      interface: { state: { status: () => this.status() } },
+    };
+  }
+
+  private status(): TurnStatus {
+    return {
+      chat: this.c.chat,
+      command: this.c.command,
+      ...(this.last === undefined ? {} : { last: this.last }),
+      ...(this.plan === undefined ? {} : { next: this.plan.at }),
+    };
+  }
+
+  /** Whether it plays now: a mode that sends, not paused, the bot not off. */
+  private playing(): boolean {
+    return this.ctx.mode.get() !== 'read-only' && !this.paused && !this.ctx.off();
+  }
+
+  /** Plans if it plays and has no plan; drops the plan if it does not play. */
+  private settle(): void {
+    if (!this.playing()) this.drop(this.ctx.mode.get() === 'read-only' ? 'read-only' : 'stopped');
+    else if (this.plan === undefined) this.replan();
+  }
+
+  /**
+   * Plans from the last turn; a plan "at once" (no recent turn: a fresh start, a long pause) comes
+   * up to a few minutes later instead, so that the instances do not all send in the same second.
+   */
+  private replan(): void {
+    const now = this.ctx.clock.now();
+    const plan = this.planner.next(this.last, now);
+    this.setPlan(plan.at <= now ? this.planner.after(now) : plan);
+  }
+
+  private drop(why: string): void {
+    if (this.plan === undefined) return;
+    this.plan = undefined;
+    this.ctx.scheduler.cancel(TURN_TIMER);
+    this.step('stopped', `plan dropped: ${why}`);
+  }
+
+  private setPlan(plan: Plan, event: 'planned' | 'rest' = 'planned', why?: string): void {
+    this.plan = plan;
+    this.ctx.scheduler.at(TURN_TIMER, plan.at, {
+      payload: plan,
+      late: 'fire',
+      graceMs: PLAN_GRACE_MS,
+    });
+    const notes = [
+      ...(why === undefined ? [] : [why]),
+      ...(plan.skipped > 0 ? [`${plan.skipped} turn${plan.skipped > 1 ? 's' : ''} forgotten`] : []),
+      ...(plan.afterSleep ? ['after the night'] : []),
+    ];
+    this.step(event, `${clock(plan.at)} UTC${notes.length > 0 ? ` (${notes.join(', ')})` : ''}`);
+  }
+
+  /** Its plan is due: waits for the bot's rest or the account, or sends. */
+  private async due(): Promise<void> {
+    const plan = this.plan;
+    this.plan = undefined;
+    if (!this.playing() || this.sending) return;
+    const now = this.ctx.clock.now();
+    const rest = this.ctx.use<TurnParserInterface>('parser').state.rest();
+    if (rest !== undefined && rest.until > now) {
+      this.setPlan(this.planner.after(rest.until), 'rest', `${this.c.chat} rests: ${rest.why}`);
+      return;
+    }
+    const live = this.ctx.mode.get() === 'live';
+    if (live && this.ctx.connector('chat').status().state !== 'connected') {
+      if (!this.waiting) this.step('waiting', "the owner's account is not connected");
+      this.waiting = true;
+      this.plan = plan ?? { at: now, skipped: 0, afterSleep: false };
+      this.ctx.scheduler.after(TURN_TIMER, CONNECT_WAIT_MS, {
+        payload: this.plan,
+        late: 'fire',
+        graceMs: PLAN_GRACE_MS,
+      });
+      return;
+    }
+    this.waiting = false;
+    this.sending = true;
+    try {
+      const r = await this.ctx.outbox('chat').deliver(this.c.chat, this.c.command);
+      const t = this.ctx.clock.now();
+      if (r.outcome === 'sent' || r.outcome === 'dry-run') {
+        if (r.outcome === 'sent')
+          this.ctx
+            .use<TurnParserInterface>('parser')
+            .actions.sent({ chat: this.c.chat, ...(r.id === undefined ? {} : { id: r.id }), t });
+        this.remember(t);
+        this.step(
+          'sent',
+          r.outcome === 'sent'
+            ? `${this.c.command}${r.id === undefined ? '' : ` #${r.id}`}`
+            : `${this.c.command} (dry run)`
+        );
+        if (this.playing()) this.replan();
+      } else {
+        this.step('failed', r.reason ?? r.outcome);
+        if (this.playing())
+          this.setPlan({ at: t + RETRY_MS, skipped: 0, afterSleep: false }, 'planned', 'a retry');
+      }
+    } finally {
+      this.sending = false;
+    }
+  }
+
+  private remember(t: number): void {
+    this.last = t;
+    this.ctx.store.write('state', { last: t } satisfies TurnActorState);
+  }
+
+  private step(event: TurnStep['event'], detail: string): void {
+    this.ctx.bus.publish(`${TURN_ACTOR}.step`, {
+      actor: this.ctx.id,
+      chat: this.c.chat,
+      event,
+      detail,
+    } satisfies TurnStep);
+    this.ctx.log.info(`${event}: ${detail}`);
+  }
+}

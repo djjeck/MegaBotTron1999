@@ -1,0 +1,201 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { type Graph } from './graph.ts';
+import {
+  describeNodes,
+  GRAPH_FILE,
+  graphMermaid,
+  graphText,
+  PREVIOUS_GRAPH_FILE,
+  readGraphFile,
+  writeGraphFile,
+} from './graph-view.ts';
+import { parseManifest } from './manifest.ts';
+
+const graph: Graph = {
+  version: 1,
+  nodes: [
+    { id: 'irc', plugin: 'irc', config: { host: 'znc', nick: 'me' } },
+    { id: 'game', plugin: 'game' },
+    { id: 'actor-b', plugin: 'actor', account: 'x:y' },
+  ],
+  edges: [
+    { from: 'irc.chat', to: 'game.channel', type: 'chat', reads: ['#a'], sends: [] },
+    { from: 'game.interface', to: 'actor-b.game', type: 'interface' },
+    {
+      from: 'irc.chat',
+      to: 'actor-b.channel',
+      type: 'chat',
+      reads: ['#a'],
+      sends: ['#a'],
+      commands: ['!go', '"q"'],
+    },
+    { from: 'game.events', to: 'actor-b.notices' },
+  ],
+};
+
+describe('the graph printed', () => {
+  it('as text: the nodes, then the edges with what they carry', () => {
+    expect(graphText(graph)).toBe(
+      [
+        'nodes:',
+        '  irc: host, nick',
+        '  game',
+        '  actor-b (actor) x:y',
+        'edges:',
+        '  irc.chat → game.channel (chat): reads #a',
+        '  game.interface → actor-b.game (interface)',
+        '  irc.chat → actor-b.channel (chat): reads #a; sends #a; commands !go "q"',
+        '  game.events → actor-b.notices (?)',
+      ].join('\n')
+    );
+  });
+
+  it('as a Mermaid flowchart, each edge coloured by its port type', () => {
+    expect(graphMermaid(graph)).toBe(
+      [
+        'flowchart LR',
+        '  irc["irc"]',
+        '  game["game"]',
+        '  actor_b["actor-b<br/><i>actor</i>"]',
+        '  irc -- "chat → channel<br/>reads #a" --> game',
+        '  game -- "interface → game" --> actor_b',
+        '  irc -- "chat → channel<br/>reads #a; sends #a; commands !go #quot;q#quot;" --> actor_b',
+        '  game -- "events → notices" --> actor_b',
+        '  linkStyle 0 stroke:#2f7ed8',
+        '  linkStyle 1 stroke:#3a9a5b',
+        '  linkStyle 2 stroke:#2f7ed8',
+      ].join('\n')
+    );
+  });
+
+  it('is written to the data volume, keeping the one before when it changed', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'graph-'));
+    expect(writeGraphFile(dir, graph)).toBe(true);
+    expect(readGraphFile(path.join(dir, GRAPH_FILE))).toEqual(graph);
+    expect(writeGraphFile(dir, graph)).toBe(false);
+    expect(fs.existsSync(path.join(dir, PREVIOUS_GRAPH_FILE))).toBe(false);
+    const next = { ...graph, edges: [] };
+    expect(writeGraphFile(dir, next)).toBe(true);
+    expect(readGraphFile(path.join(dir, GRAPH_FILE))).toEqual(next);
+    expect(readGraphFile(path.join(dir, PREVIOUS_GRAPH_FILE))).toEqual(graph);
+    fs.rmSync(dir, { recursive: true });
+  });
+});
+
+describe('the nodes as the graph view shows them', () => {
+  const irc = parseManifest({
+    id: 'irc',
+    version: '1.0.0',
+    kinds: ['connector'],
+    description: 'a network',
+    account: 'irc:me',
+    config: z.object({ host: z.string().describe('where'), port: z.number().default(6667) }),
+  });
+  const actor = parseManifest({
+    id: 'actor',
+    version: '0.2.0',
+    kinds: ['actor'],
+    description: 'acts',
+    requires: ['irc', 'game'],
+    reach: [{ connector: 'irc', sends: ['#a'] }],
+    uses: { game: ['state.board'] },
+    games: { consumes: ['game'] },
+    inputs: {
+      helper: { type: 'interface', members: ['actions.help'], optional: true, help: 'any helper' },
+      lobby: { type: 'chat', network: 'irc', optional: true },
+    },
+    settings: z.object({ loud: z.boolean().default(false) }),
+    interface: {
+      state: { status: { help: 'how it is', output: z.object({ n: z.number() }) } },
+      actions: {
+        go: { help: 'goes', input: z.object({ to: z.string() }), output: z.boolean() },
+        stay: { help: 'stays', input: z.object({}) },
+      },
+      commands: { poke: { help: 'pokes', args: '<who>', owner: true } },
+    },
+  });
+  const game = parseManifest({
+    id: 'game',
+    version: '0.1.0',
+    kinds: ['parser'],
+    description: 'reads the game',
+    games: { registers: ['game'] },
+    interface: { state: { board: { help: 'the board', output: z.array(z.string()) } } },
+  });
+
+  it('gives each its ports, interface and the JSON Schemas of its config and settings', () => {
+    const views = describeNodes(
+      [
+        { id: 'irc', manifest: irc },
+        { id: 'game', manifest: game },
+        { id: 'actor-b', manifest: actor },
+      ],
+      graph
+    );
+    expect(views[0]).toMatchObject({
+      id: 'irc',
+      plugin: 'irc',
+      version: '1.0.0',
+      account: 'irc:me',
+      config: { host: 'znc', nick: 'me' },
+      configSchema: {
+        type: 'object',
+        properties: {
+          host: { type: 'string', description: 'where' },
+          port: { type: 'number', default: 6667 },
+        },
+      },
+      inputs: {},
+      outputs: { chat: { type: 'chat', network: 'irc', label: 'chat of irc', optional: false } },
+      interface: { reads: [], actions: [], commands: [] },
+    });
+    expect(views[1]).not.toHaveProperty('config');
+    expect(views[1]?.outputs).toMatchObject({
+      events: { type: 'events', namespace: 'game' },
+      interface: { type: 'interface', plugin: 'game', members: ['state.board'] },
+    });
+    const b = views[2];
+    expect(b).toMatchObject({ id: 'actor-b', plugin: 'actor', account: 'x:y' });
+    expect(b?.settingsSchema).toMatchObject({ properties: { loud: { default: false } } });
+    expect(b?.inputs).toEqual({
+      irc: { type: 'chat', label: 'chat of any network', optional: false },
+      game: {
+        type: 'interface',
+        plugin: 'game',
+        members: ['state.board'],
+        label: 'interface of game',
+        optional: false,
+      },
+      'game-events': { type: 'events', namespace: 'game', label: 'events of game', optional: true },
+      helper: {
+        type: 'interface',
+        members: ['actions.help'],
+        label: 'interface with actions.help',
+        optional: true,
+        help: 'any helper',
+      },
+      lobby: { type: 'chat', network: 'irc', label: 'chat of irc', optional: true },
+    });
+    expect(b?.interface.reads).toMatchObject([{ name: 'status', help: 'how it is' }]);
+    expect(b?.interface.actions).toMatchObject([
+      {
+        name: 'go',
+        input: { properties: { to: { type: 'string' } } },
+        output: { type: 'boolean' },
+      },
+      { name: 'stay' },
+    ]);
+    expect(b?.interface.actions[1]).not.toHaveProperty('output');
+    expect(b?.interface.commands).toEqual([
+      { name: 'poke', help: 'pokes', args: '<who>', owner: true },
+    ]);
+    // A node the graph does not hold (it cannot happen at run time) has its manifest's alone.
+    expect(describeNodes([{ id: 'other', manifest: game }], graph)[0]).not.toHaveProperty(
+      'account'
+    );
+  });
+});

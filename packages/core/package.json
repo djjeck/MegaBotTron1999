@@ -1,0 +1,23 @@
+{
+  "name": "@megabottron1999/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MegaBotTron1999's shell: plugins, the bus, the store, the scheduler, the outbox, drift, settings, secrets, the graph and the dev kit",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*",
+    "./test/*": "./test/*"
+  },
+  "imports": {
+    "#src/*": "./src/*",
+    "#test/*": "./test/*"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  }
+}

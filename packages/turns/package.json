@@ -1,0 +1,24 @@
+{
+  "name": "@megabottron1999/turns",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MegaBotTron1999's base plugins for a game bot's turns: a parser of its answers and an actor at a person's pace",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*",
+    "./test/*": "./test/*"
+  },
+  "imports": {
+    "#src/*": "./src/*",
+    "#test/*": "./test/*"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@megabottron1999/connectors": "0.1.0",
+    "@megabottron1999/core": "0.1.0",
+    "zod": "4.6.7"
+  }
+}

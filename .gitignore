@@ -1,0 +1,11 @@
+# Local tooling
+node_modules/
+.DS_Store
+coverage/
+
+# The web UI as Vite builds it (npm run build).
+dist/
+
+# A local data volume or secrets, for running the image by hand: never in git.
+data/
+secrets/

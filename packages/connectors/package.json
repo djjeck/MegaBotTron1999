@@ -1,0 +1,27 @@
+{
+  "name": "@megabottron1999/connectors",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MegaBotTron1999's connectors: IRC through ZNC, Telegram as a bot and as a user",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*",
+    "./test/*": "./test/*"
+  },
+  "imports": {
+    "#src/*": "./src/*",
+    "#test/*": "./test/*"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@grammyjs/auto-retry": "2.0.2",
+    "@megabottron1999/core": "0.1.0",
+    "grammy": "1.46.0",
+    "grammy-switchboard": "0.2.0",
+    "telegram": "2.26.22",
+    "zod": "4.6.7"
+  }
+}
