@@ -280,6 +280,7 @@ interface PluginContext<Config, Settings> {
   off(): boolean; // the instance is off (§4.11)
   resume(): boolean; // the owner's resume, carried by the plugin
   restored?: unknown; // what serialise returned at the last stop (§3)
+  render: Render; // §4.13: SVG to PNG
 }
 ```
 
@@ -585,6 +586,75 @@ A node selected shows its details, its config and settings in read-only forms ma
 schemas (the editor's to make editable); one or several selected can be killed, each by
 `POST /plugins/<id>/kill`.
 
+### 4.13 The standard services
+
+What every plugin needs and none should implement again (bot-os.md D49, D52): the shell implements
+it once, as a higher-order call, with whatever npm dependencies or native binaries it takes, so that
+a module, which has none of its own, is written in those terms. Two kinds, by what they reach:
+
+- **In the context,** for a service that reaches nothing outside the process and costs nothing:
+  every plugin has it, with no edge.
+- **Through a connector,** for a service that holds a credential or spends money: the connector
+  holds the secret (P9), and a plugin reaches it through an interface input that an edge binds
+  (§2.1), so that the edge is the permission and the graph shows who spends.
+
+**SVG to PNG** (`ctx.render`, `packages/core/src/render.ts`), in the context:
+
+```ts
+interface Render {
+  svgToPng(svg: string, options?: SvgToPngOptions): Promise<Uint8Array>;
+}
+interface SvgToPngOptions {
+  width?: number; // the picture's width; its height follows the SVG's proportions
+  height?: number; // without width: its height; its width follows
+  scale?: number; // without either: the zoom on the SVG's own size, 1 by default
+  maxSide?: number; // the longest side at most, shrinking to fit (2560 for a Telegram photo)
+  background?: string; // a CSS colour; transparent without one
+  fonts?: readonly string[]; // font files (.ttf, .otf), by absolute path
+  defaultFontFamily?: string; // for text that names no family, or none loaded
+  systemFonts?: boolean; // the host's fonts too: false by default
+}
+```
+
+On resvg (`@resvg/resvg-js`, a native binding with prebuilt binaries for `linux/amd64` and
+`linux/arm64`, loaded at the first render), rendered on libuv's thread pool rather than the event
+loop. It loads no system font unless asked, so that a picture looks the same on every host; the
+image has none, so a plugin that draws text ships its font files (a module, in its directory:
+`fileURLToPath(new URL('fonts/Example.ttf', import.meta.url))`) and names them in `fonts`. An SVG it
+cannot read, or a size that is not a positive number, rejects with why. `CoreOptions.render`
+replaces it (a test's stub); the dev kit's core has the real one.
+
+**Asking an LLM** (`ask`, the `anthropic` connector, §5), through a connector. A plugin declares an
+interface input bound to it, and asks through it:
+
+```ts
+inputs: { llm: { type: 'interface', plugin: 'anthropic', members: ['actions.ask'] } },
+// …
+const { actions } = ctx.use<{ actions: { ask: Ask } }>('llm');
+const r = await actions.ask({ system: 'You score dice rolls.', prompt, schema: Score });
+if (r.ok) use(r.output); // typed by the schema; else r.error says why
+```
+
+```ts
+interface AskRequest<T> {
+  system?: string; // the fixed instructions, cached by the API between the calls that share them
+  prompt: string; // the user's turn
+  model?: string; // the configuration's `model` by default (claude-opus-5-5)
+  maxTokens?: number; // the configuration's `maxTokens` by default (16000)
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'; // the configuration's, or the model's
+  schema?: z.ZodType<T>; // structured output: the answer must fit it, and is returned parsed
+}
+type AskResult<T> =
+  | { ok: true; text: string; output?: T; model: string; usage: AskUsage }
+  | { ok: false; error: string; usage?: AskUsage };
+// AskUsage: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }
+```
+
+`ask` never throws: a refusal (`refused`), an answer cut short (`answer cut short`), an answer that
+does not fit the schema (`unreadable answer`) and an error of the API or the network
+(`API error 429 …`) are failed answers, so that a plugin's loop survives them. The owner may call it
+too, as the action `ask` of the control API (without a schema, which JSON cannot carry).
+
 ## 5. The shell's own plugins
 
 | Plugin          | Kinds     | Package                       | What it is                                                                                   |
@@ -592,6 +662,7 @@ schemas (the editor's to make editable); one or several selected can be killed, 
 | `irc`           | connector | `@megabottron1999/connectors` | An IRC account through a ZNC bouncer, with its flood limits and a health endpoint            |
 | `telegram-bot`  | connector | `@megabottron1999/connectors` | A Telegram bot (grammY), and the owner's chat surface                                        |
 | `telegram-user` | connector | `@megabottron1999/connectors` | A Telegram user account (GramJS), reading and sending in the chats of its configuration      |
+| `anthropic`     | connector | `@megabottron1999/connectors` | The Claude API: `ask`, with structured output (§4.13)                                        |
 | (service)       | connector | `@megabottron1999/connectors` | `ServiceConnector`: the connector of a plugin that holds secrets for an API client, no chat  |
 | (turn parsers)  | parser    | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives |
 | `turn-actor`    | actor     | `@megabottron1999/turns`      | One game bot's turns, at a person's pace, run as one instance per bot                        |
@@ -625,7 +696,14 @@ schemas (the editor's to make editable); one or several selected can be killed, 
   outbox (`deliver`, with the message's id); GramJS's flood waits become `FloodWait`.
 - **`ServiceConnector`** (`packages/connectors/src/plugins/service.ts`): for a connector plugin that
   holds an account's secrets and makes an object from them for the wiring (`Instance.service`), but
-  has no chat: it reads and sends nothing. The Anthropic connector of D49 is to be one.
+  has no chat: it reads and sends nothing. The `anthropic` connector is one.
+- **`anthropic`** (`packages/connectors/src/plugins/anthropic.ts`, on the Anthropic SDK): the Claude
+  API's account (`anthropic:api`, or the name it is given), made from its `anthropic_api_key` secret
+  at `create`, a `ServiceConnector`. Its configuration holds the defaults of `ask` (§4.13): `model`
+  (`claude-opus-5-5`), `maxTokens` (16000) and `effort` (unset: the model's own). It offers `ask` as
+  its interface's action, for the plugins an edge binds to it, and as its `service`
+  (`core.service('anthropic')`), for the wiring. A system prompt is sent with a cache breakpoint
+  (the API's default five minutes), so calls that share one pay for it once.
 - **`turnParserPlugin`** (`packages/turns/src/turn-parser.ts`): one parser plugin per game bot, each
   made from its bot's grammar (`read`), which knows the game. Each reads, on the owner's account
   (`telegram-user`), the private chat with its bot and optionally a group, read only. It knows the
@@ -656,7 +734,7 @@ schemas (the editor's to make editable); one or several selected can be killed, 
 ## 6. Boundaries
 
 - `packages/core/src/` imports nothing of any game, nor any other package: ESLint refuses imports of
-  the other workspaces there.
+  the other workspaces there. Its npm dependencies are zod and resvg (the render service, §4.13).
 - A plugin reaches the core only through its context; it never imports `packages/core/src/`
   internals, only its public API (`@megabottron1999/core`, its `src/index.ts`), and the subpaths the
   packages export (`@megabottron1999/<name>/<path under src/>`).

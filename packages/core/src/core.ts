@@ -46,6 +46,7 @@ import {
   type PluginContext,
   type PluginInterface,
 } from './plugin.ts';
+import { type Render, resvgRender } from './render.ts';
 import { type KeptTimer, PluginScheduler } from './scheduler.ts';
 import { type Secrets, SecretStore } from './secrets.ts';
 import { PluginSettings, SETTINGS_DOC, SettingsRegistry } from './settings.ts';
@@ -138,6 +139,8 @@ export interface CoreOptions {
    * whose wiring leaves this unset; only in a test, the dev kit or a manual-test tool that says so.
    */
   allowArchived?: boolean;
+  /** The render service the plugins get (§4.13): the shell's, on resvg, by default. */
+  render?: Render;
 }
 
 export class StartError extends Error {}
@@ -878,6 +881,7 @@ export class Core {
       },
       off: () => this.controls.off,
       resume: () => this.resume(id),
+      render: this.o.render ?? resvgRender,
       ...(restored === undefined ? {} : { restored }),
     };
   }

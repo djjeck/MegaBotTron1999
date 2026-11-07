@@ -42,7 +42,7 @@ port.
 - **Secrets** are files under `/run/secrets`, never environment variables: `web_ui_password` (the
   web UI's login; without it there is no UI at all), `bot_os_key` (to encrypt the secrets the core
   stores), and each connector's own (`znc_password`, `telegram_bot_token`, `telegram_user_api_id`,
-  `telegram_user_api_hash`, `telegram_user_session`).
+  `telegram_user_api_hash`, `telegram_user_session`, `anthropic_api_key`).
 - **Ports:** 8082 is the web UI. The control API listens on the container's loopback (8081) only.
 - The container runs as the `node` user, from `/app`, with `node src/main.ts`.
 
@@ -88,6 +88,9 @@ export const greeter = definePlugin({
 - **The context** gives it a clock, its own store, durable timers, the bus, handles on the
   connectors its edges bind, an outbox, drift reporting, its settings and its mode. A plugin never
   holds a credential: connectors do.
+- **Standard services,** implemented once by the shell (D52): SVG to PNG in every plugin's context
+  (`ctx.render.svgToPng`), and asking an LLM through the `anthropic` connector (`ask`, with
+  structured output), for the plugins an edge binds to it.
 - **Modes:** every plugin that sends has a mode, `read-only`, `dry-run` or `live`, enforced by the
   outbox, starting `read-only` and changed only by the owner.
 - **Drift:** a parser reports every message it claims but cannot read; past a threshold, the core

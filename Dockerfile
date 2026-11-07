@@ -29,7 +29,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY --from=manifests /m/ ./
 # The runtime dependencies, each declared by the package that uses it: zod; grammY, its auto-retry
-# and grammy-switchboard, for the Telegram bot; GramJS, for a Telegram account.
+# and grammy-switchboard, for the Telegram bot; GramJS, for a Telegram account; the Anthropic SDK,
+# for the anthropic connector; resvg, for the render service, whose native binary is a prebuilt
+# optional package per platform (linux-x64-musl, linux-arm64-musl), so no install script runs.
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 COPY packages/ packages/
 COPY --from=web /app/packages/web/dist/ packages/web/dist/

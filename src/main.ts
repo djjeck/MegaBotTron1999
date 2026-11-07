@@ -13,6 +13,7 @@
  * - the graph from `/data/graph.json` (D50), which today's empty graph stands in for, with the
  *   plugins' kept state belonging to instances apart from the nodes.
  */
+import { anthropicPlugin } from '@megabottron1999/connectors/plugins/anthropic.ts';
 import { ircPlugin } from '@megabottron1999/connectors/plugins/irc.ts';
 import { telegramBotPlugin } from '@megabottron1999/connectors/plugins/telegram-bot.ts';
 import { telegramUserPlugin } from '@megabottron1999/connectors/plugins/telegram-user.ts';
@@ -58,7 +59,8 @@ const core = new Core({
 core.register(
   ircPlugin({ nick: env['IRC_NICK'] || 'megabottron' }),
   telegramBotPlugin(),
-  telegramUserPlugin({ self: env['TELEGRAM_USER'] || 'owner' })
+  telegramUserPlugin({ self: env['TELEGRAM_USER'] || 'owner' }),
+  anthropicPlugin()
 );
 // TODO(loader): register the modules of /data/modules here, before the load.
 try {

@@ -67,7 +67,7 @@ export default tseslint.config(
   },
   {
     // The shell's core knows nothing of any game, nor of the other packages (docs/bot-os-api.md
-    // §6): only itself, zod and Node.
+    // §6): only itself, zod, resvg (the render service) and Node.
     files: ['packages/core/src/**/*.ts'],
     ignores: TESTS,
     rules: restrict(TEST_IMPORTS, {

@@ -144,6 +144,7 @@ export {
   type PortType,
   type PortTypeInfo,
 } from './ports.ts';
+export { type Render, resvgRender, type SvgToPngOptions } from './render.ts';
 export { all, from, type Matcher, mentioning, replyTo, waitFor, within } from './replies.ts';
 export { MAX_DELAY_MS, type Scheduler, type Timer, type TimerOptions } from './scheduler.ts';
 export { KEY_SECRET, REDACTED, Secrets, SecretStore } from './secrets.ts';

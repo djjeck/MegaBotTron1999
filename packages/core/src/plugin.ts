@@ -10,6 +10,7 @@ import { type ChatSurface, type Connector, type ConnectorHandle } from './connec
 import { type DriftReporter } from './drift.ts';
 import { type ManifestInput } from './manifest.ts';
 import { type Mode, type OutboxHandle } from './outbox.ts';
+import { type Render } from './render.ts';
 import { type Scheduler } from './scheduler.ts';
 import { type SettingValue } from './settings.ts';
 import { type Store } from './store.ts';
@@ -86,6 +87,8 @@ export interface PluginContext {
   resume(): boolean;
   /** What `serialise` returned at the last stop, if anything (§3). */
   readonly restored?: unknown;
+  /** The render service (§4.13): SVG to PNG. */
+  readonly render: Render;
 }
 
 /** A plugin's mode, as its context gives it. */
