@@ -1,8 +1,9 @@
 /**
- * One node of the graph view: a plugin instance, its inputs on the left and its outputs on
+ * One node of the graph editor: a plugin instance, its inputs on the left and its outputs on
  * the right, each port drawn in its type's shape and colour (`PORT_TYPE_INFO`), and its live state:
- * running or paused, its mode, its parser's drift. A killed node (D44) is drawn disabled, with its
- * reinstatement at hand.
+ * running or paused, its mode, its parser's drift, or not running (added, or not applied yet). A
+ * killed node (D44) is drawn disabled, with its reinstatement at hand. An edge is dragged from an
+ * output to an input; a node or a port the check refuses is marked, with why.
  */
 import type { Node, NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
@@ -14,6 +15,9 @@ export interface PluginNodeData extends Record<string, unknown> {
   drift?: DriftCounts | undefined;
   portTypes: Record<string, PortTypeInfo>;
   reinstate: (id: string) => void;
+  /** The check's problems with the node itself, and with each of its ports by name. */
+  problems?: string[];
+  portProblems?: Record<string, string[]>;
 }
 
 export type PluginNodeType = Node<PluginNodeData, 'plugin'>;
@@ -33,23 +37,30 @@ function Port(props: {
   side: 'in' | 'out';
   index: number;
   info: PortTypeInfo | undefined;
+  problems: string[] | undefined;
 }) {
-  const { name, port, side, index, info } = props;
+  const { name, port, side, index, info, problems = [] } = props;
   const top = HEAD_HEIGHT + PORT_ROW * index + PORT_ROW / 2;
-  const title = `${name}: ${port.label}${port.optional ? ' (optional)' : ''}${port.help === undefined ? '' : ` — ${port.help}`}`;
+  const title =
+    `${name}: ${port.label}${port.optional ? ' (optional)' : ''}${port.help === undefined ? '' : ` — ${port.help}`}` +
+    problems.map((p) => `\n✗ ${p}`).join('');
+  const refused = problems.length > 0 ? ' refused' : '';
   return (
     <>
       <Handle
         id={name}
         type={side === 'in' ? 'target' : 'source'}
         position={side === 'in' ? Position.Left : Position.Right}
-        className={`port ${info?.shape ?? 'square'}${port.optional ? ' optional' : ''}`}
+        className={`port ${info?.shape ?? 'square'}${port.optional ? ' optional' : ''}${refused}`}
         style={{ top, background: info?.colour ?? 'gray' }}
-        isConnectable={false}
         title={title}
         data-testid={`port ${side} ${name}`}
       />
-      <span className={`port-name ${side}`} style={{ top: top - PORT_ROW / 2 }} title={title}>
+      <span
+        className={`port-name ${side}${refused}`}
+        style={{ top: top - PORT_ROW / 2 }}
+        title={title}
+      >
         {name}
       </span>
     </>
@@ -57,13 +68,13 @@ function Port(props: {
 }
 
 export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
-  const { view, live, drift, portTypes } = data;
+  const { view, live, drift, portTypes, problems = [], portProblems = {} } = data;
   const killed = live?.killed === true;
   const inputs = Object.entries(view.inputs);
   const outputs = Object.entries(view.outputs);
   return (
     <div
-      className={`plugin-node${killed ? ' killed' : ''}${selected ? ' selected' : ''}`}
+      className={`plugin-node${killed ? ' killed' : ''}${selected ? ' selected' : ''}${problems.length > 0 ? ' refused' : ''}`}
       style={{ height: nodeHeight(view) }}
       aria-label={`node ${view.id}`}
       aria-disabled={killed}
@@ -74,7 +85,9 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
         <div className="muted small">{view.kinds.join(', ')}</div>
         <div>
           {live === undefined ? (
-            <span className="badge">…</span>
+            <span className="badge" title="not running: added, or not applied yet">
+              not running
+            </span>
           ) : (
             <span className={`badge ${killed ? 'killed' : live.state}`}>
               {killed ? 'killed' : live.state}
@@ -99,12 +112,33 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
             Reinstate
           </button>
         ) : null}
+        {problems.length > 0 ? (
+          <div className="error small" title={problems.join('\n')}>
+            ✗ {problems[0]}
+          </div>
+        ) : null}
       </div>
       {inputs.map(([name, port], i) => (
-        <Port key={name} name={name} port={port} side="in" index={i} info={portTypes[port.type]} />
+        <Port
+          key={name}
+          name={name}
+          port={port}
+          side="in"
+          index={i}
+          info={portTypes[port.type]}
+          problems={portProblems[name]}
+        />
       ))}
       {outputs.map(([name, port], i) => (
-        <Port key={name} name={name} port={port} side="out" index={i} info={portTypes[port.type]} />
+        <Port
+          key={name}
+          name={name}
+          port={port}
+          side="out"
+          index={i}
+          info={portTypes[port.type]}
+          problems={portProblems[name]}
+        />
       ))}
     </div>
   );

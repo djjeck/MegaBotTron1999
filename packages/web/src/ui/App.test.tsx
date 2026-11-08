@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Answer } from '#test/fake-api.ts';
 import { fakeApi } from '#test/fake-api.ts';
-import { DRIFT, status, VIEW } from '#test/graph-view.ts';
+import { fakeCore } from '#test/fake-core.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
 import { App, PAGES } from './App.tsx';
 
@@ -16,11 +16,8 @@ const HEALTH = {
   accounts: { connected: 1 },
 };
 
-const GRAPH: Record<string, Answer> = {
-  'GET /graph/view': [200, VIEW],
-  'GET /status': [200, status()],
-  'GET /drift': [200, DRIFT],
-};
+/** The graph editor's routes, as the fake core answers them. */
+const GRAPH = (): Record<string, Answer> => fakeCore().api.routes;
 
 let restore: () => void;
 beforeEach(() => {
@@ -36,12 +33,12 @@ afterEach(() => {
 describe('App', () => {
   it('asks for the password, says why a login failed, then shows the graph', async () => {
     const api = fakeApi({
+      ...GRAPH(),
       'GET /session': [200, { authenticated: false }],
       'POST /login': (body) =>
         (body as { password: string }).password === 'right password'
           ? [200, { authenticated: true }]
           : [401, { error: 'wrong password' }],
-      ...GRAPH,
     });
     render(<App />);
     const field = await screen.findByLabelText('Password');
@@ -51,7 +48,7 @@ describe('App', () => {
     fireEvent.change(field, { target: { value: 'right password' } });
     fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
     expect(await screen.findByRole('heading', { name: 'Graph' })).toBeDefined();
-    expect(await screen.findByLabelText('node actor-a')).toBeDefined();
+    expect(await screen.findByLabelText('node actor-a', {}, { timeout: 5000 })).toBeDefined();
     expect(api.calls).toContain('POST /login {"password":"right password"}');
   });
 
@@ -63,8 +60,10 @@ describe('App', () => {
 
   it('goes to each page by the hash, marks it in its menu, and logs out', async () => {
     const api = fakeApi({
-      ...GRAPH,
+      ...GRAPH(),
       'GET /session': [200, { authenticated: true }],
+      'GET /modules': [200, { installed: [], failures: [], restart: false }],
+      'GET /legacy/events': [200, { types: {} }],
       'GET /instance': [200, HEALTH],
       'GET /accounts': [200, []],
       'GET /drift': [200, []],
@@ -77,7 +76,7 @@ describe('App', () => {
     // The graph is the main menu's; the admin pages are a menu of their own.
     expect(
       within(screen.getByRole('navigation', { name: 'main' })).getAllByRole('link')
-    ).toHaveLength(1);
+    ).toHaveLength(3);
     expect(
       within(screen.getByRole('navigation', { name: 'admin' })).getAllByRole('link')
     ).toHaveLength(5);
@@ -95,6 +94,32 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
     expect(await screen.findByLabelText('Password')).toBeDefined();
     expect(api.calls).toContain('POST /logout {}');
+  });
+
+  it('shows the login with why, after a restart ends the session', async () => {
+    const api = fakeApi({ ...GRAPH(), 'GET /session': [200, { authenticated: true }] });
+    let restarted = false;
+    api.routes['POST /restart'] = () => {
+      restarted = true;
+      return [200, { restarting: true }];
+    };
+    api.routes['GET /session'] = () => [200, { authenticated: !restarted }];
+    api.routes['GET /graph/file'] = [
+      200,
+      { exists: true, graph: { version: 1, nodes: [], edges: [] }, differs: true },
+    ];
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Apply (restart)' }, { timeout: 5000 })
+    );
+    expect(
+      await screen.findByText(
+        'The instance restarted on the saved graph. A restart ends every session: log in again.',
+        {},
+        { timeout: 5000 }
+      )
+    ).toBeDefined();
+    expect(screen.getByLabelText('Password')).toBeDefined();
   });
 
   it('shows the login again when the session expires', async () => {

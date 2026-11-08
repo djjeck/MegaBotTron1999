@@ -1,0 +1,88 @@
+/**
+ * Applying what is saved (D55, bot-os-api.md §2.3): `POST /restart`, then the wait, told step by
+ * step. The instance stops (each plugin's state kept), its process exits, and Docker starts it again
+ * on the saved graph and the modules installed (`restart: unless-stopped`). The UI is served by that
+ * same process, so it loses the connection, and its sessions, which live in memory: it asks
+ * `GET /session` until a new process answers (the old one still says logged in, the new one does
+ * not), then hands over to the login, saying why.
+ */
+import { useEffect, useState } from 'react';
+import { api } from './api.ts';
+
+type Phase = 'asking' | 'stopping' | 'down' | 'gone';
+
+const STEPS: Record<Phase, string> = {
+  asking: 'Asking the instance to restart…',
+  stopping: 'Stopping: each plugin saves its state…',
+  down: 'Starting again: waiting for the instance to answer…',
+  gone: 'The instance has not come back. Look at the container (`docker logs`), and at its restart policy, which must start it again (`unless-stopped`).',
+};
+
+export function Restart(props: {
+  /** The new instance answers: the login, with why. */
+  done: (note: string) => void;
+  /** The restart refused: back to the page. */
+  failed: (why: string) => void;
+  everyMs?: number;
+  /** How long it may take to come back before the UI says it has not. */
+  giveUpMs?: number;
+}) {
+  const [phase, setPhase] = useState<Phase>('asking');
+  const { done, failed, everyMs = 1000, giveUpMs = 120_000 } = props;
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const started = Date.now();
+    const poll = (): void => {
+      if (!live) return;
+      if (Date.now() - started > giveUpMs) {
+        setPhase('gone');
+        return;
+      }
+      api<{ authenticated: boolean }>('/session').then(
+        (s) => {
+          if (!live) return;
+          if (s.authenticated) {
+            timer = setTimeout(poll, everyMs);
+            return;
+          }
+          done(
+            'The instance restarted on the saved graph. A restart ends every session: log in again.'
+          );
+        },
+        () => {
+          if (!live) return;
+          setPhase('down');
+          timer = setTimeout(poll, everyMs);
+        }
+      );
+    };
+    api('/restart', {}).then(
+      () => {
+        if (!live) return;
+        setPhase('stopping');
+        timer = setTimeout(poll, everyMs);
+      },
+      (e: unknown) => {
+        if (live) failed(e instanceof Error ? e.message : String(e));
+      }
+    );
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+    // Once, as it is shown.
+  }, []);
+  return (
+    <div className="overlay" role="dialog" aria-label="restarting">
+      <div className="card">
+        <h2>Restarting</h2>
+        <p role="status">{STEPS[phase]}</p>
+        <p className="muted small">
+          The instance stops, keeping each plugin’s state, and starts again on what is saved. This
+          page loses its connection meanwhile and comes back by itself.
+        </p>
+      </div>
+    </div>
+  );
+}

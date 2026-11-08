@@ -247,6 +247,7 @@ main.wide {
 }
 
 .graph-canvas {
+  position: relative;
   flex: 1;
   height: 75vh;
   min-width: 0;
@@ -389,4 +390,141 @@ fieldset.schema textarea {
   font-size: 0.8rem;
   width: 100%;
   min-height: 3rem;
+}
+
+/* The graph editor (D55). */
+
+.error,
+.details .error {
+  color: var(--bad);
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.banner {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 4px;
+  margin: 0.5rem 0;
+}
+
+.banner.bad {
+  border-left-color: var(--bad);
+}
+
+.banner.warn {
+  color: inherit;
+  border-left-color: var(--warn);
+}
+
+ul.problems {
+  color: var(--bad);
+  padding-left: 1.2rem;
+}
+
+.plugin-node.refused {
+  border-color: var(--bad);
+  box-shadow: 0 0 0 2px var(--bad);
+}
+
+.react-flow__handle.port.refused {
+  outline: 2px solid var(--bad);
+  outline-offset: 2px;
+}
+
+.port-name.refused {
+  color: var(--bad);
+}
+
+.field.refused input,
+.field.refused select,
+.field.refused textarea {
+  border-color: var(--bad);
+}
+
+.field small {
+  display: block;
+}
+
+.field label {
+  display: block;
+}
+
+.details input:not([type='checkbox']):not([type='radio']),
+.details select,
+.details textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0.2rem 0;
+}
+
+.details label.choice {
+  display: block;
+  margin-top: 0.4rem;
+}
+
+.react-flow__edge.refused .react-flow__edge-text {
+  fill: var(--bad);
+}
+
+ul.plugins {
+  list-style: none;
+  padding: 0;
+}
+
+button.plugin {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin: 0.25rem 0;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+button.plugin:hover {
+  border-color: var(--accent);
+}
+
+.empty-state {
+  position: absolute;
+  top: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(28rem, 90%);
+  padding: 1rem 1.25rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 15%);
+  z-index: 5;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 40%);
+  z-index: 50;
+}
+
+.overlay .card {
+  max-width: 28rem;
+  padding: 1rem 1.5rem;
+  background: var(--bg);
+  border-radius: 6px;
+}
+
+.plugin-node .head .error {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }

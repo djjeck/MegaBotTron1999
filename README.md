@@ -10,10 +10,10 @@ each binding an edge, and the edges are the permissions.
 
 It knows no game. Games, and what plays them, are plugins on top of it.
 
-**Status: v1-alpha.** The core, the connectors, the turn plugins, the web UI's graph view, the
-module loader, and the graph read from the data volume (`/data/graph.json`) with each node's state
-in an instance apart from it work; the graph is edited through the control API until the web UI's
-editor comes. The plugin API changes freely until the launch ([docs/bot-os.md](docs/bot-os.md) P13).
+**Status: v1-alpha.** The core, the connectors, the turn plugins, the module loader, the graph read
+from the data volume (`/data/graph.json`) with each node's state in an instance apart from it, and
+the web UI's graph editor, where the graph is built node by node, work. The plugin API changes
+freely until the launch ([docs/bot-os.md](docs/bot-os.md) P13).
 
 > **Plugins run with the shell's full rights.** There is no sandbox. A plugin can read every secret
 > the process holds and send as every account it is connected to. Run only plugins you have read.
@@ -35,9 +35,13 @@ docker run -d --name megabottron1999 \
   ghcr.io/djjeck/megabottron1999:edge
 ```
 
-Then open `http://127.0.0.1:8082/` and log in with that password. In a real deployment, use Docker
-or Compose secrets, and put the UI behind a reverse proxy with HTTPS rather than publishing the
-port.
+Then open `http://127.0.0.1:8082/` and log in with that password. The home page is the graph editor:
+a new instance starts empty, and offers to add its first node, a connector. Add each node from the
+plugins the image and the modules offer, wire its ports, set its config, review the changes and save
+them, then apply them with a restart (the page waits for the instance, and asks for the login
+again). The Modules page installs and rolls back modules; the Import page brings in an older data
+directory's event log ([docs/bot-os.md](docs/bot-os.md) D55). In a real deployment, use Docker or
+Compose secrets, and put the UI behind a reverse proxy with HTTPS rather than publishing the port.
 
 - **`/data`** is the instance's state: the graph (`graph.json`, and `graph.previous.json`), each
   plugin instance's state (`instances/<id>/`), the core's own (`core/`), the event log

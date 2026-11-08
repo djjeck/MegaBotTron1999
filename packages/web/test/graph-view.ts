@@ -3,6 +3,7 @@
  * `GET /drift` give it: a chat connector, a parser of a game, and an actor bound to both.
  */
 import {
+  type AvailablePlugin,
   type DriftCounts,
   type GraphViewData,
   type PluginControl,
@@ -16,6 +17,7 @@ const PORT_TYPES: GraphViewData['portTypes'] = {
 };
 
 const none = { reads: [], actions: [], commands: [] };
+const declares = { secrets: [], configSecrets: [], events: [] };
 
 export const VIEW: GraphViewData = {
   portTypes: PORT_TYPES,
@@ -60,6 +62,9 @@ export const VIEW: GraphViewData = {
       inputs: {},
       outputs: { chat: { type: 'chat', network: 'chat', label: 'chat of chat', optional: false } },
       interface: none,
+      secrets: ['chat_password'],
+      configSecrets: ['token'],
+      events: [],
     },
     {
       id: 'parser',
@@ -83,6 +88,8 @@ export const VIEW: GraphViewData = {
         actions: [],
         commands: [],
       },
+      ...declares,
+      events: ['game.message', 'game.win'],
     },
     {
       id: 'actor-a',
@@ -124,9 +131,21 @@ export const VIEW: GraphViewData = {
         ],
         commands: [{ name: 'poke', help: 'pokes it', args: '<who>', owner: true }],
       },
+      ...declares,
     },
   ],
 };
+
+/** The chat connector's config schema has a key that names a secret. */
+const chatSchema = VIEW.nodes[0]?.configSchema as { properties: Record<string, unknown> };
+chatSchema.properties['token'] = { type: 'string', description: 'the secret it logs in with' };
+
+/** The plugins the instance offers, as `GET /available` gives them: the chat from the image, the game's from a module. */
+export const AVAILABLE: AvailablePlugin[] = VIEW.nodes.map(({ id: _, config: __, ...p }) => ({
+  ...p,
+  id: p.plugin,
+  ...(p.plugin === 'chat' ? {} : { module: 'game' }),
+}));
 
 const plugin = (id: string, more: Partial<PluginControl> = {}): PluginControl => ({
   id,

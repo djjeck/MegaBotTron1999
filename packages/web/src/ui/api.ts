@@ -5,14 +5,24 @@
  */
 import type {
   AccountControl,
+  AvailablePlugin,
   DriftCounts,
   Graph,
+  GraphDiff,
   GraphEdge,
+  GraphNode,
+  GraphProblem,
+  InstanceInfo,
   JsonSchema,
+  LegacyEventTypes,
+  LegacyReport,
   LogEntry,
   MemberView,
+  Mode,
+  ModulesReport,
   NodeView,
   PluginControl,
+  PluginView,
   PortType,
   PortTypeInfo,
   PortView,
@@ -20,14 +30,24 @@ import type {
 
 export type {
   AccountControl,
+  AvailablePlugin,
   DriftCounts,
   Graph,
+  GraphDiff,
   GraphEdge,
+  GraphNode,
+  GraphProblem,
+  InstanceInfo,
   JsonSchema,
+  LegacyEventTypes,
+  LegacyReport,
   LogEntry,
   MemberView,
+  Mode,
+  ModulesReport,
   NodeView,
   PluginControl,
+  PluginView,
   PortType,
   PortTypeInfo,
   PortView,
@@ -50,10 +70,28 @@ export interface InstanceHealth {
   accounts: Record<string, number>;
 }
 
-/** The instance and its plugins, as `GET /status` gives them. */
+/** The instance and its plugins, as `GET /status` gives them; `graph.refused`, why the saved graph did not run. */
 export interface Status {
   off: boolean;
   plugins: PluginControl[];
+  graph?: { refused: GraphProblem[] };
+}
+
+/** The saved graph, as `GET /graph/file` gives it (docs/bot-os-api.md §2.3). */
+export interface GraphFileView {
+  exists: boolean;
+  graph?: unknown;
+  error?: string;
+  problems?: GraphProblem[];
+  /** Whether a restart would change what runs. */
+  differs: boolean;
+}
+
+/** A graph checked, as `POST /graph/check` gives it: its problems, and its diff from the saved file. */
+export interface GraphCheckView {
+  ok: boolean;
+  problems: GraphProblem[];
+  diff: GraphDiff;
 }
 
 /** A refusal of the API: its status and why. */
@@ -66,14 +104,21 @@ export class ApiError extends Error {
   }
 }
 
-/** Calls the API: a GET, or a POST of `body` as JSON. Throws an `ApiError` for a refusal. */
-export async function api<T>(route: string, body?: unknown): Promise<T> {
+/**
+ * Calls the API: a GET, or a POST (a PUT with `method`) of `body` as JSON. Throws an `ApiError` for
+ * a refusal.
+ */
+export async function api<T>(
+  route: string,
+  body?: unknown,
+  method: 'POST' | 'PUT' = 'POST'
+): Promise<T> {
   const res = await fetch(
     `api${route}`,
     body === undefined
       ? { credentials: 'same-origin' }
       : {
-          method: 'POST',
+          method,
           credentials: 'same-origin',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(body),

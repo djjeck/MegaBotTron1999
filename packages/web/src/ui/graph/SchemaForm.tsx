@@ -1,12 +1,16 @@
 /**
  * A form made from a JSON Schema (P11): the schemas a plugin declares in zod, as the core writes
- * them (`GET /graph/view`). One field per property, by its type: a check box, a number, a text, a
- * choice of the enum's values, a nested group for an object; anything else as JSON. Each field
- * shows its value, or the schema's default, marked as such.
+ * them (`GET /available`, `GET /graph/view`). One field per property, by its type: a check box, a
+ * number, a text, a choice of the enum's values, a nested group for an object; anything else as
+ * JSON. Each field shows its value, or the schema's default, marked as such.
  *
- * Read-only for now: the editor makes the same fields editable. Nothing here depends on
- * the node's state, so a killed node's form is as any other's (D44).
+ * Editable when given `onChange` (the editor's draft, D55): a field emptied is taken away, so that
+ * its default holds; a key of `secretKeys` (a connector's `configSecrets`, bot-os-api.md §4.9) is a
+ * choice of the secrets' names, never a value; `errors` are the check's, by key. Read-only without
+ * it (an action's input). Nothing here depends on the node's state, so a killed node's form is as
+ * any other's (D44).
  */
+import { useState } from 'react';
 import type { JsonSchema } from '#src/ui/api.ts';
 
 const show = (v: unknown): string => JSON.stringify(v, null, 2) ?? '';
@@ -17,7 +21,62 @@ function plain(schema: JsonSchema): JsonSchema {
   return options?.find((o) => o['type'] !== 'null') ?? schema;
 }
 
-function Field(props: { name: string; schema: JsonSchema; value: unknown; required: boolean }) {
+/** What a form needs to be edited, passed down to its nested groups. */
+interface Editing {
+  onChange: (value: Record<string, unknown>) => void;
+  secretKeys: readonly string[];
+  secretNames: readonly string[];
+  errors: Record<string, string[]>;
+}
+
+/** A value typed as JSON, kept as typed until it reads. */
+function JsonField(props: {
+  name: string;
+  value: unknown;
+  set: ((v: unknown) => void) | undefined;
+}) {
+  const [text, setText] = useState<string>();
+  const [bad, setBad] = useState(false);
+  const shown = text ?? (props.value === undefined ? '' : show(props.value));
+  const set = props.set;
+  if (set === undefined) return <textarea aria-label={props.name} value={shown} readOnly />;
+  return (
+    <>
+      <textarea
+        aria-label={props.name}
+        value={shown}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          if (text === undefined) return;
+          if (text.trim() === '') {
+            setBad(false);
+            setText(undefined);
+            set(undefined);
+            return;
+          }
+          try {
+            set(JSON.parse(text) as unknown);
+            setBad(false);
+            setText(undefined);
+          } catch {
+            setBad(true);
+          }
+        }}
+      />
+      {bad ? <span className="error">not JSON: unchanged</span> : null}
+    </>
+  );
+}
+
+function Field(props: {
+  name: string;
+  schema: JsonSchema;
+  value: unknown;
+  required: boolean;
+  set: ((v: unknown) => void) | undefined;
+  editing: Editing | undefined;
+}) {
+  const { name, set, editing } = props;
   const schema = plain(props.schema);
   const type = schema['type'];
   const enumOf = schema['enum'] as unknown[] | undefined;
@@ -25,18 +84,44 @@ function Field(props: { name: string; schema: JsonSchema; value: unknown; requir
   const given = props.value !== undefined;
   const value = given ? props.value : fallback;
   const description = (props.schema['description'] ?? schema['description']) as string | undefined;
+  const errors = editing?.errors[name] ?? [];
   if (type === 'object' && schema['properties'] !== undefined)
     return (
       <SchemaForm
-        legend={props.name}
+        legend={name}
         schema={schema}
-        value={value as Record<string, unknown> | undefined}
+        value={props.value as Record<string, unknown> | undefined}
+        {...(set === undefined ? {} : { onChange: (v) => set(v) })}
       />
     );
   let control;
-  if (enumOf !== undefined)
+  if (editing?.secretKeys.includes(name) === true && set !== undefined) {
+    const names = [...editing.secretNames];
+    if (typeof props.value === 'string' && !names.includes(props.value)) names.push(props.value);
     control = (
-      <select aria-label={props.name} value={String(value ?? '')} disabled>
+      <select
+        aria-label={name}
+        value={typeof props.value === 'string' ? props.value : ''}
+        onChange={(e) => set(e.target.value === '' ? undefined : e.target.value)}
+      >
+        <option value="">(no secret)</option>
+        {names.map((n) => (
+          <option key={n} value={n}>
+            {n}
+          </option>
+        ))}
+      </select>
+    );
+  } else if (enumOf !== undefined)
+    control = (
+      <select
+        aria-label={name}
+        value={String(value ?? '')}
+        disabled={set === undefined}
+        onChange={(e) =>
+          set?.(e.target.value === '' ? undefined : enumOf[e.target.selectedIndex - 1])
+        }
+      >
         <option value="" />
         {enumOf.map((o) => (
           <option key={String(o)} value={String(o)}>
@@ -46,29 +131,44 @@ function Field(props: { name: string; schema: JsonSchema; value: unknown; requir
       </select>
     );
   else if (type === 'boolean')
-    control = <input type="checkbox" aria-label={props.name} checked={value === true} disabled />;
+    control = (
+      <input
+        type="checkbox"
+        aria-label={name}
+        checked={value === true}
+        disabled={set === undefined}
+        onChange={(e) => set?.(e.target.checked)}
+      />
+    );
   else if (type === 'string' || type === 'number' || type === 'integer')
     control = (
       <input
-        aria-label={props.name}
+        aria-label={name}
         type={type === 'string' ? 'text' : 'number'}
         value={value === undefined ? '' : String(value)}
-        readOnly
+        readOnly={set === undefined}
+        onChange={(e) => {
+          const raw = e.target.value;
+          if (raw === '') set?.(undefined);
+          else set?.(type === 'string' ? raw : Number(raw));
+        }}
       />
     );
-  else
-    control = (
-      <textarea aria-label={props.name} value={value === undefined ? '' : show(value)} readOnly />
-    );
+  else control = <JsonField name={name} value={value} set={set} />;
   return (
-    <div className="field">
+    <div className={`field${errors.length > 0 ? ' refused' : ''}`}>
       <label>
-        <code>{props.name}</code>
+        <code>{name}</code>
         {props.required ? null : <span className="muted"> (optional)</span>}
         {control}
       </label>
       {!given && fallback !== undefined ? <span className="muted">default</span> : null}
       {description === undefined ? null : <small className="muted">{description}</small>}
+      {errors.map((e) => (
+        <small key={e} className="error">
+          {e}
+        </small>
+      ))}
     </div>
   );
 }
@@ -78,10 +178,33 @@ export function SchemaForm(props: {
   legend: string;
   schema: JsonSchema;
   value?: Record<string, unknown> | undefined;
+  onChange?: (value: Record<string, unknown>) => void;
+  secretKeys?: readonly string[];
+  secretNames?: readonly string[];
+  errors?: Record<string, string[]>;
 }) {
   const properties = (props.schema['properties'] ?? {}) as Record<string, JsonSchema>;
   const required = (props.schema['required'] ?? []) as string[];
   const entries = Object.entries(properties);
+  const onChange = props.onChange;
+  const editing: Editing | undefined =
+    onChange === undefined
+      ? undefined
+      : {
+          onChange,
+          secretKeys: props.secretKeys ?? [],
+          secretNames: props.secretNames ?? [],
+          errors: props.errors ?? {},
+        };
+  const setter = (name: string) =>
+    onChange === undefined
+      ? undefined
+      : (v: unknown) => {
+          const next: Record<string, unknown> = { ...props.value };
+          if (v === undefined) delete next[name];
+          else next[name] = v;
+          onChange(next);
+        };
   return (
     <fieldset className="schema">
       <legend>{props.legend}</legend>
@@ -95,6 +218,8 @@ export function SchemaForm(props: {
             schema={schema}
             value={props.value?.[name]}
             required={required.includes(name)}
+            set={setter(name)}
+            editing={editing}
           />
         ))
       )}

@@ -1,11 +1,30 @@
 /**
- * The details of the node selected in the graph view: what it is, its live state, its config
- * and its settings in forms made from their schemas (read-only until the editor), and the
- * interface it declares: its ports, reads, actions and commands (P11). A killed node (D44) says so,
- * with its reinstatement; its forms stay as they are.
+ * The node selected in the graph editor (D55): what it is, its instance and its live state, and,
+ * editable for the draft, its account (a connector's), the mode its instance starts in, its config
+ * and the settings its instance starts with, in forms made from their schemas, each field with the
+ * check's errors; a config key that names a secret (`configSecrets`) is a choice of the secrets'
+ * names. Then the interface it declares (P11) and its removal, which keeps its instance. A killed
+ * node (D44) says so, with its reinstatement; its forms stay editable as any other's.
  */
-import type { DriftCounts, MemberView, NodeView, PluginControl, PortView } from '#src/ui/api.ts';
+import type {
+  DriftCounts,
+  GraphNode,
+  InstanceInfo,
+  MemberView,
+  Mode,
+  NodeView,
+  PluginControl,
+  PortView,
+} from '#src/ui/api.ts';
+import { instanceOf } from './draft.ts';
 import { SchemaForm } from './SchemaForm.tsx';
+
+/** The modes a node's instance may start in (P10); unset, it starts `read-only`. */
+const MODES: Record<Mode, string> = {
+  'read-only': 'read-only: sends nothing',
+  'dry-run': 'dry-run: records, sends nothing',
+  live: 'live: sends',
+};
 
 function Ports(props: { title: string; ports: Record<string, PortView> }) {
   const entries = Object.entries(props.ports);
@@ -50,24 +69,30 @@ function Members(props: { title: string; members: MemberView[] }) {
   );
 }
 
-/** A setting's value by its key: the surfaces name another plugin's `<id>.<key>` (§4.10). */
-function settingsOf(id: string, live: PluginControl | undefined): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [name, value] of Object.entries(live?.settings ?? {}))
-    out[name.startsWith(`${id}.`) ? name.slice(id.length + 1) : name] = value;
-  return out;
-}
+const when = (t: number | undefined): string =>
+  t === undefined ? 'never' : new Date(t).toISOString().slice(0, 16).replace('T', ' ');
 
 export function NodeDetails(props: {
+  node: GraphNode;
   view: NodeView;
   live?: PluginControl | undefined;
   drift?: DriftCounts | undefined;
+  /** The instance it names, if it is kept already. */
+  instance?: InstanceInfo | undefined;
+  problems: string[];
+  configErrors: Record<string, string[]>;
+  settingErrors: Record<string, string[]>;
+  secretNames: readonly string[];
+  change: (change: Partial<GraphNode>) => void;
+  remove: () => void;
   kill: (ids: string[]) => void;
   reinstate: (id: string) => void;
 }) {
-  const { view, live, drift } = props;
+  const { node, view, live, drift } = props;
   const killed = live?.killed === true;
+  const connector = view.kinds.includes('connector');
   const i = view.interface;
+  const instance = instanceOf(node);
   return (
     <aside className="details" aria-label={`details of ${view.id}`}>
       <h2>{view.id}</h2>
@@ -77,16 +102,26 @@ export function NodeDetails(props: {
           ({view.plugin} {view.version}; {view.kinds.join(', ')})
         </span>
       </p>
+      {props.problems.length === 0 ? null : (
+        <ul className="problems" aria-label={`problems of ${view.id}`}>
+          {props.problems.map((p) => (
+            <li key={p}>{p}</li>
+          ))}
+        </ul>
+      )}
       <dl>
-        {view.account === undefined ? null : (
-          <>
-            <dt>Account</dt>
-            <dd>{view.account}</dd>
-          </>
-        )}
+        <dt>Instance</dt>
+        <dd>
+          <code>{instance}</code>{' '}
+          <span className="muted">
+            {props.instance === undefined
+              ? '(fresh: made at its first start)'
+              : `(kept; last referenced ${when(props.instance.referenced)})`}
+          </span>
+        </dd>
         <dt>State</dt>
         <dd>
-          {live === undefined ? '…' : killed ? 'killed' : live.state}
+          {live === undefined ? 'not running' : killed ? 'killed' : live.state}
           {live?.reason === undefined || killed ? null : (
             <span className="muted"> {live.reason}</span>
           )}
@@ -103,7 +138,7 @@ export function NodeDetails(props: {
           </>
         )}
       </dl>
-      {killed ? (
+      {live === undefined ? null : killed ? (
         <p className="killed-note">
           Killed: it sends nothing until reinstated.{' '}
           <button type="button" className="reinstate" onClick={() => props.reinstate(view.id)}>
@@ -112,22 +147,70 @@ export function NodeDetails(props: {
         </p>
       ) : (
         <p>
-          <button
-            type="button"
-            className="danger"
-            disabled={live === undefined}
-            onClick={() => props.kill([view.id])}
-          >
+          <button type="button" className="danger" onClick={() => props.kill([view.id])}>
             Kill {view.id}
           </button>
         </p>
       )}
       <section>
+        <h3>Node</h3>
+        {connector ? (
+          <div className="field">
+            <label>
+              <code>account</code>
+              <input
+                aria-label="account"
+                value={node.account ?? ''}
+                placeholder={view.account}
+                onChange={(e) => props.change({ account: e.target.value })}
+              />
+            </label>
+            <small className="muted">
+              {'<network>:<name>'}; the plugin’s own ({view.account ?? 'none'}) when empty
+            </small>
+          </div>
+        ) : (
+          <div className="field">
+            <label>
+              <code>mode</code>
+              <select
+                aria-label="mode"
+                value={node.mode ?? ''}
+                onChange={(e) =>
+                  props.change({ mode: (e.target.value || undefined) as Mode | undefined })
+                }
+              >
+                <option value="">(unset: read-only)</option>
+                {Object.entries(MODES).map(([m, help]) => (
+                  <option key={m} value={m}>
+                    {help}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <small className="muted">
+              The mode its instance starts in, while it keeps none of its own (P10).
+            </small>
+          </div>
+        )}
+      </section>
+      <section>
         <h3>Config</h3>
         {view.configSchema === undefined ? (
           <p className="muted">no config</p>
         ) : (
-          <SchemaForm legend="config" schema={view.configSchema} value={view.config} />
+          <SchemaForm
+            legend="config"
+            schema={view.configSchema}
+            value={node.config}
+            onChange={(config) => props.change({ config })}
+            secretKeys={view.configSecrets}
+            secretNames={props.secretNames}
+            errors={props.configErrors}
+          />
+        )}
+        {view.secrets.length === 0 ? null : (
+          <p className="muted small">Secrets it reads: {view.secrets.join(', ')}</p>
         )}
       </section>
       <section>
@@ -135,11 +218,19 @@ export function NodeDetails(props: {
         {view.settingsSchema === undefined ? (
           <p className="muted">no settings</p>
         ) : (
-          <SchemaForm
-            legend="settings"
-            schema={view.settingsSchema}
-            value={settingsOf(view.id, live)}
-          />
+          <>
+            <p className="muted small">
+              What its instance starts with, while it keeps none of its own; the owner’s later
+              changes (Admin: Plugins) win.
+            </p>
+            <SchemaForm
+              legend="settings"
+              schema={view.settingsSchema}
+              value={node.settings}
+              onChange={(settings) => props.change({ settings })}
+              errors={props.settingErrors}
+            />
+          </>
         )}
       </section>
       <section>
@@ -150,6 +241,11 @@ export function NodeDetails(props: {
         <Members title="Actions" members={i.actions} />
         <Members title="Commands" members={i.commands} />
       </section>
+      <p>
+        <button type="button" className="danger" onClick={props.remove}>
+          Remove {view.id}
+        </button>
+      </p>
     </aside>
   );
 }

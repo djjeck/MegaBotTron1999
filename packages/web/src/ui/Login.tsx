@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { useState } from 'react';
 import { api } from './api.ts';
 
-export function Login({ onLogin }: { onLogin: () => void }) {
+export function Login({ onLogin, note }: { onLogin: () => void; note?: string | undefined }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -21,6 +21,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
   return (
     <main className="login">
       <h1>MegaBotTron1999</h1>
+      {note === undefined ? null : <p role="status">{note}</p>}
       <form onSubmit={submit}>
         <label>
           Password

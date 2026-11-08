@@ -220,8 +220,9 @@ a node uses it (`used`).
 ### 2.3 The graph file
 
 `/data/graph.json` is the only source of the instance's composition (bot-os.md D50): no code
-declares it, the owner builds it node by node (the web UI's editor, to come, or the control API),
-and a restart applies it (P8). It is the graph of §2.1, each node with its `instance` (§2.2):
+declares it, the owner builds it node by node (the web UI's graph editor, bot-os.md D55, or the
+control API), and a restart applies it (P8). It is the graph of §2.1, each node with its `instance`
+(§2.2):
 
 ```json
 {
@@ -709,16 +710,18 @@ flowchart, left to right, a box per node and an arrow per edge, coloured by its 
 `graph.previous.json` when it changed. `packages/core/tools/graph.ts [file] [--mermaid]` prints a
 graph file.
 
-**The graph view** (bot-os.md D47) is the web UI's home page (`packages/web/src/ui/graph/`), drawn
-with React Flow. It reads `GET /graph/view`: the graph the instance runs (its secrets redacted), the
-port types' looks (`PORT_TYPE_INFO`) and each node as `describeNodes` makes it from its plugin's
-manifest: its version, description, kinds and account, its configuration, its input and output
-ports, the reads, actions and commands its `interface` declares, and the JSON Schemas of its
-`config`, its `settings` and its actions' inputs and outputs and reads' outputs (zod's
-`toJSONSchema`). It polls `GET /status` and `GET /drift` for each node's live state, mode and drift.
-A node selected shows its details, its config and settings in read-only forms made from those
-schemas (the editor's to make editable); one or several selected can be killed, each by
-`POST /plugins/<id>/kill`.
+**The graph editor** (bot-os.md D47, D55) is the web UI's home page (`packages/web/src/ui/graph/`),
+drawn with React Flow. It edits a draft of the saved graph (`GET /graph/file`), each node drawn from
+its plugin as `GET /available` describes it (`describePlugin`: its version, description, kinds and
+account, its input and output ports, the reads, actions and commands its `interface` declares, and
+the JSON Schemas of its `config`, its `settings` and its actions' inputs and outputs and reads'
+outputs, zod's `toJSONSchema`), with the node's own id, account and config; the port types' looks
+come from `GET /graph/view` (`PORT_TYPE_INFO`). It polls `GET /status` and `GET /drift` for each
+node's live state, mode and drift. Each change of the draft is checked (`POST /graph/check`) and
+every problem shown where it is located (§2.3). A node selected shows its forms, editable, a key of
+`configSecrets` as a choice of `GET /secrets`; an edge selected, its chats and commands. Saving is
+`PUT /graph/file`, applying `POST /restart`, after which the page waits on `GET /session` for the
+new process. One or several running nodes selected can be killed, each by `POST /plugins/<id>/kill`.
 
 ### 4.13 The standard services
 
@@ -1034,7 +1037,8 @@ at the next start (P8). `ModuleStore` (`<data>/modules`):
 
 From the host, through the loopback: `docker cp dice/ megabottron1999:/tmp/dice`, then
 `docker exec megabottron1999 wget -qO- --header 'content-type: application/json' --post-data '{"dir":"/tmp/dice"}' http://127.0.0.1:8081/modules`,
-and restart it (`POST /restart`). The web UI's page for it is to come.
+and restart it (`POST /restart`). The web UI's Modules page does the same: it lists them, installs
+an uploaded `.tar.gz` (sent as base64) and rolls one back, and offers the restart.
 
 ### 7.5 Developing a module against MegaBotTron1999
 
@@ -1130,4 +1134,6 @@ built: `packages/core/src/legacy.ts` (`LegacyImport`).
 
 From the host: mount the older volume read-only (`-v old-data:/legacy:ro`), `GET /legacy`, import
 each store a node will use and the event log, save the graph that names those instances
-(`PUT /graph/file`), and restart (`POST /restart`).
+(`PUT /graph/file`), and restart (`POST /restart`). In the web UI: a store is imported as the
+instance of a node as the node is added in the graph editor, and the event log from the Import page,
+its table of renames started from `GET /legacy/events`.
