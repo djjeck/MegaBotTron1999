@@ -4,7 +4,7 @@
  * and the field, and the instance does not start: it is a mistake in the image, best seen at once.
  */
 import { z } from 'zod';
-import { type InputPort, inputSchema, type OutputPort, PORT_NAME } from './ports.ts';
+import { type DeclaredInput, inputSchema, type OutputPort, PORT_NAME } from './ports.ts';
 
 export const KINDS = ['connector', 'parser', 'actor', 'stats', 'agent', 'simulator'] as const;
 export type Kind = (typeof KINDS)[number];
@@ -170,13 +170,24 @@ export const manifestSchema = z
         path: ['games', 'registers'],
         message: 'the core namespace is the core’s',
       });
-    for (const [port, p] of Object.entries(m.inputs))
+    for (const [port, p] of Object.entries(m.inputs)) {
       if (p.type === 'interface' && p.plugin === m.id && p.bind === undefined)
         ctx.addIssue({
           code: 'custom',
           path: ['inputs', port],
           message: 'an input of its own interface needs a bind',
         });
+      if (
+        p.type === 'events' &&
+        typeof p.namespace !== 'string' &&
+        !Object.hasOwn(m.config?.shape ?? {}, p.namespace.config)
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['inputs', port, 'namespace'],
+          message: `its config has no key ${p.namespace.config}`,
+        });
+    }
   })
   .transform(normalise);
 
@@ -199,7 +210,7 @@ function normalise<
       commands?: string[] | undefined;
     }[];
     games: { registers: string[]; consumes: string[] };
-    inputs: Record<string, InputPort>;
+    inputs: Record<string, DeclaredInput>;
     interface: {
       state?: Record<string, unknown> | undefined;
       actions?: Record<string, unknown> | undefined;
@@ -207,13 +218,13 @@ function normalise<
   },
 >(m: M) {
   const { requires, uses, reach, games, inputs: declared, ...rest } = m;
-  const inputs: Record<string, InputPort> = {};
-  const add = (name: string, port: InputPort): void => {
+  const inputs: Record<string, DeclaredInput> = {};
+  const add = (name: string, port: DeclaredInput): void => {
     let n = name;
     for (let i = 2; Object.hasOwn(inputs, n) || Object.hasOwn(declared, n); i++) n = `${name}-${i}`;
     inputs[n] = port;
   };
-  const chatOf = (r: (typeof reach)[number], optional: boolean): InputPort => ({
+  const chatOf = (r: (typeof reach)[number], optional: boolean): DeclaredInput => ({
     type: 'chat',
     optional,
     bind: {

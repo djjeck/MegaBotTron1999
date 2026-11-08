@@ -10,9 +10,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { type Graph, type GraphEdge } from './graph.ts';
+import { type Graph, type GraphEdge, nodeInputs } from './graph.ts';
 import { type Manifest } from './manifest.ts';
-import { describePort, type InputPort, type OutputPort, PORT_TYPE_INFO } from './ports.ts';
+import {
+  type DeclaredInput,
+  describePort,
+  type InputPort,
+  type OutputPort,
+  PORT_TYPE_INFO,
+} from './ports.ts';
 
 /** The graph file, in the data volume. */
 export const GRAPH_FILE = 'graph.json';
@@ -109,7 +115,13 @@ export type JsonSchema = Record<string, unknown>;
 /** A port as the graph view draws it: its type, what it carries, and its words. */
 export type PortView = (
   | { type: 'chat'; network?: string }
-  | { type: 'events'; namespace: string }
+  | {
+      type: 'events';
+      /** Its namespace: the manifest's, or as its node's config names it; none while unresolved. */
+      namespace?: string;
+      /** The key of its node's config that names its namespace, when the manifest says so. */
+      config?: string;
+    }
   | { type: 'interface'; plugin?: string; members: string[] }
 ) & {
   /** The port in words (`describePort`). */
@@ -162,7 +174,10 @@ export interface NodeView extends PluginView {
 export const jsonSchema = (schema: z.ZodType): JsonSchema =>
   z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }) as JsonSchema;
 
-function inputView(p: InputPort): PortView {
+function inputView(
+  p: DeclaredInput | InputPort,
+  declared: DeclaredInput = p as DeclaredInput
+): PortView {
   const base = {
     label: describePort(p),
     optional: p.optional,
@@ -170,7 +185,15 @@ function inputView(p: InputPort): PortView {
   };
   if (p.type === 'chat')
     return { type: 'chat', ...(p.network === undefined ? {} : { network: p.network }), ...base };
-  if (p.type === 'events') return { type: 'events', namespace: p.namespace, ...base };
+  if (p.type === 'events') {
+    const from = declared.type === 'events' ? declared.namespace : undefined;
+    return {
+      type: 'events',
+      ...(typeof p.namespace === 'string' ? { namespace: p.namespace } : {}),
+      ...(from !== undefined && typeof from !== 'string' ? { config: from.config } : {}),
+      ...base,
+    };
+  }
   return {
     type: 'interface',
     ...(p.plugin === undefined ? {} : { plugin: p.plugin }),
@@ -228,19 +251,24 @@ export function describePlugin(m: Manifest): PluginView {
 
 /**
  * Each node of the graph as the graph view shows it: its plugin's manifest (`describePlugin`), with
- * the node's own account and configuration.
+ * the node's own account and configuration, and its input ports as its config resolves them (§2.1):
+ * the ones given, or resolved from the graph's node.
  */
 export function describeNodes(
-  nodes: readonly { id: string; manifest: Manifest }[],
+  nodes: readonly { id: string; manifest: Manifest; ports?: Record<string, InputPort> }[],
   graph: Graph
 ): NodeView[] {
-  return nodes.map(({ id, manifest: m }) => {
+  return nodes.map(({ id, manifest: m, ports }) => {
     const node = graph.nodes.find((n) => n.id === id);
     const { account: _, ...plugin } = describePlugin(m);
     const account = node?.account ?? m.account;
+    const resolved = ports ?? nodeInputs(m, node?.config).ports;
     return {
       id,
       ...plugin,
+      inputs: Object.fromEntries(
+        Object.entries(resolved).map(([k, p]) => [k, inputView(p, m.inputs[k] ?? p)])
+      ),
       ...(account === undefined ? {} : { account }),
       ...(node?.config === undefined ? {} : { config: node.config }),
     };

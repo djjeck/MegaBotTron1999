@@ -10,6 +10,7 @@ import {
   endOf,
   freeId,
   idProblem,
+  inputsOf,
   instanceOf,
   placeProblems,
   removeEdge,
@@ -160,5 +161,21 @@ describe('the draft', () => {
       description: 'the plugin gone is not offered by this instance',
     });
     expect(gone).not.toHaveProperty('account');
+  });
+
+  it('resolves an events input whose namespace a node’s config names, as the core does', () => {
+    const ports = {
+      heard: { type: 'events', config: 'on', label: 'events of config on', optional: false },
+      maybe: { type: 'events', config: 'also', label: 'events of config also', optional: true },
+      chat: { type: 'chat', label: 'chat of any network', optional: false },
+    } as const;
+    expect(inputsOf(ports, { on: 'dice.roll', also: 'cards' })).toEqual({
+      heard: { ...ports.heard, namespace: 'dice', label: 'events of dice' },
+      maybe: { ...ports.maybe, namespace: 'cards', label: 'events of cards' },
+      chat: ports.chat,
+    });
+    // Unresolved: a required one stays, for the check to refuse; an optional one is not there.
+    expect(inputsOf(ports, { on: 'Bad' })).toEqual({ heard: ports.heard, chat: ports.chat });
+    expect(inputsOf(ports, undefined)).toEqual({ heard: ports.heard, chat: ports.chat });
   });
 });

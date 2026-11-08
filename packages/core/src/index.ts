@@ -90,6 +90,7 @@ export {
   graphSchema,
   type InstanceInput,
   loadOrder,
+  nodeInputs,
   type ResolvedNode,
   resolveGraph,
   withInstances,
@@ -202,15 +203,19 @@ export {
 } from './plugin.ts';
 export {
   type ChatBinding,
+  type DeclaredInput,
   describePort,
   type InputPort,
   type InputPortInput,
   mismatch,
+  namespaceOf,
+  type NamespaceSource,
   type OutputPort,
   PORT_TYPE_INFO,
   PORT_TYPES,
   type PortType,
   type PortTypeInfo,
+  resolveInputs,
 } from './ports.ts';
 export { type Render, resvgRender, type SvgToPngOptions } from './render.ts';
 export { all, from, type Matcher, mentioning, replyTo, waitFor, within } from './replies.ts';

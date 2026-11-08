@@ -25,6 +25,7 @@ import { type DriftCounts } from './drift.ts';
 import { type Manifest } from './manifest.ts';
 import { isMode, type Mode, type Modes } from './outbox.ts';
 import { type Instance } from './plugin.ts';
+import { type InputPort } from './ports.ts';
 import { type SettingsRegistry, type SettingValue } from './settings.ts';
 
 /** The core's document of the off switch. */
@@ -48,7 +49,7 @@ export interface ControlsHost {
   /** The core's own documents. */
   store: { read<T>(name: string): T | undefined; write(name: string, value: unknown): void };
   /** The plugin instances, in load order: each one's id and its plugin's manifest. */
-  nodes(): { id: string; manifest: Manifest }[];
+  nodes(): { id: string; manifest: Manifest; ports?: Record<string, InputPort> }[];
   /** Whether an instance sends anywhere: an edge binds a chat it sends to (P10). */
   sends(id: string): boolean;
   /** A plugin's state, with why. */
@@ -276,8 +277,11 @@ export class Controls {
     return { result: `${id} killed${said === '' ? '' : `: ${said}`}` };
   }
 
-  /** The plugin instances, in load order: each one's id and its plugin's manifest. */
-  nodes(): { id: string; manifest: Manifest }[] {
+  /**
+   * The plugin instances, in load order: each one's id, its plugin's manifest, and its input ports
+   * as its node's config resolves them, where the host knows them.
+   */
+  nodes(): { id: string; manifest: Manifest; ports?: Record<string, InputPort> }[] {
     return this.host.nodes();
   }
 

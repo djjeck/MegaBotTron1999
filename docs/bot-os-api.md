@@ -1,6 +1,6 @@
 # MegaBotTron1999: the plugin API
 
-Documented as of 7 Nov 2026. The plugin model of MegaBotTron1999 ([bot-os.md](bot-os.md)): what a
+Documented as of 8 Nov 2026. The plugin model of MegaBotTron1999 ([bot-os.md](bot-os.md)): what a
 plugin declares, how the core runs it, what it is given, and the shell's own plugins. The API stays
 open until launch (P13): this document changes with it, in the same commit as the code.
 
@@ -117,16 +117,33 @@ its type. The instance's wiring is that graph, kept as data (`packages/core/src/
 edges are the permissions (P6): a plugin reaches a connector, an outbox, an interface or a
 namespace's events only through an input an edge binds.
 
-| Port type   | Output (derived from the manifest)                                       | Input (declared)                                                                                                 |
-| ----------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `chat`      | `chat`: a connector's account, of its network                            | `{ type: 'chat', network? }`; its edge carries the chats it `reads` and `sends` to, and the `commands` sent      |
-| `events`    | `events` (`<ns>-events` with more than one): each namespace it registers | `{ type: 'events', namespace }`, bound to any number of instances; it hears only theirs                          |
-| `interface` | `interface`: its declared reads and actions (every plugin has one)       | `{ type: 'interface', plugin, members }`; none for a plugin it only needs started first; no `plugin`: a contract |
+| Port type   | Output (derived from the manifest)                                       | Input (declared)                                                                                                              |
+| ----------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `chat`      | `chat`: a connector's account, of its network                            | `{ type: 'chat', network? }`; its edge carries the chats it `reads` and `sends` to, and the `commands` sent                   |
+| `events`    | `events` (`<ns>-events` with more than one): each namespace it registers | `{ type: 'events', namespace }`, bound to any number of instances; it hears only theirs; `namespace` may be `{ config: key }` |
+| `interface` | `interface`: its declared reads and actions (every plugin has one)       | `{ type: 'interface', plugin, members }`; none for a plugin it only needs started first; no `plugin`: a contract              |
 
 An interface input that names no plugin is a **contract**: any node whose interface declares its
 members binds it (`interface with state.rest, actions.sent`), so each instance of one plugin may use
 another plugin's interface (each turn-actor instance its own bot's parser, §5). It has no default
 edge: the graph binds it.
+
+**An events input whose namespace its node's config names** (bot-os.md D57): a plugin that learns
+what it listens to from its node's config (the `reactor`, §5) declares
+`{ type: 'events', namespace: { config: 'on' } }`, where `on` is a key of its `config` schema (the
+manifest is refused otherwise). Each node resolves it from its config, as the plugin's schema makes
+it (its defaults included; as written when the schema refuses it): the key's value names a namespace
+(`dice`) or an event type, whose namespace it takes (`dice.roll` → `dice`). The resolved namespace
+is the port's everywhere: the graph's check compares it with the output an edge binds
+(`events of dice cannot bind events of cards`), the default graph binds it to the nodes registering
+it, the node's `ctx.bus.subscribe` and `ctx.events.read` allow it, `GET /graph/view` draws it on the
+node (with the `config` key it came from), and the editor resolves it from the draft's config as
+written (`GET /available` gives the key, `config`, and no `namespace`). A node whose config leaves a
+required one unresolved is refused, naming the node
+(`node r: input port events: its namespace comes from config on, which is not set`), and so is one
+whose value names no namespace; an optional one whose key is not set is not there: the node has no
+such port, and an edge to it is refused. `resolveInputs` (`packages/core/src/ports.ts`) resolves
+them; `ResolvedNode.ports` holds a node's.
 
 Each port type has a stable id, a description, and a shape and a colour for the drawing
 (`PORT_TYPE_INFO`). An input may be `optional`: it may be left unbound, imposes no order and fails

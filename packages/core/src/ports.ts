@@ -7,7 +7,9 @@
  *
  * - `chat`: a chat connection of a network, a connector's account. Bound, it carries the chats the
  *   plugin reads and sends to, and the commands it may send (what a manifest's `reach` lists).
- * - `events`: the events of a namespace, from the plugins that register it.
+ * - `events`: the events of a namespace, from the plugins that register it. The manifest names the
+ *   namespace, or the key of its node's config that does (`{ config: 'on' }`), so that a plugin
+ *   that learns what it listens to from its config (the reactor) has the port resolved per node.
  * - `interface`: a plugin's declared interface (§2): its reads and actions; an input names the
  *   members it uses, none for a plugin it only needs started first. An input that names no plugin
  *   is a contract: any interface that declares its members binds it.
@@ -94,7 +96,14 @@ export const inputSchema = z.discriminatedUnion('type', [
   }),
   z.strictObject({
     type: z.literal('events'),
-    namespace: z.string().regex(ID),
+    /**
+     * Its namespace; or `{ config: key }`, the key of its node's config whose value names it (a
+     * namespace, or an event type of it), resolved per node (`resolveInputs`).
+     */
+    namespace: z.union([
+      z.string().regex(ID),
+      z.strictObject({ config: z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key') }),
+    ]),
     ...common,
     /** By default, every other node whose plugin registers the namespace. */
     bind: z.strictObject({ nodes: z.array(z.string().regex(ID)) }).optional(),
@@ -118,8 +127,15 @@ export const inputSchema = z.discriminatedUnion('type', [
       path: ['members'],
     }),
 ]);
-export type InputPort = z.output<typeof inputSchema>;
+/** An input port as a manifest declares it: an events input's namespace may come from config. */
+export type DeclaredInput = z.output<typeof inputSchema>;
 export type InputPortInput = z.input<typeof inputSchema>;
+/** An events input's namespace as declared: a namespace, or the config key that names one. */
+export type NamespaceSource = Extract<DeclaredInput, { type: 'events' }>['namespace'];
+/** An input port of a node: its namespace resolved (`resolveInputs`), as the graph compares it. */
+export type InputPort =
+  | Exclude<DeclaredInput, { type: 'events' }>
+  | (Omit<Extract<DeclaredInput, { type: 'events' }>, 'namespace'> & { namespace: string });
 
 /** An output port: derived from the manifest, never written by hand. */
 export type OutputPort =
@@ -127,10 +143,14 @@ export type OutputPort =
   | { type: 'events'; namespace: string }
   | { type: 'interface'; plugin: string; members: string[] };
 
-/** A port in words: `chat of irc`, `events of dice`, `interface of dice`. */
-export function describePort(p: InputPort | OutputPort): string {
+/**
+ * A port in words: `chat of irc`, `events of dice`, `interface of dice`; an events input whose
+ * namespace its node's config names, unresolved, `events of config on`.
+ */
+export function describePort(p: DeclaredInput | InputPort | OutputPort): string {
   if (p.type === 'chat') return `chat of ${p.network ?? 'any network'}`;
-  if (p.type === 'events') return `events of ${p.namespace}`;
+  if (p.type === 'events')
+    return `events of ${typeof p.namespace === 'string' ? p.namespace : `config ${p.namespace.config}`}`;
   return p.plugin === undefined
     ? `interface with ${p.members.join(', ')}`
     : `interface of ${p.plugin}`;
@@ -150,4 +170,46 @@ export function mismatch(input: InputPort, output: OutputPort): string | undefin
   return missing.length === 0
     ? undefined
     : `${output.plugin} does not declare ${missing.join(', ')}`;
+}
+
+/**
+ * The namespace a config value names: a namespace (`dice`), or an event type's (`dice.roll`);
+ * undefined if it names neither.
+ */
+export function namespaceOf(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const ns = value.includes('.') ? value.slice(0, value.indexOf('.')) : value;
+  return ID.test(ns) ? ns : undefined;
+}
+
+/**
+ * A node's input ports, each events input's namespace resolved from its node's `config` when the
+ * manifest says it comes from there (`{ config: key }`): the namespace the key's value names, or
+ * the event type's. One whose key is not set is left out if it is optional (the node has no such
+ * port), and is a problem if it is required; one whose value names no namespace is a problem.
+ * Each problem names the port; the caller names the node.
+ */
+export function resolveInputs(
+  inputs: Readonly<Record<string, DeclaredInput>>,
+  config: Readonly<Record<string, unknown>> | undefined
+): { ports: Record<string, InputPort>; problems: string[] } {
+  const ports: Record<string, InputPort> = {};
+  const problems: string[] = [];
+  for (const [name, p] of Object.entries(inputs)) {
+    if (p.type !== 'events' || typeof p.namespace === 'string') {
+      ports[name] = p as InputPort;
+      continue;
+    }
+    const key = p.namespace.config;
+    const value = config?.[key];
+    const ns = namespaceOf(value);
+    if (ns !== undefined) ports[name] = { ...p, namespace: ns };
+    else if (value !== undefined && value !== null)
+      problems.push(
+        `input port ${name}: its namespace comes from config ${key}, and ${JSON.stringify(value)} names no event type or namespace`
+      );
+    else if (!p.optional)
+      problems.push(`input port ${name}: its namespace comes from config ${key}, which is not set`);
+  }
+  return { ports, problems };
 }

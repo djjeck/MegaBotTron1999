@@ -11,6 +11,7 @@ import type {
   GraphProblem,
   NodeView,
   PluginView,
+  PortView,
 } from '#src/ui/api.ts';
 
 export const EMPTY_GRAPH: Graph = { version: 1, nodes: [], edges: [] };
@@ -223,6 +224,34 @@ export function placeProblems(problems: readonly GraphProblem[]): PlacedProblems
 }
 
 /** A node as the editor draws it: its plugin's declarations, with the node's own. */
+/** A namespace, as the core's ids are written. */
+const NAMESPACE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+
+/**
+ * A node's input ports, each events input whose namespace its config names (`config`) resolved
+ * from the node's config as written, as the core resolves it (bot-os-api.md §2.1): the value's
+ * namespace, or its event type's. Unresolved, an optional one is not there, and a required one is
+ * left for the check to refuse.
+ */
+export function inputsOf(
+  inputs: Readonly<Record<string, PortView>>,
+  config: Readonly<Record<string, unknown>> | undefined
+): Record<string, PortView> {
+  const out: Record<string, PortView> = {};
+  for (const [name, p] of Object.entries(inputs)) {
+    if (p.type !== 'events' || p.config === undefined) {
+      out[name] = p;
+      continue;
+    }
+    const value = config?.[p.config];
+    const ns = typeof value === 'string' ? value.split('.')[0] : undefined;
+    if (ns !== undefined && NAMESPACE.test(ns))
+      out[name] = { ...p, namespace: ns, label: `events of ${ns}` };
+    else if (!p.optional) out[name] = p;
+  }
+  return out;
+}
+
 export function viewOf(node: GraphNode, plugin: PluginView | undefined): NodeView {
   const base: PluginView = plugin ?? {
     plugin: node.plugin,
@@ -240,6 +269,7 @@ export function viewOf(node: GraphNode, plugin: PluginView | undefined): NodeVie
   const { account: _, ...rest } = base;
   return {
     ...rest,
+    inputs: inputsOf(base.inputs, node.config),
     id: node.id,
     ...(account === undefined ? {} : { account }),
     ...(node.config === undefined ? {} : { config: node.config }),

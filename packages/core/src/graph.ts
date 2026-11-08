@@ -14,6 +14,9 @@
  *   its manifest's `bind` says. Any other graph (a file) replaces it as a whole.
  * - A required input left unbound, an edge between ports of two types, an input of one edge bound
  *   twice, an unknown plugin, node or port, and a cycle of required edges fail the start.
+ * - An events input whose namespace its node's config names (`{ config: key }`) is resolved per
+ *   node, from the config as its plugin's schema makes it (`resolveInputs`): a required one the
+ *   config leaves unresolved fails the start, naming the node.
  *
  * Nothing in here knows of any game.
  */
@@ -28,6 +31,7 @@ import {
   type OutputPort,
   PORT_TYPES,
   type PortType,
+  resolveInputs,
 } from './ports.ts';
 
 /** The format of the graph file; a change that old files cannot be read with bumps it. */
@@ -123,8 +127,23 @@ export interface ResolvedNode {
   /** The settings and the mode a fresh instance starts with. */
   settings?: Record<string, unknown>;
   mode?: Mode;
-  /** Each input of its manifest, with its other ends (none: unbound). */
+  /** Its input ports: its manifest's, each events input's namespace resolved from its config. */
+  ports: Record<string, InputPort>;
+  /** Each of its input ports, with its other ends (none: unbound). */
   inputs: Map<string, Binding[]>;
+}
+
+/**
+ * A node's input ports (`resolveInputs`), from its config as its plugin's schema makes it (with
+ * its defaults), or as written when the schema refuses it (the load then says why).
+ */
+export function nodeInputs(
+  manifest: Manifest,
+  config: Readonly<Record<string, unknown>> | undefined
+): { ports: Record<string, InputPort>; problems: string[] } {
+  const parsed = manifest.config?.safeParse(config ?? {});
+  const made = parsed?.success === true ? (parsed.data as Record<string, unknown>) : config;
+  return resolveInputs(manifest.inputs, made);
 }
 
 /**
@@ -152,7 +171,9 @@ export function defaultGraph(
   const byId = new Map(manifests.map((m) => [m.id, m]));
   const edges: GraphEdge[] = [];
   for (const m of manifests)
-    for (const [port, input] of Object.entries(m.inputs)) {
+    for (const [port, input] of Object.entries(
+      nodeInputs(m, config[m.id] as Record<string, unknown> | undefined).ports
+    )) {
       const targets =
         input.type === 'events'
           ? (input.bind?.nodes ??
@@ -295,15 +316,18 @@ export function resolveGraph(
       if (other !== undefined) problems.push(`node ${n.id}: the account ${account} is ${other}'s`);
       else accounts.set(account, n.id);
     }
+    const { ports, problems: unresolved } = nodeInputs(manifest, n.config);
+    for (const p of unresolved) problems.push(`node ${n.id}: ${p}`);
     nodes.set(n.id, {
       id: n.id,
       instance,
       manifest,
+      ports,
       ...(account === undefined ? {} : { account }),
       ...(n.config === undefined ? {} : { config: n.config }),
       ...(n.settings === undefined ? {} : { settings: n.settings }),
       ...(n.mode === undefined ? {} : { mode: n.mode }),
-      inputs: new Map(Object.keys(manifest.inputs).map((p) => [p, []])),
+      inputs: new Map(Object.keys(ports).map((p) => [p, []])),
     });
   }
   const edges: GraphEdge[] = [];
@@ -323,9 +347,15 @@ export function resolveGraph(
       problems.push(`${name}: a node cannot feed itself`);
       continue;
     }
-    const input = to.manifest.inputs[toPort];
+    const input = to.ports[toPort];
     if (input === undefined) {
-      problems.push(`node ${toNode}: no input port ${toPort}`);
+      const declared = to.manifest.inputs[toPort];
+      problems.push(
+        `node ${toNode}: no input port ${toPort}` +
+          (declared?.type === 'events' && typeof declared.namespace !== 'string'
+            ? `: its namespace comes from config ${declared.namespace.config}, which is not set`
+            : '')
+      );
       continue;
     }
     let port = fromPort;
@@ -387,7 +417,7 @@ export function resolveGraph(
     edges.push({ from: `${fromNode}.${port}`, to: e.to, type: input.type, ...(chat ?? {}) });
   }
   for (const n of nodes.values())
-    for (const [port, input] of Object.entries(n.manifest.inputs)) {
+    for (const [port, input] of Object.entries(n.ports)) {
       if (input.optional || named.has(`${n.id}.${port}`) || (n.inputs.get(port)?.length ?? 0) > 0)
         continue;
       const target =
@@ -412,7 +442,7 @@ export function resolveGraph(
 export function requiredOf(node: ResolvedNode): string[] {
   const out: string[] = [];
   for (const [port, bindings] of node.inputs)
-    if (node.manifest.inputs[port]?.optional !== true)
+    if (node.ports[port]?.optional !== true)
       for (const b of bindings) if (!out.includes(b.node)) out.push(b.node);
   return out;
 }

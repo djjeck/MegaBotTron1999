@@ -50,6 +50,7 @@ import {
   type PluginContext,
   type PluginInterface,
 } from './plugin.ts';
+import { type InputPort } from './ports.ts';
 import { type Render, resvgRender } from './render.ts';
 import { type KeptTimer, PluginScheduler } from './scheduler.ts';
 import { type Secrets, SecretStore } from './secrets.ts';
@@ -566,9 +567,16 @@ export class Core {
     return reqs.includes(other) || reqs.some((r) => this.requires(r, other, seen));
   }
 
-  /** The plugin instances, in load order: each one's id and its plugin's manifest. */
-  nodes(): { id: string; manifest: Manifest }[] {
-    return [...this.entries.values()].map((e) => ({ id: e.id, manifest: e.manifest }));
+  /**
+   * The plugin instances, in load order: each one's id, its plugin's manifest, and its input ports
+   * as its node's config resolves them (§2.1).
+   */
+  nodes(): { id: string; manifest: Manifest; ports: Record<string, InputPort> }[] {
+    return [...this.entries.values()].map((e) => ({
+      id: e.id,
+      manifest: e.manifest,
+      ports: e.node.ports,
+    }));
   }
 
   /**
@@ -1091,7 +1099,7 @@ export class Core {
     const readable = new Set([
       ...manifest.games.registers,
       manifest.id,
-      ...Object.values(manifest.inputs).flatMap((i) => (i.type === 'events' ? [i.namespace] : [])),
+      ...Object.values(node.ports).flatMap((i) => (i.type === 'events' ? [i.namespace] : [])),
     ]);
     const wanted = o.type;
     if (wanted !== undefined) {
@@ -1159,15 +1167,14 @@ export class Core {
    */
   private interfaceOf(entry: Entry, key: string): PluginInterface | undefined {
     const { node } = entry;
-    const named = node.manifest.inputs[key];
+    const named = node.ports[key];
     const port =
       named?.type === 'interface'
         ? key
         : [...node.inputs].find(
-            ([p, bs]) =>
-              node.manifest.inputs[p]?.type === 'interface' && bs.some((b) => b.node === key)
+            ([p, bs]) => node.ports[p]?.type === 'interface' && bs.some((b) => b.node === key)
           )?.[0];
-    const input = port === undefined ? undefined : node.manifest.inputs[port];
+    const input = port === undefined ? undefined : node.ports[port];
     if (port === undefined || input?.type !== 'interface')
       throw new Error(`${entry.id} does not use ${key}: add an interface input of it`);
     const other = node.inputs.get(port)?.[0]?.node;
@@ -1247,7 +1254,7 @@ function sourcesOf(node: ResolvedNode): Map<string, Set<string>> {
   };
   for (const ns of node.manifest.games.registers) add(ns, node.id);
   for (const [port, bs] of node.inputs) {
-    const input = node.manifest.inputs[port];
+    const input = node.ports[port];
     if (input?.type !== 'events') continue;
     if (!out.has(input.namespace)) out.set(input.namespace, new Set());
     for (const b of bs) add(input.namespace, b.node);
