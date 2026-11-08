@@ -685,9 +685,10 @@ accounts counted by state); `GET /accounts`; `GET /drift`;
 refused); `GET /plugins/<id>/state/<name>`; `POST /plugins/<id>/actions/<name>`, the body the
 action's input (400 for an input refused by its schema, 409 for the plugin's refusal);
 `GET /instances` (§2.2); `GET /graph/file`, `POST /graph/check`, `PUT /graph/file`,
-`POST /graph/rollback` and `POST /restart` (§2.3); `GET /available`, `GET /modules`, `POST /modules`
-and `POST /modules/<id>/rollback` (§7). Ids and names in a path may be URL-encoded. The control API
-is the owner's alone: no agent is ever given it (P11), so no agent installs a module (P1).
+`POST /graph/rollback` and `POST /restart` (§2.3); `GET /legacy`, `POST /instances/import` and
+`POST /legacy/events/import` (§8); `GET /available`, `GET /modules`, `POST /modules` and
+`POST /modules/<id>/rollback` (§7). Ids and names in a path may be URL-encoded. The control API is
+the owner's alone: no agent is ever given it (P11), so no agent installs a module (P1).
 
 ### 4.12 The graph printed and drawn
 
@@ -1069,3 +1070,42 @@ git -C vendor/MegaBotTron1999 checkout v0.1.0 && git add vendor/MegaBotTron1999
 
 Upgrading the shell is moving the submodule to a newer tag; a module that targets another plugin API
 than the instance's is refused at start, by name.
+
+## 8. Importing from an older MegaBotTron1999 data directory
+
+An instance from before the graph lived in the volume kept its state by plugin, not by instance. Its
+data directory, mounted read-only into the new container (`LEGACY_DIR`, `/legacy` by default), can
+be imported from, one store at a time and its event log (bot-os.md D54). Nothing writes to it. As
+built: `packages/core/src/legacy.ts` (`LegacyImport`).
+
+**The older layout:**
+
+| Path                    | What it holds                                                                                                                                 |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plugins/<id>/`         | A plugin's store, by its plugin's id: documents `<name>.json`, and the core's `_meta.json`, `_timers.json`, `_settings.json`, `_restore.json` |
+| `plugins/core/`         | The core's own: `modes.json` (every plugin's mode), `power.json` (the off switch), `secrets/`                                                 |
+| `events-<day>.jsonl`    | The event log, a file per UTC day, one JSON record per line; records of before types were namespaced have plain types (`message`)             |
+| other files at the root | What an older entry point kept itself; not imported                                                                                           |
+
+**The control API** (§4.11), the owner's alone; each says so (404) when no directory is mounted:
+
+- `GET /legacy`: what it offers: each store (`plugins/<id>/` but the core's) with its documents, its
+  schema `version`, its `timers`, whether it keeps `settings`, and the `mode` it had; and its event
+  log's days (`days`, `first`, `last`).
+- `POST /instances/import {"from": "<store>", "instance"?: "<id>", "plugin"?: "<id>"}`: copies the
+  store's JSON documents, the core's beside them, into a fresh instance (`instances/<instance>/`,
+  `from` by default), of a plugin the instance offers (`from` by default), which a node then names
+  (§2.2). Its version comes with it, so its plugin's migrations run from there; its timers and
+  settings come too; its mode does not (P10): the instance starts `read-only`, or in its node's
+  `mode`. 409 for an instance kept already, 400 for an unknown plugin. An instance no node uses is
+  deleted after 7 days, as any.
+- `POST /legacy/events/import {"types"?: {"<old>": "<ns>.<name>"}, "since"?: <ms>}`: merges its
+  event log into this instance's, day by day, from the day of `since`: each record once (a record
+  there already is not added again, so the import may be run again), its type renamed by `types`,
+  each day's file rewritten in time order. A record whose type is still not namespaced is left out
+  and counted by its old type (`skipped`), for the owner to give its name and import again. It
+  answers the `days` read, the records `imported`, those `present` already, and those `skipped`.
+
+From the host: mount the older volume read-only (`-v old-data:/legacy:ro`), `GET /legacy`, import
+each store a node will use and the event log, save the graph that names those instances
+(`PUT /graph/file`), and restart (`POST /restart`).

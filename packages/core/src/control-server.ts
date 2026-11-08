@@ -27,6 +27,12 @@
  * - `PUT /graph/file` with a graph as the body: checked, then saved, the file before kept as
  *   `graph.previous.json`; 400 with its problems when refused.
  * - `POST /graph/rollback`: the previous version back (409 when there is none).
+ * - `GET /legacy`: what an older data directory mounted read-only offers to import (§8): its
+ *   stores, and its event log's days; 404 when none is mounted.
+ * - `POST /instances/import {"from": "<store>", "instance"?: "<id>", "plugin"?: "<id>"}`: a store
+ *   of it copied into a fresh instance; 409 for an instance kept already.
+ * - `POST /legacy/events/import {"types"?: {"old": "ns.new"}, "since"?: <ms>}`: its event log
+ *   merged into this instance's.
  * - `POST /restart`: the instance stops, its state kept, and exits to be started again: how a
  *   saved graph, or a module installed, takes effect.
  * - `POST /plugins/<id>/mode {"mode": "live"}`, `POST /plugins/<id>/resume`.
@@ -56,6 +62,7 @@ import { type Graph } from './graph.ts';
 import { type GraphFileControls, GraphFileError } from './graph-file.ts';
 import { describeNodes } from './graph-view.ts';
 import { type InstanceInfo } from './instance-registry.ts';
+import { LegacyError } from './legacy.ts';
 import { type ModuleSource } from './module-store.ts';
 import { ModuleError } from './modules.ts';
 import { PORT_TYPE_INFO } from './ports.ts';
@@ -94,6 +101,13 @@ async function moduleSource(req: http.IncomingMessage): Promise<ModuleSource> {
   throw new ModuleError('give a dir, a tarball in base64, or the tarball as the body');
 }
 
+/** The import from an older data directory (legacy.ts), as the wiring offers it. */
+export interface LegacyControls {
+  report(): unknown;
+  importStore(request: unknown): unknown;
+  importEvents(request: unknown): unknown;
+}
+
 /** The owner's changes to the modules (module-store.ts), as the wiring offers them. */
 export interface ModuleControls {
   report(): unknown;
@@ -121,6 +135,8 @@ export interface ControlOptions {
   instances?: () => InstanceInfo[];
   /** The saved graph's file: read, checked, saved, rolled back (§2.3). */
   graphFile?: GraphFileControls;
+  /** An older data directory's stores and event log, imported (§8). */
+  legacy?: LegacyControls;
   /**
    * Applies the saved graph: the instance stops, its state kept, and exits for its supervisor
    * (Docker's `restart: unless-stopped`) to start it again. Called once the answer has gone.
@@ -183,6 +199,22 @@ export function controlHandler(
           return reply(200, gf.rollback());
         } catch (e) {
           if (e instanceof GraphFileError) return reply(409, { error: e.message });
+          throw e;
+        }
+      }
+      const legacy = o.legacy;
+      const imports: Record<string, ((b: unknown) => unknown) | undefined> = {
+        'GET /legacy': legacy === undefined ? undefined : () => legacy.report(),
+        'POST /instances/import': legacy === undefined ? undefined : (b) => legacy.importStore(b),
+        'POST /legacy/events/import':
+          legacy === undefined ? undefined : (b) => legacy.importEvents(b),
+      };
+      const run = imports[`${post ? 'POST' : (req.method ?? 'GET')} ${route}`];
+      if (run !== undefined) {
+        try {
+          return reply(200, run(post ? await body(req) : undefined));
+        } catch (e) {
+          if (e instanceof LegacyError) return reply(e.status, { error: e.message });
           throw e;
         }
       }

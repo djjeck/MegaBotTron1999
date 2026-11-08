@@ -30,6 +30,7 @@ export {
   controlHandler,
   type ControlOptions,
   controlServer,
+  type LegacyControls,
   MAX_UPLOAD,
   type ModuleControls,
 } from './control-server.ts';
@@ -128,6 +129,14 @@ export {
   InstanceRegistry,
   ORPHAN_MS,
 } from './instance-registry.ts';
+export {
+  LEGACY_DIR,
+  LegacyError,
+  LegacyImport,
+  type LegacyOptions,
+  type LegacyReport,
+  type LegacyStore,
+} from './legacy.ts';
 export {
   type Kind,
   KINDS,

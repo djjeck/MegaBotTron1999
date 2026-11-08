@@ -19,6 +19,8 @@ import {
   CoreEventLog,
   GraphFile,
   graphFileControls,
+  LEGACY_DIR,
+  LegacyImport,
   loadModules,
   ModuleStore,
   type Plugin,
@@ -106,6 +108,13 @@ const controlApi = controlHandler({
   instances: () => core.instances(),
   graphFile: graphFileControls(graphFile, core, (v) => secrets.redactDeep(v)),
   restart: () => void end('restart'),
+  // An older MegaBotTron1999 data directory, mounted read-only, to import from (§8).
+  legacy: new LegacyImport({
+    dir: env['LEGACY_DIR'] || LEGACY_DIR,
+    dataDir,
+    now: () => clock.now(),
+    plugins: () => core.available().map((p) => p.id),
+  }),
   modules: {
     report: () => modules.report(loaded),
     install: (source) => modules.install(source),

@@ -49,6 +49,9 @@ port.
   web UI's login; without it there is no UI at all), `bot_os_key` (to encrypt the secrets the core
   stores), and each connector's own (`znc_password`, `telegram_bot_token`, `telegram_user_api_id`,
   `telegram_user_api_hash`, `telegram_user_session`, `anthropic_api_key`).
+- **An older data directory** (a deployment of before v1) can be mounted read-only at `/legacy`
+  (`LEGACY_DIR`) to import its plugins' stores and its event log through the control API
+  ([docs/bot-os-api.md](docs/bot-os-api.md) §8).
 - **Ports:** 8082 is the web UI. The control API listens on the container's loopback (8081) only.
 - The container runs as the `node` user, from `/app`, with `node src/main.ts`.
 
