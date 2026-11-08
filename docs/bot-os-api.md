@@ -191,9 +191,9 @@ plugin's, each input bound as its `bind` says (`defaultGraph`), which tests and 
 `CoreOptions.graph` may also be a function of the default graph:
 `withInstances(graph, plugin, instances)` replaces the default node of a plugin meant for several
 instances by its instances. `core.graph()` gives the graph the instance runs, every edge written
-out. A changed graph takes effect at the next start (P8). Today's entry point (`src/main.ts`)
-registers the connectors and the modules' plugins (§7), and runs an empty graph; from the next step
-the graph is read from the volume (`/data/graph.json`, bot-os.md D50).
+out. A changed graph takes effect at the next start (P8). The instance's entry point (`src/main.ts`)
+registers the connectors and the modules' plugins (§7), and runs the graph saved in its volume
+(`CoreOptions.graphFile`, §2.3).
 
 ### 2.2 Instances
 
@@ -215,6 +215,79 @@ instance. An instance that no node references, of the running graph or of the sa
 directory without its record (put there by hand) is listed and left alone. `core.instances()`, and
 `GET /instances`, list them: each with its plugin, its times, the node that runs on it, and whether
 a node uses it (`used`).
+
+### 2.3 The graph file
+
+`/data/graph.json` is the only source of the instance's composition (bot-os.md D50): no code
+declares it, the owner builds it node by node (the web UI's editor, to come, or the control API),
+and a restart applies it (P8). It is the graph of §2.1, each node with its `instance` (§2.2):
+
+```json
+{
+  "version": 1,
+  "nodes": [
+    {
+      "id": "tg",
+      "plugin": "telegram-user",
+      "account": "telegram:alice",
+      "config": { "chats": ["@QuestBot"] }
+    },
+    { "id": "quest", "plugin": "quest-parser" },
+    {
+      "id": "quest-turns",
+      "plugin": "turn-actor",
+      "instance": "quest-turns",
+      "mode": "dry-run",
+      "config": { "chat": "@QuestBot" }
+    }
+  ],
+  "edges": [
+    { "from": "tg.chat", "to": "quest.chat", "type": "chat", "reads": ["@QuestBot"], "sends": [] },
+    {
+      "from": "tg.chat",
+      "to": "quest-turns.chat",
+      "type": "chat",
+      "reads": ["@QuestBot"],
+      "sends": ["@QuestBot"],
+      "commands": ["/play"]
+    },
+    { "from": "quest.interface", "to": "quest-turns.parser", "type": "interface" }
+  ]
+}
+```
+
+**At start** (`packages/core/src/graph-file.ts`, `GraphFile`), the core reads it and checks it as
+any graph (§2.1), against the plugins `core.available()` lists, their configuration and settings
+schemas, their secrets and the instances kept. No file: an empty graph. A file that does not read
+(not JSON), or that the check refuses, never stops the instance, which would only start again and
+fail again: it starts with no nodes, the file is kept as it is, and why is printed, recorded
+(`core.graph`, `event: "refused"`), told to the owner, and reported by `GET /status`
+(`graph.refused`) and `GET /graph/file` (`problems`), for the owner to fix.
+
+**A problem** (`GraphProblem`) is its words as the load says them (`text`) and, where it can be
+told, the `node`, the `edge` (`{ from, to }`), the `port`, and the `config` or `setting` key it is
+about, so that the editor marks it there. An edge between ports of two types is refused with why
+(`node actor: input port score: chat of chat cannot bind interface of scorer (edge chat.chat → actor.score)`).
+
+**The control API's graph routes** (§4.11), the owner's alone:
+
+- `GET /graph/file`: the saved file (`graph`, as written), whether there is one (`exists`), why it
+  does not read (`error`) or is refused (`problems`), and whether it differs from the graph running
+  (`differs`: a restart would change what runs).
+- `POST /graph/check`, a graph as the body: checked as the load would, nothing saved: `ok`, its
+  `problems`, and its `diff` from the saved file: the nodes `added`, `removed` and `changed` (with
+  the fields that changed), and the edges `added`, `removed` and `changed`, by their two ends.
+- `PUT /graph/file`, a graph as the body: checked, then saved as the core holds it (each edge's ends
+  and type written out), the file before kept as `graph.previous.json`; `saved` (false when nothing
+  changed) and `restart` (whether it differs from what runs). A graph refused is not saved: 400,
+  with its `problems`.
+- `POST /graph/rollback`: `graph.previous.json` and `graph.json` swap, so a second rollback goes
+  forward again; 409 when there is no previous version. Its `problems`, if the check refuses it.
+- `POST /restart`: applies it. The answer goes, then the instance ends as at `SIGTERM` (§3): the
+  core stops, each plugin's state kept, and the process exits 0, so that Docker's
+  `restart: unless-stopped` starts it again on the saved graph.
+
+No agent grant ever includes these (P11): they are the control API's, which no agent is given.
 
 ## 3. The lifecycle
 
@@ -238,8 +311,10 @@ reason.
   plugin is `failed`, with why; the plugins that require it (a required edge, §2.1) are `failed`
   too; every other plugin starts. The owner is told, and the failure is logged (`core.plugin`).
 - **Start** runs in load order (requirements first), each plugin's `start` awaited before the next
-  begins. **Stop** runs in the reverse order, at `SIGTERM`, each plugin's `stop` awaited for up to 5
-  seconds (a stop that fails or takes longer is logged, and the next plugin stops).
+  begins. **Stop** runs in the reverse order, at `SIGTERM` or the owner's restart (§2.3), each
+  plugin's `stop` awaited for up to 5 seconds (a stop that fails or takes longer is logged, and the
+  next plugin stops). The process exits 0 once the core has stopped, or after 30 seconds however far
+  it got (`packages/core/src/shutdown.ts`).
 - **Ready:** once every plugin has started, each running one hears `ready`, in load order, before
   the core's `start` resolves. It is for the work that needs the plugins that use this one in place
   (a parser replaying recent history to the plugins that listen to it). A `ready` that throws fails
@@ -584,9 +659,10 @@ accounts counted by state); `GET /accounts`; `GET /drift`;
 `POST /plugins/<id>/mode`, `/plugins/<id>/resume` and `/plugins/<id>/kill` (409 with why when
 refused); `GET /plugins/<id>/state/<name>`; `POST /plugins/<id>/actions/<name>`, the body the
 action's input (400 for an input refused by its schema, 409 for the plugin's refusal);
-`GET /instances` (§2.2); `GET /available`, `GET /modules`, `POST /modules` and
-`POST /modules/<id>/rollback` (§7). Ids and names in a path may be URL-encoded. The control API is
-the owner's alone: no agent is ever given it (P11), so no agent installs a module (P1).
+`GET /instances` (§2.2); `GET /graph/file`, `POST /graph/check`, `PUT /graph/file`,
+`POST /graph/rollback` and `POST /restart` (§2.3); `GET /available`, `GET /modules`, `POST /modules`
+and `POST /modules/<id>/rollback` (§7). Ids and names in a path may be URL-encoded. The control API
+is the owner's alone: no agent is ever given it (P11), so no agent installs a module (P1).
 
 ### 4.12 The graph printed and drawn
 
@@ -894,7 +970,7 @@ at the next start (P8). `ModuleStore` (`<data>/modules`):
 
 From the host, through the loopback: `docker cp dice/ megabottron1999:/tmp/dice`, then
 `docker exec megabottron1999 wget -qO- --header 'content-type: application/json' --post-data '{"dir":"/tmp/dice"}' http://127.0.0.1:8081/modules`,
-and restart the container. The web UI's page for it is to come.
+and restart it (`POST /restart`). The web UI's page for it is to come.
 
 ### 7.5 Developing a module against MegaBotTron1999
 

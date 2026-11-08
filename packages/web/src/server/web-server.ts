@@ -13,8 +13,8 @@
  *   the app is not built.
  *
  * Fail closed: without the `web_ui_password` secret, or with one too short, there is no server at
- * all (`startWebUi`), and the instance runs as without a UI. A POST must come from the UI's own
- * origin and carry JSON, so that no other site's page can make one (beside SameSite=Strict). The
+ * all (`startWebUi`), and the instance runs as without a UI. A POST or a PUT must come from the UI's
+ * own origin and carry JSON, so that no other site's page can make one (beside SameSite=Strict). The
  * cookie is `Secure` when the request came over HTTPS (TLS here, or `X-Forwarded-Proto: https`
  * from the proxy in front).
  */
@@ -93,7 +93,7 @@ function overHttps(req: http.IncomingMessage): boolean {
 }
 
 /**
- * Whether a POST is the UI's own: JSON, and from the page's origin when the browser says where
+ * Whether a POST or a PUT is the UI's own: JSON, and from the page's origin when the browser says where
  * from (`Origin`, or `Sec-Fetch-Site`).
  */
 function sameOrigin(req: http.IncomingMessage): boolean {
@@ -211,7 +211,9 @@ export function webHandler(o: WebOptions): Handler {
       const route = url.pathname;
       if (route !== '/api' && !route.startsWith('/api/')) return serveFile(req, res, route);
       const post = req.method === 'POST';
-      if (post && !sameOrigin(req)) return json(res, 403, { error: 'not from this page' });
+      // Every request that changes something (a POST, or the graph's PUT) is the page's own.
+      const change = req.method !== 'GET' && req.method !== 'HEAD';
+      if (change && !sameOrigin(req)) return json(res, 403, { error: 'not from this page' });
       const token = cookies(req)[SESSION_COOKIE];
       if (route === '/api/session') return json(res, 200, { authenticated: sessions.valid(token) });
       if (post && route === '/api/login') return login(req, res);

@@ -89,6 +89,20 @@ export {
   withInstances,
 } from './graph.ts';
 export {
+  type GraphCheck,
+  type GraphChecker,
+  type GraphDiff,
+  graphDiff,
+  GraphFile,
+  type GraphFileControls,
+  graphFileControls,
+  GraphFileError,
+  type GraphFileRead,
+  type GraphProblem,
+  locateProblem,
+  sameGraph,
+} from './graph-file.ts';
+export {
   describeNodes,
   GRAPH_FILE,
   graphMermaid,
@@ -190,6 +204,7 @@ export {
   SettingsRegistry,
   type SettingValue,
 } from './settings.ts';
+export { shutdown, type ShutdownOptions } from './shutdown.ts';
 export {
   CORE_STORE,
   INSTANCES_DIR,

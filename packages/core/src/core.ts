@@ -35,6 +35,7 @@ import {
   type ResolvedNode,
   resolveGraph,
 } from './graph.ts';
+import { type GraphCheck, type GraphFile, type GraphProblem, locateProblem } from './graph-file.ts';
 import { type InstanceInfo, InstanceRegistry } from './instance-registry.ts';
 import { type Manifest, parseManifest } from './manifest.ts';
 import { Modes, Outbox, type SenderPolicy, type SendRecord } from './outbox.ts';
@@ -107,6 +108,11 @@ export interface CoreOptions {
    * from the orphans' expiry. Undefined when the saved graph cannot be read: nothing is deleted then.
    */
   referenced?: () => ReadonlySet<string> | undefined;
+  /**
+   * The saved graph's file (§2.3), read at load when no `graph` is given: missing, an empty graph;
+   * refused, no nodes, with why (`graphProblems`). Its nodes' instances are `referenced` by default.
+   */
+  graphFile?: GraphFile;
   /** The way back to the owner's main card, at the foot of the core's own cards (§4.11). */
   home?: CommandButton;
   /**
@@ -146,6 +152,16 @@ export interface AvailablePlugin {
   kinds: string[];
   /** The module that offers it; none for the image's own. */
   module?: string;
+}
+
+/** A graph with no node: the instance's when it has none saved. */
+const EMPTY_GRAPH: Graph = { version: 1, nodes: [], edges: [] };
+
+/** A graph compiled: its instances in load order, the graph as held, and their bus. */
+interface Compiled {
+  entries: Map<string, Entry>;
+  graph: Graph;
+  bus: Bus;
 }
 
 interface Entry {
@@ -190,7 +206,9 @@ export class Core {
   /** Every plugin's settings, for the control surfaces (§2, P11). */
   readonly settings: SettingsRegistry;
   private readonly stores: Stores;
-  private readonly bus: Bus;
+  private bus: Bus;
+  /** Why the saved graph was refused at this start (§2.3). */
+  private refused: GraphProblem[] = [];
   private readonly outboxes = new Map<string, Outbox>();
   /** The acting plugins' modes (P10), kept in the core's own store. */
   readonly modes: Modes;
@@ -295,10 +313,14 @@ export class Core {
       threshold: (parser) => this.entries.get(parser)?.manifest.drift ?? DEFAULT_DRIFT,
       pause: (parser, reason) => this.pauseActorsOf(parser, reason),
     });
-    this.bus = new Bus({
-      now: () => options.clock.now(),
-      ...(options.record === undefined ? {} : { record: options.record }),
-      validate: options.validateEvents ?? process.env['NODE_ENV'] !== 'production',
+    this.bus = this.newBus();
+  }
+
+  private newBus(): Bus {
+    return new Bus({
+      now: () => this.o.clock.now(),
+      ...(this.o.record === undefined ? {} : { record: this.o.record }),
+      validate: this.o.validateEvents ?? process.env['NODE_ENV'] !== 'production',
     });
   }
 
@@ -582,16 +604,33 @@ export class Core {
   load(): void {
     if (this.loaded) return;
     this.loaded = true;
-    this.entries = this.order();
-    const missing = [...this.entries.values()].flatMap(({ id, manifest }) =>
-      manifest.secrets
-        .filter((name) => this.o.secrets?.has(name) !== true)
-        .map(
-          (name) =>
-            `plugin ${id}: the secret ${name} is not provided (${this.o.secrets?.dir ?? 'no secrets'}/${name})`
-        )
-    );
-    if (missing.length > 0) throw new StartError(missing.join('\n'));
+    const { raw, fromFile } = this.graphSource();
+    let compiled: Compiled;
+    try {
+      compiled = this.compile(raw);
+    } catch (e) {
+      // A saved graph refused never stops the instance: it starts with no nodes, the file kept as
+      // it is, and the owner is told why, to fix it in the UI (§2.3).
+      if (!fromFile || !(e instanceof StartError)) throw e;
+      this.refused = e.message.split('\n').map((p) => locateProblem(p, raw));
+      compiled = this.compile(EMPTY_GRAPH);
+    }
+    if (this.refused.length > 0) {
+      const why = this.refused.map((p) => p.text);
+      (this.o.print ?? (() => {}))(
+        `core: the saved graph is refused, no node runs:\n${why.join('\n')}`
+      );
+      this.o.record?.({
+        type: 'core.graph',
+        t: this.o.clock.now(),
+        event: 'refused',
+        problems: why,
+      });
+      this.tell(`The saved graph is refused, and no node runs: ${why.join('; ')}`);
+    }
+    this.entries = compiled.entries;
+    this.loadedGraph = compiled.graph;
+    this.bus = compiled.bus;
     if (this.o.settings !== undefined)
       this.settings.add(new PluginSettings(CORE, this.o.settings, this.stores.internal(CORE)));
     for (const { id, manifest, node } of this.entries.values()) {
@@ -612,7 +651,7 @@ export class Core {
    */
   instances(): InstanceInfo[] {
     const running = new Map([...this.entries.values()].map((e) => [e.node.instance, e.id]));
-    const saved = this.o.referenced?.() ?? new Set<string>();
+    const saved = this.references() ?? new Set<string>();
     return this.registry.list().map(({ id, meta }) => {
       const node = running.get(id);
       return {
@@ -630,7 +669,7 @@ export class Core {
    * cannot be read.
    */
   sweepInstances(): string[] {
-    const saved = this.o.referenced === undefined ? new Set<string>() : this.o.referenced();
+    const saved = this.references();
     if (saved === undefined) return [];
     const referenced = new Set([
       ...saved,
@@ -642,6 +681,12 @@ export class Core {
       this.o.record?.({ type: 'core.instance', t: this.o.clock.now(), instance, event: 'deleted' });
     }
     return deleted;
+  }
+
+  /** The instances the saved graph references: undefined when it does not read. */
+  private references(): ReadonlySet<string> | undefined {
+    if (this.o.referenced !== undefined) return this.o.referenced();
+    return this.o.graphFile === undefined ? new Set() : this.o.graphFile.references();
   }
 
   /** The orphaned instances looked for now, and again in a day. */
@@ -706,7 +751,61 @@ export class Core {
    * The manifests checked, the graph checked against them (§2.1), and the instances in the order
    * their required edges make.
    */
-  private order(): Map<string, Entry> {
+  /**
+   * The graph to load: the one given, the default one, or the saved file's (§2.3): an empty graph
+   * when there is no file; one that does not read is refused, the instance started with no nodes.
+   */
+  private graphSource(): { raw: unknown; fromFile: boolean } {
+    const given = this.o.graph;
+    const file = this.o.graphFile;
+    if (given === undefined && file !== undefined) {
+      const r = file.read();
+      if (!r.exists) return { raw: EMPTY_GRAPH, fromFile: true };
+      if ('error' in r) {
+        this.refused = [{ text: r.error }];
+        return { raw: EMPTY_GRAPH, fromFile: true };
+      }
+      return { raw: r.raw, fromFile: true };
+    }
+    if (typeof given === 'function' || given === undefined) {
+      const manifests = this.plugins.flatMap((p) => {
+        try {
+          return [parseManifest(p.manifest)];
+        } catch {
+          return [];
+        }
+      });
+      const defaults = defaultGraph(manifests, this.o.config);
+      return { raw: typeof given === 'function' ? given(defaults) : defaults, fromFile: false };
+    }
+    return { raw: given, fromFile: false };
+  }
+
+  /**
+   * Checks a graph as the load would (§2.3), against the plugins the instance offers, their
+   * manifests, configuration, settings and secrets, and the instances kept: the graph as the core
+   * would hold it, or its problems, each located where it can be. Nothing starts, nothing is kept.
+   */
+  check(raw: unknown): GraphCheck {
+    try {
+      return { ok: true, graph: this.compile(raw).graph };
+    } catch (e) {
+      if (!(e instanceof StartError)) throw e;
+      return { ok: false, problems: e.message.split('\n').map((p) => locateProblem(p, raw)) };
+    }
+  }
+
+  /** Why the saved graph was not run at this start (§2.3); none when it was. */
+  graphProblems(): GraphProblem[] {
+    return structuredClone(this.refused);
+  }
+
+  /**
+   * The manifests checked, the graph checked against them (§2.1), and the instances in the order
+   * their required edges make, with the bus their event types are registered on.
+   */
+  private compile(raw: unknown): Compiled {
+    const bus = this.newBus();
     const problems: string[] = [];
     const plugins = new Map<string, { plugin: Plugin; manifest: Manifest }>();
     for (const plugin of this.plugins) {
@@ -727,13 +826,7 @@ export class Core {
     let resolved: ReturnType<typeof resolveGraph>;
     let ordered: ResolvedNode[];
     try {
-      const given = this.o.graph;
-      const defaults = (): Graph => defaultGraph([...manifests.values()], this.o.config);
-      resolved = resolveGraph(
-        typeof given === 'function' ? given(defaults()) : (given ?? defaults()),
-        manifests,
-        (instance) => this.registry.meta(instance)?.plugin
-      );
+      resolved = resolveGraph(raw, manifests, (instance) => this.registry.meta(instance)?.plugin);
       ordered = loadOrder(resolved.nodes);
     } catch (e) {
       if (e instanceof GraphError) throw new StartError([...problems, ...e.problems].join('\n'));
@@ -745,7 +838,6 @@ export class Core {
           problems.push(
             `plugin ${node.id}: ${node.manifest.id} is archived (bot-os.md D32): it runs in no instance, only in a run that allows archives`
           );
-    this.loadedGraph = resolved.graph;
     const entries = new Map<string, Entry>();
     for (const node of ordered) {
       const { id, manifest } = node;
@@ -768,7 +860,12 @@ export class Core {
             `plugin ${id}: settings ${key}: ${parsed.error.issues.map((i) => i.message).join('; ')}`
           );
       }
-      problems.push(...this.bus.register(id, manifest));
+      for (const name of manifest.secrets)
+        if (this.o.secrets?.has(name) !== true)
+          problems.push(
+            `plugin ${id}: the secret ${name} is not provided (${this.o.secrets?.dir ?? 'no secrets'}/${name})`
+          );
+      problems.push(...bus.register(id, manifest));
       entries.set(id, {
         id,
         plugin: (plugins.get(manifest.id) as { plugin: Plugin }).plugin,
@@ -780,7 +877,7 @@ export class Core {
     }
     problems.push(...commandProblems([...entries.values()]));
     if (problems.length > 0) throw new StartError(problems.join('\n'));
-    return entries;
+    return { entries, graph: resolved.graph, bus };
   }
 
   private async startOne(entry: Entry): Promise<void> {

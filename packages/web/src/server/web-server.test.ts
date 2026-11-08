@@ -106,7 +106,7 @@ describe('webHandler', () => {
     expect((await b.call('/api/status')).status).toBe(401);
   });
 
-  it('refuses a POST from another origin, or not JSON', async () => {
+  it('refuses a POST or a PUT from another origin, or not JSON', async () => {
     const base = await serve(webHandler({ password: PASSWORD, dist: dist(), api: () => {} }));
     const post = (headers: Record<string, string>) =>
       fetch(`${base}/api/login`, {
@@ -126,6 +126,13 @@ describe('webHandler', () => {
       (await post({ 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' })).status
     ).toBe(200);
     expect((await post({ 'content-type': 'application/json' })).status).toBe(200);
+    // A PUT (the graph's file) is held to the same.
+    const put = await fetch(`${base}/api/graph/file`, {
+      method: 'PUT',
+      body: '{}',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    });
+    expect(put.status).toBe(403);
   });
 
   it('marks the cookie Secure behind HTTPS', async () => {

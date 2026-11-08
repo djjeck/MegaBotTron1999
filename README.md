@@ -10,10 +10,10 @@ each binding an edge, and the edges are the permissions.
 
 It knows no game. Games, and what plays them, are plugins on top of it.
 
-**Status: v1-alpha.** The core, the connectors, the turn plugins, the web UI's graph view and the
-module loader work. Plugin instances and the graph read from the data volume are the next step, so
-today's image loads the modules installed and offers their plugins, but runs an empty graph. The
-plugin API changes freely until the launch ([docs/bot-os.md](docs/bot-os.md) P13).
+**Status: v1-alpha.** The core, the connectors, the turn plugins, the web UI's graph view, the
+module loader, and the graph read from the data volume (`/data/graph.json`) with each node's state
+in an instance apart from it work; the graph is edited through the control API until the web UI's
+editor comes. The plugin API changes freely until the launch ([docs/bot-os.md](docs/bot-os.md) P13).
 
 > **Plugins run with the shell's full rights.** There is no sandbox. A plugin can read every secret
 > the process holds and send as every account it is connected to. Run only plugins you have read.
@@ -30,6 +30,7 @@ docker run -d --name megabottron1999 \
   -v megabottron1999-data:/data \
   -v "$PWD/secrets:/run/secrets:ro" \
   -p 127.0.0.1:8082:8082 \
+  --restart unless-stopped \
   ghcr.io/djjeck/megabottron1999:edge
 ```
 
@@ -37,9 +38,13 @@ Then open `http://127.0.0.1:8082/` and log in with that password. In a real depl
 or Compose secrets, and put the UI behind a reverse proxy with HTTPS rather than publishing the
 port.
 
-- **`/data`** is the instance's state: the event log, each plugin's store and the modules installed
-  (`/data/modules/`; and, from the next step, the graph). Back it up as one, with the container
-  stopped.
+- **`/data`** is the instance's state: the graph (`graph.json`, and `graph.previous.json`), each
+  plugin instance's state (`instances/<id>/`), the core's own (`core/`), the event log
+  (`events-<day>.jsonl`) and the modules installed (`modules/`). Back it up as one, with the
+  container stopped.
+- **Restart policy:** run it with `--restart unless-stopped` (or Compose's
+  `restart: unless-stopped`): the owner applies a saved graph or an installed module by
+  `POST /restart`, which stops the instance, its state kept, and exits for Docker to start it again.
 - **Secrets** are files under `/run/secrets`, never environment variables: `web_ui_password` (the
   web UI's login; without it there is no UI at all), `bot_os_key` (to encrypt the secrets the core
   stores), and each connector's own (`znc_password`, `telegram_bot_token`, `telegram_user_api_id`,

@@ -7,7 +7,8 @@
  * controls', and each plugin's are its declared reads and actions.
  *
  * - `GET /status`: the instance (off or on) and each plugin: its state, mode, settings, reads,
- *   actions, and its own `status` read if it declares one.
+ *   actions, and its own `status` read if it declares one; `graph.refused`, why the saved graph
+ *   did not run, when it did not.
  * - `GET /instance`: the instance's health: off or on, the process's uptime, Node's version and
  *   memory, the plugins and the accounts counted by state.
  * - `GET /accounts`: each connector instance, its account and its connection's status.
@@ -19,6 +20,15 @@
  * - `GET /graph`: the graph the instance runs (§2.1), every edge written out.
  * - `GET /graph/view`: what the web UI's graph view draws: the graph, the port types' looks,
  *   and each node's ports, interface and the JSON Schemas of its config and settings.
+ * - `GET /graph/file`: the saved graph (`<data>/graph.json`, §2.3), whether it differs from the one
+ *   running, and its problems if it is refused.
+ * - `POST /graph/check` with a graph as the body: its problems, each located (node, edge, port,
+ *   config or setting), and how it differs from the saved file; nothing is saved.
+ * - `PUT /graph/file` with a graph as the body: checked, then saved, the file before kept as
+ *   `graph.previous.json`; 400 with its problems when refused.
+ * - `POST /graph/rollback`: the previous version back (409 when there is none).
+ * - `POST /restart`: the instance stops, its state kept, and exits to be started again: how a
+ *   saved graph, or a module installed, takes effect.
  * - `POST /plugins/<id>/mode {"mode": "live"}`, `POST /plugins/<id>/resume`.
  * - `POST /plugins/<id>/kill`: that node's kill (D44): its own safety stop, then paused as killed
  *   until its resume reinstates it.
@@ -43,6 +53,7 @@ import { type Controls } from './controls.ts';
 import { type AvailablePlugin } from './core.ts';
 import { type LogEntry } from './event-log.ts';
 import { type Graph } from './graph.ts';
+import { type GraphFileControls, GraphFileError } from './graph-file.ts';
 import { describeNodes } from './graph-view.ts';
 import { type InstanceInfo } from './instance-registry.ts';
 import { type ModuleSource } from './module-store.ts';
@@ -108,6 +119,13 @@ export interface ControlOptions {
   modules?: ModuleControls;
   /** The plugin instances kept, apart from the nodes (`core.instances()`, §2.2). */
   instances?: () => InstanceInfo[];
+  /** The saved graph's file: read, checked, saved, rolled back (§2.3). */
+  graphFile?: GraphFileControls;
+  /**
+   * Applies the saved graph: the instance stops, its state kept, and exits for its supervisor
+   * (Docker's `restart: unless-stopped`) to start it again. Called once the answer has gone.
+   */
+  restart?: () => void;
 }
 
 const HOUR = 3_600_000;
@@ -139,7 +157,40 @@ export function controlHandler(
       const url = new URL(req.url ?? '/', 'http://control');
       const route = url.pathname;
       const post = req.method === 'POST';
-      if (!post && route === '/status') return reply(200, controls.status());
+      const put = req.method === 'PUT';
+      const gf = o.graphFile;
+      if (!post && !put && route === '/status') {
+        const refused = gf?.problems() ?? [];
+        return reply(200, {
+          ...controls.status(),
+          ...(refused.length === 0 ? {} : { graph: { refused } }),
+        });
+      }
+      if (gf !== undefined && route === '/graph/file' && (put || !post)) {
+        if (!put) return reply(200, gf.file());
+        try {
+          return reply(200, gf.save(await body(req)));
+        } catch (e) {
+          if (e instanceof GraphFileError)
+            return reply(400, { error: e.message, problems: e.problems });
+          throw e;
+        }
+      }
+      if (gf !== undefined && post && route === '/graph/check')
+        return reply(200, gf.check(await body(req)));
+      if (gf !== undefined && post && route === '/graph/rollback') {
+        try {
+          return reply(200, gf.rollback());
+        } catch (e) {
+          if (e instanceof GraphFileError) return reply(409, { error: e.message });
+          throw e;
+        }
+      }
+      if (post && route === '/restart' && o.restart !== undefined) {
+        const restart = o.restart;
+        res.on('finish', () => restart());
+        return reply(200, { restarting: true });
+      }
       if (!post && route === '/instance') {
         const { off, plugins } = controls.status();
         const memory = process.memoryUsage();

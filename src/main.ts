@@ -4,11 +4,10 @@
  * wiring, left out of coverage.
  *
  * The connectors are registered, and so are the plugins of the modules installed under
- * `/data/modules/<id>/` (docs/bot-os.md D49, docs/bot-os-api.md §7), so the image offers them, but
- * the graph is empty: no plugin instance runs until the owner adds one (docs/bot-os.md D50).
- *
- * TODO(graph): the next step reads the graph from `/data/graph.json` (D50), which today's empty
- * graph stands in for, with the plugins' kept state belonging to instances apart from the nodes.
+ * `/data/modules/<id>/` (docs/bot-os.md D49, docs/bot-os-api.md §7), so the image offers them; the
+ * graph is the saved one, `/data/graph.json` (D50, docs/bot-os-api.md §2.3), each node's state in
+ * its instance under `/data/instances/`. No file: no node runs until the owner adds one. A file
+ * refused: no node runs, and the owner is told why.
  */
 import { anthropicPlugin } from '@megabottron1999/connectors/plugins/anthropic.ts';
 import { ircPlugin } from '@megabottron1999/connectors/plugins/irc.ts';
@@ -18,10 +17,13 @@ import {
   controlHandler,
   Core,
   CoreEventLog,
+  GraphFile,
+  graphFileControls,
   loadModules,
   ModuleStore,
   type Plugin,
   Secrets,
+  shutdown,
   StartError,
   wallClock,
 } from '@megabottron1999/core';
@@ -45,13 +47,15 @@ for (const method of ['log', 'info', 'debug', 'warn', 'error'] as const) {
   console[method] = (...args: unknown[]) => print(secrets.redact(format(...args)));
 }
 const events = new CoreEventLog(dataDir);
+const clock = wallClock();
+// The instance's composition, saved in the volume (D50): read at load, edited by the owner.
+const graphFile = new GraphFile(dataDir);
 
 const core = new Core({
-  clock: wallClock(),
+  clock,
   dataDir,
   secrets,
-  // TODO(graph): the graph from /data/graph.json (D50); until then, an empty one.
-  graph: { version: 1, nodes: [], edges: [] },
+  graphFile,
   print: (line) => console.log(line),
   record: (r) => events.write(secrets.redactDeep(r)),
 });
@@ -101,6 +105,9 @@ const controlApi = controlHandler({
   graph: () => secrets.redactDeep(core.graph()),
   records: (from, to) => events.recordsSince(from, to),
   available: () => core.available(),
+  instances: () => core.instances(),
+  graphFile: graphFileControls(graphFile, core, (v) => secrets.redactDeep(v)),
+  restart: () => void end('restart'),
   modules: {
     report: () => modules.report(loaded),
     install: (source) => modules.install(source),
@@ -118,11 +125,17 @@ const web = startWebUi({
 });
 console.log(`megabottron1999: started, ${core.nodes().length} plugin instance(s) in the graph`);
 
-function shutdown(): void {
-  void core.stop();
-  control.close();
-  web?.close();
-  setTimeout(() => process.exit(0), 1000).unref();
-}
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+// The end, at a signal or the owner's restart: the core stops first, its plugins' state kept, then
+// the process exits 0, for Docker's `restart: unless-stopped` to start it again after a restart.
+const end = shutdown({
+  stop: () => core.stop(),
+  close: () => {
+    control.close();
+    web?.close();
+  },
+  exit: (code) => process.exit(code),
+  clock,
+  print: (line) => console.log(line),
+});
+process.on('SIGTERM', () => void end('SIGTERM'));
+process.on('SIGINT', () => void end('SIGINT'));

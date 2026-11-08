@@ -34,8 +34,8 @@ that guards them.
   Five failed logins from one address within 15 minutes, and that address waits; behind a proxy
   every visitor shares the proxy's address, so the limit is the whole instance's.
 
-A POST must carry JSON and come from the UI's own origin. Every response carries a strict Content
-Security Policy and refuses to be framed.
+A POST or a PUT must carry JSON and come from the UI's own origin. Every response carries a strict
+Content Security Policy and refuses to be framed.
 
 The app is tested with Vitest on happy-dom and Testing Library, against a fake of the API
 (`test/fake-api.ts`, with a made-up instance for the graph in `test/graph-view.ts`, and what React
