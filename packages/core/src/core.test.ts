@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { type BusEvent } from './bus.ts';
 import { VirtualClock } from './clock.ts';
 import { Core, type CoreRecord, StartError } from './core.ts';
+import { FakeConnector } from './devkit.ts';
 import { definePlugin, type Instance, type Plugin } from './plugin.ts';
 import { type MigrationStore } from './store.ts';
 
@@ -653,5 +654,68 @@ describe('archived plugins (bot-os.md D32)', () => {
     const { core: c } = core();
     c.register(plugin('a', []));
     expect(() => c.load()).not.toThrow();
+  });
+});
+
+describe('the owner’s notices (bot-os-api.md §4.8)', () => {
+  /** A connector whose instance offers a chat surface, as a `telegram-bot` with its `owner` does. */
+  const surfaced = (id: string, told: string[]) =>
+    definePlugin({
+      manifest: {
+        id,
+        version: '0.1.0',
+        kinds: ['connector'],
+        description: 'a surface',
+        account: `x:${id}`,
+      },
+      create: () => ({
+        connector: new FakeConnector({ account: `x:${id}` }),
+        surface: { serve: () => {}, tell: (t: string) => told.push(`${id}: ${t}`) },
+      }),
+    });
+  /** A plugin that tells the owner as it is made. */
+  const teller = definePlugin({
+    manifest: { id: 'teller', version: '0.1.0', kinds: ['stats'], description: 'tells' },
+    create: (ctx) => {
+      ctx.notify('made');
+      return {};
+    },
+  });
+
+  it('go to the first node of the graph that offers a chat surface, waiting for it', async () => {
+    const told: string[] = [];
+    const lines: string[] = [];
+    const core = new Core({
+      clock: new VirtualClock(0),
+      print: (l) => lines.push(l),
+      graph: {
+        version: 1,
+        nodes: [
+          { id: 'teller', plugin: 'teller' },
+          { id: 'a', plugin: 'a' },
+          { id: 'b', plugin: 'b' },
+        ],
+        edges: [],
+      },
+    });
+    core.register(teller, surfaced('a', told), surfaced('b', told));
+    await core.start();
+    core.notify('later');
+    expect(told).toEqual(['a: made', 'a: later']);
+    expect(lines.filter((l) => l.includes('not told'))).toEqual([]);
+    await core.stop();
+  });
+
+  it('are printed when no node offers one and the wiring gives no other way', async () => {
+    const lines: string[] = [];
+    const core = new Core({ clock: new VirtualClock(0), print: (l) => lines.push(l) });
+    core.register(teller);
+    await core.start();
+    core.notify('after');
+    expect(lines.filter((l) => l.includes('not told'))).toEqual([
+      "core: not told (no node offers the owner's chat): made",
+      "core: not told (no node offers the owner's chat): after",
+    ]);
+    await core.stop();
   });
 });

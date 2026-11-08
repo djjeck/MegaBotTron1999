@@ -20,10 +20,23 @@ import { TelegramSurface } from '#src/transport/telegram-surface.ts';
 export const TELEGRAM_BOT = 'telegram-bot';
 export const BOT_TOKEN = 'telegram_bot_token';
 
-/** Its configuration (`TELEGRAM_AUTHOR_ID`, `TELEGRAM_GROUP_ID`): with an owner, a chat surface. */
+/**
+ * Its configuration, in its node of the graph (v0's `TELEGRAM_AUTHOR_ID` and `TELEGRAM_GROUP_ID`
+ * were environment variables): with an owner, a chat surface, and the owner's chat (bot-os.md D56).
+ */
 export const telegramBotConfig = z.object({
-  owner: z.number().int().optional(),
-  group: z.number().int().optional(),
+  owner: z
+    .number()
+    .int()
+    .optional()
+    .describe(
+      'The owner’s Telegram user id: their private chat with the bot gets the owner’s notices, and alone answers the owner’s commands'
+    ),
+  group: z
+    .number()
+    .int()
+    .optional()
+    .describe('A group whose members may use the plugins’ public commands'),
 });
 export type TelegramBotConfig = z.infer<typeof telegramBotConfig>;
 

@@ -119,8 +119,9 @@ export interface CoreOptions {
   /** The way back to the owner's main card, at the foot of the core's own cards (§4.11). */
   home?: CommandButton;
   /**
-   * The connector plugin whose chat surface is the owner's (§4.8): the owner's notices go
-   * there, waiting for it to start; without it, to `notify`.
+   * The node whose chat surface is the owner's (§4.8): the owner's notices go there, waiting for
+   * it to start. Without it, the graph says: the first node, in load order, whose instance offers a
+   * chat surface (a `telegram-bot` node configured with its `owner`); without one, `notify`.
    */
   owner?: string;
   /**
@@ -223,6 +224,8 @@ export class Core {
   private readonly driftMonitor: DriftMonitor;
   /** The owner's notices waiting for the owner's surface to start. */
   private readonly pendingTells: [string, Buttons | undefined][] = [];
+  /** Every plugin has started (`start`): a notice with no surface to wait for is printed. */
+  private startedAll = false;
   /** The secrets the core stores itself, encrypted at rest (§4.9); none without a data volume. */
   readonly secretStore?: SecretStore;
   /** The owner's controls (§4.11), from which every control surface is made. */
@@ -504,20 +507,33 @@ export class Core {
 
   private tell(text: string, buttons?: Buttons): void {
     if (this.controls.off) return;
-    if (this.o.owner === undefined) {
-      this.o.notify?.(text, buttons);
-      return;
-    }
     const surface = this.ownerSurface();
     if (surface !== undefined) surface.tell(this.redact(text), buttons);
+    else if (this.o.owner === undefined && this.o.notify !== undefined)
+      this.o.notify(text, buttons);
+    else if (this.o.owner === undefined && this.startedAll)
+      this.print(`core: not told (no node offers the owner's chat): ${this.redact(text)}`);
     else this.pendingTells.push([this.redact(text), buttons]);
   }
 
-  /** The owner's chat surface, once its plugin has made it. */
+  /**
+   * The owner's chat surface, once its plugin has made it: the `owner` node's, or, without one,
+   * the first running node's, in load order, that offers one.
+   */
   private ownerSurface(): ChatSurface | undefined {
-    const e = this.o.owner === undefined ? undefined : this.entries.get(this.o.owner);
-    if (e?.status.state !== 'running' && e?.status.state !== 'paused') return undefined;
-    return e.instance?.surface;
+    const live = (e: Entry | undefined): e is Entry =>
+      e?.status.state === 'running' || e?.status.state === 'paused';
+    if (this.o.owner !== undefined) {
+      const e = this.entries.get(this.o.owner);
+      return live(e) ? e.instance?.surface : undefined;
+    }
+    for (const e of this.entries.values())
+      if (live(e) && e.instance?.surface !== undefined) return e.instance.surface;
+    return undefined;
+  }
+
+  private print(line: string): void {
+    (this.o.print ?? (() => {}))(line);
   }
 
   private redact(text: string): string {
@@ -593,9 +609,11 @@ export class Core {
       }
     }
     this.sweepDaily();
+    this.startedAll = true;
     // Notices for an owner's surface that never started are printed, not lost silently.
+    const none = this.o.owner ?? "node offers the owner's chat";
     for (const [text] of this.pendingTells.splice(0))
-      (this.o.print ?? (() => {}))(`core: not told (no ${String(this.o.owner)}): ${text}`);
+      this.print(`core: not told (no ${none}): ${text}`);
   }
 
   /**
@@ -924,7 +942,10 @@ export class Core {
     this.set(entry, 'running');
     entry.scheduler?.arm();
     // The owner's notices made before its surface existed, in order.
-    const surface = id === this.o.owner ? this.ownerSurface() : undefined;
+    const surface =
+      id === this.o.owner || (this.o.owner === undefined && entry.instance?.surface !== undefined)
+        ? this.ownerSurface()
+        : undefined;
     for (const [text, buttons] of surface === undefined ? [] : this.pendingTells.splice(0))
       surface?.tell(text, buttons);
   }

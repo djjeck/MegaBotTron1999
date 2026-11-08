@@ -590,10 +590,15 @@ the counts.
 ### 4.8 The owner
 
 The owner of the instance (D19) is told of what the core does on its own (a plugin failed, a pause
-for drift) and of what a plugin asks to say (`notify`): through the core, to the chat surface of the
-connector the wiring names the owner's (`CoreOptions.owner`), waiting for it to start, or to
-`CoreOptions.notify` without one, and never while the instance is off. The owner's controls are the
-core's (§4.11).
+for drift) and of what a plugin asks to say (`notify`): through the core, to the owner's chat
+surface, and never while the instance is off. **Which surface is the graph's** (bot-os.md D56): the
+first node, in load order, whose instance offers a chat surface, which is a `telegram-bot` node
+configured with its `owner` (the owner's Telegram user id: the owner's private chat with the bot,
+§5); a notice made before it has started waits for it, in order. A wiring may name the node itself
+(`CoreOptions.owner`, tests); without a surface, notices go to `CoreOptions.notify`, or are printed
+(`core: not told …`) when the wiring gives none, as the image's does. Only the owner's chat may use
+the owner's commands and their buttons: the surface answers them to the owner alone (`Asker.owner`),
+never in a group. The owner's controls are the core's (§4.11).
 
 ### 4.9 Secrets
 
@@ -840,11 +845,12 @@ alone (§4) finds each in its context, its config or an edge:
   polls; its own name is the bot's username. It hears every message Telegram delivers the bot and
   sends through the account's outbox (`deliver`, to a chat id or an `@username`; a 429 longer than
   auto-retry waits out becomes `FloodWait`). Configured with the owner's Telegram user id and
-  optionally a group (`owner`, `group`), it is the instance's chat surface (`telegram-surface.ts`):
-  the switchboard on its bot (`telegram-switchboard.ts`, on grammy-switchboard), the plugins'
-  commands answered in the group, the owner's chat and any other private chat
-  (`telegram-commands.ts`), the menus kept registered, and the owner's notices carried in order
-  (`telegram-notifier.ts`). Nothing hands its bot out (P9).
+  optionally a group (`owner`, `group`, in its node's config), it is the instance's chat surface,
+  and the owner's chat that the core sends the owner's notices to (§4.8, bot-os.md D56)
+  (`telegram-surface.ts`): the switchboard on its bot (`telegram-switchboard.ts`, on
+  grammy-switchboard), the plugins' commands answered in the group, the owner's chat and any other
+  private chat (`telegram-commands.ts`), the menus kept registered, and the owner's notices carried
+  in order (`telegram-notifier.ts`). Nothing hands its bot out (P9).
 - **`telegram-user`** (`packages/connectors/src/plugins/telegram-user.ts`, on GramJS in
   `packages/connectors/src/transport/telegram-user.ts`): the owner's own account, from three secrets
   (`telegram_user_api_id`, `telegram_user_api_hash`, `telegram_user_session`). It reads only the
