@@ -166,7 +166,6 @@ describe('the anthropic plugin', () => {
       { ok: true, text: 'hello', model: 'claude-sonnet-5-5', usage: USAGE },
     ]);
     expect(core.connector('anthropic')?.account).toBe('anthropic:api');
-    expect(typeof core.service<{ ask: Ask }>('anthropic')?.ask).toBe('function');
   });
 
   it('makes the SDK’s client by default, under the account name it is given', async () => {

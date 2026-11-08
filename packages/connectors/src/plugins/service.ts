@@ -1,7 +1,7 @@
 /**
- * The connector of a service connector: its plugin holds an account's secrets and makes an object
- * from them for the wiring (`Instance.service`, such as an API client), but has no chat of its own,
- * so the connector reads nothing and sends nothing.
+ * The connector of a service connector: its plugin holds an account's secrets and offers what it
+ * makes from them (an API client's calls) through its declared interface, to the plugins an edge
+ * binds to it, but has no chat of its own, so the connector reads nothing and sends nothing.
  */
 import { type Connector, ConnectorBase } from '@megabottron1999/core';
 

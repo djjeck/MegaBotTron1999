@@ -243,17 +243,6 @@ describe('Controls', () => {
     await again.core.stop();
   });
 
-  it('takes the off switch of before the core from its file, once', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'controls-'));
-    fs.writeFileSync(path.join(dir, 'off.json'), '{}\n');
-    const { core } = instance({ dataDir: dir, legacyOff: 'off.json' });
-    expect(core.controls.off).toBe(true);
-    core.controls.turnOn();
-    // The file stays for the plugin that adopts it; the core's own document wins.
-    const after = instance({ dataDir: dir, legacyOff: 'off.json' });
-    expect(after.core.controls.off).toBe(false);
-  });
-
   it('shows each account with its connection, and each parser’s drift', async () => {
     const connector = new FakeConnector({ account: 'chat:me', self: 'me_' });
     const key = definePlugin({

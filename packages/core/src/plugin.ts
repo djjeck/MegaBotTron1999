@@ -134,11 +134,6 @@ export interface Instance {
   readonly connector?: Connector;
   /** A connector's chat surface (§2, §4.11): the core serves it the commands. */
   readonly surface?: ChatSurface;
-  /**
-   * What a service connector makes from its secrets for the wiring (an API client), so that the
-   * wiring gets the object and never the secret.
-   */
-  readonly service?: unknown;
   /** The owner changed one of its settings, already in force (§2). */
   settingsChanged?(): void;
   /**

@@ -3,8 +3,8 @@
  * API, implemented once in the shell. It holds the API key (the `anthropic_api_key` Docker secret,
  * P9) and offers one higher-order call, `ask`: a prompt, an optional system prompt, and optionally a
  * zod schema that the answer must fit (structured output). A plugin reaches it through an interface
- * input bound to it (`ctx.use(port).actions.ask`), so that the edge is the permission (P6, P17); the
- * wiring through `core.service(id)`. Nobody gets the key.
+ * input bound to it (`ctx.use(port).actions.ask`), so that the edge is the permission (P6, P17).
+ * Nobody gets the key.
  *
  * A refusal, an answer cut short, an unreadable one or an error of the API is a failed answer
  * (`ok: false`, with why), never an exception, so that a plugin's loop survives the network.
@@ -174,7 +174,6 @@ export function anthropicPlugin(o: AnthropicPluginOptions = {}): Plugin {
       const ask = askWith(makeClient(ctx.secrets?.get(ANTHROPIC_KEY) ?? ''), config);
       return {
         connector: new ServiceConnector(account, ANTHROPIC),
-        service: { ask },
         interface: { actions: { ask } },
       };
     },

@@ -249,7 +249,6 @@ interface Instance {
   };
   connector?: Connector; // a connector plugin's (§4.5)
   surface?: ChatSurface; // a connector's chat surface (§2)
-  service?: unknown; // what a service connector makes from its secrets (§4.9)
 }
 ```
 
@@ -308,9 +307,6 @@ its own, and sets its own at an absolute time (`at`).
 - `version`: the schema version kept with the documents (`_meta.json`). At start the core runs the
   manifest's migrations from the kept version up to the manifest's, each one awaited; a failed one
   leaves the store as it was, and fails that plugin only (§3).
-- `adopt(file, name, read?)`, for migrations only: moves a file of the data volume into the store,
-  read as JSON, or by `read` from its bytes. No file of the stores (`plugins/…`) and nothing outside
-  the volume can be adopted.
 
 A plugin reaches nothing outside its own directory. Data of another plugin comes through that
 plugin's interface (`use`), never its files.
@@ -321,8 +317,7 @@ directory of mode 700; the core keeps its own beside them (`_meta.json`, the ver
 Migrations run on a staged copy (`<id>.migrating/`) that replaces the directory only when every step
 has succeeded, so a failed one leaves the store as it was, and a store newer than its plugin (an
 image rolled back) fails that plugin rather than being read wrong. A crash between the two renames
-of the commit is undone at the next start. A file adopted from the root is renamed `<file>.migrated`
-once the migration has succeeded.
+of the commit is undone at the next start.
 
 **Backups.** The whole data volume is the instance's state: the event log, the stores and the
 modules (and, from the next step, the graph). Back up the volume as one, with the instance stopped
@@ -365,8 +360,7 @@ days) are armed again when they wake.
   Handlers run in order of subscription, synchronously: a message has reached every consumer before
   the next one is read. It returns the way to stop; a plugin that fails or stops is unsubscribed.
 - Every event published is written to the event log, as `{ type, t, ...payload }`, one JSON line per
-  record in a file per UTC day (`packages/core/src/event-log.ts`). The log may be given a table of
-  older type names (`legacy`), under which old files are read back.
+  record in a file per UTC day (`packages/core/src/event-log.ts`).
 
 Two plugins registering one type is an error of the deployment; two instances of one plugin share
 its types, and each subscriber hears only the instances its edges bind. A subscriber that throws is
@@ -483,8 +477,7 @@ or only digits, are not redacted, to spare ordinary text); the core passes what 
 and tells, and a failed plugin's reason, through them, and the entry point its `console` and its
 event log. A connector's `ctx.secrets.get(name)` gives only the secrets its manifest declares; no
 other kind of plugin has `ctx.secrets`; a declared secret not provided fails the load, naming it and
-its file. `core.service(id)` gives the wiring what a service connector made from its secrets (an API
-client), never the secret. `core.secretStore` keeps the core's own secrets (a login done later
+its file. `core.secretStore` keeps the core's own secrets (a login done later
 through the UI), each in `/data/plugins/core/secrets/<name>.json` of mode 600: AES-256-GCM with a
 random IV and the secret's name as additional data, under a key derived (HKDF-SHA256) from the
 `bot_os_key` Docker secret; without that secret it stores nothing.
@@ -697,14 +690,13 @@ too, as the action `ask` of the control API (without a schema, which JSON cannot
   it replies to, and `own` for the owner's own from any device. It sends only through the account's
   outbox (`deliver`, with the message's id); GramJS's flood waits become `FloodWait`.
 - **`ServiceConnector`** (`packages/connectors/src/plugins/service.ts`): for a connector plugin that
-  holds an account's secrets and makes an object from them for the wiring (`Instance.service`), but
+  holds an account's secrets and offers what it makes from them through its declared interface, but
   has no chat: it reads and sends nothing. The `anthropic` connector is one.
 - **`anthropic`** (`packages/connectors/src/plugins/anthropic.ts`, on the Anthropic SDK): the Claude
   API's account (`anthropic:api`, or the name it is given), made from its `anthropic_api_key` secret
   at `create`, a `ServiceConnector`. Its configuration holds the defaults of `ask` (§4.13): `model`
   (`claude-opus-5-5`), `maxTokens` (16000) and `effort` (unset: the model's own). It offers `ask` as
-  its interface's action, for the plugins an edge binds to it, and as its `service`
-  (`core.service('anthropic')`), for the wiring. A system prompt is sent with a cache breakpoint
+  its interface's action, for the plugins an edge binds to it. A system prompt is sent with a cache breakpoint
   (the API's default five minutes), so calls that share one pay for it once.
 - **`turnParserPlugin`** (`packages/turns/src/turn-parser.ts`): one parser plugin per game bot, each
   made from its bot's grammar (`read`), which knows the game. Each reads, on the owner's account

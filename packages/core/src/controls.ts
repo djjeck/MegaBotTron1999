@@ -125,12 +125,9 @@ export class Controls {
   private readonly host: ControlsHost;
   private offNow: boolean;
 
-  /** `legacyOff`: the instance was off before the core kept the switch (`/data/off.json`). */
-  constructor(host: ControlsHost, legacyOff = false) {
+  constructor(host: ControlsHost) {
     this.host = host;
-    const kept = host.store.read<PowerDoc>(POWER_DOC);
-    this.offNow = kept?.off ?? legacyOff;
-    if (kept === undefined && legacyOff) host.store.write(POWER_DOC, { off: true });
+    this.offNow = host.store.read<PowerDoc>(POWER_DOC)?.off ?? false;
   }
 
   /** Whether the owner turned the instance off. */

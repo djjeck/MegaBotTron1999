@@ -13,16 +13,14 @@ afterEach(() => {
 });
 
 describe('the core’s EventLog', () => {
-  it('keeps records by day, in time order, under the names its table gives the old ones', () => {
-    const log = new EventLog(path.join(dir, 'sub'), { legacy: { old: 'game.old' } });
+  it('keeps records by day, in time order', () => {
+    const log = new EventLog(path.join(dir, 'sub'));
     const t = Date.UTC(2026, 10, 5, 23, 59);
     log.write({ type: 'game.b', t: t + 120_000 });
-    log.write({ type: 'old', t });
+    log.write({ type: 'game.a', t });
     fs.appendFileSync(log.fileFor(t), '{"cut sho\n{"type":1,"t":2}\n');
-    expect(log.typeOf('old')).toBe('game.old');
-    expect(log.typeOf('toString')).toBe('toString');
     expect(log.recordsSince(t, t + 120_000)).toEqual([
-      { type: 'game.old', t },
+      { type: 'game.a', t },
       { type: 'game.b', t: t + 120_000 },
     ]);
     expect(log.recordsSince(t + 1, t + 2)).toEqual([]);

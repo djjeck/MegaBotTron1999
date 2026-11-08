@@ -95,6 +95,8 @@ describe('secrets in the core', () => {
       },
       create: (ctx) => {
         got[id] = ctx;
+        // Read at create, as a connector makes its client: from then on, it is redacted.
+        if (secrets[0] !== undefined) ctx.secrets?.get(secrets[0]);
         return {
           connector: {
             account: `test:${id}`,
@@ -105,7 +107,6 @@ describe('secrets in the core', () => {
             onStatus: () => () => {},
             send: () => true,
           },
-          service: { made: ctx.secrets?.get(secrets[0] ?? '') },
         };
       },
     });
@@ -138,8 +139,6 @@ describe('secrets in the core', () => {
     expect(() => got['conn']?.secrets?.get('other')).toThrow(
       'conn does not declare the secret other'
     );
-    expect(core.service('conn')).toEqual({ made: 'tok-123456' });
-    expect(core.service('stats')).toBeUndefined();
     // A plugin's error naming a secret is redacted everywhere the core says it.
     expect(core.state('stats')?.reason).toBe(`cannot start without ${REDACTED}`);
     expect(lines.join('\n')).not.toContain('tok-123456');

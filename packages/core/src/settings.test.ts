@@ -80,39 +80,6 @@ describe('settings in the core', () => {
     expect(applied).toEqual(['a.on=true', 'a.n=3']);
   });
 
-  it('migrate the settings file of before the core, once, keeping what no plugin has', () => {
-    fs.writeFileSync(
-      path.join(dataDir, 'settings.json'),
-      JSON.stringify({ n: 4, every: 1, gone: true, on: true })
-    );
-    const { core: c, lines } = core({
-      legacySettings: 'settings.json',
-      settings: z.object({ every: count }),
-    });
-    c.register(
-      plugin('a', z.object({ n: count, on: onOff })),
-      plugin('b', z.object({ on: onOff }))
-    );
-    c.load();
-    c.load();
-    expect(c.settings.kept()).toEqual({ every: 1, n: 4 });
-    expect(fs.existsSync(path.join(dataDir, 'settings.json.migrated'))).toBe(true);
-    expect(lines).toEqual([
-      'core: settings.json migrated into a, core; no plugin has gone, on, kept in settings.json.migrated',
-    ]);
-    // A later start does nothing more; and the store's own settings win over an old file.
-    fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ n: 9 }));
-    const later = core({ legacySettings: 'settings.json' });
-    later.core.register(plugin('a', z.object({ n: count, on: onOff })));
-    later.core.load();
-    expect(later.core.settings.kept()).toEqual({ n: 4 });
-    expect(fs.readFileSync(path.join(dataDir, 'settings.json.migrated'), 'utf8')).toContain('gone');
-    expect(fs.existsSync(path.join(dataDir, 'settings.json.migrated.0'))).toBe(true);
-    const none = core({ legacySettings: 'missing.json' });
-    none.core.load();
-    expect(none.lines).toEqual([]);
-  });
-
   it('log a plugin whose settingsChanged throws, and keep the setting', async () => {
     const { core: c, lines } = core();
     c.register(

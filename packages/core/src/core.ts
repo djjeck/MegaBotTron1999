@@ -11,7 +11,6 @@
  * - `stop` runs in the reverse order, keeping what each plugin's `serialise` returns, which its
  *   next `create` gets back as `restored`.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { type z } from 'zod';
 import { Bus, type BusEvent } from './bus.ts';
@@ -49,7 +48,7 @@ import {
 import { type Render, resvgRender } from './render.ts';
 import { type KeptTimer, PluginScheduler } from './scheduler.ts';
 import { type Secrets, SecretStore } from './secrets.ts';
-import { PluginSettings, SETTINGS_DOC, SettingsRegistry } from './settings.ts';
+import { PluginSettings, SettingsRegistry } from './settings.ts';
 import { type Migration, Stores } from './store.ts';
 
 export type PluginState =
@@ -89,12 +88,6 @@ export interface CoreOptions {
    */
   graph?: GraphInput | ((defaults: Graph) => GraphInput);
   /**
-   * A file of the data volume's root that kept every setting before the core
-   * (`settings.json`): at the first load each key goes to its plugin's store, and the file is
-   * left as `<file>.migrated`.
-   */
-  legacySettings?: string;
-  /**
    * The core's own runtime settings, as a zod object (the owner's summaries, today), kept in its
    * own store beside the plugins' and named `core` in the registry.
    */
@@ -108,12 +101,6 @@ export interface CoreOptions {
   validateEvents?: boolean;
   /** Tells the owner, with buttons that each run a command; nothing while the instance is off. */
   notify?: (text: string, buttons?: Buttons) => void;
-  /**
-   * A file of the data volume's root whose presence meant the instance was off before the core
-   * kept the off switch (`off.json`): adopted as off at the first load (§4.11). The plugin that
-   * kept what it holds in that file adopts it into its store.
-   */
-  legacyOff?: string;
   /** The way back to the owner's main card, at the foot of the core's own cards (§4.11). */
   home?: CommandButton;
   /**
@@ -240,10 +227,6 @@ export class Core {
     if (secrets !== undefined && dir !== undefined)
       this.secretStore = new SecretStore(path.join(dir, 'secrets'), secrets);
     this.modes = new Modes(this.stores.open(CORE));
-    const legacyOff =
-      options.legacyOff !== undefined &&
-      options.dataDir !== undefined &&
-      fs.existsSync(path.join(options.dataDir, options.legacyOff));
     this.settings = new SettingsRegistry((plugin) => {
       const entry = this.entries.get(plugin);
       try {
@@ -280,8 +263,7 @@ export class Core {
           };
         },
         drift: () => this.drift(),
-      },
-      legacyOff
+      }
     );
     this.driftMonitor = new DriftMonitor({
       clock: options.clock,
@@ -416,16 +398,6 @@ export class Core {
     const value = this.o.secrets?.read(name);
     if (value === undefined) throw new Error(`the secret ${name} is not provided`);
     return value;
-  }
-
-  /**
-   * What a running service connector made from its secrets for the wiring (`Instance.service`):
-   * the object, never the secret. Undefined while it does not run.
-   */
-  service<T>(id: string): T | undefined {
-    const e = this.entries.get(id);
-    if (e?.status.state !== 'running' && e?.status.state !== 'paused') return undefined;
-    return e.instance?.service as T | undefined;
   }
 
   /**
@@ -596,61 +568,11 @@ export class Core {
         )
     );
     if (missing.length > 0) throw new StartError(missing.join('\n'));
-    this.migrateSettings();
     if (this.o.settings !== undefined)
       this.settings.add(new PluginSettings(CORE, this.o.settings, this.stores.internal(CORE)));
     for (const { id, manifest } of this.entries.values())
       if (manifest.settings !== undefined)
         this.settings.add(new PluginSettings(id, manifest.settings, this.stores.internal(id)));
-  }
-
-  /** The keys of the settings file of before the core, each into its plugin's store, once. */
-  private migrateSettings(): void {
-    const file = this.o.legacySettings;
-    const dir = this.o.dataDir;
-    if (file === undefined || dir === undefined) return;
-    const source = path.join(dir, file);
-    let old: Record<string, unknown>;
-    try {
-      old = JSON.parse(fs.readFileSync(source, 'utf8')) as Record<string, unknown>;
-    } catch {
-      return;
-    }
-    const schemas: [string, z.ZodObject][] = [
-      ...(this.o.settings === undefined ? [] : [[CORE, this.o.settings] as [string, z.ZodObject]]),
-      ...[...this.entries.values()].flatMap((e) =>
-        e.manifest.settings === undefined
-          ? []
-          : [[e.id, e.manifest.settings] as [string, z.ZodObject]]
-      ),
-    ];
-    const ownerOf = (key: string): string | undefined => {
-      const owners = schemas.filter(([, schema]) => Object.hasOwn(schema.shape, key));
-      return owners.length === 1 ? owners[0]?.[0] : undefined;
-    };
-    const byPlugin = new Map<string, Record<string, unknown>>();
-    const orphans: string[] = [];
-    for (const [key, value] of Object.entries(old)) {
-      const owner = ownerOf(key);
-      if (owner === undefined) orphans.push(key);
-      else byPlugin.set(owner, { ...byPlugin.get(owner), [key]: value });
-    }
-    for (const [plugin, values] of byPlugin) {
-      const store = this.stores.internal(plugin);
-      // A plugin that has its own already is not overwritten by the old file.
-      if (store.get(SETTINGS_DOC) === undefined) store.put(SETTINGS_DOC, values);
-    }
-    // A file migrated before (an older image ran meanwhile) is never overwritten.
-    const kept = fs.existsSync(`${source}.migrated`)
-      ? `${source}.migrated.${this.o.clock.now()}`
-      : `${source}.migrated`;
-    fs.renameSync(source, kept);
-    (this.o.print ?? (() => {}))(
-      `core: ${file} migrated into ${[...byPlugin.keys()].join(', ') || 'no plugin'}` +
-        (orphans.length === 0
-          ? ''
-          : `; no plugin has ${orphans.join(', ')}, kept in ${path.basename(kept)}`)
-    );
   }
 
   /** Stops the plugins running or paused, in the reverse order, keeping what they serialise. */

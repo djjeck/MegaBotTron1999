@@ -7,10 +7,7 @@
  * The schema version of a plugin's documents is kept with them (`_meta.json`). At start the core
  * migrates them from the kept version to the manifest's (the number of its migrations), on a staged
  * copy that replaces the store only once every step has succeeded: a failed migration leaves the
- * store as it was. `adopt` is for migrations only, to bring in a file of the data volume that
- * something kept before the plugin had a store (`/data/old-state.json`, `/data/img/chart.png`),
- * never one of the stores;
- * once the migration has succeeded, the file is renamed `<file>.migrated`, kept rather than deleted.
+ * store as it was.
  *
  * Without a data directory the documents live in memory, for tests.
  */
@@ -26,14 +23,8 @@ export interface Store {
   names(): string[];
 }
 
-export interface MigrationStore extends Store {
-  /**
-   * Brings `file`, a path relative to the data volume (`old-state.json`, `img/data.json`),
-   * in as the document `name`; false if there is none. It is read as JSON, or by `read` from its
-   * bytes (a PNG into a document).
-   */
-  adopt(file: string, name: string, read?: (bytes: Buffer) => unknown): boolean;
-}
+/** What a migration works on: a staged copy of the plugin's store. */
+export type MigrationStore = Store;
 
 /** One step, from the version before it to the next. */
 export type Migration = (store: MigrationStore) => void | Promise<void>;
@@ -208,37 +199,12 @@ export class Stores {
         `its store is at version ${from}, newer than the ${migrations.length} it knows`
       );
     const dir = this.dirOf(id);
-    const adopted: string[] = [];
     const staged = this.stage(id, dir);
-    const store: MigrationStore = {
+    const store: Store = {
       read: <T>(name: string) => staged.read<T>(name),
       write: (name, value) => staged.write(name, value),
       remove: (name) => staged.remove(name),
       names: () => staged.names(),
-      adopt: (file, name, read) => {
-        if (this.dataDir === undefined) return false;
-        if (
-          path.isAbsolute(file) ||
-          path.normalize(file) !== file ||
-          file.split(/[\\/]/u).some((part) => part === '' || part.startsWith('.')) ||
-          file.split(/[\\/]/u)[0] === 'plugins'
-        )
-          // Nothing outside the volume, and nothing of the stores: no plugin's state but its own.
-          throw new Error(`not a file of the app of before the core: ${JSON.stringify(file)}`);
-        const source = path.join(this.dataDir, file);
-        let bytes: Buffer;
-        try {
-          bytes = fs.readFileSync(source);
-        } catch {
-          return false;
-        }
-        staged.write(
-          name,
-          read === undefined ? (JSON.parse(bytes.toString('utf8')) as unknown) : read(bytes)
-        );
-        adopted.push(source);
-        return true;
-      },
     };
     try {
       for (let v = from; v < migrations.length; v++) {
@@ -257,7 +223,6 @@ export class Stores {
       throw e;
     }
     this.commit(id, dir, staged);
-    for (const source of adopted) fs.renameSync(source, `${source}.migrated`);
   }
 
   /**

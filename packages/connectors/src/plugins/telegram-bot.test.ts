@@ -1,6 +1,5 @@
 import { Core, definePlugin, VirtualClock } from '@megabottron1999/core';
 import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
-import { type Bot } from 'grammy';
 import { describe, expect, it } from 'vitest';
 import { BOT_INFO, stubBot } from '#test/telegram.ts';
 import { telegramBotPlugin } from './telegram-bot.ts';
@@ -29,8 +28,6 @@ describe('the telegram-bot plugin', () => {
     );
     await core.start();
     expect(tokens).toEqual(['1:abcdef']);
-    // Nothing hands the bot out: the token stays the connector's (P9).
-    expect(core.service<Bot>('telegram-bot')).toBeUndefined();
     const connector = core.connector('telegram-bot');
     expect(connector?.account).toBe('telegram-bot:bot');
     expect(connector?.status().state).toBe('connecting');

@@ -1,12 +1,8 @@
 /**
  * The instance's record (docs/bot-os-api.md §4.4): every event published on the bus and every
  * record the core and the plugins write, one JSON object per line, in a file per UTC day
- * (`events-2026-10-22.jsonl`). Append-only, so that a run can be replayed and read back.
- *
- * Every record's type is namespaced, `<namespace>.<name>`. Records written before the core had
- * plain types (`message`, `command`, …): the instance gives the table of their namespaced names
- * (`legacy`), under which they are written from now on and read back from the old files, so that
- * a reader sees one name for each kind of record, whatever day it was written.
+ * (`events-2026-10-22.jsonl`). Append-only, so that a run can be replayed and read back. Every
+ * record's type is namespaced, `<namespace>.<name>`.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,11 +18,9 @@ const DAY = /^events-(\d{4}-\d{2}-\d{2})\.jsonl$/u;
 
 export class EventLog {
   readonly dir: string;
-  private readonly legacy: Readonly<Record<string, string>>;
 
-  constructor(dir: string, options: { legacy?: Readonly<Record<string, string>> } = {}) {
+  constructor(dir: string) {
     this.dir = dir;
-    this.legacy = options.legacy ?? {};
     fs.mkdirSync(dir, { recursive: true });
   }
 
@@ -35,16 +29,9 @@ export class EventLog {
     return path.join(this.dir, `events-${new Date(t).toISOString().slice(0, 10)}.jsonl`);
   }
 
-  /** The namespaced name of a type: itself, or its name in the table of old ones. */
-  typeOf(type: string): string {
-    return Object.hasOwn(this.legacy, type) ? (this.legacy[type] as string) : type;
-  }
-
-  /** Appends a record, under its namespaced type. */
+  /** Appends a record. */
   write(record: { type: string; t: number }): void {
-    const type = this.typeOf(record.type);
-    const out = type === record.type ? record : { ...record, type };
-    fs.appendFileSync(this.fileFor(record.t), `${JSON.stringify(out)}\n`);
+    fs.appendFileSync(this.fileFor(record.t), `${JSON.stringify(record)}\n`);
   }
 
   /** The start of the first day logged, or undefined for an empty log. */
@@ -57,7 +44,7 @@ export class EventLog {
     return days[0] === undefined ? undefined : Date.parse(`${days[0]}T00:00:00Z`);
   }
 
-  /** Every record from `since` to `until`, in time order, under its namespaced type. */
+  /** Every record from `since` to `until`, in time order. */
   recordsSince(since: number, until: number): LogEntry[] {
     const out: LogEntry[] = [];
     for (let day = since - (since % 86_400_000); day <= until; day += 86_400_000) {
@@ -73,7 +60,7 @@ export class EventLog {
           continue;
         }
         if (typeof r.type === 'string' && typeof r.t === 'number' && r.t >= since && r.t <= until)
-          out.push({ ...r, type: this.typeOf(r.type), t: r.t });
+          out.push({ ...r, type: r.type, t: r.t });
       }
     }
     return out.sort((a, b) => a.t - b.t);
