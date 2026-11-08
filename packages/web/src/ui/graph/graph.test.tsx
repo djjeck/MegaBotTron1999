@@ -176,8 +176,12 @@ describe('GraphPage', () => {
       'GET /drift': [200, []],
     });
     render(<GraphPage loggedOut={loggedOut} />);
-    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'broken');
-    expect(within(screen.getByLabelText('node actor-a')).getByText('…')).toBeDefined();
+    // The alert can come before React Flow has measured and drawn the nodes, and both take longer
+    // than the default second when the whole suite runs: each is awaited, with room.
+    const slow = { timeout: 5000 };
+    expect(await screen.findByRole('alert', {}, slow)).toHaveProperty('textContent', 'broken');
+    const actor = await screen.findByLabelText('node actor-a', {}, slow);
+    expect(within(actor).getByText('…')).toBeDefined();
   });
 });
 
