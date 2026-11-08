@@ -429,12 +429,12 @@ failed one leaves the store as it was, and a store newer than its plugin (an ima
 fails that plugin rather than being read wrong. A crash between the two renames of the commit is
 undone at the next start.
 
-**Backups.** The whole data volume is the instance's state: the event log, the stores and the
-modules (and, from the next step, the graph). Back up the volume as one, with the instance stopped
-for the copy, so that no document is caught between writes. Restore it as one too: a store restored
-without the event log, or the reverse, would replay a history the state does not match. A single
-plugin's state can be restored on its own by putting back its instance's directory,
-`instances/<instance>/`, while the instance is stopped.
+**Backups.** The whole data volume is the instance's state: the graph, the event log, the instances'
+stores, the core's own and the modules. Back up the volume as one, with the instance stopped for the
+copy, so that no document is caught between writes. Restore it as one too: a store restored without
+the event log, or the reverse, would replay a history the state does not match. A single plugin's
+state can be restored on its own by putting back its instance's directory, `instances/<instance>/`,
+while the instance is stopped.
 
 ### 4.3 The scheduler
 
@@ -993,8 +993,7 @@ point prints each module loaded and each refused.
 
 The plugins loaded are registered with the core beside the image's (`core.registerModule`), and
 `core.available()` lists them all, each with its module: the plugins the instance offers, which the
-editor will add as nodes. Until the graph comes from the volume (bot-os.md §6) the instance's graph
-is empty, so they are offered, not run.
+editor will add as nodes. A plugin runs once a node of the saved graph (§2.3) names it.
 
 ### 7.4 Installing, and rolling back
 
