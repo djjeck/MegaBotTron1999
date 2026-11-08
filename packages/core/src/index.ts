@@ -217,6 +217,17 @@ export {
   type PortTypeInfo,
   resolveInputs,
 } from './ports.ts';
+export {
+  fill,
+  matches,
+  type MessageTrigger,
+  react,
+  REACT_MAX_AGE_MS,
+  type Reaction,
+  type ReactionPayload,
+  type ReactionText,
+  valueAt,
+} from './react.ts';
 export { type Render, resvgRender, type SvgToPngOptions } from './render.ts';
 export { all, from, type Matcher, mentioning, replyTo, waitFor, within } from './replies.ts';
 export { MAX_DELAY_MS, type Scheduler, type Timer, type TimerOptions } from './scheduler.ts';

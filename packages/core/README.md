@@ -18,6 +18,8 @@ settings' JSON Schemas), with the names of the secrets provided, never their val
   `src/module-store.ts`: the modules of the data volume, their resolve hook, their loading, install
   and rollback (docs/bot-os-api.md §7).
 - `tools/modules.ts`: loads module directories as the instance does, for a module repository.
+- `src/react.ts`: `react()`, a reaction: when an event is heard or a message matches, send a command
+  through the outbox (docs/bot-os-api.md §4.15).
 - `src/rng.ts`: a seeded generator, so that a simulated run repeats exactly.
 - `tools/graph.ts`: prints a graph file as text or as a Mermaid flowchart.
 

@@ -1,7 +1,7 @@
 # MegaBotTron1999
 
 A plugin-based bot shell for chat networks, with a node-graph web UI: the core, the IRC and Telegram
-connectors, the turn plugins and the web UI, in one Docker image. It knows no game. See
+connectors, the turn plugins, the reactor and the web UI, in one Docker image. It knows no game. See
 [README.md](README.md) for the overview.
 
 **This repository is public.** Everything committed here, history included, is readable by anyone.

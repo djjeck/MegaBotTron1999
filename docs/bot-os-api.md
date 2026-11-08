@@ -210,8 +210,8 @@ plugin's, each input bound as its `bind` says (`defaultGraph`), which tests and 
 `withInstances(graph, plugin, instances)` replaces the default node of a plugin meant for several
 instances by its instances. `core.graph()` gives the graph the instance runs, every edge written
 out. A changed graph takes effect at the next start (P8). The instance's entry point (`src/main.ts`)
-registers the connectors, the turn-actor and the modules' plugins (§7), and runs the graph saved in
-its volume (`CoreOptions.graphFile`, §2.3).
+registers the connectors, the turn-actor, the reactor and the modules' plugins (§7), and runs the
+graph saved in its volume (`CoreOptions.graphFile`, §2.3).
 
 ### 2.2 Instances
 
@@ -836,17 +836,79 @@ alone (§4) finds each in its context, its config or an edge:
 | a callback on a setting                                | its instance's `settingsChanged`, or the other plugin's action                                                          |
 | a credential                                           | only a connector: a secret its manifest declares, or one its config names (`configSecrets`, §4.9)                       |
 
+### 4.15 Reactions
+
+A building block of automation (bot-os.md D58): when something happens, send a command.
+`react(ctx, reaction)` (`packages/core/src/react.ts`, imported from `@megabottron1999/core` by any
+plugin, a module's too) reacts until the function it returns is called; a plugin calls it as often
+as it likes, and stops each reaction as its conditions change. The `reactor` (§5) is one reaction
+made from its node's config.
+
+```ts
+import { react } from '@megabottron1999/core';
+
+const stop = react(ctx, {
+  on: 'quest.turn', // an event type or a namespace; or { port?, chats?, match } for messages
+  when: { 'outcome.kind': 'gain', 'outcome.sure': true }, // dotted paths, each equal
+  chat: '@QuestBot', // a {path} template, or a function of the payload
+  send: '/look {outcome.item}', // the same
+  record: 'dice-roller.reaction', // the type of its records: of its plugin's id
+});
+```
+
+```ts
+interface Reaction {
+  on: string | { port?: string; chats?: readonly string[]; match: string | RegExp };
+  when?: Record<string, unknown>;
+  chat: string | ((payload: ReactionPayload) => string | undefined);
+  send: string | ((payload: ReactionPayload) => string | undefined);
+  via?: string; // the chat input whose outbox it sends through: `chat` by default
+  record: string; // ctx.record's type for each reaction
+  name?: string; // in its records, and the send's origin in `core.send`: `react` by default
+  maxAgeMs?: number; // how old an event may be and still be reacted to: 2 minutes by default
+}
+```
+
+- **On an event:** `on` is an event type (`quest.turn`) or a namespace on the bus, one its events
+  inputs consume or its own (§4.4), heard from the nodes its edges bind. Its payload is the event as
+  published, `{ type, t, instance, ...payload }`. An event older than `maxAgeMs` (a parser's replay
+  of its history at `ready`) is skipped, and recorded, so that history is not acted on again.
+- **On a message:** `on` is `{ port, chats, match }`: the messages read on the chat input `port`
+  (`chat` by default), in `chats` (compared without case; every chat its edge reads without), whose
+  text contains `match` (a string) or matches it (a `RegExp`). Messages played back and the
+  account's own are never reacted to. Its payload is `{ chat, sender, text, time, id?, replyTo? }`,
+  with the regular expression's named groups beside them (`(?<item>\w+)` is `{item}`; a group of one
+  of those names is shadowed).
+- **When:** each field of `when`, by dotted path (`outcome.kind`, `outcome.tags.0`), must equal
+  (`===`) its value; without it, every payload.
+- **Send:** `chat` and `send` are texts whose `{path}`s are replaced by the payload's values there,
+  or functions of the payload. A path with no value (or one that is not a string, a number or a
+  boolean), or a function that makes no text, sends nothing: the reaction is skipped and recorded
+  (`reason: "no value at outcome.item"`), never sent half made. Text in braces that is not a path is
+  kept as written.
+- **Through the outbox:** each send is `ctx.outbox(via).enqueue(chat, text, { origin: name })`, so
+  the plugin's mode, its edge's reach (the chats it `sends` to, its `commands`), the account's
+  pacing and the `core.send` log all apply (§4.6).
+- **Recorded:** each reaction is written with `ctx.record(record, …)`:
+  `{ reaction, on, outcome, reason?, chat?, text? }`, its outcome the outbox's (`sent`, `dry-run`,
+  `refused`, with why) or `skipped`.
+
+`react` throws, as the context does, for a namespace no events input of the plugin consumes, an
+event type nobody registers, and a message trigger on a chat input no edge binds. `valueAt`,
+`matches` and `fill` (the dotted paths, `when` and the templates) are exported beside it.
+
 ## 5. The shell's own plugins
 
-| Plugin          | Kinds     | Package                       | What it is                                                                                   |
-| --------------- | --------- | ----------------------------- | -------------------------------------------------------------------------------------------- |
-| `irc`           | connector | `@megabottron1999/connectors` | An IRC account through a ZNC bouncer, with its flood limits and a health endpoint            |
-| `telegram-bot`  | connector | `@megabottron1999/connectors` | A Telegram bot (grammY), and the owner's chat surface                                        |
-| `telegram-user` | connector | `@megabottron1999/connectors` | A Telegram user account (GramJS), reading and sending in the chats of its configuration      |
-| `anthropic`     | connector | `@megabottron1999/connectors` | The Claude API: `ask`, with structured output (§4.13)                                        |
-| (service)       | connector | `@megabottron1999/connectors` | `ServiceConnector`: the connector of a plugin that holds secrets for an API client, no chat  |
-| (turn parsers)  | parser    | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives |
-| `turn-actor`    | actor     | `@megabottron1999/turns`      | One game bot's turns, at a person's pace, run as one instance per bot                        |
+| Plugin          | Kinds     | Package                       | What it is                                                                                       |
+| --------------- | --------- | ----------------------------- | ------------------------------------------------------------------------------------------------ |
+| `irc`           | connector | `@megabottron1999/connectors` | An IRC account through a ZNC bouncer, with its flood limits and a health endpoint                |
+| `telegram-bot`  | connector | `@megabottron1999/connectors` | A Telegram bot (grammY), and the owner's chat surface                                            |
+| `telegram-user` | connector | `@megabottron1999/connectors` | A Telegram user account (GramJS), reading and sending in the chats of its configuration          |
+| `anthropic`     | connector | `@megabottron1999/connectors` | The Claude API: `ask`, with structured output (§4.13)                                            |
+| (service)       | connector | `@megabottron1999/connectors` | `ServiceConnector`: the connector of a plugin that holds secrets for an API client, no chat      |
+| (turn parsers)  | parser    | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives     |
+| `turn-actor`    | actor     | `@megabottron1999/turns`      | One game bot's turns, at a person's pace, run as one instance per bot                            |
+| `reactor`       | actor     | `@megabottron1999/turns`      | One reaction (§4.15) from its config: a command sent when an event is heard or a message matches |
 
 - **`irc`** (`packages/connectors/src/plugins/irc.ts`, on the IRC client of
   `packages/connectors/src/transport/irc-client.ts`): one IRC account through ZNC, its configuration
@@ -917,6 +979,48 @@ alone (§4) finds each in its context, its config or an edge:
   bot, each on its own instance, its `chat` edge to the owner's `telegram-user` node and its
   `parser` edge to its bot's parser. The turn parsers are not the image's: each is made from a
   game's grammar, so a game's module offers it.
+- **`reactor`** (`packages/turns/src/reactor.ts`): one reaction (`react`, §4.15) made from its
+  node's config, with no code, run as one instance per reaction. An actor: it starts `read-only`,
+  and the owner sets its mode. Its configuration (`reactorConfig`): `on`, the event type it reacts
+  to (or a namespace), or `match`, a regular expression the messages read on its chat input must
+  match (its named groups in the payload), with `in` (the one chat whose messages it reads; every
+  chat its edge reads without) and `ignoreCase`; exactly one of `on` and `match`. Then `when`
+  (dotted paths of the payload, each equal to its value), `chat` and `send` (`{path}` templates of
+  the payload), and `maxAgeS` (how old an event may be, 120 seconds by default). Its inputs: `chat`,
+  the account it sends through (on any network), whose edge carries the chat it sends to and its
+  commands, and, for `match`, the chats it reads; and `events`, optional, whose namespace is the one
+  of its `on` (§2.1): bound to the nodes whose events it hears, and not a port at all of a reactor
+  on messages. Each reaction is recorded as `reactor.reaction`, and each send logged as `core.send`
+  with the node's id as its origin. The image offers it (`src/main.ts`); a node that examines what a
+  game's parser reads, in the graph file:
+
+  ```json
+  {
+    "nodes": [
+      {
+        "id": "look-gains",
+        "plugin": "reactor",
+        "config": {
+          "on": "quest.turn",
+          "when": { "outcome.kind": "gain", "outcome.sure": true },
+          "chat": "@QuestBot",
+          "send": "/look {outcome.item}"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "tg.chat",
+        "to": "look-gains.chat",
+        "type": "chat",
+        "reads": [],
+        "sends": ["@QuestBot"],
+        "commands": ["/look"]
+      },
+      { "from": "quest.events", "to": "look-gains.events", "type": "events" }
+    ]
+  }
+  ```
 
 ## 6. Boundaries
 

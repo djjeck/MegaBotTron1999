@@ -10,10 +10,10 @@ each binding an edge, and the edges are the permissions.
 
 It knows no game. Games, and what plays them, are plugins on top of it.
 
-**Status: v1-alpha.** The core, the connectors, the turn plugins, the module loader, the graph read
-from the data volume (`/data/graph.json`) with each node's state in an instance apart from it, and
-the web UI's graph editor, where the graph is built node by node, work. The plugin API changes
-freely until the launch ([docs/bot-os.md](docs/bot-os.md) P13).
+**Status: v1-alpha.** The core, the connectors, the turn plugins, the reactor, the module loader,
+the graph read from the data volume (`/data/graph.json`) with each node's state in an instance apart
+from it, and the web UI's graph editor, where the graph is built node by node, work. The plugin API
+changes freely until the launch ([docs/bot-os.md](docs/bot-os.md) P13).
 
 > **Plugins run with the shell's full rights.** There is no sandbox. A plugin can read every secret
 > the process holds and send as every account it is connected to. Run only plugins you have read.
@@ -104,7 +104,9 @@ export const greeter = definePlugin({
   drift reporting, its settings and its mode. A plugin is built from its node's saved config and its
   context alone. It never holds a credential: connectors do.
 - **The image offers** the connectors (`irc`, `telegram-bot`, `telegram-user`, `anthropic`) and the
-  `turn-actor`, one node per game bot; everything that knows a game comes from a module.
+  `turn-actor`, one node per game bot, and the `reactor`, one node per reaction ("when this event is
+  heard, or a message matches, send this command", from its config alone, on `react()`, which any
+  plugin may call too); everything that knows a game comes from a module.
 - **Standard services,** implemented once by the shell (D52): SVG to PNG in every plugin's context
   (`ctx.render.svgToPng`), and asking an LLM through the `anthropic` connector (`ask`, with
   structured output), for the plugins an edge binds to it.
