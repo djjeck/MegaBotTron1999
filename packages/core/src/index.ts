@@ -110,6 +110,7 @@ export {
 } from './graph-file.ts';
 export {
   describeNodes,
+  describePlugin,
   GRAPH_FILE,
   graphMermaid,
   graphText,
@@ -117,6 +118,7 @@ export {
   jsonSchema,
   type MemberView,
   type NodeView,
+  type PluginView,
   type PortView,
   PREVIOUS_GRAPH_FILE,
   readGraphFile,
@@ -132,6 +134,7 @@ export {
 export {
   LEGACY_DIR,
   LegacyError,
+  type LegacyEventTypes,
   LegacyImport,
   type LegacyOptions,
   type LegacyReport,

@@ -73,6 +73,13 @@ export interface LegacyOptions {
   now: () => number;
   /** The plugins this instance offers, by id: an import is for one of them. */
   plugins: () => readonly string[];
+  /** The event types those plugins register: what an old type may be renamed to (`eventTypes`). */
+  eventTypes?: () => readonly string[];
+}
+
+/** The older log's types that are not namespaced, each with its count and the names it may take. */
+export interface LegacyEventTypes {
+  types: Record<string, { count: number; suggest: string[] }>;
 }
 
 const readJson = (file: string): unknown => {
@@ -169,6 +176,37 @@ export class LegacyImport {
       .map((f) => DAY_FILE.exec(f)?.[1])
       .filter((d) => d !== undefined)
       .sort();
+  }
+
+  /**
+   * The types of the older log that are not namespaced (those an import would skip), each with how
+   * many records have it and the event types registered here whose name after the namespace is it
+   * (`message` → `dice.message`): one is the rename to give; several, a choice; none, a name to
+   * type. Nothing is guessed beyond that.
+   */
+  eventTypes(): LegacyEventTypes {
+    this.need();
+    const registered = this.o.eventTypes?.() ?? [];
+    const types: LegacyEventTypes['types'] = {};
+    for (const day of this.days())
+      for (const line of fs
+        .readFileSync(path.join(this.o.dir, `events-${day}.jsonl`), 'utf8')
+        .split('\n')) {
+        let record: unknown;
+        try {
+          record = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const type = (record as { type?: unknown } | null)?.type;
+        if (typeof type !== 'string' || NAMESPACED.test(type)) continue;
+        const t = (types[type] ??= {
+          count: 0,
+          suggest: registered.filter((r) => r.slice(r.indexOf('.') + 1) === type),
+        });
+        t.count++;
+      }
+    return { types };
   }
 
   /**

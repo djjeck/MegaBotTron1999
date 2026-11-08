@@ -36,6 +36,22 @@ export class Secrets {
     return NAME.test(name) && fs.existsSync(path.join(this.dir, name));
   }
 
+  /**
+   * The names of the secrets provided (their files), never their values: what a connector's config
+   * may name (§4.9), for the editor's choice.
+   */
+  names(): string[] {
+    try {
+      return fs
+        .readdirSync(this.dir, { withFileTypes: true })
+        .filter((d) => !d.isDirectory() && NAME.test(d.name))
+        .map((d) => d.name)
+        .sort();
+    } catch {
+      return [];
+    }
+  }
+
   /** A secret's value, its trailing newline dropped; undefined if it is not provided. */
   read(name: string): string | undefined {
     if (!NAME.test(name)) throw new Error(`not a secret's name: ${JSON.stringify(name)}`);

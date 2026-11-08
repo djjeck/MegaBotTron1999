@@ -606,12 +606,13 @@ or only digits, are not redacted, to spare ordinary text); the core passes what 
 and tells, and a failed plugin's reason, through them, and the entry point its `console` and its
 event log. A connector's `ctx.secrets.get(name)` gives only the secrets its manifest declares, and
 those its node's config names in a key of its manifest's `configSecrets` (a connector run as several
-nodes, each with its own credential: `{ "token": "bot_token_b" }`); no other kind of plugin has
-`ctx.secrets`; a secret declared or named and not provided, or a value that is no secret's name,
-fails the load (and the graph's check), naming it and its file. `core.secretStore` keeps the core's
-own secrets (a login done later through the UI), each in `/data/core/secrets/<name>.json` of mode
-600: AES-256-GCM with a random IV and the secret's name as additional data, under a key derived
-(HKDF-SHA256) from the `bot_os_key` Docker secret; without that secret it stores nothing.
+nodes, each with its own credential: `{ "token": "bot_token_b" }`; `secrets.names()` lists the names
+provided, never their values, for the editor's choice); no other kind of plugin has `ctx.secrets`; a
+secret declared or named and not provided, or a value that is no secret's name, fails the load (and
+the graph's check), naming it and its file. `core.secretStore` keeps the core's own secrets (a login
+done later through the UI), each in `/data/core/secrets/<name>.json` of mode 600: AES-256-GCM with a
+random IV and the secret's name as additional data, under a key derived (HKDF-SHA256) from the
+`bot_os_key` Docker secret; without that secret it stores nothing.
 
 **Backups and secrets.** The Docker secrets are not in the data volume: back them up where the
 deployment keeps them. The secrets the core stores itself are in the volume, encrypted: a backup of
@@ -691,10 +692,13 @@ accounts counted by state); `GET /accounts`; `GET /drift`;
 refused); `GET /plugins/<id>/state/<name>`; `POST /plugins/<id>/actions/<name>`, the body the
 action's input (400 for an input refused by its schema, 409 for the plugin's refusal);
 `GET /instances` (§2.2); `GET /graph/file`, `POST /graph/check`, `PUT /graph/file`,
-`POST /graph/rollback` and `POST /restart` (§2.3); `GET /legacy`, `POST /instances/import` and
-`POST /legacy/events/import` (§8); `GET /available`, `GET /modules`, `POST /modules` and
-`POST /modules/<id>/rollback` (§7). Ids and names in a path may be URL-encoded. The control API is
-the owner's alone: no agent is ever given it (P11), so no agent installs a module (P1).
+`POST /graph/rollback` and `POST /restart` (§2.3); `GET /legacy`, `GET /legacy/events`,
+`POST /instances/import` and `POST /legacy/events/import` (§8); `GET /available`, `GET /modules`,
+`POST /modules` and `POST /modules/<id>/rollback` (§7); `GET /secrets`, the names of the Docker
+secrets provided, never their values, for a connector's config to name (§4.9; the wiring leaves out
+`web_ui_password` and `bot_os_key`, the shell's own). Ids and names in a path may be URL-encoded.
+The control API is the owner's alone: no agent is ever given it (P11), so no agent installs a module
+(P1).
 
 ### 4.12 The graph printed and drawn
 
@@ -1022,7 +1026,11 @@ at the next start (P8). `ModuleStore` (`<data>/modules`):
 - **The list** (`GET /modules`): each module installed (its manifest, or why it does not read), the
   version kept for a rollback (`previous`), the version the running instance loaded (`loaded`), the
   modules it refused at its start with why (`failures`), and whether a restart would change what is
-  loaded (`restart`). `GET /available` lists the plugins the instance offers.
+  loaded (`restart`). `GET /available` lists the plugins the instance offers, each as the editor
+  adds a node of it (`describePlugin`, `PluginView`): its id, its module (none for the image's own),
+  version, description and kinds, its account, its input and output ports, its interface, the JSON
+  Schemas of its config and settings, the secrets it declares, the keys of its config that name one
+  (`configSecrets`), and the event types it registers.
 
 From the host, through the loopback: `docker cp dice/ megabottron1999:/tmp/dice`, then
 `docker exec megabottron1999 wget -qO- --header 'content-type: application/json' --post-data '{"dir":"/tmp/dice"}' http://127.0.0.1:8081/modules`,
@@ -1107,6 +1115,11 @@ built: `packages/core/src/legacy.ts` (`LegacyImport`).
   settings come too; its mode does not (P10): the instance starts `read-only`, or in its node's
   `mode`. 409 for an instance kept already, 400 for an unknown plugin. An instance no node uses is
   deleted after 7 days, as any.
+- `GET /legacy/events`: the types of its event log that are not namespaced (those an import would
+  skip), each with how many records have it and the event types registered here whose name after the
+  namespace is it (`suggest`: `message` → `dice.message`, where a plugin registers `dice.message`),
+  for the owner's table of renames: one suggestion is the rename to give, several a choice, none a
+  name to type. Nothing is guessed beyond that.
 - `POST /legacy/events/import {"types"?: {"<old>": "<ns>.<name>"}, "since"?: <ms>}`: merges its
   event log into this instance's, day by day, from the day of `since`: each record once (a record
   there already is not added again, so the import may be run again), its type renamed by `types`,

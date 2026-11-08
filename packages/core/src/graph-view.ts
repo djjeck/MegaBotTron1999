@@ -130,16 +130,13 @@ export interface MemberView {
   owner?: boolean;
 }
 
-/** One node of the graph, as the graph view shows it: what it declares, not how it runs. */
-export interface NodeView {
-  id: string;
+/** A plugin as the editor shows it (`GET /available`), and each node of it: what it declares. */
+export interface PluginView {
   plugin: string;
   version: string;
   description: string;
   kinds: string[];
   account?: string;
-  /** Its configuration, as the graph gives it (defaults are the schema's). */
-  config?: Record<string, unknown>;
   configSchema?: JsonSchema;
   /** Its settings' schema; their values in force are the controls' (`GET /status`). */
   settingsSchema?: JsonSchema;
@@ -147,6 +144,18 @@ export interface NodeView {
   inputs: Record<string, PortView>;
   outputs: Record<string, PortView>;
   interface: { reads: MemberView[]; actions: MemberView[]; commands: MemberView[] };
+  /** The Docker secrets it declares, and the keys of its config that name one (§4.9). */
+  secrets: string[];
+  configSecrets: string[];
+  /** The event types it registers (§4.4). */
+  events: string[];
+}
+
+/** One node of the graph, as the graph view shows it: its plugin's declarations, and its own. */
+export interface NodeView extends PluginView {
+  id: string;
+  /** Its configuration, as the graph gives it (defaults are the schema's). */
+  config?: Record<string, unknown>;
 }
 
 /** A zod schema as a JSON Schema, for a form: as its input, what zod cannot say left open. */
@@ -177,8 +186,49 @@ const outputView = (p: OutputPort): PortView => ({
 });
 
 /**
- * Each node of the graph as the graph view shows it: its plugin's manifest (ports, interface and
- * the JSON Schemas of its config and settings), with the node's own account and configuration.
+ * A plugin as the editor shows it: its manifest's ports, interface, secrets and event types, and
+ * the JSON Schemas of its config and settings, for the forms (P11).
+ */
+export function describePlugin(m: Manifest): PluginView {
+  const i = m.interface;
+  return {
+    plugin: m.id,
+    version: m.version,
+    description: m.description,
+    kinds: [...m.kinds],
+    ...(m.account === undefined ? {} : { account: m.account }),
+    ...(m.config === undefined ? {} : { configSchema: jsonSchema(m.config) }),
+    ...(m.settings === undefined ? {} : { settingsSchema: jsonSchema(m.settings) }),
+    inputs: Object.fromEntries(Object.entries(m.inputs).map(([k, p]) => [k, inputView(p)])),
+    outputs: Object.fromEntries(Object.entries(m.outputs).map(([k, p]) => [k, outputView(p)])),
+    interface: {
+      reads: Object.entries(i.state ?? {}).map(([name, r]) => ({
+        name,
+        help: r.help,
+        output: jsonSchema(r.output),
+      })),
+      actions: Object.entries(i.actions ?? {}).map(([name, a]) => ({
+        name,
+        help: a.help,
+        input: jsonSchema(a.input),
+        ...(a.output === undefined ? {} : { output: jsonSchema(a.output) }),
+      })),
+      commands: Object.entries(i.commands ?? {}).map(([name, c]) => ({
+        name,
+        help: c.help,
+        ...(c.args === undefined ? {} : { args: c.args }),
+        owner: c.owner,
+      })),
+    },
+    secrets: [...m.secrets],
+    configSecrets: [...m.configSecrets],
+    events: Object.keys(m.events).sort(),
+  };
+}
+
+/**
+ * Each node of the graph as the graph view shows it: its plugin's manifest (`describePlugin`), with
+ * the node's own account and configuration.
  */
 export function describeNodes(
   nodes: readonly { id: string; manifest: Manifest }[],
@@ -186,39 +236,13 @@ export function describeNodes(
 ): NodeView[] {
   return nodes.map(({ id, manifest: m }) => {
     const node = graph.nodes.find((n) => n.id === id);
+    const { account: _, ...plugin } = describePlugin(m);
     const account = node?.account ?? m.account;
-    const i = m.interface;
     return {
       id,
-      plugin: m.id,
-      version: m.version,
-      description: m.description,
-      kinds: [...m.kinds],
+      ...plugin,
       ...(account === undefined ? {} : { account }),
       ...(node?.config === undefined ? {} : { config: node.config }),
-      ...(m.config === undefined ? {} : { configSchema: jsonSchema(m.config) }),
-      ...(m.settings === undefined ? {} : { settingsSchema: jsonSchema(m.settings) }),
-      inputs: Object.fromEntries(Object.entries(m.inputs).map(([k, p]) => [k, inputView(p)])),
-      outputs: Object.fromEntries(Object.entries(m.outputs).map(([k, p]) => [k, outputView(p)])),
-      interface: {
-        reads: Object.entries(i.state ?? {}).map(([name, r]) => ({
-          name,
-          help: r.help,
-          output: jsonSchema(r.output),
-        })),
-        actions: Object.entries(i.actions ?? {}).map(([name, a]) => ({
-          name,
-          help: a.help,
-          input: jsonSchema(a.input),
-          ...(a.output === undefined ? {} : { output: jsonSchema(a.output) }),
-        })),
-        commands: Object.entries(i.commands ?? {}).map(([name, c]) => ({
-          name,
-          help: c.help,
-          ...(c.args === undefined ? {} : { args: c.args }),
-          owner: c.owner,
-        })),
-      },
     };
   });
 }

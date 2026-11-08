@@ -174,8 +174,6 @@ describe('an event', () => {
     await core.start();
     g(got, 'game').publish('dice.roll', { player: 'x', type: 'other', t: 1, instance: 'no' });
     const event = logged.find((r) => r.type === 'dice.roll');
-    expect(JSON.stringify(event)).toBe(
-      '{"type":"dice.roll","t":5,"instance":"game","player":"x"}'
-    );
+    expect(JSON.stringify(event)).toBe('{"type":"dice.roll","t":5,"instance":"game","player":"x"}');
   });
 });

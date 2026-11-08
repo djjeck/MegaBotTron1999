@@ -24,12 +24,20 @@ describe('the plugins available', () => {
     const broken = { manifest: { id: 'Broken' }, create: () => ({}) } as unknown as Plugin;
     core.register(plugin('image-plugin'));
     core.registerModule('dice', [plugin('dice-stats', 'Counts rolls'), broken]);
-    expect(core.available()).toEqual([
+    const available = core.available();
+    expect(available).toMatchObject([
       {
         id: 'image-plugin',
+        plugin: 'image-plugin',
         version: '0.2.0',
         description: 'A test plugin',
         kinds: ['stats'],
+        // What the editor draws and forms a node of it with.
+        inputs: {},
+        outputs: { interface: { type: 'interface', optional: false } },
+        secrets: [],
+        configSecrets: [],
+        events: [],
       },
       {
         id: 'dice-stats',
@@ -39,6 +47,8 @@ describe('the plugins available', () => {
         module: 'dice',
       },
     ]);
+    expect(available).toHaveLength(2);
+    expect(available[0]).not.toHaveProperty('module');
   });
 });
 
@@ -58,6 +68,7 @@ describe('the control API’s modules', () => {
       controls: core.controls,
       settings: core.settings,
       available: () => core.available(),
+      secrets: () => ['api_key'],
       modules: {
         report: () => store.report(),
         install: (s) => store.install(s),
@@ -79,8 +90,16 @@ describe('the control API’s modules', () => {
 
     expect(await call('/available')).toEqual([
       200,
-      [{ id: 'image-plugin', version: '0.2.0', description: 'A test plugin', kinds: ['stats'] }],
+      [
+        expect.objectContaining({
+          id: 'image-plugin',
+          version: '0.2.0',
+          description: 'A test plugin',
+          kinds: ['stats'],
+        }),
+      ],
     ]);
+    expect(await call('/secrets')).toEqual([200, { names: ['api_key'] }]);
     const dir = writeModule(tempDir(), 'dice', manifestOf('dice'));
     expect(await call('/modules', JSON.stringify({ dir }))).toEqual([
       200,

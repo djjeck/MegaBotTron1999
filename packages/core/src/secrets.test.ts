@@ -45,6 +45,14 @@ describe('Secrets', () => {
     expect(s.redact('12 apples, 37780000 points')).toBe('12 apples, 37780000 points');
     expect(new Secrets().dir).toBe('/run/secrets');
   });
+
+  it('lists the names of the secrets provided, never their values', () => {
+    const s = secretsWith({ znc_password: 'hunter22', api_key: 'sk-ant-xyz-1234' });
+    fs.mkdirSync(path.join(s.dir, 'a_dir'));
+    fs.writeFileSync(path.join(s.dir, 'Not.A.Name'), 'x');
+    expect(s.names()).toEqual(['api_key', 'znc_password']);
+    expect(new Secrets(path.join(dir, 'nowhere')).names()).toEqual([]);
+  });
 });
 
 describe('SecretStore', () => {

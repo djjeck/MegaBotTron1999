@@ -19,6 +19,7 @@ import {
   CoreEventLog,
   GraphFile,
   graphFileControls,
+  KEY_SECRET,
   LEGACY_DIR,
   LegacyImport,
   loadModules,
@@ -105,6 +106,9 @@ const controlApi = controlHandler({
   graph: () => secrets.redactDeep(core.graph()),
   records: (from, to) => events.recordsSince(from, to),
   available: () => core.available(),
+  // The names of the Docker secrets a connector's config may name, never their values; the UI's
+  // password and the key of the stored secrets are the shell's own.
+  secrets: () => secrets.names().filter((n) => n !== 'web_ui_password' && n !== KEY_SECRET),
   instances: () => core.instances(),
   graphFile: graphFileControls(graphFile, core, (v) => secrets.redactDeep(v)),
   restart: () => void end('restart'),
@@ -114,6 +118,7 @@ const controlApi = controlHandler({
     dataDir,
     now: () => clock.now(),
     plugins: () => core.available().map((p) => p.id),
+    eventTypes: () => core.available().flatMap((p) => p.events),
   }),
   modules: {
     report: () => modules.report(loaded),

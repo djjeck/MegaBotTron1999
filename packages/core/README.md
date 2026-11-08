@@ -8,8 +8,9 @@ loads the plugins of a graph, starts them in order, enforces each acting plugin'
 `dry-run`, `live`) on its sends, pauses one whose parser drifts, and keeps everything across a
 restart. The owner's controls (`src/controls.ts`) and their HTTP API (`src/control-server.ts`) offer
 each plugin's state, mode, settings, reads and actions, the instance's off and kill switches, a
-single node's kill, and what the web UI's graph view draws of each node (`src/graph-view.ts`: its
-ports, its interface, and its config's and settings' JSON Schemas).
+single node's kill, and what the web UI's graph editor draws and forms each plugin and node with
+(`src/graph-view.ts`: its ports, its interface, its secrets and event types, and its config's and
+settings' JSON Schemas), with the names of the secrets provided, never their values.
 
 - `src/index.ts` is the public API (`@megabottron1999/core`); plugins import nothing else.
 - `src/devkit.ts`: a core on a virtual clock with fake connectors, for tests and simulators.

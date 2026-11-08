@@ -29,6 +29,8 @@
  * - `POST /graph/rollback`: the previous version back (409 when there is none).
  * - `GET /legacy`: what an older data directory mounted read-only offers to import (§8): its
  *   stores, and its event log's days; 404 when none is mounted.
+ * - `GET /legacy/events`: its event log's types that are not namespaced, counted, each with the
+ *   types registered here it may be renamed to.
  * - `POST /instances/import {"from": "<store>", "instance"?: "<id>", "plugin"?: "<id>"}`: a store
  *   of it copied into a fresh instance; 409 for an instance kept already.
  * - `POST /legacy/events/import {"types"?: {"old": "ns.new"}, "since"?: <ms>}`: its event log
@@ -42,7 +44,9 @@
  * - `POST /plugins/<id>/actions/<name>` with the action's input as the body: its output, a 400 for
  *   an input its schema refuses, a 409 when the plugin refuses, with why.
  *
- * - `GET /available`: the plugins the instance offers, the image's and the modules' (§7).
+ * - `GET /available`: the plugins the instance offers, the image's and the modules' (§7), each
+ *   with its ports, schemas, interface, secrets and event types, for the editor.
+ * - `GET /secrets`: the names of the Docker secrets provided, never their values (§4.9).
  * - `GET /instances`: the plugin instances kept, each with its plugin and whether a node uses it.
  * - `GET /modules`: the modules installed, with the version each had loaded, and those refused at
  *   the start with why.
@@ -104,6 +108,7 @@ async function moduleSource(req: http.IncomingMessage): Promise<ModuleSource> {
 /** The import from an older data directory (legacy.ts), as the wiring offers it. */
 export interface LegacyControls {
   report(): unknown;
+  eventTypes(): unknown;
   importStore(request: unknown): unknown;
   importEvents(request: unknown): unknown;
 }
@@ -131,6 +136,8 @@ export interface ControlOptions {
   available?: () => AvailablePlugin[];
   /** The modules: listed, installed, rolled back (§7). */
   modules?: ModuleControls;
+  /** The names of the secrets provided (never their values), for a connector's config (§4.9). */
+  secrets?: () => string[];
   /** The plugin instances kept, apart from the nodes (`core.instances()`, §2.2). */
   instances?: () => InstanceInfo[];
   /** The saved graph's file: read, checked, saved, rolled back (§2.3). */
@@ -205,6 +212,7 @@ export function controlHandler(
       const legacy = o.legacy;
       const imports: Record<string, ((b: unknown) => unknown) | undefined> = {
         'GET /legacy': legacy === undefined ? undefined : () => legacy.report(),
+        'GET /legacy/events': legacy === undefined ? undefined : () => legacy.eventTypes(),
         'POST /instances/import': legacy === undefined ? undefined : (b) => legacy.importStore(b),
         'POST /legacy/events/import':
           legacy === undefined ? undefined : (b) => legacy.importEvents(b),
@@ -263,6 +271,8 @@ export function controlHandler(
       }
       if (!post && route === '/available' && o.available !== undefined)
         return reply(200, o.available());
+      if (!post && route === '/secrets' && o.secrets !== undefined)
+        return reply(200, { names: o.secrets() });
       if (!post && route === '/instances' && o.instances !== undefined)
         return reply(200, o.instances());
       const mods = o.modules;

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { type Graph } from './graph.ts';
 import {
   describeNodes,
+  describePlugin,
   GRAPH_FILE,
   graphMermaid,
   graphText,
@@ -93,7 +94,13 @@ describe('the nodes as the graph view shows them', () => {
     kinds: ['connector'],
     description: 'a network',
     account: 'irc:me',
-    config: z.object({ host: z.string().describe('where'), port: z.number().default(6667) }),
+    secrets: ['irc_password'],
+    configSecrets: ['token'],
+    config: z.object({
+      host: z.string().describe('where'),
+      port: z.number().default(6667),
+      token: z.string().optional(),
+    }),
   });
   const actor = parseManifest({
     id: 'actor',
@@ -124,6 +131,7 @@ describe('the nodes as the graph view shows them', () => {
     kinds: ['parser'],
     description: 'reads the game',
     games: { registers: ['game'] },
+    events: { 'game.win': z.object({}), 'game.move': z.object({}) },
     interface: { state: { board: { help: 'the board', output: z.array(z.string()) } } },
   });
 
@@ -152,8 +160,15 @@ describe('the nodes as the graph view shows them', () => {
       inputs: {},
       outputs: { chat: { type: 'chat', network: 'irc', label: 'chat of irc', optional: false } },
       interface: { reads: [], actions: [], commands: [] },
+      secrets: ['irc_password'],
+      configSecrets: ['token'],
+      events: [],
     });
     expect(views[1]).not.toHaveProperty('config');
+    expect(views[1]?.events).toEqual(['game.move', 'game.win']);
+    // The plugin alone, as the editor's palette offers it: its manifest's account, no node's.
+    expect(describePlugin(actor)).not.toHaveProperty('account');
+    expect(describePlugin(irc)).toMatchObject({ plugin: 'irc', account: 'irc:me' });
     expect(views[1]?.outputs).toMatchObject({
       events: { type: 'events', namespace: 'game' },
       interface: { type: 'interface', plugin: 'game', members: ['state.board'] },

@@ -86,8 +86,14 @@ function snapshot(dir: string): Record<string, string> {
   return out;
 }
 
-const importer = (dir = legacy): LegacyImport =>
-  new LegacyImport({ dir, dataDir: data, now: () => T0, plugins: () => ['counter', 'other'] });
+const importer = (dir = legacy, eventTypes?: string[]): LegacyImport =>
+  new LegacyImport({
+    dir,
+    dataDir: data,
+    now: () => T0,
+    plugins: () => ['counter', 'other'],
+    ...(eventTypes === undefined ? {} : { eventTypes: () => eventTypes }),
+  });
 
 describe('the import from an older data directory', () => {
   it('lists its stores and its log, and copies a store into a fresh instance', async () => {
@@ -190,6 +196,28 @@ describe('the import from an older data directory', () => {
     expect(snapshot(legacy)).toEqual(before);
   });
 
+  it('names the types an import would skip, with the registered ones they may become', () => {
+    fs.writeFileSync(
+      path.join(legacy, 'events-2026-11-03.jsonl'),
+      [
+        JSON.stringify({ type: 'roll', t: 1 }),
+        JSON.stringify({ type: 'message', t: 2 }),
+        '{"not',
+        'null',
+        JSON.stringify({ t: 3 }),
+      ].join('\n')
+    );
+    const imp = importer(legacy, ['dice.roll', 'quest.message', 'dice.message', 'dice.other']);
+    expect(imp.eventTypes()).toEqual({
+      types: {
+        roll: { count: 2, suggest: ['dice.roll'] },
+        message: { count: 1, suggest: ['quest.message', 'dice.message'] },
+        line: { count: 1, suggest: [] },
+      },
+    });
+    expect(importer().eventTypes().types['roll']?.suggest).toEqual([]);
+  });
+
   it('says when no older directory is mounted, and serves all this on the control API', async () => {
     const none = importer(path.join(root, 'nowhere'));
     expect(none.mounted()).toBe(false);
@@ -225,6 +253,7 @@ describe('the import from an older data directory', () => {
     };
     const on = await serve(importer());
     expect((await on.call('/legacy'))[1]).toMatchObject({ stores: [{ id: 'counter' }, {}] });
+    expect((await on.call('/legacy/events'))[1]).toMatchObject({ types: { roll: { count: 1 } } });
     expect(await on.call('/instances/import', { from: 'counter' })).toEqual([
       200,
       { instance: 'counter', plugin: 'counter', documents: ['state'] },

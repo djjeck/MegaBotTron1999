@@ -37,6 +37,7 @@ import {
   resolveGraph,
 } from './graph.ts';
 import { type GraphCheck, type GraphFile, type GraphProblem, locateProblem } from './graph-file.ts';
+import { describePlugin, type PluginView } from './graph-view.ts';
 import { type InstanceInfo, InstanceRegistry } from './instance-registry.ts';
 import { type Manifest, parseManifest, SECRET_NAME } from './manifest.ts';
 import { Modes, Outbox, type SenderPolicy, type SendRecord } from './outbox.ts';
@@ -151,12 +152,12 @@ export interface CoreOptions {
 
 export class StartError extends Error {}
 
-/** A plugin the instance offers: the image's, or a module's (`module`). */
-export interface AvailablePlugin {
+/**
+ * A plugin the instance offers: the image's, or a module's (`module`), as the editor shows it
+ * (`describePlugin`: its ports, schemas, interface, secrets and event types).
+ */
+export interface AvailablePlugin extends PluginView {
   id: string;
-  version: string;
-  description: string;
-  kinds: string[];
   /** The module that offers it; none for the image's own. */
   module?: string;
 }
@@ -353,15 +354,7 @@ export class Core {
       try {
         const m = parseManifest(p.manifest);
         const module = this.origins.get(p);
-        return [
-          {
-            id: m.id,
-            version: m.version,
-            description: m.description,
-            kinds: [...m.kinds],
-            ...(module === undefined ? {} : { module }),
-          },
-        ];
+        return [{ id: m.id, ...describePlugin(m), ...(module === undefined ? {} : { module }) }];
       } catch {
         return [];
       }
