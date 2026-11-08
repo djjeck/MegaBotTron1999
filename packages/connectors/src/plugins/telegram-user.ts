@@ -46,14 +46,17 @@ export function userCredentials(
 }
 
 /**
- * The `telegram-user` plugin of the account `telegram:<self>`; `client` makes the GramJS client
- * from the credentials (tests pass a fake).
+ * The `telegram-user` plugin, on its node's account (`telegram:<name>`; `telegram:owner`, or
+ * `telegram:<self>`, until a node names one); `client` makes the GramJS client from the
+ * credentials (tests pass a fake).
  */
-export function telegramUserPlugin(o: {
-  self: string;
-  client?: (credentials: UserCredentials) => GramClient;
-}): Plugin {
-  const account = `telegram:${o.self}`;
+export function telegramUserPlugin(
+  o: {
+    self?: string;
+    client?: (credentials: UserCredentials) => GramClient;
+  } = {}
+): Plugin {
+  const account = `telegram:${o.self ?? 'owner'}`;
   const make = o.client ?? ((c: UserCredentials): GramClient => createTelegramClient(c));
   return definePlugin({
     manifest: {
@@ -67,7 +70,7 @@ export function telegramUserPlugin(o: {
     },
     create: (ctx) => {
       const connector = new TelegramUserConnector({
-        account,
+        account: ctx.account ?? account,
         client: make(userCredentials((name) => ctx.secrets?.get(name) ?? '')),
         chats: (ctx.config as TelegramUserConfig).chats,
         clock: ctx.clock,

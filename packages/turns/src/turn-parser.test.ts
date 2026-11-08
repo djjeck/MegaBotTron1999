@@ -21,7 +21,7 @@ describe('isTurnCommand', () => {
 
 describe('a turn parser', () => {
   it("reads the replies to the owner's turns in the group, by hand, and no one else's", async () => {
-    const p = await run(questPlugin({ group: GROUP }), { commands: ['/quest'] });
+    const p = await run(questPlugin(), { commands: ['/quest'] }, GROUP);
     const hand = p.hear({ ...own, chat: GROUP, text: `/quest@${QUESTBOT}` });
     p.hear({ ...bot, chat: GROUP, replyTo: hand, text: 'Found an apple.' });
     p.hear({ ...bot, chat: GROUP, replyTo: '1', text: 'Found a pear.' });

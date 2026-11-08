@@ -16,7 +16,37 @@ export interface LogEntry {
 
 const DAY = /^events-(\d{4}-\d{2}-\d{2})\.jsonl$/u;
 
-export class EventLog {
+/** The event log, read back: what a plugin's `ctx.events` reads (§4.4). */
+export interface EventReader {
+  /** Every record from `since` to `until`, in time order. */
+  recordsSince(since: number, until: number): LogEntry[];
+  /** The start of the first day logged, or undefined for an empty log. */
+  firstDay(): number | undefined;
+}
+
+/** An event log in memory: the dev kit's, its history given and its records kept. */
+export class MemoryEventLog implements EventReader {
+  readonly records: LogEntry[];
+
+  constructor(history: readonly LogEntry[] = []) {
+    this.records = [...history];
+  }
+
+  write(record: { type: string; t: number }): void {
+    this.records.push({ ...record });
+  }
+
+  recordsSince(since: number, until: number): LogEntry[] {
+    return this.records.filter((r) => r.t >= since && r.t <= until).sort((a, b) => a.t - b.t);
+  }
+
+  firstDay(): number | undefined {
+    const first = Math.min(...this.records.map((r) => r.t));
+    return Number.isFinite(first) ? first - (first % 86_400_000) : undefined;
+  }
+}
+
+export class EventLog implements EventReader {
   readonly dir: string;
 
   constructor(dir: string) {

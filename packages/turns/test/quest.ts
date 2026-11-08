@@ -25,19 +25,16 @@ export function readQuest(text: string): { outcome: TurnOutcome; restMs: number 
 }
 
 /** @QuestBot's parser: what answers alice's turns, and in private a reply that reads as one. */
-export function questPlugin(o: { group?: string } = {}): Plugin {
-  return turnParserPlugin(
-    {
-      id: QUEST,
-      bot: QUESTBOT,
-      description: "@QuestBot's answers to the owner's turns",
-      read: (m): TurnReading => {
-        if (!m.answers && !(m.private && m.replies)) return undefined;
-        const read = readQuest(m.text);
-        if (read === undefined) return m.answers ? { unread: true } : undefined;
-        return read;
-      },
+export function questPlugin(): Plugin {
+  return turnParserPlugin({
+    id: QUEST,
+    bot: QUESTBOT,
+    description: "@QuestBot's answers to the owner's turns",
+    read: (m): TurnReading => {
+      if (!m.answers && !(m.private && m.replies)) return undefined;
+      const read = readQuest(m.text);
+      if (read === undefined) return m.answers ? { unread: true } : undefined;
+      return read;
     },
-    o
-  );
+  });
 }

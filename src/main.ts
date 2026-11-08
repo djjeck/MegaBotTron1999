@@ -56,17 +56,15 @@ const core = new Core({
   dataDir,
   secrets,
   graphFile,
+  // What the plugins read back of the log: a replay of recent history, a fresh instance's first
+  // reading of the whole log (ctx.events).
+  events,
   print: (line) => console.log(line),
   record: (r) => events.write(secrets.redactDeep(r)),
 });
-// The connectors the image offers (docs/bot-os-api.md §5). The names they hold are placeholders
-// until a node of the graph gives each its own account.
-const image: Plugin[] = [
-  ircPlugin({ nick: env['IRC_NICK'] || 'megabottron' }),
-  telegramBotPlugin(),
-  telegramUserPlugin({ self: env['TELEGRAM_USER'] || 'owner' }),
-  anthropicPlugin(),
-];
+// The connectors the image offers (docs/bot-os-api.md §5), each built from its node's config alone;
+// a node gives each its own account.
+const image: Plugin[] = [ircPlugin(), telegramBotPlugin(), telegramUserPlugin(), anthropicPlugin()];
 core.register(...image);
 // The modules (docs/bot-os-api.md §7): each one refused is named, with why, and the others load.
 const modules = new ModuleStore(path.join(dataDir, 'modules'));

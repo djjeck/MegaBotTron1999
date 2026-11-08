@@ -51,10 +51,10 @@ export class IrcConnector extends ConnectorBase implements Connector {
 
   /** `client` makes the IRC client on the connector's events (tests pass a fake). */
   constructor(
-    options: IrcClientOptions & { limits?: Limits },
+    options: IrcClientOptions & { limits?: Limits; account?: string },
     client: (events: TransportEvents) => Transport = (events) => new IrcClient(options, events)
   ) {
-    super(`irc:${options.nick}`, 'irc');
+    super(options.account ?? `irc:${options.nick}`, 'irc');
     this.named(options.nick);
     if (options.limits !== undefined) this.limits = options.limits;
     this.channel = options.channel;
@@ -137,20 +137,23 @@ export const ircConfig = z.object({
 export type IrcConfig = z.infer<typeof ircConfig>;
 
 /**
- * The `irc` plugin of the account `irc:<nick>`: it makes its connector at `create`, from its
- * configuration as the core checked it; `client` makes the IRC client (tests pass a fake).
+ * The `irc` plugin: it makes its connector at `create`, from its configuration alone, as the core
+ * checked it, on its node's account (`irc:<nick>`; `irc:irc` until a node names one). `nick` only
+ * names the manifest's placeholder account, and `client` makes the IRC client (tests pass a fake).
  */
-export function ircPlugin(o: {
-  nick: string;
-  client?: (options: IrcClientOptions, events: TransportEvents) => Transport;
-}): Plugin {
+export function ircPlugin(
+  o: {
+    nick?: string;
+    client?: (options: IrcClientOptions, events: TransportEvents) => Transport;
+  } = {}
+): Plugin {
   return definePlugin({
     manifest: {
       id: IRC,
       version: '0.1.0',
       kinds: ['connector'],
       description: 'An IRC account through ZNC',
-      account: `irc:${o.nick}`,
+      account: `irc:${o.nick ?? 'irc'}`,
       config: ircConfig,
       // The ZNC login's password (P9): the plugin alone receives it.
       secrets: [ZNC_PASSWORD],
@@ -162,7 +165,8 @@ export function ircPlugin(o: {
     },
     create: (ctx) => {
       const c = ctx.config as IrcConfig;
-      const options: IrcClientOptions & { limits: Limits } = {
+      const options: IrcClientOptions & { limits: Limits; account?: string } = {
+        ...(ctx.account === undefined ? {} : { account: ctx.account }),
         host: c.host,
         port: c.port,
         tls: c.tls,

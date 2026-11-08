@@ -8,6 +8,7 @@ import { type Clock } from './clock.ts';
 import { type Buttons, type CommandHandler } from './commands.ts';
 import { type ChatSurface, type Connector, type ConnectorHandle } from './connector.ts';
 import { type DriftReporter } from './drift.ts';
+import { type LogEntry } from './event-log.ts';
 import { type ManifestInput } from './manifest.ts';
 import { type Mode, type OutboxHandle } from './outbox.ts';
 import { type Render } from './render.ts';
@@ -89,6 +90,31 @@ export interface PluginContext {
   readonly restored?: unknown;
   /** The render service (§4.13): SVG to PNG. */
   readonly render: Render;
+  /**
+   * The event log, read back (§4.4): the records of the namespaces it registers, of its plugin's
+   * own, and of those its events inputs consume; of one type (`dice.roll`) or namespace (`dice`),
+   * or of all of them; over the whole log or since a time. For a replay of recent history at
+   * `ready`, or a fresh instance reading the whole log once.
+   */
+  readonly events: { read(query?: EventQuery): LogEntry[] };
+  /**
+   * Writes a record to the event log (§4.4), `{ type, t, ...fields }`, `t` now: of a type in a
+   * namespace it registers or of its plugin's id (`dice-roller.turn`), with no schema; the bus's
+   * events are written as they are published.
+   */
+  record(type: string, fields: Record<string, unknown>): void;
+  /** A connector's account (§4.5): its node's, or its manifest's. */
+  readonly account?: string;
+}
+
+/** Which of the event log's records a plugin reads (`ctx.events.read`). */
+export interface EventQuery {
+  /** A type (`dice.roll`) or a namespace (`dice`); all it may read without. */
+  type?: string;
+  /** From this time (ms); the log's first day without. */
+  since?: number;
+  /** Up to this time (ms); now without. */
+  until?: number;
 }
 
 /** A plugin's mode, as its context gives it. */

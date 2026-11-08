@@ -173,7 +173,7 @@ export function anthropicPlugin(o: AnthropicPluginOptions = {}): Plugin {
       const config = ctx.config as z.infer<typeof anthropicConfig>;
       const ask = askWith(makeClient(ctx.secrets?.get(ANTHROPIC_KEY) ?? ''), config);
       return {
-        connector: new ServiceConnector(account, ANTHROPIC),
+        connector: new ServiceConnector(ctx.account ?? account, ANTHROPIC),
         interface: { actions: { ask } },
       };
     },

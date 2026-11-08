@@ -80,6 +80,11 @@ export const manifestSchema = z
     settings: objectSchema.optional(),
     secrets: z.array(z.string().regex(SECRET_NAME, 'expected a Docker secret name')).default([]),
     /**
+     * The keys of its `config` whose values name a secret (docs/bot-os-api.md §4.9): a connector
+     * that several nodes run, each with a credential of its own that its node's config names.
+     */
+    configSecrets: z.array(z.string().min(1)).default([]),
+    /**
      * The steps that bring its store from each older version to the next (docs/bot-os-api.md §4.2):
      * the store's version is the number of them.
      */
@@ -128,6 +133,12 @@ export const manifestSchema = z
       ctx.addIssue({
         code: 'custom',
         path: ['secrets'],
+        message: 'only a connector may hold secrets (P9)',
+      });
+    if (m.configSecrets.length > 0 && !connector)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['configSecrets'],
         message: 'only a connector may hold secrets (P9)',
       });
     if (connector && m.account === undefined)

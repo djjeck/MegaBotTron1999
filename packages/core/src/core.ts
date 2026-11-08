@@ -24,6 +24,7 @@ import {
 import { type ChatSurface, type Connector, handleOf } from './connector.ts';
 import { Controls, KILLED } from './controls.ts';
 import { DEFAULT_DRIFT, type DriftCounts, DriftMonitor, type DriftRecord } from './drift.ts';
+import { type EventReader, type LogEntry } from './event-log.ts';
 import {
   type Binding,
   defaultGraph,
@@ -37,10 +38,11 @@ import {
 } from './graph.ts';
 import { type GraphCheck, type GraphFile, type GraphProblem, locateProblem } from './graph-file.ts';
 import { type InstanceInfo, InstanceRegistry } from './instance-registry.ts';
-import { type Manifest, parseManifest } from './manifest.ts';
+import { type Manifest, parseManifest, SECRET_NAME } from './manifest.ts';
 import { Modes, Outbox, type SenderPolicy, type SendRecord } from './outbox.ts';
 import { CORE_COMMANDS, coreCommands } from './owner-commands.ts';
 import {
+  type EventQuery,
   type Instance,
   type Logger,
   type Plugin,
@@ -140,6 +142,11 @@ export interface CoreOptions {
   allowArchived?: boolean;
   /** The render service the plugins get (§4.13): the shell's, on resvg, by default. */
   render?: Render;
+  /**
+   * The event log, read back (§4.4): what each plugin's `ctx.events` reads. Without it, a plugin
+   * reads no history.
+   */
+  events?: EventReader;
 }
 
 export class StartError extends Error {}
@@ -431,14 +438,16 @@ export class Core {
   }
 
   /**
-   * A connector's own declared secret, for its context's `secrets` (§4.9). Refused for any plugin
-   * but a connector, and any secret it does not declare.
+   * A connector's own declared secret, or one its config names (`configSecrets`), for its
+   * context's `secrets` (§4.9). Refused for any plugin but a connector, and any other secret.
    */
   private secretFor(plugin: string, name: string): string {
-    const manifest = this.entries.get(plugin)?.manifest;
+    const entry = this.entries.get(plugin);
+    const manifest = entry?.manifest;
     if (manifest === undefined || !manifest.kinds.includes('connector'))
       throw new Error(`${plugin} is not a connector: it receives no secret`);
-    if (!manifest.secrets.includes(name))
+    const named = manifest.configSecrets.some((key) => entry?.config[key] === name);
+    if (!manifest.secrets.includes(name) && !named)
       throw new Error(`${plugin} does not declare the secret ${name}`);
     const value = this.o.secrets?.read(name);
     if (value === undefined) throw new Error(`the secret ${name} is not provided`);
@@ -860,7 +869,14 @@ export class Core {
             `plugin ${id}: settings ${key}: ${parsed.error.issues.map((i) => i.message).join('; ')}`
           );
       }
-      for (const name of manifest.secrets)
+      const named: string[] = [];
+      for (const key of manifest.configSecrets) {
+        const value = config[key];
+        if (value === undefined) continue;
+        if (typeof value === 'string' && SECRET_NAME.test(value)) named.push(value);
+        else problems.push(`plugin ${id}: config ${key}: expected the name of a secret`);
+      }
+      for (const name of [...manifest.secrets, ...named])
         if (this.o.secrets?.has(name) !== true)
           problems.push(
             `plugin ${id}: the secret ${name} is not provided (${this.o.secrets?.dir ?? 'no secrets'}/${name})`
@@ -1033,8 +1049,51 @@ export class Core {
       off: () => this.controls.off,
       resume: () => this.resume(id),
       render: this.o.render ?? resvgRender,
+      events: { read: (options) => this.readEvents(entry, options) },
+      record: (type, fields) => {
+        const ns = type.slice(0, type.indexOf('.'));
+        const own = [...entry.manifest.games.registers, entry.manifest.id];
+        if (!type.includes('.') || !own.includes(ns))
+          throw new Error(`${id} cannot record ${type}: its namespaces are ${own.join(', ')}`);
+        this.o.record?.({ ...fields, type, t: this.o.clock.now() } as BusEvent);
+      },
+      ...(node.account === undefined ? {} : { account: node.account }),
       ...(restored === undefined ? {} : { restored }),
     };
+  }
+
+  /**
+   * The event log's records an instance may read (§4.4): of the namespaces it registers, its own
+   * plugin's, and those its events inputs consume; of one type or namespace, or of them all; from
+   * `since` (the log's first day) to `until` (now).
+   */
+  private readEvents(entry: Entry, o: EventQuery = {}): LogEntry[] {
+    const { manifest } = entry;
+    const readable = new Set([
+      ...manifest.games.registers,
+      manifest.id,
+      ...Object.values(manifest.inputs).flatMap((i) => (i.type === 'events' ? [i.namespace] : [])),
+    ]);
+    const wanted = o.type;
+    if (wanted !== undefined) {
+      const ns = wanted.includes('.') ? wanted.slice(0, wanted.indexOf('.')) : wanted;
+      if (!readable.has(ns))
+        throw new Error(
+          `${entry.id} does not read ${ns}: it reads ${[...readable].join(', ')} (add an events input of it)`
+        );
+    }
+    const log = this.o.events;
+    if (log === undefined) return [];
+    const until = o.until ?? this.o.clock.now();
+    const since = o.since ?? log.firstDay() ?? until;
+    const nsOf = (type: string): string => type.slice(0, type.indexOf('.'));
+    return log
+      .recordsSince(since, until)
+      .filter((r) =>
+        wanted === undefined
+          ? readable.has(nsOf(r.type))
+          : r.type === wanted || (!wanted.includes('.') && nsOf(r.type) === wanted)
+      );
   }
 
   /** A connector's way to its declared secrets. */

@@ -44,6 +44,30 @@ describe('the telegram-user plugin', () => {
     expect(connector?.status().state).toBe('closed');
   });
 
+  it('runs on its node’s account, from its config alone', async () => {
+    const core = new Core({
+      clock: new VirtualClock(),
+      secrets: secretsWith(USER),
+      graph: {
+        version: 1,
+        nodes: [
+          {
+            id: 'me',
+            plugin: 'telegram-user',
+            account: 'telegram:bob',
+            config: { chats: ['@quiz_bot'] },
+          },
+        ],
+        edges: [],
+      },
+    });
+    core.register(telegramUserPlugin({ client }));
+    await core.start();
+    expect(core.connector('me')?.account).toBe('telegram:bob');
+    expect(telegramUserPlugin().manifest.account).toBe('telegram:owner');
+    await core.stop();
+  });
+
   it('refuses a chat that is neither a group id nor a username', () => {
     const core = new Core({
       clock: new VirtualClock(),

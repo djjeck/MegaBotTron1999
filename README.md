@@ -91,9 +91,10 @@ export const greeter = definePlugin({
   ports, the event types it registers, its configuration, settings and secrets as zod schemas, and
   its interface of reads, actions and chat commands. The web UI, the chat commands and the owner's
   control API are all made from these declarations.
-- **The context** gives it a clock, its own store, durable timers, the bus, handles on the
-  connectors its edges bind, an outbox, drift reporting, its settings and its mode. A plugin never
-  holds a credential: connectors do.
+- **The context** gives it a clock, its own store, durable timers, the bus, the event log read back
+  (its own namespaces and those it consumes), handles on the connectors its edges bind, an outbox,
+  drift reporting, its settings and its mode. A plugin is built from its node's saved config and its
+  context alone. It never holds a credential: connectors do.
 - **Standard services,** implemented once by the shell (D52): SVG to PNG in every plugin's context
   (`ctx.render.svgToPng`), and asking an LLM through the `anthropic` connector (`ask`, with
   structured output), for the plugins an edge binds to it.

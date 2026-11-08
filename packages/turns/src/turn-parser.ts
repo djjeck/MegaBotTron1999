@@ -96,10 +96,11 @@ export function isTurnCommand(text: string, commands: readonly string[], bot: st
 }
 
 /**
- * A parser plugin of one game bot; with `group`, the game's group (its id) is read too, for the
- * turns the owner plays there by hand.
+ * A parser plugin of one game bot, from its grammar (`spec`, code a game gives). Its default edge
+ * reads the private chat with its bot; an edge of the graph that also reads the game's group (its
+ * id) has it read the turns the owner plays there by hand.
  */
-export function turnParserPlugin(spec: TurnParserSpec, o: { group?: string } = {}): Plugin {
+export function turnParserPlugin(spec: TurnParserSpec): Plugin {
   const privateChat = `@${spec.bot}`;
   return definePlugin({
     manifest: {
@@ -116,12 +117,8 @@ export function turnParserPlugin(spec: TurnParserSpec, o: { group?: string } = {
         chat: {
           type: 'chat',
           network: 'telegram',
-          help: `the owner's own account: the private chat with @${spec.bot}${o.group === undefined ? '' : ', and the group'}, read only`,
-          bind: {
-            node: TELEGRAM_USER,
-            reads: [privateChat, ...(o.group === undefined ? [] : [o.group])],
-            sends: [],
-          },
+          help: `the owner's own account: the private chat with @${spec.bot}, and the game's group if the edge reads it; read only`,
+          bind: { node: TELEGRAM_USER, reads: [privateChat], sends: [] },
         },
       },
       interface: {

@@ -15,14 +15,29 @@ import { type TurnParserInterface } from '#src/turn-parser.ts';
 
 export const T0 = Date.parse('2026-11-06T12:00:00Z');
 
-/** A parser on alice's faked account: what it publishes, drifts and offers. */
-export async function runParser(plugin: Plugin, config: Record<string, unknown> = {}) {
+/**
+ * A parser on alice's faked account: what it publishes, drifts and offers. `group`: its edge reads
+ * the game's group too.
+ */
+export async function runParser(
+  plugin: Plugin,
+  config: Record<string, unknown> = {},
+  group?: string
+) {
   const account = new FakeConnector({ account: 'telegram:alice' });
   const events: BusEvent[] = [];
   const kit = new DevKit({
     start: T0,
     plugins: [fakeConnectorPlugin(TELEGRAM_USER, account), plugin],
     config: { [plugin.manifest.id]: config },
+    graph: (defaults) => ({
+      ...defaults,
+      edges: defaults.edges.map((e) =>
+        group === undefined || e.to !== `${plugin.manifest.id}.chat`
+          ? e
+          : { ...e, reads: [...(e.reads ?? []), group] }
+      ),
+    }),
     record: (r) => {
       if (r.type.endsWith('.turn')) events.push(r as BusEvent);
     },

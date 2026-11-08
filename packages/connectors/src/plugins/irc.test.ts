@@ -186,6 +186,25 @@ describe('the irc plugin in the core', () => {
     );
   });
 
+  it('runs on its node’s account, from its config alone', async () => {
+    const core = new Core({
+      clock: new VirtualClock(),
+      secrets: secretsWith(IRC_SECRETS),
+      graph: {
+        version: 1,
+        nodes: [{ id: 'net', plugin: 'irc', account: 'irc:bob', config: IRC_CONFIG }],
+        edges: [],
+      },
+    });
+    core.register(
+      ircPlugin({ client: () => ({ start: () => {}, stop: () => {}, say: () => true }) })
+    );
+    await core.start();
+    expect(core.connector('net')?.account).toBe('irc:bob');
+    expect(core.available()[0]).toMatchObject({ id: 'irc' });
+    await core.stop();
+  });
+
   it('makes a real IRC client without one given, which connects only once started', async () => {
     const core = new Core({
       clock: new VirtualClock(),

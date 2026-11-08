@@ -37,25 +37,26 @@ can make as many as they like, and one plugin can run as several instances (§2.
 Validated with zod when the instance loads; a bad manifest names the plugin and the field, and the
 instance does not start.
 
-| Field         | Meaning                                                                                                                                                                                                                                                                                                                               |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`          | Lower-case words and dashes (`dice-roller`), unique in the instance; the name of its store, its settings and its log lines. `core` is reserved                                                                                                                                                                                        |
-| `version`     | Semver of the plugin                                                                                                                                                                                                                                                                                                                  |
-| `kinds`       | One or more of `connector`, `parser`, `actor`, `stats` (stats and commands), `agent`, `simulator` (bot-os.md §1)                                                                                                                                                                                                                      |
-| `description` | One line, for the UI and the agents                                                                                                                                                                                                                                                                                                   |
-| `archived`    | An archive (bot-os.md D32): built and tested, but refused in every instance's graph; only a run that says `allowArchived` (a test, the dev kit, a manual-test tool) runs it                                                                                                                                                           |
-| `inputs`      | Its input ports, by name (§2.1): what it consumes, each of a port type, with the binding the default graph gives it                                                                                                                                                                                                                   |
-| `requires`    | Shorthand (§2.1): the plugins it needs started first, by id, read as input ports. The load order follows them; a missing one or a cycle fails the start, naming it                                                                                                                                                                    |
-| `games`       | `registers`: the namespaces whose event types it defines (its game's, or its own id); `consumes`: those whose events it reads (P7)                                                                                                                                                                                                    |
-| `events`      | The event types it registers, `<namespace>.<name>` → zod schema of the payload (§4.4)                                                                                                                                                                                                                                                 |
-| `uses`        | Shorthand (§2.1): the other plugins' interfaces it calls, by id and member (`{ dice: ['state.game'] }`): reviewed with both (P6)                                                                                                                                                                                                      |
-| `reach`       | Shorthand (§2.1): what it reads and sends, per connector: `{ connector, reads: chats, sends: chats, commands }`. The outbox refuses a send outside it (§4.6)                                                                                                                                                                          |
-| `config`      | A zod object: what is set at deploy. The core validates it at load; a bad value names the plugin and the key                                                                                                                                                                                                                          |
-| `settings`    | A zod object: what the owner changes at runtime, each key with its default and its help (`.describe()`). Kept in the plugin's store, offered to every control surface (P11)                                                                                                                                                           |
-| `secrets`     | The secrets it needs, by name (`znc_password`). Only a `connector` may declare any (P9); the manifest of any other kind that does is refused                                                                                                                                                                                          |
-| `state`       | `{ version, migrations }`: the schema version of its store and the steps from each older one (§4.2)                                                                                                                                                                                                                                   |
-| `drift`       | The parser's threshold for an unrecoverable rate of unread messages (§4.7)                                                                                                                                                                                                                                                            |
-| `interface`   | What it offers people, commands and agents (P11): `commands` (chat commands: name, help, arguments), `actions` (typed calls that change something: zod input and output) and `state` (typed reads, by name: zod output). The web UI, the chat commands and the agent interface are all made from these descriptions, and nothing else |
+| Field           | Meaning                                                                                                                                                                                                                                                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`            | Lower-case words and dashes (`dice-roller`), unique in the instance; the name of its store, its settings and its log lines. `core` is reserved                                                                                                                                                                                        |
+| `version`       | Semver of the plugin                                                                                                                                                                                                                                                                                                                  |
+| `kinds`         | One or more of `connector`, `parser`, `actor`, `stats` (stats and commands), `agent`, `simulator` (bot-os.md §1)                                                                                                                                                                                                                      |
+| `description`   | One line, for the UI and the agents                                                                                                                                                                                                                                                                                                   |
+| `archived`      | An archive (bot-os.md D32): built and tested, but refused in every instance's graph; only a run that says `allowArchived` (a test, the dev kit, a manual-test tool) runs it                                                                                                                                                           |
+| `inputs`        | Its input ports, by name (§2.1): what it consumes, each of a port type, with the binding the default graph gives it                                                                                                                                                                                                                   |
+| `requires`      | Shorthand (§2.1): the plugins it needs started first, by id, read as input ports. The load order follows them; a missing one or a cycle fails the start, naming it                                                                                                                                                                    |
+| `games`         | `registers`: the namespaces whose event types it defines (its game's, or its own id); `consumes`: those whose events it reads (P7)                                                                                                                                                                                                    |
+| `events`        | The event types it registers, `<namespace>.<name>` → zod schema of the payload (§4.4)                                                                                                                                                                                                                                                 |
+| `uses`          | Shorthand (§2.1): the other plugins' interfaces it calls, by id and member (`{ dice: ['state.game'] }`): reviewed with both (P6)                                                                                                                                                                                                      |
+| `reach`         | Shorthand (§2.1): what it reads and sends, per connector: `{ connector, reads: chats, sends: chats, commands }`. The outbox refuses a send outside it (§4.6)                                                                                                                                                                          |
+| `config`        | A zod object: what is set at deploy. The core validates it at load; a bad value names the plugin and the key                                                                                                                                                                                                                          |
+| `settings`      | A zod object: what the owner changes at runtime, each key with its default and its help (`.describe()`). Kept in the plugin's store, offered to every control surface (P11)                                                                                                                                                           |
+| `secrets`       | The secrets it needs, by name (`znc_password`). Only a `connector` may declare any (P9); the manifest of any other kind that does is refused                                                                                                                                                                                          |
+| `configSecrets` | The keys of its `config` whose values name a secret (§4.9): a connector run as several nodes, each with a credential its node's config names. Only a `connector`                                                                                                                                                                      |
+| `state`         | `{ version, migrations }`: the schema version of its store and the steps from each older one (§4.2)                                                                                                                                                                                                                                   |
+| `drift`         | The parser's threshold for an unrecoverable rate of unread messages (§4.7)                                                                                                                                                                                                                                                            |
+| `interface`     | What it offers people, commands and agents (P11): `commands` (chat commands: name, help, arguments), `actions` (typed calls that change something: zod input and output) and `state` (typed reads, by name: zod output). The web UI, the chat commands and the agent interface are all made from these descriptions, and nothing else |
 
 A connector's manifest also names its **account** (§4.5): the network and the identity it holds.
 
@@ -362,7 +363,8 @@ It never holds a credential (P9).
 interface PluginContext<Config, Settings> {
   id: string;
   log: Logger; // stdout, prefixed with the id, secrets redacted (§4.9)
-  record(type: string, fields: object): void; // the event log, in its registered namespaces
+  record(type: string, fields: object): void; // to the event log (§4.4), in its own namespaces
+  events: { read(query?: EventQuery): LogEntry[] }; // the event log read back (§4.4)
   clock: Clock; // now(), and timers; virtual in tests and simulators
   store: Store; // §4.2
   scheduler: Scheduler; // §4.3
@@ -383,7 +385,13 @@ interface PluginContext<Config, Settings> {
 }
 ```
 
-A connector's context also has `secrets.get(name)`, for the secrets it declared.
+A connector's context also has `secrets.get(name)`, for the secrets it declared or its config names
+(§4.9), and `account`, its node's account (§4.5), on which it makes its connector.
+
+**Built from its saved config alone** (bot-os.md D50): everything a plugin needs is its node's
+`config` and its context, so the graph's nodes are data the editor can make. A plugin factory may
+take what is code (a game's grammar, a test's fake client), never a deployment's values (a chat, a
+group, an account, a closure over the event log): those are config, an edge, or the context.
 
 ### 4.1 The clock
 
@@ -463,6 +471,19 @@ days) are armed again when they wake.
   the next one is read. It returns the way to stop; a plugin that fails or stops is unsubscribed.
 - Every event published is written to the event log, as `{ type, t, ...payload }`, one JSON line per
   record in a file per UTC day (`packages/core/src/event-log.ts`).
+- **Its own records:** `ctx.record(type, fields)` writes `{ type, t, ...fields }` (`t` now) to the
+  log, with no schema and to no subscriber, for what a plugin keeps a trace of without publishing
+  it: a type of a namespace it registers or of its plugin's id (`dice-roller.turn`); any other is
+  refused.
+- **Reading the log back:** `ctx.events.read({ type?, since?, until? })` gives the log's records in
+  time order, of the namespaces it registers, of its plugin's id, and of those its events inputs
+  consume (asking for another is refused, naming what it reads): one type (`dice.roll`), one
+  namespace (`dice`), or all of them; from `since` (the log's first day without) to `until` (now
+  without). A parser replays its recent history at `ready` with
+  `read({ type: 'dice.roll', since: ctx.clock.now() - 6 * HOUR })`; a fresh instance reads the whole
+  log once with `read({ type: 'dice.roll' })`. It reads the instance's log (`CoreOptions.events`);
+  the dev kit's is in memory (§4.10); without one it reads nothing. Records name their type, not the
+  node that wrote them: two instances of one plugin read each other's.
 
 Two plugins registering one type is an error of the deployment; two instances of one plugin share
 its types, and each subscriber hears only the instances its edges bind. A subscriber that throws is
@@ -577,12 +598,14 @@ As built (`packages/core/src/secrets.ts`): `Secrets` reads each file once (its t
 dropped) and remembers every value read, for `redact` and `redactDeep` (values under 6 characters,
 or only digits, are not redacted, to spare ordinary text); the core passes what it prints, records
 and tells, and a failed plugin's reason, through them, and the entry point its `console` and its
-event log. A connector's `ctx.secrets.get(name)` gives only the secrets its manifest declares; no
-other kind of plugin has `ctx.secrets`; a declared secret not provided fails the load, naming it and
-its file. `core.secretStore` keeps the core's own secrets (a login done later through the UI), each
-in `/data/core/secrets/<name>.json` of mode 600: AES-256-GCM with a random IV and the secret's name
-as additional data, under a key derived (HKDF-SHA256) from the `bot_os_key` Docker secret; without
-that secret it stores nothing.
+event log. A connector's `ctx.secrets.get(name)` gives only the secrets its manifest declares, and
+those its node's config names in a key of its manifest's `configSecrets` (a connector run as several
+nodes, each with its own credential: `{ "token": "bot_token_b" }`); no other kind of plugin has
+`ctx.secrets`; a secret declared or named and not provided, or a value that is no secret's name,
+fails the load (and the graph's check), naming it and its file. `core.secretStore` keeps the core's
+own secrets (a login done later through the UI), each in `/data/core/secrets/<name>.json` of mode
+600: AES-256-GCM with a random IV and the secret's name as additional data, under a key derived
+(HKDF-SHA256) from the `bot_os_key` Docker secret; without that secret it stores nothing.
 
 **Backups and secrets.** The Docker secrets are not in the data volume: back them up where the
 deployment keeps them. The secrets the core stores itself are in the volume, encrypted: a backup of
@@ -605,9 +628,11 @@ public API (`packages/core/src/devkit.ts`):
   the run, the run's graph (`graph`; by default one instance of each, bound as the manifests say)
   and, set before it starts, keyed by plugin instance: their configuration (`config`), the owner's
   kept settings (`settings`), the acting instances' modes (`modes`; `read-only` otherwise) and the
-  documents their stores start with (`documents`). An archived plugin runs on a kit only when the
-  run says so (`allowArchived`). `start` refuses a setting refused and a run with a plugin failed;
-  `runUntil(t)` runs the clock. The core is the instance's own, unchanged.
+  documents their stores start with (`documents`), and the event log before the run (`history`),
+  which the plugins read with `ctx.events`; `kit.log` is that log in memory, every record of the run
+  added (`MemoryEventLog`). An archived plugin runs on a kit only when the run says so
+  (`allowArchived`). `start` refuses a setting refused and a run with a plugin failed; `runUntil(t)`
+  runs the clock. The core is the instance's own, unchanged.
 - **`defineSimulator({ manifest, run })`**: a simulator plugin (bot-os.md D13), a model of a game
   that runs other plugins on a kit. It is not registered in an instance: its manifest (kind
   `simulator`) names it, the game it plays (`games.consumes`) and the plugins it runs (`requires`),
@@ -753,6 +778,27 @@ does not fit the schema (`unreadable answer`) and an error of the API or the net
 (`API error 429 …`) are failed answers, so that a plugin's loop survives them. The owner may call it
 too, as the action `ask` of the control API (without a schema, which JSON cannot carry).
 
+### 4.14 From closures to the context
+
+An entry point used to hand plugin factories closures of its own; a plugin built from its config
+alone (§4) finds each in its context, its config or an edge:
+
+| A factory was given                                    | A plugin now uses                                                                                                       |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| the bot messages of the whole log, read once           | `ctx.events.read({ type: '<ns>.message' })`, when its store keeps nothing yet (a fresh instance)                        |
+| the bot messages of the last hours, to replay          | `ctx.events.read({ type, since: ctx.clock.now() - hours * HOUR })` at `ready`, the hours in its config                  |
+| the event log's records from one time to another       | `ctx.events.read({ since, until })`, of the namespaces it registers or its events inputs consume                        |
+| a log writer                                           | `ctx.bus.publish` for an event others hear, `ctx.record(type, fields)` for a trace of its own                           |
+| a print function                                       | `ctx.log.info` (`warn`, `error`): stdout, prefixed with its node's id                                                   |
+| `now`, timers                                          | `ctx.clock` (`now()`, `setTimeout`), virtual in tests; durable timers in `ctx.scheduler`                                |
+| the account it plays                                   | its config, or `ctx.connector(port).self()`, the connected account's own name                                           |
+| a group or a chat to post in                           | its config names it, and the chat edge carries it in its `reads` and `sends` (the outbox refuses any other)             |
+| an LLM's ask function                                  | an interface input bound to the `anthropic` connector, `ctx.use(port).actions.ask` (§4.13)                              |
+| a drawing function                                     | `ctx.render.svgToPng` (§4.13)                                                                                           |
+| another plugin's object (a game, a ledger, a registry) | that plugin's declared interface (`state`, `actions`), through an interface input an edge binds: `ctx.use(port)` (§2.1) |
+| a callback on a setting                                | its instance's `settingsChanged`, or the other plugin's action                                                          |
+| a credential                                           | only a connector: a secret its manifest declares, or one its config names (`configSecrets`, §4.9)                       |
+
 ## 5. The shell's own plugins
 
 | Plugin          | Kinds     | Package                       | What it is                                                                                   |
@@ -803,14 +849,15 @@ too, as the action `ask` of the control API (without a schema, which JSON cannot
   breakpoint (the API's default five minutes), so calls that share one pay for it once.
 - **`turnParserPlugin`** (`packages/turns/src/turn-parser.ts`): one parser plugin per game bot, each
   made from its bot's grammar (`read`), which knows the game. Each reads, on the owner's account
-  (`telegram-user`), the private chat with its bot and optionally a group, read only. It knows the
-  owner's turns (a turn command of its configuration, `commands`, bare or addressed to its bot, sent
-  by hand from any device; and those its actor sends, told through its action `sent`, since the
-  account never sees its own sends come back), and which of its bot's messages answer one: a reply
-  to it or, in the private chat, the first message within two minutes of it. What it reads it
-  publishes as `<id>.turn` (`{ chat, outcome }`); a message it claims and cannot read goes to drift
-  (§4.7) and is published as an `unknown` outcome. Its read `rest` says until when the bot rests,
-  from its last answer. The tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
+  (`telegram-user`), the private chat with its bot and, when its edge also reads it, the game's
+  group, read only. It knows the owner's turns (a turn command of its configuration, `commands`,
+  bare or addressed to its bot, sent by hand from any device; and those its actor sends, told
+  through its action `sent`, since the account never sees its own sends come back), and which of its
+  bot's messages answer one: a reply to it or, in the private chat, the first message within two
+  minutes of it. What it reads it publishes as `<id>.turn` (`{ chat, outcome }`); a message it
+  claims and cannot read goes to drift (§4.7) and is published as an `unknown` outcome. Its read
+  `rest` says until when the bot rests, from its last answer. The tests play a made-up @QuestBot
+  (`packages/turns/test/quest.ts`).
 - **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
   (P3, P17), each with its own id, configuration, store, timer and mode. Its inputs: `chat`, a chat
   on `telegram`, bound to the private chat with its bot (read and sent to, its command only), and

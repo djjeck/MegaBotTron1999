@@ -69,7 +69,7 @@ export function telegramBotPlugin(
             });
       const listen = Promise.all([o.listen, surface?.listening]);
       const c = new TelegramBotConnector({
-        account,
+        account: ctx.account ?? account,
         bot,
         log,
         listen,

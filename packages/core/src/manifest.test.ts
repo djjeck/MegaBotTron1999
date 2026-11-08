@@ -14,6 +14,7 @@ describe('parseManifest', () => {
       games: { registers: [] },
       events: {},
       secrets: [],
+      configSecrets: [],
       state: { migrations: [] },
       interface: {},
     });

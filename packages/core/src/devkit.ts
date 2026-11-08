@@ -18,6 +18,7 @@ import { type Clock, VirtualClock } from './clock.ts';
 import { type Buttons } from './commands.ts';
 import { type Connector, ConnectorBase, type Inbound } from './connector.ts';
 import { Core, type CoreOptions } from './core.ts';
+import { type LogEntry, MemoryEventLog } from './event-log.ts';
 import { type Manifest, ManifestError, type ManifestInput, parseManifest } from './manifest.ts';
 import { type Limits, type Mode } from './outbox.ts';
 import { definePlugin, type Plugin } from './plugin.ts';
@@ -120,8 +121,13 @@ export interface DevKitOptions {
   modes?: Record<string, Mode>;
   /** The documents each plugin instance's store starts with, by instance id and name. */
   documents?: Record<string, Record<string, unknown>>;
-  /** Where the core's records and every event published go. */
+  /** Where the core's records and every event published go, beside the kit's own log (`log`). */
   record?: CoreOptions['record'];
+  /**
+   * The event log as it was before the run, for the plugins that read their history
+   * (`ctx.events`): the kit's log starts with it, and keeps every record of the run after it.
+   */
+  history?: readonly LogEntry[];
   /** Where log lines go; nowhere by default. */
   print?: (line: string) => void;
   /** Where the owner's notifications go; nowhere by default. */
@@ -136,17 +142,25 @@ export interface DevKitOptions {
 export class DevKit {
   readonly clock: VirtualClock;
   readonly core: Core;
+  /** The run's event log, in memory: its history, then every record of the run. */
+  readonly log: MemoryEventLog;
   private readonly o: DevKitOptions;
 
   constructor(o: DevKitOptions) {
     this.o = o;
     this.clock = new VirtualClock(o.start ?? 0);
+    const log = new MemoryEventLog(o.history);
+    this.log = log;
     this.core = new Core({
+      events: log,
+      record: (r) => {
+        log.write(r);
+        o.record?.(r);
+      },
       clock: this.clock as Clock,
       ...(o.config === undefined ? {} : { config: o.config }),
       ...(o.graph === undefined ? {} : { graph: o.graph }),
       ...(o.documents === undefined ? {} : { documents: o.documents }),
-      ...(o.record === undefined ? {} : { record: o.record }),
       ...(o.print === undefined ? {} : { print: o.print }),
       ...(o.notify === undefined ? {} : { notify: o.notify }),
       ...(o.validateEvents === undefined ? {} : { validateEvents: o.validateEvents }),

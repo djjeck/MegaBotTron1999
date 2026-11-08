@@ -71,7 +71,12 @@ export {
   type DriftThreshold,
   type Reading,
 } from './drift.ts';
-export { EventLog as CoreEventLog, type LogEntry } from './event-log.ts';
+export {
+  EventLog as CoreEventLog,
+  type EventReader,
+  type LogEntry,
+  MemoryEventLog,
+} from './event-log.ts';
 export {
   type Binding,
   defaultGraph,
@@ -174,6 +179,7 @@ export {
 export { CORE_COMMANDS, coreCommands, lamp, showValue } from './owner-commands.ts';
 export {
   definePlugin,
+  type EventQuery,
   type Instance,
   type Logger,
   type Plugin,
