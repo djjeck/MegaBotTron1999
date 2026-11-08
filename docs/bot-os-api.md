@@ -766,6 +766,7 @@ interface AskRequest<T> {
   model?: string; // the configuration's `model` by default (claude-opus-5-5)
   maxTokens?: number; // the configuration's `maxTokens` by default (16000)
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'; // the configuration's, or the model's
+  cacheTtl?: '5m' | '1h'; // how long the system prompt stays cached; the configuration's (5m)
   schema?: z.ZodType<T>; // structured output: the answer must fit it, and is returned parsed
 }
 type AskResult<T> =
@@ -845,9 +846,11 @@ alone (§4) finds each in its context, its config or an edge:
 - **`anthropic`** (`packages/connectors/src/plugins/anthropic.ts`, on the Anthropic SDK): the Claude
   API's account (`anthropic:api`, or the name it is given), made from its `anthropic_api_key` secret
   at `create`, a `ServiceConnector`. Its configuration holds the defaults of `ask` (§4.13): `model`
-  (`claude-opus-5-5`), `maxTokens` (16000) and `effort` (unset: the model's own). It offers `ask` as
-  its interface's action, for the plugins an edge binds to it. A system prompt is sent with a cache
-  breakpoint (the API's default five minutes), so calls that share one pay for it once.
+  (`claude-opus-5-5`), `maxTokens` (16000), `effort` (unset: the model's own) and `cacheTtl`. It
+  offers `ask` as its interface's action, for the plugins an edge binds to it. A system prompt is
+  sent with a cache breakpoint, so calls that share one pay for it once; `cacheTtl` says how long it
+  stays cached: `5m` (the API's default) or `1h`, for calls more than five minutes apart (writing it
+  costs more, reading it the same), and a request may ask its own.
 - **`turnParserPlugin`** (`packages/turns/src/turn-parser.ts`): one parser plugin per game bot, each
   made from its bot's grammar (`read`), which knows the game. Each reads, on the owner's account
   (`telegram-user`), the private chat with its bot and, when its edge also reads it, the game's

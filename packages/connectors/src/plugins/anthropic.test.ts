@@ -95,6 +95,19 @@ describe('askWith', () => {
     ]);
   });
 
+  it('keeps the system prompt cached for an hour when configured or asked', async () => {
+    const requests: { system?: unknown }[] = [];
+    const ask = askWith(fakeClient({ text: 'ok' }, requests), { ...defaults, cacheTtl: '1h' });
+    await ask({ system: 'Be brief.', prompt: 'hi' });
+    await ask({ system: 'Be brief.', prompt: 'hi', cacheTtl: '5m' });
+    expect(requests.map((r) => r.system)).toEqual([
+      [{ type: 'text', text: 'Be brief.', cache_control: { type: 'ephemeral', ttl: '1h' } }],
+      [{ type: 'text', text: 'Be brief.', cache_control: { type: 'ephemeral' } }],
+    ]);
+    expect(defaults.cacheTtl).toBe('5m');
+    expect(anthropicConfig.safeParse({ cacheTtl: '1d' }).success).toBe(false);
+  });
+
   it('answers the output parsed by the schema given', async () => {
     const requests: { output_config?: { format?: { type: string } } }[] = [];
     const roll = z.object({ dice: z.number() });

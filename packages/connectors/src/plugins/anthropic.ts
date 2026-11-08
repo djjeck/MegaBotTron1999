@@ -21,6 +21,9 @@ export const ANTHROPIC_KEY = 'anthropic_api_key';
 export const DEFAULT_MODEL = 'claude-opus-5-5';
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type Effort = (typeof EFFORTS)[number];
+/** How long the API keeps a cached system prompt: its default five minutes, or an hour. */
+export const CACHE_TTLS = ['5m', '1h'] as const;
+export type CacheTtl = (typeof CACHE_TTLS)[number];
 
 export const anthropicConfig = z.object({
   model: z.string().min(1).default(DEFAULT_MODEL).describe('The model asked by default'),
@@ -34,6 +37,12 @@ export const anthropicConfig = z.object({
     .enum(EFFORTS)
     .optional()
     .describe('How hard the model thinks by default; the model’s own default when unset'),
+  cacheTtl: z
+    .enum(CACHE_TTLS)
+    .default('5m')
+    .describe(
+      'How long the system prompt stays cached: 5m (the API’s default), or 1h for calls further apart (a dearer write)'
+    ),
 });
 
 /** What `ask` asks. */
@@ -44,6 +53,8 @@ export interface AskRequest<T = unknown> {
   model?: string;
   maxTokens?: number;
   effort?: Effort;
+  /** How long the system prompt stays cached; the configuration's `cacheTtl` by default. */
+  cacheTtl?: CacheTtl;
   /** The shape the answer must have: it is returned parsed, as `output`. */
   schema?: z.ZodType<T>;
 }
@@ -71,6 +82,7 @@ const askInput = z.object({
   model: z.string().min(1).optional(),
   maxTokens: z.number().int().positive().optional(),
   effort: z.enum(EFFORTS).optional(),
+  cacheTtl: z.enum(CACHE_TTLS).optional(),
   schema: z.custom<z.ZodType>((v) => v instanceof z.ZodType, 'a zod schema').optional(),
 });
 
@@ -96,6 +108,11 @@ const askOutput = z.union([
 export function askWith(client: AnthropicClient, defaults: z.infer<typeof anthropicConfig>): Ask {
   return async <T>(r: AskRequest<T>): Promise<AskResult<T>> => {
     const effort = r.effort ?? defaults.effort;
+    // The breakpoint after the system prompt: five minutes is the API's own default, so only an
+    // hour is written out.
+    const ttl = r.cacheTtl ?? defaults.cacheTtl;
+    const cache_control =
+      ttl === '1h' ? { type: 'ephemeral' as const, ttl } : { type: 'ephemeral' as const };
     const output_config = {
       ...(effort === undefined ? {} : { effort }),
       ...(r.schema === undefined ? {} : { format: zodOutputFormat(r.schema) }),
@@ -106,7 +123,7 @@ export function askWith(client: AnthropicClient, defaults: z.infer<typeof anthro
         max_tokens: r.maxTokens ?? defaults.maxTokens,
         ...(r.system === undefined
           ? {}
-          : { system: [{ type: 'text', text: r.system, cache_control: { type: 'ephemeral' } }] }),
+          : { system: [{ type: 'text', text: r.system, cache_control }] }),
         messages: [{ role: 'user', content: r.prompt }],
         ...(Object.keys(output_config).length === 0 ? {} : { output_config }),
       });
