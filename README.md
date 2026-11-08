@@ -21,7 +21,8 @@ editor comes. The plugin API changes freely until the launch ([docs/bot-os.md](d
 ## Running it
 
 The image is `ghcr.io/djjeck/megabottron1999`, for `linux/amd64` and `linux/arm64`. `edge` follows
-`main`; each release `v<version>` is tagged `<version>` and `latest`.
+`main`; each release `v<version>` is tagged `<version>` and `latest`, and a pre-release
+(`v0.1.0-alpha.1`) `<version>` alone.
 
 ```sh
 mkdir -p secrets

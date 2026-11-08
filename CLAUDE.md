@@ -94,4 +94,5 @@ Address every error before marking a sub-task complete.
   `linux/arm64`, running `node src/main.ts` as the `node` user from `/app`, with its state in
   `/data`. `docker buildx bake --load` builds it for this machine (`docker-bake.hcl`). CI publishes
   it to `ghcr.io/djjeck/megabottron1999` (`.github/workflows/publish.yml`, D51): `edge` on every
-  push to `main`, `<version>` and `latest` on a pushed tag `v<version>`.
+  push to `main`, `<version>` on a pushed tag `v<version>`, and `latest` too unless it is a
+  pre-release (`v0.1.0-alpha.1`).
