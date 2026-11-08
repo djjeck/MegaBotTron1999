@@ -7,8 +7,9 @@
  * (P6).
  *
  * - A plugin may be instantiated more than once, each node with its own id, configuration, store,
- *   settings and mode. With one instance the node's id is the plugin's, so its store stays where it
- *   was (`/data/plugins/<id>/`).
+ *   settings and mode. A node's kept state (its store, timers, settings and mode) belongs to the
+ *   _instance_ it names (`/data/instances/<instance>/`, the node's id when it names none), which
+ *   outlives the node: a node of the same plugin may take it up again.
  * - The programmatic wiring is the default graph: a node per plugin registered, each input bound as
  *   its manifest's `bind` says. Any other graph (a file) replaces it as a whole.
  * - A required input left unbound, an edge between ports of two types, an input of one edge bound
@@ -18,6 +19,7 @@
  */
 import { z } from 'zod';
 import { ACCOUNT_ID, type Manifest, PLUGIN_ID } from './manifest.ts';
+import { type Mode, MODES } from './outbox.ts';
 import {
   type ChatBinding,
   describePort,
@@ -45,10 +47,26 @@ export const graphSchema = z.strictObject({
         .refine((id) => id !== 'core', '`core` is reserved for the core'),
       /** The plugin it is an instance of, by the plugin's id. */
       plugin: z.string().regex(PLUGIN_ID, 'expected a plugin id'),
+      /**
+       * The instance whose kept state it runs on (`<data>/instances/<instance>/`): an existing one
+       * of the same plugin, or a fresh id. The node's own id when not given.
+       */
+      instance: z
+        .string()
+        .regex(PLUGIN_ID, 'expected lower-case words and dashes')
+        .refine((id) => id !== 'core', '`core` is reserved for the core')
+        .optional(),
       /** Its configuration, checked against its plugin's `config` schema. */
       config: z.record(z.string(), z.unknown()).optional(),
       /** A connector instance's own account, in place of its manifest's (`<network>:<name>`). */
       account: z.string().regex(ACCOUNT_ID, 'expected <network>:<name>').optional(),
+      /**
+       * The settings its instance starts with, checked against its plugin's `settings`: put in
+       * force only while the instance keeps none of its own (a fresh one).
+       */
+      settings: z.record(z.string(), z.unknown()).optional(),
+      /** The mode its instance starts in (P10), while the instance keeps none. */
+      mode: z.enum(MODES).optional(),
     })
   ),
   edges: z
@@ -96,10 +114,15 @@ export interface Binding {
 /** A node of a checked graph, with its manifest and what each of its inputs is bound to. */
 export interface ResolvedNode {
   id: string;
+  /** The instance whose kept state it runs on: the node's own, or its id. */
+  instance: string;
   manifest: Manifest;
   /** Its account: the node's own, or its manifest's. */
   account?: string;
   config?: Record<string, unknown>;
+  /** The settings and the mode a fresh instance starts with. */
+  settings?: Record<string, unknown>;
+  mode?: Mode;
   /** Each input of its manifest, with its other ends (none: unbound). */
   inputs: Map<string, Binding[]>;
 }
@@ -222,7 +245,9 @@ export function withInstances(
  */
 export function resolveGraph(
   raw: unknown,
-  plugins: ReadonlyMap<string, Manifest>
+  plugins: ReadonlyMap<string, Manifest>,
+  /** The plugin of an instance kept already, by its id; undefined for a fresh one. */
+  instanceOf: (instance: string) => string | undefined = () => undefined
 ): { graph: Graph; nodes: ResolvedNode[] } {
   const parsed = graphSchema.safeParse(raw);
   if (!parsed.success)
@@ -234,6 +259,7 @@ export function resolveGraph(
   const problems: string[] = [];
   const nodes = new Map<string, ResolvedNode>();
   const accounts = new Map<string, string>();
+  const instances = new Map<string, string>();
   for (const n of parsed.data.nodes) {
     const manifest = plugins.get(n.plugin);
     if (nodes.has(n.id)) {
@@ -244,6 +270,16 @@ export function resolveGraph(
       problems.push(`node ${n.id}: its plugin ${n.plugin} is not in the image`);
       continue;
     }
+    const instance = n.instance ?? n.id;
+    const holder = instances.get(instance);
+    const kept = instanceOf(instance);
+    if (holder !== undefined)
+      problems.push(`node ${n.id}: its instance ${instance} is node ${holder}'s`);
+    else instances.set(instance, n.id);
+    if (kept !== undefined && kept !== n.plugin)
+      problems.push(
+        `node ${n.id}: its instance ${instance} is of the plugin ${kept}, not ${n.plugin}`
+      );
     const account = n.account ?? manifest.account;
     if (n.account !== undefined) {
       const network = (a: string): string => a.slice(0, a.indexOf(':'));
@@ -261,9 +297,12 @@ export function resolveGraph(
     }
     nodes.set(n.id, {
       id: n.id,
+      instance,
       manifest,
       ...(account === undefined ? {} : { account }),
       ...(n.config === undefined ? {} : { config: n.config }),
+      ...(n.settings === undefined ? {} : { settings: n.settings }),
+      ...(n.mode === undefined ? {} : { mode: n.mode }),
       inputs: new Map(Object.keys(manifest.inputs).map((p) => [p, []])),
     });
   }

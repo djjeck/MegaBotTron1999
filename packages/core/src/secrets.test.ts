@@ -155,7 +155,7 @@ describe('secrets in the core', () => {
     });
     core.secretStore?.put('later', 'login-done-later');
     expect(core.secretStore?.get('later')).toBe('login-done-later');
-    expect(fs.existsSync(path.join(dir, 'plugins', 'core', 'secrets', 'later.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'core', 'secrets', 'later.json'))).toBe(true);
   });
 
   it('refuse a secret a connector declares that is not provided', () => {

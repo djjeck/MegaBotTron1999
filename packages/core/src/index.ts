@@ -103,6 +103,13 @@ export {
   writeGraphFile,
 } from './graph-view.ts';
 export {
+  INSTANCE_DOC,
+  type InstanceInfo,
+  type InstanceMeta,
+  InstanceRegistry,
+  ORPHAN_MS,
+} from './instance-registry.ts';
+export {
   type Kind,
   KINDS,
   type Manifest,
@@ -136,8 +143,10 @@ export {
   isMode,
   type Limits,
   type Mode,
+  type ModeBackend,
   MODES,
   Modes,
+  modesIn,
   Outbox,
   type OutboxHandle,
   type OutboxOptions,
@@ -181,4 +190,11 @@ export {
   SettingsRegistry,
   type SettingValue,
 } from './settings.ts';
-export { type Migration, type MigrationStore, type Store } from './store.ts';
+export {
+  CORE_STORE,
+  INSTANCES_DIR,
+  type Migration,
+  type MigrationStore,
+  type Store,
+  Stores,
+} from './store.ts';

@@ -1,6 +1,7 @@
 /**
- * Each plugin's state, in its own namespace (docs/bot-os-api.md §4.2, P6, P8): JSON documents by
- * name under `<data>/plugins/<id>/`, written atomically (a temporary file, flushed, then renamed),
+ * Each plugin instance's state, in its own namespace (docs/bot-os-api.md §4.2, P6, P8): JSON
+ * documents by name under `<data>/instances/<instance>/` (the core's own under `<data>/core/`),
+ * written atomically (a temporary file, flushed, then renamed),
  * so that a crash leaves the old document or the new one, never half of one. A name is a plain file
  * name, so no plugin reaches outside its directory.
  *
@@ -148,7 +149,14 @@ class BackendStore implements Store {
   }
 }
 
-/** The stores of every plugin, under one data directory (or in memory). */
+/** The directory of the instances' stores, in the data volume. */
+export const INSTANCES_DIR = 'instances';
+/** The core's own store, beside the instances': `<data>/core/`. */
+export const CORE_STORE = 'core';
+/** An instance's id: lower-case words and dashes, as a plugin's. */
+const INSTANCE_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+
+/** The stores of every plugin instance, under one data directory (or in memory). */
 export class Stores {
   private readonly dataDir: string | undefined;
   private readonly memory = new Map<string, Map<string, string>>();
@@ -157,9 +165,34 @@ export class Stores {
     this.dataDir = dataDir;
   }
 
-  /** Where a plugin's documents are, on disk. */
+  /** Where an instance's documents are, on disk: the core's in `core/`, the others' in `instances/`. */
   dirOf(id: string): string | undefined {
-    return this.dataDir === undefined ? undefined : path.join(this.dataDir, 'plugins', id);
+    if (this.dataDir === undefined) return undefined;
+    return id === CORE_STORE
+      ? path.join(this.dataDir, CORE_STORE)
+      : path.join(this.dataDir, INSTANCES_DIR, id);
+  }
+
+  /** The instances that keep a store, sorted (the core's left out). */
+  ids(): string[] {
+    if (this.dataDir === undefined)
+      return [...this.memory.keys()].filter((id) => id !== CORE_STORE).sort();
+    try {
+      return fs
+        .readdirSync(path.join(this.dataDir, INSTANCES_DIR), { withFileTypes: true })
+        .filter((d) => d.isDirectory() && INSTANCE_ID.test(d.name))
+        .map((d) => d.name)
+        .sort();
+    } catch {
+      return [];
+    }
+  }
+
+  /** Deletes an instance's store, every document of it. */
+  delete(id: string): void {
+    const dir = this.dirOf(id);
+    if (dir === undefined) this.memory.delete(id);
+    else fs.rmSync(dir, { recursive: true, force: true });
   }
 
   /** A plugin's store. */

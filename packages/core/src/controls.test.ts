@@ -498,6 +498,7 @@ describe('controlServer', () => {
       controls: core.controls,
       settings: core.settings,
       graph: () => core.graph(),
+      instances: () => core.instances(),
     });
     await new Promise<void>((r) => server?.listen(0, '127.0.0.1', r));
     const { port } = server.address() as { port: number };
@@ -513,6 +514,11 @@ describe('controlServer', () => {
       return [res.status, await res.json()] as const;
     };
     expect((await call('/status'))[1]).toMatchObject({ off: false });
+    expect((await call('/instances'))[1]).toMatchObject([
+      { id: 'actor', node: 'actor', used: true },
+      { id: 'broken', node: 'broken', used: true },
+      { id: 'chat', plugin: 'chat', used: true },
+    ]);
     expect((await call('/graph'))[1]).toMatchObject({
       version: 1,
       nodes: [{ id: 'chat' }, { id: 'actor' }, { id: 'broken' }],

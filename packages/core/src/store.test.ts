@@ -22,14 +22,16 @@ describe('Stores, on disk', () => {
     stores.open('b').write('state', 'b');
     expect(stores.open('a').read('state')).toEqual({ last: 5 });
     expect(a.names()).toEqual(['other', 'state']);
-    expect(fs.readFileSync(path.join(dataDir, 'plugins', 'a', 'state.json'), 'utf8')).toBe(
+    expect(fs.readFileSync(path.join(dataDir, 'instances', 'a', 'state.json'), 'utf8')).toBe(
       '{"last":5}\n'
     );
-    expect(fs.statSync(path.join(dataDir, 'plugins', 'a', 'state.json')).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.join(dataDir, 'instances', 'a', 'state.json')).mode & 0o777).toBe(
+      0o600
+    );
     a.remove('other');
     expect(a.names()).toEqual(['state']);
     expect(stores.open('nobody').names()).toEqual([]);
-    expect(stores.dirOf('a')).toBe(path.join(dataDir, 'plugins', 'a'));
+    expect(stores.dirOf('a')).toBe(path.join(dataDir, 'instances', 'a'));
   });
 
   it('refuses a name that would leave the directory, or is the core’s', () => {
@@ -43,9 +45,9 @@ describe('Stores, on disk', () => {
   it('says which document is not JSON, and passes other errors on', () => {
     const stores = new Stores(dataDir);
     stores.open('a').write('state', 1);
-    fs.writeFileSync(path.join(dataDir, 'plugins', 'a', 'state.json'), '{half');
+    fs.writeFileSync(path.join(dataDir, 'instances', 'a', 'state.json'), '{half');
     expect(() => stores.open('a').read('state')).toThrow('document state is not JSON');
-    fs.mkdirSync(path.join(dataDir, 'plugins', 'a', 'dir.json'));
+    fs.mkdirSync(path.join(dataDir, 'instances', 'a', 'dir.json'));
     expect(() => stores.open('a').read('dir')).toThrow();
   });
 
@@ -73,7 +75,7 @@ describe('Stores, on disk', () => {
     ]);
     expect(stores.open('ledger').names()).toEqual([]);
     expect(stores.version('ledger')).toBe(3);
-    expect(fs.readdirSync(path.join(dataDir, 'plugins'))).toEqual(['ledger']);
+    expect(fs.readdirSync(path.join(dataDir, 'instances'))).toEqual(['ledger']);
   });
 
   it('leaves the store as it was when a migration fails', async () => {
@@ -91,7 +93,7 @@ describe('Stores, on disk', () => {
     expect(stores.open('a').read('state')).toEqual({ kept: true });
     expect(stores.open('a').names()).toEqual(['state']);
     expect(stores.version('a')).toBe(0);
-    expect(fs.readdirSync(path.join(dataDir, 'plugins'))).toEqual(['a']);
+    expect(fs.readdirSync(path.join(dataDir, 'instances'))).toEqual(['a']);
     await expect(
       stores.migrate('a', [
         () => {
@@ -146,13 +148,13 @@ describe('Stores, after a crash', () => {
     stores.open('a').write('state', { kept: 1 });
     await stores.migrate('a', [() => {}]);
     // The crash: the store moved aside, the staged copy not moved in yet.
-    const dir = path.join(dataDir, 'plugins', 'a');
+    const dir = path.join(dataDir, 'instances', 'a');
     fs.renameSync(dir, `${dir}.old`);
     fs.mkdirSync(`${dir}.migrating`);
     await stores.migrate('a', [() => {}, (s) => s.write('v2', true)]);
     expect(stores.open('a').read('state')).toEqual({ kept: 1 });
     expect(stores.open('a').read('v2')).toBe(true);
     expect(stores.version('a')).toBe(2);
-    expect(fs.readdirSync(path.join(dataDir, 'plugins'))).toEqual(['a']);
+    expect(fs.readdirSync(path.join(dataDir, 'instances'))).toEqual(['a']);
   });
 });

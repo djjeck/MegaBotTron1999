@@ -166,14 +166,19 @@ chat input. A plugin's code names its inputs: `ctx.connector('channel')`, `ctx.o
 ```
 
 A node is a plugin instance: its id (a plugin id's form), the plugin it instantiates (one the image
-or a module offers, registered with `core.register`), its configuration, and, for a connector, its
-own `account` in place of the manifest's (of the same network). An edge goes from `node.port` (or
-`node`, when one of its outputs fits) to `node.port`, with its type and, for a chat, what it
+or a module offers, registered with `core.register`), the `instance` whose kept state it runs on
+(§2.2; the node's id when it names none), its configuration, and, for a connector, its own `account`
+in place of the manifest's (of the same network). It may also give the `settings` (checked against
+its plugin's `settings`) and the `mode` its instance starts with: they are put in force only while
+the instance keeps none of its own, so the owner's later changes win. An edge goes from `node.port`
+(or `node`, when one of its outputs fits) to `node.port`, with its type and, for a chat, what it
 carries. The core checks it with zod and against the manifests at load, and fails the start naming
-the node and the port: a plugin not in the image, a node twice, an edge between ports of two types
-or to a port that is not there, an interface member not declared, a single input bound twice, a
-connector account held twice, a required input unbound
-(`node actor: input port channel (chat of irc) is not bound`), a cycle of required edges.
+the node and the port: a plugin not in the image, a node twice, an instance named by two nodes or
+kept by another plugin (`node b: its instance tally is of the plugin other, not counter`), a setting
+the plugin does not have or refuses, an edge between ports of two types or to a port that is not
+there, an interface member not declared, a single input bound twice, a connector account held twice,
+a required input unbound (`node actor: input port channel (chat of irc) is not bound`), a cycle of
+required edges.
 
 Each instance has its own id (`ctx.id`), configuration, store, settings, mode, timers and drift; its
 log lines, its records and the owner's controls name the instance (`PluginControl.plugin` names its
@@ -188,8 +193,28 @@ plugin's, each input bound as its `bind` says (`defaultGraph`), which tests and 
 instances by its instances. `core.graph()` gives the graph the instance runs, every edge written
 out. A changed graph takes effect at the next start (P8). Today's entry point (`src/main.ts`)
 registers the connectors and the modules' plugins (§7), and runs an empty graph; from the next step
-the graph is read from the volume (`/data/graph.json`, bot-os.md D50), and plugin instances get kept
-state apart from their nodes.
+the graph is read from the volume (`/data/graph.json`, bot-os.md D50).
+
+### 2.2 Instances
+
+A plugin's kept state belongs to an **instance**, apart from the node that runs on it (bot-os.md
+D50): its store and the core's documents beside it (its timers, its settings, its mode, what it
+serialised), in `/data/instances/<instance>/`. A node names its instance: an existing one of the
+same plugin, whose state it takes up, or a fresh id, made at its first start. So a node can be
+removed and added again, renamed, or replaced by another node of its plugin, without losing what it
+kept; and one plugin can run as several nodes (the turn-actor, one per bot), each on its own
+instance.
+
+As built (`packages/core/src/instance-registry.ts`): each instance keeps a record of itself,
+`_instance.json`: its `plugin`, when it was `created` and when a node last `referenced` it (each a
+time in ms). The load refuses a node on an instance of another plugin, and two nodes on one
+instance. An instance that no node references, of the running graph or of the saved one (§2.3), for
+7 days (`ORPHAN_MS`) is deleted, with its state: the core looks at start and then daily
+(`core.sweepInstances`), touching the instances referenced, prints each one deleted and records it
+(`core.instance`, `event: "deleted"`). While the saved graph does not read, nothing is deleted. A
+directory without its record (put there by hand) is listed and left alone. `core.instances()`, and
+`GET /instances`, list them: each with its plugin, its times, the node that runs on it, and whether
+a node uses it (`used`).
 
 ## 3. The lifecycle
 
@@ -299,7 +324,8 @@ its own, and sets its own at an absolute time (`at`).
 
 ### 4.2 The store
 
-`/data/plugins/<id>/` (P6), one directory per plugin instance, under the data volume:
+`/data/instances/<instance>/` (P6), one directory per plugin instance (§2.2), under the data volume;
+the core's own is `/data/core/`:
 
 - `read(name)` and `write(name, value)` of JSON documents, by name (letters, digits, `-`, `_` and
   `.`: no path), written atomically (a temporary file, then a rename), so that a crash leaves the
@@ -313,18 +339,19 @@ plugin's interface (`use`), never its files.
 
 As built (`packages/core/src/store.ts`): documents are `<name>.json`, written with mode 600 in a
 directory of mode 700; the core keeps its own beside them (`_meta.json`, the version;
-`_restore.json`, what `serialise` returned, handed back once; `_timers.json`; `_settings.json`).
-Migrations run on a staged copy (`<id>.migrating/`) that replaces the directory only when every step
-has succeeded, so a failed one leaves the store as it was, and a store newer than its plugin (an
-image rolled back) fails that plugin rather than being read wrong. A crash between the two renames
-of the commit is undone at the next start.
+`_restore.json`, what `serialise` returned, handed back once; `_timers.json`; `_settings.json`;
+`_mode.json`; `_instance.json`, the instance's record, §2.2). Migrations run on a staged copy
+(`<instance>.migrating/`) that replaces the directory only when every step has succeeded, so a
+failed one leaves the store as it was, and a store newer than its plugin (an image rolled back)
+fails that plugin rather than being read wrong. A crash between the two renames of the commit is
+undone at the next start.
 
 **Backups.** The whole data volume is the instance's state: the event log, the stores and the
 modules (and, from the next step, the graph). Back up the volume as one, with the instance stopped
 for the copy, so that no document is caught between writes. Restore it as one too: a store restored
 without the event log, or the reverse, would replay a history the state does not match. A single
-plugin's state can be restored on its own by putting back its directory, `plugins/<id>/`, while the
-instance is stopped.
+plugin's state can be restored on its own by putting back its instance's directory,
+`instances/<instance>/`, while the instance is stopped.
 
 ### 4.3 The scheduler
 
@@ -414,8 +441,8 @@ One per account; every send goes through it (bot-os.md §3). A plugin gets its h
 
 - **The mode (P10)** of the sending plugin: `read-only` refuses, `dry-run` logs as if sent, `live`
   sends. Every acting plugin has one, starts `read-only`, is changed only by the owner (a safety
-  stop may only lower it), and keeps it across restarts, in the core's store
-  (`/data/plugins/core/modes.json`).
+  stop may only lower it), and keeps it across restarts, in the core's store (`_mode.json` in its
+  instance's store, §2.2).
 - **The reach:** each edge to the account's connector lets it send to its `sends`, with its
   `commands`; a send outside them is refused.
 - **Pacing:** `send` sends now or is refused with why (too soon, the hourly limit), for actors that
@@ -477,10 +504,10 @@ or only digits, are not redacted, to spare ordinary text); the core passes what 
 and tells, and a failed plugin's reason, through them, and the entry point its `console` and its
 event log. A connector's `ctx.secrets.get(name)` gives only the secrets its manifest declares; no
 other kind of plugin has `ctx.secrets`; a declared secret not provided fails the load, naming it and
-its file. `core.secretStore` keeps the core's own secrets (a login done later
-through the UI), each in `/data/plugins/core/secrets/<name>.json` of mode 600: AES-256-GCM with a
-random IV and the secret's name as additional data, under a key derived (HKDF-SHA256) from the
-`bot_os_key` Docker secret; without that secret it stores nothing.
+its file. `core.secretStore` keeps the core's own secrets (a login done later through the UI), each
+in `/data/core/secrets/<name>.json` of mode 600: AES-256-GCM with a random IV and the secret's name
+as additional data, under a key derived (HKDF-SHA256) from the `bot_os_key` Docker secret; without
+that secret it stores nothing.
 
 **Backups and secrets.** The Docker secrets are not in the data volume: back them up where the
 deployment keeps them. The secrets the core stores itself are in the volume, encrypted: a backup of
@@ -528,8 +555,8 @@ control API, the web UI and later the agents, whose grants will be subsets of it
 - **The off switch,** instance-wide: off, every running plugin hears `off` and stops what it does,
   the owner is told nothing, and every change of a mode or a resume is refused until on; `on` lets
   each plugin take up what it did and say what. It is kept in the core's store
-  (`/data/plugins/core/power.json`) across restarts, logged as `core.power`, and a plugin reads it
-  with `ctx.off()`. The outbox does not refuse sends while off: a plugin's `off` stops it (D30).
+  (`/data/core/power.json`) across restarts, logged as `core.power`, and a plugin reads it with
+  `ctx.off()`. The outbox does not refuse sends while off: a plugin's `off` stops it (D30).
 - **The accounts and drift:** each connector instance with its account and its connection's status
   (`accounts`), and each parser's drift (`drift`).
 - **The kill switch:** each running plugin's own `kill`, its safety stop, with what came of it and
@@ -557,9 +584,9 @@ accounts counted by state); `GET /accounts`; `GET /drift`;
 `POST /plugins/<id>/mode`, `/plugins/<id>/resume` and `/plugins/<id>/kill` (409 with why when
 refused); `GET /plugins/<id>/state/<name>`; `POST /plugins/<id>/actions/<name>`, the body the
 action's input (400 for an input refused by its schema, 409 for the plugin's refusal);
-`GET /available`, `GET /modules`, `POST /modules` and `POST /modules/<id>/rollback` (§7). Ids and
-names in a path may be URL-encoded. The control API is the owner's alone: no agent is ever given it
-(P11), so no agent installs a module (P1).
+`GET /instances` (§2.2); `GET /available`, `GET /modules`, `POST /modules` and
+`POST /modules/<id>/rollback` (§7). Ids and names in a path may be URL-encoded. The control API is
+the owner's alone: no agent is ever given it (P11), so no agent installs a module (P1).
 
 ### 4.12 The graph printed and drawn
 
@@ -696,8 +723,8 @@ too, as the action `ask` of the control API (without a schema, which JSON cannot
   API's account (`anthropic:api`, or the name it is given), made from its `anthropic_api_key` secret
   at `create`, a `ServiceConnector`. Its configuration holds the defaults of `ask` (§4.13): `model`
   (`claude-opus-5-5`), `maxTokens` (16000) and `effort` (unset: the model's own). It offers `ask` as
-  its interface's action, for the plugins an edge binds to it. A system prompt is sent with a cache breakpoint
-  (the API's default five minutes), so calls that share one pay for it once.
+  its interface's action, for the plugins an edge binds to it. A system prompt is sent with a cache
+  breakpoint (the API's default five minutes), so calls that share one pay for it once.
 - **`turnParserPlugin`** (`packages/turns/src/turn-parser.ts`): one parser plugin per game bot, each
   made from its bot's grammar (`read`), which knows the game. Each reads, on the owner's account
   (`telegram-user`), the private chat with its bot and optionally a group, read only. It knows the

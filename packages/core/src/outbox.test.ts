@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { VirtualClock } from './clock.ts';
 import { type Connector, ConnectorBase } from './connector.ts';
 import { Core } from './core.ts';
-import { FloodWait, isMode, Modes, Outbox, type SenderPolicy, type SendRecord } from './outbox.ts';
+import {
+  FloodWait,
+  isMode,
+  Modes,
+  modesIn,
+  Outbox,
+  type SenderPolicy,
+  type SendRecord,
+} from './outbox.ts';
 import { Stores } from './store.ts';
 
 /** A connector whose sends answer later, as Telegram's do. */
@@ -62,7 +70,7 @@ function setup(o: { policy?: SenderPolicy; limits?: boolean } = {}) {
 describe('Modes', () => {
   it('start read-only, are kept, and only the owner raises them', () => {
     const stores = new Stores();
-    const modes = new Modes(stores.open('core'));
+    const modes = new Modes(modesIn(stores.open('core')));
     const changes: string[] = [];
     modes.onChange((p, m) => changes.push(`${p} ${m}`));
     expect(modes.get('p')).toBe('read-only');
@@ -71,8 +79,8 @@ describe('Modes', () => {
     expect(modes.set('p', 'read-only', 'safety')).toBeUndefined();
     expect(modes.set('p', 'on' as never)).toBe('not a mode: on');
     modes.set('q', 'dry-run');
-    expect(new Modes(stores.open('core')).get('q')).toBe('dry-run');
-    expect(new Modes(stores.open('core')).get('p')).toBe('read-only');
+    expect(new Modes(modesIn(stores.open('core'))).get('q')).toBe('dry-run');
+    expect(new Modes(modesIn(stores.open('core'))).get('p')).toBe('read-only');
     expect(changes).toEqual(['p live', 'p read-only', 'q dry-run']);
     expect([isMode('live'), isMode('on')]).toEqual([true, false]);
     expect([modes.has('q'), modes.has('nobody')]).toEqual([true, false]);

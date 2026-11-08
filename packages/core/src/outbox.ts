@@ -85,33 +85,57 @@ export interface SenderPolicy {
   paused?: string | undefined;
 }
 
+/** Where the modes are kept, plugin by plugin (the core: in each instance's own store). */
+export interface ModeBackend {
+  /** A plugin's kept mode, if any. */
+  load(plugin: string): unknown;
+  save(plugin: string, mode: Mode): void;
+}
+
+/** Every plugin's mode in one document, `modes`, of a store: for a wiring or a test of its own. */
+export function modesIn(store: Pick<Store, 'read' | 'write'>): ModeBackend {
+  return {
+    load: (plugin) => store.read<Record<string, unknown>>('modes')?.[plugin],
+    save: (plugin, mode) =>
+      store.write('modes', { ...store.read<Record<string, unknown>>('modes'), [plugin]: mode }),
+  };
+}
+
 /** The modes of the acting plugins, kept; `read-only` until one is set (P10). */
 export class Modes {
-  private readonly store: Pick<Store, 'read' | 'write'> | undefined;
-  private readonly modes: Record<string, Mode>;
+  private readonly backend: ModeBackend | undefined;
+  private readonly modes = new Map<string, Mode>();
   private listeners: ((plugin: string, mode: Mode) => void)[] = [];
 
-  constructor(store?: Pick<Store, 'read' | 'write'>) {
-    this.store = store;
-    this.modes = { ...store?.read<Record<string, Mode>>('modes') };
+  constructor(backend?: ModeBackend) {
+    this.backend = backend;
+  }
+
+  /** A plugin's mode as set, read from where it is kept at the first ask. */
+  private kept(plugin: string): Mode | undefined {
+    let m = this.modes.get(plugin);
+    if (m === undefined) {
+      const loaded = this.backend?.load(plugin);
+      if (isMode(loaded)) this.modes.set(plugin, (m = loaded));
+    }
+    return m;
   }
 
   /** Whether a plugin's mode was ever set (kept), rather than `read-only` by default. */
   has(plugin: string): boolean {
-    return isMode(this.modes[plugin]);
+    return this.kept(plugin) !== undefined;
   }
 
   get(plugin: string): Mode {
-    const m = this.modes[plugin];
-    return isMode(m) ? m : 'read-only';
+    return this.kept(plugin) ?? 'read-only';
   }
 
   /** Sets a plugin's mode: the owner sets any; a safety stop only `read-only`. Why not, or undefined. */
   set(plugin: string, mode: Mode, by: 'owner' | 'safety' = 'owner'): string | undefined {
     if (!isMode(mode)) return `not a mode: ${String(mode)}`;
     if (by === 'safety' && mode !== 'read-only') return 'only the owner raises a mode';
-    this.modes[plugin] = mode;
-    this.store?.write('modes', { ...this.modes });
+    this.modes.set(plugin, mode);
+    this.backend?.save(plugin, mode);
     for (const l of [...this.listeners]) l(plugin, mode);
     return undefined;
   }

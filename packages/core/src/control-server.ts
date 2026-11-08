@@ -27,6 +27,7 @@
  *   an input its schema refuses, a 409 when the plugin refuses, with why.
  *
  * - `GET /available`: the plugins the instance offers, the image's and the modules' (§7).
+ * - `GET /instances`: the plugin instances kept, each with its plugin and whether a node uses it.
  * - `GET /modules`: the modules installed, with the version each had loaded, and those refused at
  *   the start with why.
  * - `POST /modules`: installs a module, from `{"dir": "/path/in/the/container"}`, from
@@ -43,6 +44,7 @@ import { type AvailablePlugin } from './core.ts';
 import { type LogEntry } from './event-log.ts';
 import { type Graph } from './graph.ts';
 import { describeNodes } from './graph-view.ts';
+import { type InstanceInfo } from './instance-registry.ts';
 import { type ModuleSource } from './module-store.ts';
 import { ModuleError } from './modules.ts';
 import { PORT_TYPE_INFO } from './ports.ts';
@@ -104,6 +106,8 @@ export interface ControlOptions {
   available?: () => AvailablePlugin[];
   /** The modules: listed, installed, rolled back (§7). */
   modules?: ModuleControls;
+  /** The plugin instances kept, apart from the nodes (`core.instances()`, §2.2). */
+  instances?: () => InstanceInfo[];
 }
 
 const HOUR = 3_600_000;
@@ -176,6 +180,8 @@ export function controlHandler(
       }
       if (!post && route === '/available' && o.available !== undefined)
         return reply(200, o.available());
+      if (!post && route === '/instances' && o.instances !== undefined)
+        return reply(200, o.instances());
       const mods = o.modules;
       if (mods !== undefined && route === '/modules') {
         if (!post) return reply(200, mods.report());

@@ -35,6 +35,7 @@ import {
   type ResolvedNode,
   resolveGraph,
 } from './graph.ts';
+import { type InstanceInfo, InstanceRegistry } from './instance-registry.ts';
 import { type Manifest, parseManifest } from './manifest.ts';
 import { Modes, Outbox, type SenderPolicy, type SendRecord } from './outbox.ts';
 import { CORE_COMMANDS, coreCommands } from './owner-commands.ts';
@@ -48,8 +49,8 @@ import {
 import { type Render, resvgRender } from './render.ts';
 import { type KeptTimer, PluginScheduler } from './scheduler.ts';
 import { type Secrets, SecretStore } from './secrets.ts';
-import { PluginSettings, SettingsRegistry } from './settings.ts';
-import { type Migration, Stores } from './store.ts';
+import { PluginSettings, SETTINGS_DOC, SettingsRegistry } from './settings.ts';
+import { CORE_STORE, type Migration, Stores } from './store.ts';
 
 export type PluginState =
   'registered' | 'starting' | 'running' | 'paused' | 'stopping' | 'stopped' | 'failed';
@@ -101,6 +102,11 @@ export interface CoreOptions {
   validateEvents?: boolean;
   /** Tells the owner, with buttons that each run a command; nothing while the instance is off. */
   notify?: (text: string, buttons?: Buttons) => void;
+  /**
+   * The instances the saved graph references (bot-os-api.md §2.2), beyond the running graph's: kept
+   * from the orphans' expiry. Undefined when the saved graph cannot be read: nothing is deleted then.
+   */
+  referenced?: () => ReadonlySet<string> | undefined;
   /** The way back to the owner's main card, at the foot of the core's own cards (§4.11). */
   home?: CommandButton;
   /**
@@ -109,13 +115,13 @@ export interface CoreOptions {
    */
   owner?: string;
   /**
-   * The data volume: each plugin's store is `<dataDir>/plugins/<id>/`. Without it the stores live
-   * in memory, for tests.
+   * The data volume: each instance's store is `<dataDir>/instances/<instance>/`, the core's own
+   * `<dataDir>/core/`. Without it the stores live in memory, for tests.
    */
   dataDir?: string;
   /**
-   * Without a data volume, the documents each plugin's store holds as the core is made, by plugin
-   * and name: the state a run of the dev kit starts from (packages/core/src/devkit.ts).
+   * Without a data volume, the documents each instance's store holds as the core is made, by
+   * instance and name: the state a run of the dev kit starts from (packages/core/src/devkit.ts).
    * Ignored with one.
    */
   documents?: Record<string, Record<string, unknown>>;
@@ -156,8 +162,12 @@ interface Entry {
   scheduler?: PluginScheduler;
 }
 
-/** The core's own store, beside the plugins'. */
-const CORE = 'core';
+/** The core's own store, beside the instances'. */
+const CORE = CORE_STORE;
+/** The core's document, in each instance's store, of its mode (P10). */
+const MODE_DOC = '_mode';
+/** How often the orphaned instances are looked for: daily. */
+const SWEEP_MS = 86_400_000;
 
 /** The core's document, in each plugin's store, of what it serialised at its last stop. */
 const RESTORE = '_restore';
@@ -191,6 +201,9 @@ export class Core {
   readonly secretStore?: SecretStore;
   /** The owner's controls (§4.11), from which every control surface is made. */
   readonly controls: Controls;
+  /** The instances, apart from the nodes (§2.2). */
+  private readonly registry: InstanceRegistry;
+  private sweepTimer?: ReturnType<Clock['setTimeout']>;
 
   constructor(given: CoreOptions) {
     const secrets = given.secrets;
@@ -226,7 +239,20 @@ export class Core {
     const dir = this.stores.dirOf(CORE);
     if (secrets !== undefined && dir !== undefined)
       this.secretStore = new SecretStore(path.join(dir, 'secrets'), secrets);
-    this.modes = new Modes(this.stores.open(CORE));
+    this.registry = new InstanceRegistry(this.stores, () => options.clock.now());
+    // Each node's mode is kept in its instance's store, with the rest of its state.
+    this.modes = new Modes({
+      load: (plugin) => {
+        const instance = this.entries.get(plugin)?.node.instance;
+        const doc =
+          instance === undefined ? undefined : this.stores.internal(instance).get(MODE_DOC);
+        return (doc as { mode?: unknown } | undefined)?.mode;
+      },
+      save: (plugin, mode) => {
+        const instance = this.entries.get(plugin)?.node.instance;
+        if (instance !== undefined) this.stores.internal(instance).put(MODE_DOC, { mode });
+      },
+    });
     this.settings = new SettingsRegistry((plugin) => {
       const entry = this.entries.get(plugin);
       try {
@@ -235,36 +261,33 @@ export class Core {
         this.logger(plugin).error(`settingsChanged: ${message(e)}`);
       }
     });
-    this.controls = new Controls(
-      {
-        modes: this.modes,
-        settings: this.settings,
-        store: this.stores.open(CORE),
-        nodes: () => this.nodes(),
-        sends: (id) => this.sends(id),
-        status: (id) => this.state(id),
-        instance: (id) => {
-          const e = this.entries.get(id);
-          return e?.status.state === 'running' || e?.status.state === 'paused'
-            ? e.instance
-            : undefined;
-        },
-        resume: (id) => this.resume(id),
-        killNode: (id) => this.killNode(id),
-        record: (fields) =>
-          this.o.record?.({ type: 'core.power', t: this.o.clock.now(), ...fields }),
-        error: (id, line) => this.logger(id).error(line),
-        account: (id) => {
-          const account = this.entries.get(id)?.node.account;
-          const connection = this.connector(id);
-          return {
-            ...(account === undefined ? {} : { account }),
-            ...(connection === undefined ? {} : { connection }),
-          };
-        },
-        drift: () => this.drift(),
-      }
-    );
+    this.controls = new Controls({
+      modes: this.modes,
+      settings: this.settings,
+      store: this.stores.open(CORE),
+      nodes: () => this.nodes(),
+      sends: (id) => this.sends(id),
+      status: (id) => this.state(id),
+      instance: (id) => {
+        const e = this.entries.get(id);
+        return e?.status.state === 'running' || e?.status.state === 'paused'
+          ? e.instance
+          : undefined;
+      },
+      resume: (id) => this.resume(id),
+      killNode: (id) => this.killNode(id),
+      record: (fields) => this.o.record?.({ type: 'core.power', t: this.o.clock.now(), ...fields }),
+      error: (id, line) => this.logger(id).error(line),
+      account: (id) => {
+        const account = this.entries.get(id)?.node.account;
+        const connection = this.connector(id);
+        return {
+          ...(account === undefined ? {} : { account }),
+          ...(connection === undefined ? {} : { connection }),
+        };
+      },
+      drift: () => this.drift(),
+    });
     this.driftMonitor = new DriftMonitor({
       clock: options.clock,
       ...(options.record === undefined ? {} : { record: options.record }),
@@ -545,6 +568,7 @@ export class Core {
         this.logger(entry.id).error(`serve failed: ${message(e)}`);
       }
     }
+    this.sweepDaily();
     // Notices for an owner's surface that never started are printed, not lost silently.
     for (const [text] of this.pendingTells.splice(0))
       (this.o.print ?? (() => {}))(`core: not told (no ${String(this.o.owner)}): ${text}`);
@@ -570,13 +594,65 @@ export class Core {
     if (missing.length > 0) throw new StartError(missing.join('\n'));
     if (this.o.settings !== undefined)
       this.settings.add(new PluginSettings(CORE, this.o.settings, this.stores.internal(CORE)));
-    for (const { id, manifest } of this.entries.values())
+    for (const { id, manifest, node } of this.entries.values()) {
+      this.registry.touch(node.instance, manifest.id);
+      const kept = this.stores.internal(node.instance);
+      // A fresh instance starts with the settings and the mode its node gives.
+      if (node.settings !== undefined && kept.get(SETTINGS_DOC) === undefined)
+        kept.put(SETTINGS_DOC, node.settings);
       if (manifest.settings !== undefined)
-        this.settings.add(new PluginSettings(id, manifest.settings, this.stores.internal(id)));
+        this.settings.add(new PluginSettings(id, manifest.settings, kept));
+      if (node.mode !== undefined && !this.modes.has(id)) this.modes.set(id, node.mode);
+    }
+  }
+
+  /**
+   * The instances kept (§2.2): each one's plugin, and the node that runs on it; `used` also when
+   * only the saved graph references it.
+   */
+  instances(): InstanceInfo[] {
+    const running = new Map([...this.entries.values()].map((e) => [e.node.instance, e.id]));
+    const saved = this.o.referenced?.() ?? new Set<string>();
+    return this.registry.list().map(({ id, meta }) => {
+      const node = running.get(id);
+      return {
+        id,
+        ...(meta === undefined ? {} : meta),
+        ...(node === undefined ? {} : { node }),
+        used: node !== undefined || saved.has(id),
+      };
+    });
+  }
+
+  /**
+   * Deletes the instances no node has referenced for 7 days, of the running graph or the saved
+   * one, and touches the others (§2.2): the ids deleted. Nothing is deleted while the saved graph
+   * cannot be read.
+   */
+  sweepInstances(): string[] {
+    const saved = this.o.referenced === undefined ? new Set<string>() : this.o.referenced();
+    if (saved === undefined) return [];
+    const referenced = new Set([
+      ...saved,
+      ...[...this.entries.values()].map((e) => e.node.instance),
+    ]);
+    const deleted = this.registry.sweep(referenced);
+    for (const instance of deleted) {
+      (this.o.print ?? (() => {}))(`core: instance ${instance} deleted, unused for 7 days`);
+      this.o.record?.({ type: 'core.instance', t: this.o.clock.now(), instance, event: 'deleted' });
+    }
+    return deleted;
+  }
+
+  /** The orphaned instances looked for now, and again in a day. */
+  private sweepDaily(): void {
+    this.sweepInstances();
+    this.sweepTimer = this.o.clock.setTimeout(() => this.sweepDaily(), SWEEP_MS);
   }
 
   /** Stops the plugins running or paused, in the reverse order, keeping what they serialise. */
   async stop(): Promise<void> {
+    this.o.clock.clearTimeout(this.sweepTimer);
     for (const entry of [...this.entries.values()].reverse()) {
       const { instance, status } = entry;
       if (instance === undefined || (status.state !== 'running' && status.state !== 'paused'))
@@ -586,7 +662,7 @@ export class Core {
       this.bus.drop(entry.id);
       try {
         if (instance.serialise !== undefined)
-          this.stores.internal(entry.id).put(RESTORE, instance.serialise());
+          this.stores.internal(entry.node.instance).put(RESTORE, instance.serialise());
         await this.withTimeout(() => instance.stop?.(), entry.id);
       } catch (e) {
         this.logger(entry.id).error(`stop failed: ${message(e)}`);
@@ -655,7 +731,8 @@ export class Core {
       const defaults = (): Graph => defaultGraph([...manifests.values()], this.o.config);
       resolved = resolveGraph(
         typeof given === 'function' ? given(defaults()) : (given ?? defaults()),
-        manifests
+        manifests,
+        (instance) => this.registry.meta(instance)?.plugin
       );
       ordered = loadOrder(resolved.nodes);
     } catch (e) {
@@ -682,6 +759,15 @@ export class Core {
               `plugin ${id}: config ${i.path.map(String).join('.') || '(all)'}: ${i.message}`
             );
       }
+      for (const [key, value] of Object.entries(node.settings ?? {})) {
+        const field = manifest.settings?.shape[key] as z.ZodType | undefined;
+        const parsed = field?.safeParse(value);
+        if (parsed === undefined) problems.push(`plugin ${id}: settings ${key}: no such setting`);
+        else if (!parsed.success)
+          problems.push(
+            `plugin ${id}: settings ${key}: ${parsed.error.issues.map((i) => i.message).join('; ')}`
+          );
+      }
       problems.push(...this.bus.register(id, manifest));
       entries.set(id, {
         id,
@@ -706,7 +792,10 @@ export class Core {
     }
     this.set(entry, 'starting');
     try {
-      await this.stores.migrate(id, entry.manifest.state.migrations as Migration[]);
+      await this.stores.migrate(
+        entry.node.instance,
+        entry.manifest.state.migrations as Migration[]
+      );
       const instance = await entry.plugin.create(this.contextFor(entry));
       entry.instance = instance;
       if (instance.settings !== undefined) this.settings.serveFor(id, instance.settings);
@@ -765,7 +854,7 @@ export class Core {
 
   private contextFor(entry: Entry): PluginContext {
     const { id, node } = entry;
-    const kept = this.stores.internal(id);
+    const kept = this.stores.internal(node.instance);
     const restored = kept.get(RESTORE);
     // Handed back once: a crash before the next stop must not restore it a second time.
     kept.backend.delete(RESTORE);
@@ -803,7 +892,7 @@ export class Core {
       id,
       log,
       clock: this.o.clock,
-      store: this.stores.open(id),
+      store: this.stores.open(node.instance),
       config: entry.config,
       ...(entry.manifest.kinds.includes('connector') ? { secrets: this.secretsOf(id) } : {}),
       scheduler,
