@@ -64,9 +64,9 @@ describe('the bus', () => {
       'game hears itself',
     ]);
     expect(logged()).toEqual([
-      { type: 'dice.roll', t: 5000, player: 'Bob', points: 30 },
-      { type: 'dice.roll', t: 7000, player: 'Carol', points: 1 },
-      { type: 'dice.roll', t: 5000, player: 'Sigma', points: 2 },
+      { type: 'dice.roll', t: 5000, instance: 'game', player: 'Bob', points: 30 },
+      { type: 'dice.roll', t: 7000, instance: 'game', player: 'Carol', points: 1 },
+      { type: 'dice.roll', t: 5000, instance: 'game', player: 'Sigma', points: 2 },
     ]);
   });
 
@@ -162,7 +162,7 @@ function g(got: Record<string, BusHandle>, id: string): BusHandle {
 }
 
 describe('an event', () => {
-  it('starts with its type and time, which its payload cannot replace', async () => {
+  it('starts with its type, time and instance, which its payload cannot replace', async () => {
     const got: Record<string, BusHandle> = {};
     const logged: BusEvent[] = [];
     const core = new Core({
@@ -172,8 +172,10 @@ describe('an event', () => {
     });
     core.register(onBus('game', got, { registers: ['dice'] }, { 'dice.roll': roll }));
     await core.start();
-    g(got, 'game').publish('dice.roll', { player: 'x', type: 'other', t: 1 });
+    g(got, 'game').publish('dice.roll', { player: 'x', type: 'other', t: 1, instance: 'no' });
     const event = logged.find((r) => r.type === 'dice.roll');
-    expect(JSON.stringify(event)).toBe('{"type":"dice.roll","t":5,"player":"x"}');
+    expect(JSON.stringify(event)).toBe(
+      '{"type":"dice.roll","t":5,"instance":"game","player":"x"}'
+    );
   });
 });

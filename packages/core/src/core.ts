@@ -1009,7 +1009,7 @@ export class Core {
       config: entry.config,
       ...(entry.manifest.kinds.includes('connector') ? { secrets: this.secretsOf(id) } : {}),
       scheduler,
-      bus: this.bus.handle(id, entry.manifest, sourcesOf(node), log),
+      bus: this.bus.handle(id, entry.manifest, sourcesOf(node), log, node.instance),
       drift: this.driftMonitor.reporter(id),
       outbox: (key) => {
         const bound = this.chatInput(node, key);
@@ -1055,7 +1055,12 @@ export class Core {
         const own = [...entry.manifest.games.registers, entry.manifest.id];
         if (!type.includes('.') || !own.includes(ns))
           throw new Error(`${id} cannot record ${type}: its namespaces are ${own.join(', ')}`);
-        this.o.record?.({ ...fields, type, t: this.o.clock.now() } as BusEvent);
+        this.o.record?.({
+          ...fields,
+          type,
+          t: this.o.clock.now(),
+          instance: node.instance,
+        } as BusEvent);
       },
       ...(node.account === undefined ? {} : { account: node.account }),
       ...(restored === undefined ? {} : { restored }),
@@ -1068,7 +1073,7 @@ export class Core {
    * `since` (the log's first day) to `until` (now).
    */
   private readEvents(entry: Entry, o: EventQuery = {}): LogEntry[] {
-    const { manifest } = entry;
+    const { manifest, node } = entry;
     const readable = new Set([
       ...manifest.games.registers,
       manifest.id,
@@ -1087,12 +1092,30 @@ export class Core {
     const until = o.until ?? this.o.clock.now();
     const since = o.since ?? log.firstDay() ?? until;
     const nsOf = (type: string): string => type.slice(0, type.indexOf('.'));
+    // Whose records of each namespace it reads: its own instance's, and those of the nodes its
+    // events inputs bind (their instances), as the bus delivers them; with `all`, every instance's.
+    // A record with no instance (imported from an older log, D54) is everyone's.
+    const sources = sourcesOf(node);
+    const writers = (ns: string): Set<string> =>
+      new Set([
+        ...(ns === manifest.id ? [node.instance] : []),
+        ...[...(sources.get(ns) ?? [])].map((n) => this.entries.get(n)?.node.instance ?? n),
+      ]);
+    const byNs = new Map<string, Set<string>>();
+    const mine = (r: LogEntry): boolean => {
+      if (o.all === true || typeof r['instance'] !== 'string') return true;
+      const ns = nsOf(r.type);
+      let w = byNs.get(ns);
+      if (w === undefined) byNs.set(ns, (w = writers(ns)));
+      return w.has(r['instance']);
+    };
     return log
       .recordsSince(since, until)
-      .filter((r) =>
-        wanted === undefined
-          ? readable.has(nsOf(r.type))
-          : r.type === wanted || (!wanted.includes('.') && nsOf(r.type) === wanted)
+      .filter(
+        (r) =>
+          (wanted === undefined
+            ? readable.has(nsOf(r.type))
+            : r.type === wanted || (!wanted.includes('.') && nsOf(r.type) === wanted)) && mine(r)
       );
   }
 

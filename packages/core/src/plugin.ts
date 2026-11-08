@@ -98,7 +98,8 @@ export interface PluginContext {
    */
   readonly events: { read(query?: EventQuery): LogEntry[] };
   /**
-   * Writes a record to the event log (§4.4), `{ type, t, ...fields }`, `t` now: of a type in a
+   * Writes a record to the event log (§4.4), `{ type, t, instance, ...fields }`, `t` now and
+   * `instance` its node's instance (§2.2): of a type in a
    * namespace it registers or of its plugin's id (`dice-roller.turn`), with no schema; the bus's
    * events are written as they are published.
    */
@@ -115,6 +116,12 @@ export interface EventQuery {
   since?: number;
   /** Up to this time (ms); now without. */
   until?: number;
+  /**
+   * Every instance's records: without it, only its own instance's records of its own namespaces,
+   * and those of the nodes its events inputs bind (records with no instance, imported from an
+   * older log, always).
+   */
+  all?: boolean;
 }
 
 /** A plugin's mode, as its context gives it. */

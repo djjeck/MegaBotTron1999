@@ -33,6 +33,7 @@ describe('a turn parser', () => {
       {
         type: 'quest.turn',
         t: T0,
+        instance: 'quest',
         chat: GROUP,
         outcome: { kind: 'gain', bot: QUESTBOT, item: 'an apple' },
       },

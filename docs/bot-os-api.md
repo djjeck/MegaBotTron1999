@@ -363,8 +363,8 @@ It never holds a credential (P9).
 interface PluginContext<Config, Settings> {
   id: string;
   log: Logger; // stdout, prefixed with the id, secrets redacted (§4.9)
-  record(type: string, fields: object): void; // to the event log (§4.4), in its own namespaces
-  events: { read(query?: EventQuery): LogEntry[] }; // the event log read back (§4.4)
+  record(type: string, fields: object): void; // to the event log (§4.4), with its instance
+  events: { read(query?: EventQuery): LogEntry[] }; // the log read back, its instance's (§4.4)
   clock: Clock; // now(), and timers; virtual in tests and simulators
   store: Store; // §4.2
   scheduler: Scheduler; // §4.3
@@ -469,21 +469,27 @@ days) are armed again when they wake.
   the namespaces of its events inputs, from the instances their edges bind, and its own (§2.1).
   Handlers run in order of subscription, synchronously: a message has reached every consumer before
   the next one is read. It returns the way to stop; a plugin that fails or stops is unsubscribed.
-- Every event published is written to the event log, as `{ type, t, ...payload }`, one JSON line per
-  record in a file per UTC day (`packages/core/src/event-log.ts`).
-- **Its own records:** `ctx.record(type, fields)` writes `{ type, t, ...fields }` (`t` now) to the
-  log, with no schema and to no subscriber, for what a plugin keeps a trace of without publishing
-  it: a type of a namespace it registers or of its plugin's id (`dice-roller.turn`); any other is
-  refused.
-- **Reading the log back:** `ctx.events.read({ type?, since?, until? })` gives the log's records in
-  time order, of the namespaces it registers, of its plugin's id, and of those its events inputs
-  consume (asking for another is refused, naming what it reads): one type (`dice.roll`), one
+- Every event published is written to the event log, as `{ type, t, instance, ...payload }`, one
+  JSON line per record in a file per UTC day (`packages/core/src/event-log.ts`); `instance` is the
+  instance whose state the publishing node runs on (§2.2). `type`, `t` and `instance` are the
+  core's: a payload's own fields of those names never replace them.
+- **Its own records:** `ctx.record(type, fields)` writes `{ type, t, instance, ...fields }` (`t`
+  now, `instance` its node's) to the log, with no schema and to no subscriber, for what a plugin
+  keeps a trace of without publishing it: a type of a namespace it registers or of its plugin's id
+  (`dice-roller.turn`); any other is refused.
+- **Reading the log back:** `ctx.events.read({ type?, since?, until?, all? })` gives the log's
+  records in time order, of the namespaces it registers, of its plugin's id, and of those its events
+  inputs consume (asking for another is refused, naming what it reads): one type (`dice.roll`), one
   namespace (`dice`), or all of them; from `since` (the log's first day without) to `until` (now
   without). A parser replays its recent history at `ready` with
   `read({ type: 'dice.roll', since: ctx.clock.now() - 6 * HOUR })`; a fresh instance reads the whole
   log once with `read({ type: 'dice.roll' })`. It reads the instance's log (`CoreOptions.events`);
-  the dev kit's is in memory (§4.10); without one it reads nothing. Records name their type, not the
-  node that wrote them: two instances of one plugin read each other's.
+  the dev kit's is in memory (§4.10); without one it reads nothing. **By instance:** it reads its
+  own instance's records of its own namespaces, and, of a namespace an events input consumes, those
+  of the instances its edges bind, as the bus would have delivered them; so two instances of one
+  plugin (a turn-actor per bot) never read each other's. `all: true` reads every instance's. A
+  record with no `instance` (imported from an older log, §8, or written before records carried one)
+  belongs to no instance, and every reader of its namespace reads it.
 
 Two plugins registering one type is an error of the deployment; two instances of one plugin share
 its types, and each subscriber hears only the instances its edges bind. A subscriber that throws is
@@ -1106,7 +1112,8 @@ built: `packages/core/src/legacy.ts` (`LegacyImport`).
   there already is not added again, so the import may be run again), its type renamed by `types`,
   each day's file rewritten in time order. A record whose type is still not namespaced is left out
   and counted by its old type (`skipped`), for the owner to give its name and import again. It
-  answers the `days` read, the records `imported`, those `present` already, and those `skipped`.
+  answers the `days` read, the records `imported`, those `present` already, and those `skipped`. The
+  records imported carry no `instance` (§4.4): every reader of their namespace reads them.
 
 From the host: mount the older volume read-only (`-v old-data:/legacy:ro`), `GET /legacy`, import
 each store a node will use and the event log, save the graph that names those instances

@@ -327,11 +327,25 @@ describe('the irc plugin’s records and health', () => {
     events?.line({ ...line('live'), time: 2000 });
     events?.status('closed', 'ECONNRESET');
     expect(records.filter((r) => r.type.startsWith('irc.'))).toEqual([
-      { type: 'irc.status', t: 0, status: 'connecting' },
-      { type: 'irc.status', t: 0, status: 'joined' },
-      { type: 'irc.line', t: 1000, nick: 'GameBot', text: 'played back', playback: true },
-      { type: 'irc.line', t: 2000, nick: 'GameBot', text: 'live', playback: false },
-      { type: 'irc.status', t: 0, status: 'closed', detail: 'ECONNRESET' },
+      { type: 'irc.status', t: 0, instance: 'irc', status: 'connecting' },
+      { type: 'irc.status', t: 0, instance: 'irc', status: 'joined' },
+      {
+        type: 'irc.line',
+        t: 1000,
+        instance: 'irc',
+        nick: 'GameBot',
+        text: 'played back',
+        playback: true,
+      },
+      {
+        type: 'irc.line',
+        t: 2000,
+        instance: 'irc',
+        nick: 'GameBot',
+        text: 'live',
+        playback: false,
+      },
+      { type: 'irc.status', t: 0, instance: 'irc', status: 'closed', detail: 'ECONNRESET' },
     ]);
     expect(lines).toEqual(['irc: connecting', 'irc: joined', 'irc: closed (ECONNRESET)']);
     await core.stop();

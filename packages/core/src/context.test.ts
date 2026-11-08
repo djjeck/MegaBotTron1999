@@ -86,13 +86,58 @@ describe('the context’s event log', () => {
     kit.clock.advance(1000);
     counter.record('ledger.total', { total: 4 });
     expect(counter.events.read({ type: 'ledger.total', since: T0 })).toEqual([
-      { type: 'ledger.total', t: T0 + 1000, total: 4 },
+      { type: 'ledger.total', t: T0 + 1000, instance: 'ledger', total: 4 },
     ]);
     expect(() => counter.record('dice.roll', {})).toThrow(
       'ledger cannot record dice.roll: its namespaces are ledger'
     );
     expect(() => counter.record('ledger', {})).toThrow('ledger cannot record ledger');
-    expect(kit.log.records.at(-1)).toEqual({ type: 'ledger.total', t: T0 + 1000, total: 4 });
+    expect(kit.log.records.at(-1)).toEqual({
+      type: 'ledger.total',
+      t: T0 + 1000,
+      instance: 'ledger',
+      total: 4,
+    });
+  });
+
+  it('reads its own instance’s records, and those of the nodes it hears, or all', async () => {
+    const seen: PluginContext[] = [];
+    const kit = new DevKit({
+      start: T0,
+      history: [
+        { type: 'dice.roll', t: T0 - 3 * HOUR, value: 1 }, // imported: no instance
+        { type: 'dice.roll', t: T0 - 2 * HOUR, instance: 'one', value: 2 },
+        { type: 'dice.roll', t: T0 - HOUR, instance: 'two', value: 3 },
+        { type: 'ledger.total', t: T0 - HOUR, instance: 'books', total: 1 },
+        { type: 'ledger.total', t: T0 - HOUR, instance: 'other-books', total: 9 },
+      ],
+      plugins: [parser(seen), ledger(seen)],
+      graph: {
+        version: 1,
+        nodes: [
+          { id: 'd1', plugin: 'dice', instance: 'one' },
+          { id: 'd2', plugin: 'dice', instance: 'two' },
+          { id: 'books', plugin: 'ledger' },
+        ],
+        edges: [{ from: 'd1.events', to: 'books.rolls', type: 'events' }],
+      },
+    });
+    await kit.start();
+    const [d1, d2, books] = seen as [PluginContext, PluginContext, PluginContext];
+    const values = (c: PluginContext, all?: boolean) =>
+      c.events.read(all === undefined ? {} : { all }).map((r) => r['value'] ?? r['total']);
+    // Its own instance's, and what has no instance; never the other instance's.
+    expect(values(d1)).toEqual([1, 2]);
+    expect(values(d2)).toEqual([1, 3]);
+    expect(values(d1, true)).toEqual([1, 2, 3]);
+    // A consumer: the instances its edges bind, as the bus delivers them, and its own records.
+    expect(values(books)).toEqual([1, 2, 1]);
+    expect(values(books, true)).toEqual([1, 2, 3, 1, 9]);
+    // What it writes carries its instance.
+    d2.bus.publish('dice.roll', { value: 4 });
+    expect(kit.log.records.at(-1)).toMatchObject({ instance: 'two', value: 4 });
+    expect(values(d2)).toEqual([1, 3, 4]);
+    expect(values(d1)).toEqual([1, 2]);
   });
 
   it('reads nothing without a log, and the memory log knows its first day', async () => {

@@ -10,7 +10,8 @@
  *   events inputs or its own, and hears only the instances its edges bind (P6, §2.1). Delivery is synchronous, in order of subscription: an event has reached
  *   every subscriber before `publish` returns. A subscriber that throws is logged, and the others
  *   still get the event.
- * - Every event published is written to the event log, `{ type, t, ...payload }`.
+ * - Every event published is written to the event log, `{ type, t, instance, ...payload }`, its
+ *   `instance` the one whose state the publishing node runs on.
  */
 import { type z } from 'zod';
 import { type Manifest } from './manifest.ts';
@@ -88,7 +89,8 @@ export class Bus {
     instance: string,
     manifest: Manifest,
     sources: ReadonlyMap<string, ReadonlySet<string>>,
-    log: Logger
+    log: Logger,
+    kept: string = instance
   ): BusHandle {
     return {
       publish: (type, payload, t) => {
@@ -103,9 +105,10 @@ export class Bus {
               `${type}: ${result.error.issues.map((i) => `${i.path.join('.') || '(payload)'}: ${i.message}`).join('; ')}`
             );
         }
-        // The type and the time first, as every record of the log has them; the payload's own
-        // `type` or `t`, if any, never replaces them.
-        const head = { type, t: t ?? this.o.now() };
+        // The type, the time and the instance whose state the writer runs on (`kept`, §2.2), as
+        // every plugin's record of the log has them; the payload's own `type`, `t` or `instance`, if
+        // any, never replaces them.
+        const head = { type, t: t ?? this.o.now(), instance: kept };
         const event: BusEvent = Object.assign({ ...head }, payload, head);
         this.o.record?.(event);
         for (const s of [...this.subscriptions])
