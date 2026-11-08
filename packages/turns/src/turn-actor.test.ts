@@ -267,3 +267,82 @@ describe('the turn-actor', () => {
     }
   });
 });
+
+describe('several turn-actor nodes', () => {
+  it('run one per bot from a saved graph, each on its own instance, store, mode and records', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'turn-actors-'));
+    const account = new Account({ account: 'telegram:alice' });
+    const records: { type: string; instance?: unknown; event?: unknown }[] = [];
+    const clock = new VirtualClock(T0);
+    const chat = (to: string, bot: string) => ({
+      from: `${TELEGRAM_USER}.chat`,
+      to: `${to}.chat`,
+      type: 'chat' as const,
+      reads: [bot],
+      sends: [bot],
+      commands: ['/play'],
+    });
+    const core = new Core({
+      clock,
+      dataDir,
+      record: (r) => records.push(r as (typeof records)[number]),
+      // As the editor saves it: plain data, each node its instance, config and mode.
+      graph: {
+        version: 1,
+        nodes: [
+          { id: TELEGRAM_USER, plugin: TELEGRAM_USER, account: 'telegram:alice' },
+          { id: QUEST, plugin: QUEST },
+          {
+            id: 'quest-a',
+            plugin: TURN_ACTOR,
+            instance: 'turns-a',
+            mode: 'dry-run',
+            config: { chat: CHAT, seed: 1, schedule: { maxGapMin: 17 } },
+          },
+          {
+            id: 'quest-b',
+            plugin: TURN_ACTOR,
+            mode: 'read-only',
+            config: { chat: CHAT, seed: 2, command: '/quest' },
+          },
+        ],
+        edges: [
+          { ...chat(QUEST, CHAT), sends: [], commands: [] },
+          chat('quest-a', CHAT),
+          { ...chat('quest-b', CHAT), commands: ['/quest'] },
+          { from: `${QUEST}.interface`, to: 'quest-a.parser', type: 'interface' },
+          { from: `${QUEST}.interface`, to: 'quest-b.parser', type: 'interface' },
+        ],
+      },
+    });
+    core.register(fakeConnectorPlugin(TELEGRAM_USER, account), questPlugin(), turnActorPlugin());
+    await core.start();
+    expect(core.status().map((s) => [s.id, s.state])).toEqual([
+      [TELEGRAM_USER, 'running'],
+      [QUEST, 'running'],
+      ['quest-a', 'running'],
+      ['quest-b', 'running'],
+    ]);
+    expect([core.modes.get('quest-a'), core.modes.get('quest-b')]).toEqual([
+      'dry-run',
+      'read-only',
+    ]);
+    clock.advanceTo(T0 + 20 * MIN);
+    await flush();
+    // Each records as its own instance: only the dry-run one played; the read-only one waits.
+    const steps = records.filter((r) => r.type === `${TURN_ACTOR}.step`);
+    expect(steps.some((s) => s.event === 'sent')).toBe(true);
+    expect(new Set(steps.map((s) => s.instance))).toEqual(new Set(['turns-a']));
+    const statusOf = (id: string) => {
+      const r = core.controls.read(id, 'status');
+      return ('value' in r ? r.value : r) as TurnStatus;
+    };
+    expect(statusOf('quest-a').last).toBeGreaterThanOrEqual(T0);
+    expect(statusOf('quest-b').last).toBeUndefined();
+    await core.stop();
+    expect(fs.readdirSync(path.join(dataDir, 'instances')).sort()).toEqual(
+      expect.arrayContaining(['quest-b', 'turns-a'])
+    );
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+});

@@ -193,8 +193,8 @@ plugin's, each input bound as its `bind` says (`defaultGraph`), which tests and 
 `withInstances(graph, plugin, instances)` replaces the default node of a plugin meant for several
 instances by its instances. `core.graph()` gives the graph the instance runs, every edge written
 out. A changed graph takes effect at the next start (P8). The instance's entry point (`src/main.ts`)
-registers the connectors and the modules' plugins (§7), and runs the graph saved in its volume
-(`CoreOptions.graphFile`, §2.3).
+registers the connectors, the turn-actor and the modules' plugins (§7), and runs the graph saved in
+its volume (`CoreOptions.graphFile`, §2.3).
 
 ### 2.2 Instances
 
@@ -896,7 +896,10 @@ alone (§4) finds each in its context, its config or an edge:
   message's id; a failed send is tried again two minutes later. It plays in `dry-run` and `live`
   only (a new instance starts `dry-run`, D33). It declares no chat command, since two instances
   would clash: the owner reaches each with `/plugins <id>` and its read `status`. Each step is
-  published as `turn-actor.step`.
+  published as `turn-actor.step`. The image offers it (`src/main.ts`): the editor adds one node per
+  bot, each on its own instance, its `chat` edge to the owner's `telegram-user` node and its
+  `parser` edge to its bot's parser. The turn parsers are not the image's: each is made from a
+  game's grammar, so a game's module offers it.
 
 ## 6. Boundaries
 
