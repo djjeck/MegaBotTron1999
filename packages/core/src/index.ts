@@ -26,7 +26,13 @@ export {
   handleOf,
   type Inbound,
 } from './connector.ts';
-export { controlHandler, type ControlOptions, controlServer } from './control-server.ts';
+export {
+  controlHandler,
+  type ControlOptions,
+  controlServer,
+  MAX_UPLOAD,
+  type ModuleControls,
+} from './control-server.ts';
 export {
   type AccountControl,
   type ActResult,
@@ -39,6 +45,7 @@ export {
   type PowerDoc,
 } from './controls.ts';
 export {
+  type AvailablePlugin,
   Core,
   type CoreOptions,
   type CoreRecord,
@@ -103,6 +110,26 @@ export {
   type ManifestInput,
   parseManifest,
 } from './manifest.ts';
+export {
+  type LoadedModule,
+  loadModules,
+  type LoadModulesOptions,
+  type ModulesLoad,
+} from './module-loader.ts';
+export {
+  type InstalledModule,
+  type ModuleSource,
+  type ModulesReport,
+  ModuleStore,
+} from './module-store.ts';
+export {
+  MODULE_FILE,
+  ModuleError,
+  type ModuleFailure,
+  type ModuleManifest,
+  moduleManifestSchema,
+  PLUGIN_API,
+} from './modules.ts';
 export {
   type DeliverResult,
   FloodWait,

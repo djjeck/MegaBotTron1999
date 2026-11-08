@@ -37,8 +37,8 @@ COPY packages/ packages/
 COPY --from=web /app/packages/web/dist/ packages/web/dist/
 COPY src/ src/
 
-# /data holds the instance's data (the event log, the plugins' stores, and from the next step the
-# graph and the modules). Created here so that an empty named volume mounted on it starts out owned
+# /data holds the instance's data (the event log, the plugins' stores, the modules, and from the
+# next step the graph). Created here so that an empty named volume mounted on it starts out owned
 # by node: Docker copies the image's directory, ownership included, into a new volume.
 RUN mkdir /data && chown node:node /data
 USER node

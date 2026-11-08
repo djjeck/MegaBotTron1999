@@ -145,6 +145,16 @@ export interface CoreOptions {
 
 export class StartError extends Error {}
 
+/** A plugin the instance offers: the image's, or a module's (`module`). */
+export interface AvailablePlugin {
+  id: string;
+  version: string;
+  description: string;
+  kinds: string[];
+  /** The module that offers it; none for the image's own. */
+  module?: string;
+}
+
 interface Entry {
   /** The instance's id: the node's. */
   id: string;
@@ -172,6 +182,8 @@ const message = (e: unknown): string => (e instanceof Error ? e.message : String
 export class Core {
   private readonly o: CoreOptions;
   private readonly plugins: Plugin[] = [];
+  /** The module each plugin registered from a module came from. */
+  private readonly origins = new Map<Plugin, string>();
   /** By id, in load order once started. */
   private entries = new Map<string, Entry>();
   /** The graph as loaded, every edge written out (§2.1). */
@@ -289,6 +301,37 @@ export class Core {
   register(...plugins: Plugin[]): void {
     if (this.started) throw new Error('plugins are registered before the core starts');
     this.plugins.push(...plugins);
+  }
+
+  /** Adds the plugins a module offers (§7), as `register` does, remembering their module. */
+  registerModule(module: string, plugins: readonly Plugin[]): void {
+    this.register(...plugins);
+    for (const p of plugins) this.origins.set(p, module);
+  }
+
+  /**
+   * The plugins the instance offers (§7): the image's and the modules', whether or not a node of
+   * the graph runs one, for the editor to list. A plugin whose manifest does not read is left out
+   * (the load says why).
+   */
+  available(): AvailablePlugin[] {
+    return this.plugins.flatMap((p) => {
+      try {
+        const m = parseManifest(p.manifest);
+        const module = this.origins.get(p);
+        return [
+          {
+            id: m.id,
+            version: m.version,
+            description: m.description,
+            kinds: [...m.kinds],
+            ...(module === undefined ? {} : { module }),
+          },
+        ];
+      } catch {
+        return [];
+      }
+    });
   }
 
   /** Each plugin's state, in load order. */

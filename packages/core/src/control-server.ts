@@ -26,20 +26,66 @@
  * - `POST /plugins/<id>/actions/<name>` with the action's input as the body: its output, a 400 for
  *   an input its schema refuses, a 409 when the plugin refuses, with why.
  *
+ * - `GET /available`: the plugins the instance offers, the image's and the modules' (§7).
+ * - `GET /modules`: the modules installed, with the version each had loaded, and those refused at
+ *   the start with why.
+ * - `POST /modules`: installs a module, from `{"dir": "/path/in/the/container"}`, from
+ *   `{"tarball": "<base64 of a .tar.gz or .tar>"}`, or from the tarball itself as the body
+ *   (`content-type: application/gzip`, `application/x-tar` or `application/octet-stream`); it is
+ *   loaded at the next start. 400 with why for what is not a module.
+ * - `POST /modules/<id>/rollback`: puts the previous version back (409 when there is none).
+ *
  * Ids and names in a path may be URL-encoded.
  */
 import http from 'node:http';
 import { type Controls } from './controls.ts';
+import { type AvailablePlugin } from './core.ts';
 import { type LogEntry } from './event-log.ts';
 import { type Graph } from './graph.ts';
 import { describeNodes } from './graph-view.ts';
+import { type ModuleSource } from './module-store.ts';
+import { ModuleError } from './modules.ts';
 import { PORT_TYPE_INFO } from './ports.ts';
 import { type SettingsRegistry } from './settings.ts';
 
-async function body(req: http.IncomingMessage): Promise<unknown> {
-  let text = '';
-  for await (const chunk of req) text += String(chunk);
+/** The largest module uploaded, in bytes (base64 in JSON is a third more). */
+export const MAX_UPLOAD = 64 * 2 ** 20;
+
+/** A request's body, refused past `max` bytes. */
+async function bytes(req: http.IncomingMessage, max = MAX_UPLOAD): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    if (size > max) throw new ModuleError(`the body is over ${max} bytes`);
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+async function body(req: http.IncomingMessage, max?: number): Promise<unknown> {
+  const text = (await bytes(req, max)).toString('utf8');
   return text === '' ? {} : (JSON.parse(text) as unknown);
+}
+
+const TARBALL = /^application\/(?:gzip|x-gzip|x-tar|octet-stream)\b/iu;
+
+/** What `POST /modules` installs from. */
+async function moduleSource(req: http.IncomingMessage): Promise<ModuleSource> {
+  if (TARBALL.test(req.headers['content-type'] ?? '')) return { tarball: await bytes(req) };
+  const b = await body(req, Math.ceil(MAX_UPLOAD * 1.4));
+  const dir = field(b, 'dir');
+  const tarball = field(b, 'tarball');
+  if (typeof dir === 'string') return { dir };
+  if (typeof tarball === 'string') return { tarball: Buffer.from(tarball, 'base64') };
+  throw new ModuleError('give a dir, a tarball in base64, or the tarball as the body');
+}
+
+/** The owner's changes to the modules (module-store.ts), as the wiring offers them. */
+export interface ModuleControls {
+  report(): unknown;
+  install(source: ModuleSource): unknown;
+  rollback(id: string): unknown;
 }
 
 const field = (v: unknown, key: string): unknown =>
@@ -54,6 +100,10 @@ export interface ControlOptions {
   records?: (from: number, to: number) => LogEntry[];
   /** The time now, for the event log's span. */
   now?: () => number;
+  /** The plugins the instance offers (`core.available()`). */
+  available?: () => AvailablePlugin[];
+  /** The modules: listed, installed, rolled back (§7). */
+  modules?: ModuleControls;
 }
 
 const HOUR = 3_600_000;
@@ -123,6 +173,27 @@ export function controlHandler(
           portTypes: PORT_TYPE_INFO,
           nodes: describeNodes(controls.nodes(), graph),
         });
+      }
+      if (!post && route === '/available' && o.available !== undefined)
+        return reply(200, o.available());
+      const mods = o.modules;
+      if (mods !== undefined && route === '/modules') {
+        if (!post) return reply(200, mods.report());
+        try {
+          return reply(200, mods.install(await moduleSource(req)));
+        } catch (e) {
+          if (e instanceof ModuleError) return reply(400, { error: e.message });
+          throw e;
+        }
+      }
+      const rollback = /^\/modules\/([^/]+)\/rollback$/u.exec(route);
+      if (post && mods !== undefined && rollback !== null) {
+        try {
+          return reply(200, mods.rollback(decodeURIComponent(rollback[1] ?? '')));
+        } catch (e) {
+          if (e instanceof ModuleError) return reply(409, { error: e.message });
+          throw e;
+        }
       }
       if (post && route === '/off') return reply(200, { off: true, result: controls.turnOff() });
       if (post && route === '/on') return reply(200, { off: false, result: controls.turnOn() });

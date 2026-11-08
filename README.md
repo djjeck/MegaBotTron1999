@@ -10,10 +10,10 @@ each binding an edge, and the edges are the permissions.
 
 It knows no game. Games, and what plays them, are plugins on top of it.
 
-**Status: v1-alpha.** The core, the connectors, the turn plugins and the web UI's graph view work.
-The module loader, plugin instances, and the graph read from the data volume are the next step, so
-today's image runs the shell with an empty graph. The plugin API changes freely until the launch
-([docs/bot-os.md](docs/bot-os.md) P13).
+**Status: v1-alpha.** The core, the connectors, the turn plugins, the web UI's graph view and the
+module loader work. Plugin instances and the graph read from the data volume are the next step, so
+today's image loads the modules installed and offers their plugins, but runs an empty graph. The
+plugin API changes freely until the launch ([docs/bot-os.md](docs/bot-os.md) P13).
 
 > **Plugins run with the shell's full rights.** There is no sandbox. A plugin can read every secret
 > the process holds and send as every account it is connected to. Run only plugins you have read.
@@ -37,8 +37,9 @@ Then open `http://127.0.0.1:8082/` and log in with that password. In a real depl
 or Compose secrets, and put the UI behind a reverse proxy with HTTPS rather than publishing the
 port.
 
-- **`/data`** is the instance's state: the event log and each plugin's store (and, from the next
-  step, the graph and the modules). Back it up as one, with the container stopped.
+- **`/data`** is the instance's state: the event log, each plugin's store and the modules installed
+  (`/data/modules/`; and, from the next step, the graph). Back it up as one, with the container
+  stopped.
 - **Secrets** are files under `/run/secrets`, never environment variables: `web_ui_password` (the
   web UI's login; without it there is no UI at all), `bot_os_key` (to encrypt the secrets the core
   stores), and each connector's own (`znc_password`, `telegram_bot_token`, `telegram_user_api_id`,
@@ -98,9 +99,12 @@ export const greeter = definePlugin({
 - **The dev kit** (`DevKit`, `FakeConnector`, `VirtualClock`) runs plugins on a virtual clock with
   fake connectors, for tests and simulators.
 
-Games and their automation are to come as _modules_ in the data volume (`/data/modules/<id>/`, a
-directory of `.ts` files and a `module.json`), loaded at start ([docs/bot-os.md](docs/bot-os.md)
-D49). The full API is [docs/bot-os-api.md](docs/bot-os-api.md).
+Games and their automation come as _modules_ in the data volume (`/data/modules/<id>/`, a directory
+of `.ts` files and a `module.json`), installed by the owner through the control API (the previous
+version kept for a rollback) and loaded at start ([docs/bot-os.md](docs/bot-os.md) D49, D53). A
+module repository develops and tests against this one vendored as a git submodule
+([docs/bot-os-api.md](docs/bot-os-api.md) §7). The full API is
+[docs/bot-os-api.md](docs/bot-os-api.md).
 
 ## Layout
 

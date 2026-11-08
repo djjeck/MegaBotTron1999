@@ -187,9 +187,9 @@ plugin's, each input bound as its `bind` says (`defaultGraph`), which tests and 
 `withInstances(graph, plugin, instances)` replaces the default node of a plugin meant for several
 instances by its instances. `core.graph()` gives the graph the instance runs, every edge written
 out. A changed graph takes effect at the next start (P8). Today's entry point (`src/main.ts`)
-registers the connectors and runs an empty graph; from the next step the graph is read from the
-volume (`/data/graph.json`, bot-os.md D50), and plugin instances get kept state apart from their
-nodes.
+registers the connectors and the modules' plugins (§7), and runs an empty graph; from the next step
+the graph is read from the volume (`/data/graph.json`, bot-os.md D50), and plugin instances get kept
+state apart from their nodes.
 
 ## 3. The lifecycle
 
@@ -324,9 +324,9 @@ image rolled back) fails that plugin rather than being read wrong. A crash betwe
 of the commit is undone at the next start. A file adopted from the root is renamed `<file>.migrated`
 once the migration has succeeded.
 
-**Backups.** The whole data volume is the instance's state: the event log and the stores (and, from
-the next step, the graph and the modules). Back up the volume as one, with the instance stopped for
-the copy, so that no document is caught between writes. Restore it as one too: a store restored
+**Backups.** The whole data volume is the instance's state: the event log, the stores and the
+modules (and, from the next step, the graph). Back up the volume as one, with the instance stopped
+for the copy, so that no document is caught between writes. Restore it as one too: a store restored
 without the event log, or the reverse, would replay a history the state does not match. A single
 plugin's state can be restored on its own by putting back its directory, `plugins/<id>/`, while the
 instance is stopped.
@@ -563,8 +563,10 @@ accounts counted by state); `GET /accounts`; `GET /drift`;
 `POST /off`, `/on`, `/kill`; `GET` and `POST /settings`; `GET /graph` and `GET /graph/view` (§4.12);
 `POST /plugins/<id>/mode`, `/plugins/<id>/resume` and `/plugins/<id>/kill` (409 with why when
 refused); `GET /plugins/<id>/state/<name>`; `POST /plugins/<id>/actions/<name>`, the body the
-action's input (400 for an input refused by its schema, 409 for the plugin's refusal). Ids and names
-in a path may be URL-encoded.
+action's input (400 for an input refused by its schema, 409 for the plugin's refusal);
+`GET /available`, `GET /modules`, `POST /modules` and `POST /modules/<id>/rollback` (§7). Ids and
+names in a path may be URL-encoded. The control API is the owner's alone: no agent is ever given it
+(P11), so no agent installs a module (P1).
 
 ### 4.12 The graph printed and drawn
 
@@ -745,3 +747,183 @@ too, as the action `ask` of the control API (without a schema, which JSON cannot
   shell there), so its bundle holds none of the shell's code and no game.
 - Nothing in this repository names a game other than the made-up ones of its tests, a person, a
   chat, or a host (CLAUDE.md).
+
+## 7. Modules
+
+Games and automation come as modules (bot-os.md D49, D53): directories of plain `.ts` files, with no
+npm dependencies of their own, installed in the data volume and loaded at start. As built:
+`packages/core/src/modules.ts` (the manifest, the order), `module-resolve.ts` and `module-hooks.ts`
+(the resolve hook), `module-loader.ts` (the loading), `module-store.ts` (install and rollback) and
+`semver.ts`.
+
+### 7.1 The format
+
+A module is a directory, `/data/modules/<id>/`, holding its `module.json` and its sources under
+`src/`:
+
+```json
+{
+  "id": "dice",
+  "version": "0.1.0",
+  "api": "1",
+  "provides": "@example/dice",
+  "imports": { "@example/dice-rules": "^0.1.0" },
+  "plugins": ["src/plugins/roller.ts"]
+}
+```
+
+| Field         | Meaning                                                                                                                                                                            |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`          | Lower-case words and dashes; the name of its directory, which must match                                                                                                           |
+| `version`     | `MAJOR.MINOR.PATCH`, with an optional pre-release                                                                                                                                  |
+| `api`         | The plugin API it targets: the shell's (`PLUGIN_API`, today `"1"`) exactly, or it is refused                                                                                       |
+| `provides`    | Its import name, an npm package name: `<provides>/<path>` is `<its directory>/src/<path>`, and `<provides>` alone `src/index.ts`, as a package's `exports` maps `./*` to `./src/*` |
+| `imports`     | Optional: the modules it imports, by the name each provides, each with a version range (`1.2.3`, `^`, `~`, `>=`, `<`, `*`, spaces for all, `\|\|` for either)                      |
+| `plugins`     | Optional: its plugin entry files, relative to its directory; a module without any is a library for others                                                                          |
+| `description` | Optional: one line, for the owner                                                                                                                                                  |
+
+Nothing else is allowed. A module's files import:
+
+- `@megabottron1999/*` and `zod`: the host's own copies, so that a module's plugins, schemas and
+  `instanceof` checks are the shell's;
+- its own files, relatively, by its `provides` name, or by `#` imports if it keeps its workspace's
+  `package.json` (§7.5) in its directory, whose `imports` Node reads;
+- the modules its `imports` declare, by the names they provide;
+- Node's built-ins.
+
+Anything else is refused when the file is imported, by name: an npm package (a module has no npm
+dependencies: what it needs that the shell lacks belongs in the shell, as a standard service,
+§4.13), and a module it does not declare.
+
+### 7.2 A plugin entry
+
+Each file of `plugins` exports `plugins`, an array of plugins as `definePlugin` makes them (§1):
+
+```ts
+import { definePlugin, type Plugin } from '@megabottron1999/core';
+import { z } from 'zod';
+import { faces } from '@example/dice-rules/faces.ts';
+
+export const plugins: Plugin[] = [
+  definePlugin({
+    manifest: {
+      id: 'dice-roller',
+      version: '0.1.0',
+      kinds: ['actor'],
+      description: 'Rolls the dice',
+      config: z.object({ faces: z.number().default(faces) }),
+    },
+    create: (ctx) => ({/* everything from ctx, its configuration in ctx.config */}),
+  }),
+];
+```
+
+A plugin of a module is built from its saved configuration alone (bot-os.md D50): what changes from
+one use to the next is its `config`, read from `ctx.config`, never the arguments of a factory, so
+that the graph's nodes are data the editor can make. Its id is new: one of the image's own (`irc`,
+`anthropic`, …) or of a module loaded before is refused.
+
+### 7.3 Loading
+
+At start (`src/main.ts`), before the core loads, `loadModules` reads `/data/modules/` (the data
+directory's `modules/`, `LOG_DIR`), the hidden directories aside (`.previous/`, `.staging/`), and:
+
+1. reads and checks each `module.json`, and that its plugin entries exist;
+2. checks each module's `api` against the shell's, and each import against the installed version of
+   the module that provides it;
+3. orders the modules so that each loads after those it imports;
+4. registers the resolve hook (`module.register`, run on Node's hooks thread) with the table of the
+   modules that load: their `provides` names and directories, and the host's file to resolve
+   `@megabottron1999/*` and `zod` from;
+5. imports each module's plugin entries, in that order, and checks what they export and their
+   manifests.
+
+A module that fails any step is refused, by name and with why, and so is every module that imports
+it, directly or not; the others load. The reasons read as:
+`it targets plugin API 2, and this shell offers 1`,
+`it imports @example/dice ^0.2.0, and dice 0.1.0 is installed`,
+`it imports @example/nowhere, which no module provides`,
+`it imports @example/old, which is refused`, `its imports form a cycle: a → b → a`,
+`@example/same is provided by a and b`, `src/p.ts failed to load: …`,
+`src/p.ts exports no plugins array`, `its plugin irc is offered by the image already`. The entry
+point prints each module loaded and each refused.
+
+The plugins loaded are registered with the core beside the image's (`core.registerModule`), and
+`core.available()` lists them all, each with its module: the plugins the instance offers, which the
+editor will add as nodes. Until the graph comes from the volume (bot-os.md §6) the instance's graph
+is empty, so they are offered, not run.
+
+### 7.4 Installing, and rolling back
+
+The owner installs a module through the control API (§4.11), never an agent (P1, P11); it is loaded
+at the next start (P8). `ModuleStore` (`<data>/modules`):
+
+- **Install** (`POST /modules`): from a directory of the container's (`{"dir": "/path"}`; its `.git`
+  and `node_modules` are left behind), or from a tarball, `.tar.gz` or `.tar` (base64 in
+  `{"tarball": "…"}`, which the web UI's same-origin rule allows; or the bytes as the body, with
+  `content-type: application/gzip`, on the loopback), up to 64 MiB. The tarball holds the module at
+  its root or in its one directory (as `git archive --prefix=dice/` and GitHub's release tarballs
+  make it); files and directories only, nothing outside it. It is staged in `.staging/`, checked
+  (its `module.json`), and replaces `<id>/`, whose version before is kept as `.previous/<id>/`. 400
+  with why for what is not a module.
+- **Rollback** (`POST /modules/<id>/rollback`): `.previous/<id>/` and `<id>/` swap, so a second
+  rollback goes forward again; 409 when there is no previous version.
+- **The list** (`GET /modules`): each module installed (its manifest, or why it does not read), the
+  version kept for a rollback (`previous`), the version the running instance loaded (`loaded`), the
+  modules it refused at its start with why (`failures`), and whether a restart would change what is
+  loaded (`restart`). `GET /available` lists the plugins the instance offers.
+
+From the host, through the loopback: `docker cp dice/ megabottron1999:/tmp/dice`, then
+`docker exec megabottron1999 wget -qO- --header 'content-type: application/json' --post-data '{"dir":"/tmp/dice"}' http://127.0.0.1:8081/modules`,
+and restart the container. The web UI's page for it is to come.
+
+### 7.5 Developing a module against MegaBotTron1999
+
+A module repository vendors this repository as a git submodule, pinned to a tag, and makes its
+packages workspaces of its own, so that its modules are written, type-checked and tested against the
+very shell they will run in:
+
+```sh
+git submodule add https://github.com/djjeck/MegaBotTron1999 vendor/MegaBotTron1999
+git -C vendor/MegaBotTron1999 checkout v0.1.0 && git add vendor/MegaBotTron1999
+```
+
+```json
+{
+  "name": "example-modules",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "vendor/MegaBotTron1999/packages/core",
+    "vendor/MegaBotTron1999/packages/connectors",
+    "vendor/MegaBotTron1999/packages/turns",
+    "packages/*"
+  ]
+}
+```
+
+- **Each module is a workspace package** (`packages/dice/`), named as its `provides`
+  (`@example/dice`), with `exports` `{ "./*": "./src/*" }` and `imports` `{ "#src/*": "./src/*" }`
+  as this repository's packages have, and its `module.json` beside its `package.json`. So the same
+  imports resolve in development (through npm's workspaces) and in the instance (through the hook).
+  Its `dependencies` name `@megabottron1999/*` and `zod` at the versions the vendored shell pins,
+  and other modules of the repository: they are for development only, and the loader ignores them.
+- **Leave out `vendor/MegaBotTron1999/packages/web`**: the web UI's build tools are its own
+  `devDependencies`, and a module needs only its types, which it does not import.
+- **TypeScript:** extend the vendored configuration, which the shell's sources need as they are
+  (strict, `erasableSyntaxOnly`, `.ts` imports), with the repository's own `include`:
+  `{ "extends": "./vendor/MegaBotTron1999/tsconfig.json", "include": ["packages"] }`.
+- **Tests:** Vitest, with the dev kit (§4.10) from `@megabottron1999/core`; exclude `vendor/**` from
+  the repository's own runs, since the shell's tests are its own.
+- **Loading as the instance does:**
+  `node vendor/MegaBotTron1999/packages/core/tools/modules.ts packages/dice packages/dice-rules`
+  links the modules given into a temporary modules' directory, loads them through the resolve hook,
+  checks their plugins' manifests, prints each module with its plugins and each refused with why,
+  and exits 1 if any is refused (`--installed [dir]` checks a modules' directory as it is). It
+  catches what the workspaces allow and the instance does not: an npm package imported, a module not
+  declared in `imports`.
+- **Shipping:** `git archive --prefix=dice/ -o dice.tar.gz HEAD:packages/dice` makes the tarball of
+  one module, for `POST /modules`.
+
+Upgrading the shell is moving the submodule to a newer tag; a module that targets another plugin API
+than the instance's is refused at start, by name.

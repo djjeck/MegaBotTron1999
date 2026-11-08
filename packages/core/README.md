@@ -13,6 +13,10 @@ ports, its interface, and its config's and settings' JSON Schemas).
 
 - `src/index.ts` is the public API (`@megabottron1999/core`); plugins import nothing else.
 - `src/devkit.ts`: a core on a virtual clock with fake connectors, for tests and simulators.
+- `src/modules.ts`, `src/module-loader.ts`, `src/module-resolve.ts`, `src/module-hooks.ts`,
+  `src/module-store.ts`: the modules of the data volume, their resolve hook, their loading, install
+  and rollback (docs/bot-os-api.md §7).
+- `tools/modules.ts`: loads module directories as the instance does, for a module repository.
 - `src/rng.ts`: a seeded generator, so that a simulated run repeats exactly.
 - `tools/graph.ts`: prints a graph file as text or as a Mermaid flowchart.
 
