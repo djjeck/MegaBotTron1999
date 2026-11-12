@@ -5,8 +5,9 @@
  * through the owner's account (`telegram-user`), the private chat with its bot and, optionally, a
  * group, and:
  *
- * - knows the owner's turns: the turn commands the owner sends by hand (from any device, which the
- *   account sees) and those its turn-actor sends (told through `actions.sent`, since the account
+ * - knows the owner's turns: its game's turn commands (`spec.turnCommands`, a fact of the game, not
+ *   of a node's config: bot-os.md D70) that the owner sends by hand (from any device, which the
+ *   account sees), and those its turn-actor sends (told through `actions.sent`, since the account
  *   never sees its own sends come back);
  * - tells which of its bot's messages answer one: a reply to it, or, in the private chat, where
  *   every message is the owner's, the first message within two minutes of it;
@@ -61,16 +62,17 @@ export interface TurnParserSpec {
   /** Its bot's username, without `@`. */
   bot: string;
   description: string;
+  /**
+   * Its bot's turn commands, by first word (`/play`), each counted bare or addressed to its bot:
+   * which commands are turns is a fact of the game, so the grammar says it, not a node's config
+   * (bot-os.md D70).
+   */
+  turnCommands: readonly string[];
   read(m: BotMessage): TurnReading;
 }
 
-/** The parser's configuration: the turn commands of the owner's it recognises, by first word. */
-export const turnParserConfig = z.object({
-  commands: z
-    .array(z.string().regex(/^\/\w+$/u))
-    .default(['/play'])
-    .describe('The owner’s turn commands it recognises, by first word, such as /play'),
-});
+/** A turn command, as a spec names it: its first word. */
+const TURN_COMMAND = /^\/\w+$/u;
 
 /** Until when the bot rests, and why. */
 export interface Rest {
@@ -117,13 +119,18 @@ export function isTurnCommand(text: string, commands: readonly string[], bot: st
  */
 export function turnParserPlugin(spec: TurnParserSpec): Plugin {
   const privateChat = `@${spec.bot}`;
+  const commands = [...spec.turnCommands];
+  const bad = commands.filter((c) => !TURN_COMMAND.test(c));
+  if (commands.length === 0 || bad.length > 0)
+    throw new Error(
+      `turn parser ${spec.id}: expected its turn commands, as /play, not ${JSON.stringify(commands)}`
+    );
   return definePlugin({
     manifest: {
       id: spec.id,
       version: '0.1.0',
       kinds: ['parser'],
       description: spec.description,
-      config: turnParserConfig,
       games: { registers: [spec.id] },
       events: {
         [`${spec.id}.turn`]: z.object({ chat: z.string(), outcome: outcomeSchema }),
@@ -152,7 +159,6 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       },
     },
     create: (ctx) => {
-      const { commands } = ctx.config as z.infer<typeof turnParserConfig>;
       const handle = ctx.connector('chat');
       /** the owner's turns, newest last: chat, id, time, and whether something answered it. */
       const kept = ctx.store.read<Parsed>(PARSED_DOC);

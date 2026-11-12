@@ -4,7 +4,8 @@ The base plugins for automation: two for a game bot that is played one turn at a
 reaction.
 
 - `turnParserPlugin` (`src/turn-parser.ts`): a parser of one bot's answers on a Telegram user
-  account (a chat-in input: it reads, never sends), from a grammar the game provides. It knows the
+  account (a chat-in input: it reads, never sends), from a grammar the game provides with its bot's
+  turn commands (`turnCommands`: a fact of the game, not a config, docs/bot-os.md D70). It knows the
   owner's turns (sent by hand or by the actor), which of the bot's messages answer one, publishes
   what it reads, reports to drift what it cannot read, and says until when the bot rests. It resumes
   from what it parsed, kept in its store, never by re-reading the chat (docs/bot-os.md D62).

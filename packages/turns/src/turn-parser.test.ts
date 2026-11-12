@@ -1,8 +1,19 @@
-import { type Store } from '@megabottron1999/core';
+import { TELEGRAM_USER } from '@megabottron1999/connectors/plugins/telegram-user.ts';
+import {
+  Core,
+  FakeConnector,
+  fakeConnectorPlugin,
+  GraphFile,
+  type Store,
+  VirtualClock,
+} from '@megabottron1999/core';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runParser as run, T0 } from '#test/parser-run.ts';
-import { QUESTBOT, questPlugin } from '#test/quest.ts';
-import { isTurnCommand, PARSED_DOC } from './turn-parser.ts';
+import { QUEST, QUESTBOT, questPlugin } from '#test/quest.ts';
+import { isTurnCommand, PARSED_DOC, turnParserPlugin } from './turn-parser.ts';
 
 const GROUP = '-1001000000001';
 const MIN = 60_000;
@@ -22,7 +33,7 @@ describe('isTurnCommand', () => {
 
 describe('a turn parser', () => {
   it("reads the replies to the owner's turns in the group, by hand, and no one else's", async () => {
-    const p = await run(questPlugin(), { commands: ['/quest'] }, GROUP);
+    const p = await run(questPlugin(['/quest']), {}, GROUP);
     const hand = p.hear({ ...own, chat: GROUP, text: `/quest@${QUESTBOT}` });
     p.hear({ ...bot, chat: GROUP, replyTo: hand, text: 'Found an apple.' });
     p.hear({ ...bot, chat: GROUP, replyTo: '1', text: 'Found a pear.' });
@@ -121,5 +132,68 @@ describe('a turn parser', () => {
     expect(p.iface.rest()).toMatchObject({ until: T0 + 40 * MIN, why: 'it said too soon' });
     p.kit.runUntil(T0 + 41 * MIN);
     expect(p.iface.rest()).toBeUndefined();
+  });
+});
+
+describe('its turn commands, its game’s (bot-os.md D70)', () => {
+  it('come from its spec, and it has no config', () => {
+    expect(questPlugin(['/quest']).manifest.config).toBeUndefined();
+    const spec = { id: 'x', bot: 'XBot', description: 'x', read: () => undefined };
+    expect(() => turnParserPlugin({ ...spec, turnCommands: [] })).toThrow(
+      'turn parser x: expected its turn commands, as /play, not []'
+    );
+    expect(() => turnParserPlugin({ ...spec, turnCommands: ['play'] })).toThrow('["play"]');
+  });
+
+  it('ignore a node’s config that still names commands, as a graph saved before does', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'turn-parser-'));
+    try {
+      // A version 2 graph, saved while the commands were the node's config.
+      const graph = {
+        version: 2,
+        nodes: [
+          { id: TELEGRAM_USER, plugin: TELEGRAM_USER },
+          { id: QUEST, plugin: QUEST, config: { commands: ['/play'] } },
+        ],
+        edges: [
+          {
+            from: `${TELEGRAM_USER}.chat`,
+            to: `${QUEST}.chat`,
+            type: 'chat-in',
+            reads: [PRIVATE],
+            senders: [PRIVATE, 'me'],
+          },
+        ],
+      };
+      fs.writeFileSync(path.join(dir, 'graph.json'), JSON.stringify(graph));
+      const account = new FakeConnector({ account: 'telegram:alice' });
+      const turns: unknown[] = [];
+      const core = new Core({
+        clock: new VirtualClock(T0),
+        graphFile: new GraphFile(dir),
+        record: (r) => {
+          if (r.type === 'quest.turn') turns.push(r['outcome']);
+        },
+      });
+      core.register(fakeConnectorPlugin(TELEGRAM_USER, account), questPlugin(['/quest']));
+      await core.start();
+      expect(core.graphProblems()).toEqual([]);
+      expect(core.status().map((s) => `${s.id} ${s.state}`)).toEqual([
+        `${TELEGRAM_USER} running`,
+        `${QUEST} running`,
+      ]);
+      // The file keeps the key, untouched; the parser counts its spec's commands alone.
+      expect(core.graph()?.nodes[1]).toEqual(graph.nodes[1]);
+      const hear = (m: { sender: string; own?: boolean; text: string }): void =>
+        account.hear({ ...m, chat: PRIVATE, time: T0 });
+      hear({ ...own, text: '/play' });
+      hear({ ...bot, text: 'Found an apple.' });
+      hear({ ...own, text: '/quest' });
+      hear({ ...bot, text: 'Found a pear.' });
+      expect(turns).toEqual([{ kind: 'gain', bot: QUESTBOT, item: 'a pear' }]);
+      await core.stop();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -24,12 +24,16 @@ export function readQuest(text: string): { outcome: TurnOutcome; restMs: number 
   return undefined;
 }
 
-/** @QuestBot's parser: what answers alice's turns, and in private a reply that reads as one. */
-export function questPlugin(): Plugin {
+/**
+ * @QuestBot's parser: what answers alice's turns (`/play`, or the commands given), and in private a
+ * reply that reads as one.
+ */
+export function questPlugin(turnCommands: readonly string[] = ['/play']): Plugin {
   return turnParserPlugin({
     id: QUEST,
     bot: QUESTBOT,
     description: "@QuestBot's answers to the owner's turns",
+    turnCommands,
     read: (m): TurnReading => {
       if (!m.answers && !(m.private && m.replies)) return undefined;
       const read = readQuest(m.text);

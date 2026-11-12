@@ -1337,16 +1337,21 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   made from its bot's grammar (`read`), which knows the game. Each reads, on the owner's account
   (`telegram-user`), the private chat with its bot and, when its edge also reads it, the game's
   group: a `chat-in` input only, with no way to send; its default edge reads from its bot and the
-  owner (`senders: ["@<bot>", "me"]`). It knows the owner's turns (a turn command of its
-  configuration, `commands`, bare or addressed to its bot, sent by hand from any device; and those
-  its actor sends, told through its action `sent`, since the account never sees its own sends come
-  back), and which of its bot's messages answer one: a reply to it or, in the private chat, the
-  first message within two minutes of it. What it reads it publishes as `<id>.turn`
-  (`{ chat, outcome }`); a message it claims and cannot read goes to drift (§4.7) and is published
-  as an `unknown` outcome. Its read `rest` says until when the bot rests, from its last answer. It
-  resumes from what it parsed (D62): the owner's recent turns and its bot's rest are kept in its
-  store (`parsed`) as they change and read back at its start; it never re-reads the chat, and reads
-  missed messages as any other. The tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
+  owner (`senders: ["@<bot>", "me"]`). It knows the owner's turns (a turn command of its game's,
+  bare or addressed to its bot, sent by hand from any device; and those its actor sends, told
+  through its action `sent`, since the account never sees its own sends come back), and which of its
+  bot's messages answer one: a reply to it or, in the private chat, the first message within two
+  minutes of it. What it reads it publishes as `<id>.turn` (`{ chat, outcome }`); a message it
+  claims and cannot read goes to drift (§4.7) and is published as an `unknown` outcome. Its read
+  `rest` says until when the bot rests, from its last answer. It resumes from what it parsed (D62):
+  the owner's recent turns and its bot's rest are kept in its store (`parsed`) as they change and
+  read back at its start; it never re-reads the chat, and reads missed messages as any other. Its
+  game gives it a spec (`TurnParserSpec`): its `id`, its `bot`, its `description`, its grammar
+  (`read`) and its `turnCommands`, the bot's turn commands by first word (`["/play"]`, at least
+  one): which commands are turns is a fact of the game, so it has no config (bot-os.md D70). A node
+  saved while it had one (`"config": { "commands": [...] }`) still loads and runs: a plugin with no
+  config schema ignores its node's config, which the file keeps as written until the owner takes it
+  out. The tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
 - **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
   (P3, P17), each with its own id, configuration, store, timer and state. Its ports: `chat`, a
   chat-in input on `telegram`, which reads the private chat with its bot (for the turns the owner
