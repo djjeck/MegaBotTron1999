@@ -38,6 +38,7 @@ export {
   type LegacyControls,
   MAX_UPLOAD,
   type ModuleControls,
+  type ModuleRequest,
 } from './control-server.ts';
 export {
   type AccountControl,
@@ -182,6 +183,25 @@ export {
   parseManifest,
 } from './manifest.ts';
 export {
+  findModules,
+  type ModuleCandidate,
+  type ModuleStatus,
+  selectFiles,
+  type TreeListing,
+} from './module-files.ts';
+export {
+  CHECK_EVERY,
+  GitHub,
+  GitHubError,
+  type GitHubLookup,
+  GitHubModules,
+  type GitHubPick,
+  type GitHubSource,
+  moduleControls,
+  newerTag,
+  parseGitHubUrl,
+} from './module-github.ts';
+export {
   type LoadedModule,
   loadModules,
   type LoadModulesOptions,
@@ -190,9 +210,13 @@ export {
 export {
   type InstalledModule,
   type ModuleFile,
+  type ModuleOrigin,
   type ModuleSource,
+  type ModuleSourceRecord,
   type ModulesReport,
   ModuleStore,
+  type ModuleUpdate,
+  type UpdateCheck,
 } from './module-store.ts';
 export {
   MODULE_FILE,

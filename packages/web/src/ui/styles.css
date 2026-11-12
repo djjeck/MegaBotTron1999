@@ -1036,6 +1036,133 @@ button.primary:disabled {
   margin-top: 0.75rem;
 }
 
+/* The Modules page (ModulesPage.tsx, bot-os.md D67): the ways to install, the modules found in a
+   folder or a GitHub link as a checklist, how each install went, and the updates. */
+.install-ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.install-ways form.link {
+  flex: 1 1 22rem;
+  margin: 0;
+}
+
+.install-ways form.link input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+
+table.checklist td:first-child {
+  width: 1.5rem;
+}
+
+table.checklist tr.refused {
+  color: var(--muted);
+}
+
+table.checklist code,
+table.modules a {
+  overflow-wrap: anywhere;
+}
+
+/* On a phone, each module is a card: its cells one under the other, each named. */
+@media (max-width: 640px) {
+  table.stack thead {
+    display: none;
+  }
+
+  table.stack tr {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.2rem 0.5rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  table.stack.checklist tr {
+    grid-template-columns: 1.75rem 1fr;
+  }
+
+  table.stack.checklist td:first-child {
+    grid-row: 1 / span 6;
+  }
+
+  table.stack td {
+    border: none;
+    padding: 0;
+  }
+
+  table.stack td:empty {
+    display: none;
+  }
+
+  table.stack td[data-label]::before {
+    content: attr(data-label) ': ';
+    color: var(--muted);
+  }
+}
+
+.badge.status-new,
+.badge.status-update {
+  color: var(--ok);
+}
+
+.badge.status-same {
+  color: var(--muted);
+}
+
+.badge.status-older {
+  color: var(--warn);
+}
+
+details.left-out summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+details.left-out ul {
+  margin: 0.25rem 0;
+  padding-left: 1rem;
+  font-size: 0.85rem;
+}
+
+ul.outcomes {
+  list-style: none;
+  padding: 0;
+}
+
+ul.outcomes li.ok {
+  color: var(--ok);
+}
+
+.updates-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0 0 0.5rem;
+}
+
+.updates-bar p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.update {
+  color: var(--warn);
+  margin-top: 0.2rem;
+}
+
 /* The review of the draft's changes (Review.tsx), a dialog over the editor. */
 .overlay .card.review {
   max-width: 36rem;

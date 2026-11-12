@@ -1,32 +1,18 @@
 /**
- * A module's folder, as the owner picks it (`<input type="file" webkitdirectory>`) or drops it on
- * the Modules page (`DataTransferItem.webkitGetAsEntry`), read in the browser before it is sent to
- * `POST /modules` as `{"files": [{path, content}]}` (docs/bot-os-api.md §7.4). What is under `.git`
- * or `node_modules` is left out here as the server leaves it out, so that it is not uploaded.
+ * A folder of modules, as the owner picks it (`<input type="file" webkitdirectory>`) or drops it on
+ * the Modules page (`DataTransferItem.webkitGetAsEntry`), read in the browser (docs/bot-os-api.md
+ * §7.4, bot-os.md D67). It may be one module's folder or a repository's root with several: its
+ * paths and its `module.json` files go to `POST /modules/plan`, which finds the modules (vendored
+ * copies and tests aside) and the files each installs; then only those files of the modules the
+ * owner checks are read and sent, one module per `POST /modules`. What is under `.git` or
+ * `node_modules` is never read nor listed.
  */
+import type { ModuleCandidate, TreeListing } from '@megabottron1999/core';
 
 /** A file of the folder: its path from the folder picked (its name first), and the file. */
 export interface FolderFile {
   path: string;
   file: File;
-}
-
-/** What the module's `module.json` says, as the page shows it before the install. */
-export interface FolderManifest {
-  id: string;
-  version: string;
-  description?: string;
-}
-
-/** A folder read: its files, and its module's manifest or why there is none. */
-export interface ModuleFolder {
-  /** The folder's name, as picked. */
-  name: string;
-  files: FolderFile[];
-  /** Their size, in bytes. */
-  bytes: number;
-  manifest?: FolderManifest;
-  error?: string;
 }
 
 /** The largest module uploaded, in bytes, as the control API takes it (`MAX_UPLOAD`). */
@@ -70,52 +56,41 @@ export async function droppedFiles(entries: readonly FileSystemEntry[]): Promise
   return out;
 }
 
-/**
- * Where the module's `module.json` is among the files: at their root, or in the one directory they
- * all are in (a folder picked gives its name first), as the server looks for it.
- */
-export function manifestFile(files: readonly FolderFile[]): FolderFile | undefined {
-  const at = (p: string) => files.find((f) => f.path === p);
-  const top = new Set(files.map((f) => f.path.split('/')[0]));
-  const only = top.size === 1 ? [...top][0] : undefined;
-  return at('module.json') ?? (only === undefined ? undefined : at(`${only}/module.json`));
+/** The folder's name: the first part its files share, as a folder picked gives it. */
+export function folderName(files: readonly FolderFile[]): string {
+  const top = new Set(files.map((f) => f.path.split('/')[0] ?? ''));
+  return top.size === 1 ? ([...top][0] ?? '') : '';
 }
 
-/** What the folder holds: its module's manifest, read here, or why it is not a module's folder. */
-export async function readFolder(files: FolderFile[]): Promise<ModuleFolder> {
-  const name = files[0]?.path.split('/')[0] ?? '';
-  const bytes = files.reduce((n, f) => n + f.file.size, 0);
-  const folder = { name, files, bytes };
-  if (files.length === 0) return { ...folder, error: 'the folder is empty' };
-  const file = manifestFile(files);
-  if (file === undefined) {
-    const inside = files
-      .filter((f) => f.path.endsWith('/module.json'))
-      .map((f) => f.path.slice(0, -'/module.json'.length));
-    return {
-      ...folder,
-      error:
-        inside.length === 0
-          ? `no module.json in ${name}: choose the module's own folder, the one that holds its module.json`
-          : `${name} is not a module's folder, but holds modules: choose one of ${inside.join(', ')}`,
-    };
+/**
+ * What `POST /modules/plan` reads: every path, and the text of each `module.json` (but those
+ * under a `vendor` directory, which are never the owner's modules).
+ */
+export async function listing(files: readonly FolderFile[]): Promise<TreeListing> {
+  const manifests: Record<string, string> = {};
+  for (const f of files) {
+    const parts = f.path.split('/');
+    if (parts.at(-1) === 'module.json' && !parts.slice(0, -1).includes('vendor'))
+      manifests[f.path] = await f.file.text();
   }
-  let m: unknown;
-  try {
-    m = JSON.parse(await file.file.text());
-  } catch (e) {
-    return { ...folder, error: `${file.path} is not JSON: ${(e as Error).message}` };
-  }
-  const o = (typeof m === 'object' && m !== null ? m : {}) as Record<string, unknown>;
-  const { id, version, description } = o;
-  if (typeof id !== 'string' || typeof version !== 'string')
-    return { ...folder, error: `${file.path} has no id or version` };
-  const manifest: FolderManifest = {
-    id,
-    version,
-    ...(typeof description === 'string' ? { description } : {}),
-  };
-  if (bytes > MAX_MODULE_BYTES)
-    return { ...folder, manifest, error: `the folder is over ${MAX_MODULE_BYTES} bytes` };
-  return { ...folder, manifest };
+  return { paths: files.map((f) => f.path), manifests };
+}
+
+/** A module's files among the folder's, as the plan names them, and their size. */
+export function moduleFiles(
+  m: ModuleCandidate,
+  files: readonly FolderFile[]
+): { files: FolderFile[]; bytes: number } {
+  const byPath = new Map(files.map((f) => [f.path, f]));
+  const mine = m.files.map((p) => byPath.get(p)).filter((f): f is FolderFile => f !== undefined);
+  return { files: mine, bytes: mine.reduce((n, f) => n + f.file.size, 0) };
+}
+
+/** A module's path in the folder, for the owner: from inside the folder picked, `.` for itself. */
+export function shownPath(path: string, folder: string): string {
+  const inside =
+    folder !== '' && (path === folder || path.startsWith(`${folder}/`))
+      ? path.slice(folder.length)
+      : path;
+  return inside.replace(/^\/+/u, '') || '.';
 }

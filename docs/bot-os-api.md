@@ -1010,10 +1010,11 @@ body the action's input (400 for an input refused by its schema, 409 for the plu
 `GET /graph/history`, `GET /graph/history/<id>`, `POST /graph/history/<id>/rollback`,
 `POST /graph/rollback` and `POST /restart` (§2.3); `GET /legacy`, `GET /legacy/events`,
 `POST /instances/import` and `POST /legacy/events/import` (§8); `GET /available`, `GET /modules`,
-`POST /modules` and `POST /modules/<id>/rollback` (§7); `GET /secrets`, the names of the Docker
-secrets provided, never their values, for a connector's config to name (§4.9; the wiring leaves out
-`web_ui_password` and `bot_os_key`, the shell's own). Ids and names in a path may be URL-encoded.
-The control API is the owner's alone: no agent is ever given it (P11), so no agent installs a module
+`POST /modules`, `POST /modules/plan`, `POST /modules/github`, `POST /modules/updates` and
+`POST /modules/<id>/rollback` (§7.4); `GET /secrets`, the names of the Docker secrets provided,
+never their values, for a connector's config to name (§4.9; the wiring leaves out `web_ui_password`,
+`bot_os_key` and `github_token`, the shell's own). Ids and names in a path may be URL-encoded. The
+control API is the owner's alone: no agent is ever given it (P11), so no agent installs a module
 (P1).
 
 **The web UI's login** (`packages/web/src/server/auth.ts`, bot-os.md D45): one password, the
@@ -1413,8 +1414,9 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
 Games and automation come as modules (bot-os.md D49, D53): directories of plain `.ts` files, with no
 npm dependencies of their own, installed in the data volume and loaded at start. As built:
 `packages/core/src/modules.ts` (the manifest, the order), `module-resolve.ts` and `module-hooks.ts`
-(the resolve hook), `module-loader.ts` (the loading), `module-store.ts` (install and rollback) and
-`semver.ts`.
+(the resolve hook), `module-loader.ts` (the loading), `module-store.ts` (install and rollback),
+`module-files.ts` (the modules in a folder or a repository, and each one's files),
+`module-github.ts` (GitHub links and their updates) and `semver.ts`.
 
 ### 7.1 The format
 
@@ -1441,6 +1443,7 @@ A module is a directory, `/data/modules/<id>/`, holding its `module.json` and it
 | `imports`     | Optional: the modules it imports, by the name each provides, each with a version range (`1.2.3`, `^`, `~`, `>=`, `<`, `*`, spaces for all, `\|\|` for either)                      |
 | `plugins`     | Optional: its plugin entry files, relative to its directory; a module without any is a library for others                                                                          |
 | `description` | Optional: one line, for the owner                                                                                                                                                  |
+| `files`       | Optional: what an install keeps, as globs from its directory (`*`, `**`, `?`; a directory names all under it), with its `module.json` always; by default all but its tests (§7.4)  |
 
 Nothing else is allowed. A module's files import:
 
@@ -1540,41 +1543,102 @@ editor will add as nodes. A plugin runs once a node of the saved graph (§2.3) n
 ### 7.4 Installing, and rolling back
 
 The owner installs a module through the control API (§4.11), never an agent (P1, P11); it is loaded
-at the next start (P8). `ModuleStore` (`<data>/modules`):
+at the next start (P8). The shell downloads a module only when the owner asks it to install one from
+a GitHub link, and never installs or restarts on its own (bot-os.md D67). `ModuleStore`
+(`<data>/modules`):
 
-- **Install** (`POST /modules`): from a directory of the container's (`{"dir": "/path"}`; its `.git`
-  and `node_modules` are left behind); from a tarball, `.tar.gz` or `.tar` (base64 in
-  `{"tarball": "…"}`, which the web UI's same-origin rule allows; or the bytes as the body, with
-  `content-type: application/gzip`, on the loopback); or from a directory's files one by one, as a
-  browser reads a folder picked or dropped
-  (`{"files": [{"path": "dice/module.json", "content": "<base64>"}, …]}`). Up to 64 MiB: the body,
+- **Install** (`POST /modules`), one module a request: from a directory of the container's
+  (`{"dir": "/path"}`); from a tarball, `.tar.gz` or `.tar` (base64 in `{"tarball": "…"}`, which the
+  web UI's same-origin rule allows; or the bytes as the body, with `content-type: application/gzip`,
+  on the loopback); from a directory's files one by one, as a browser reads a folder picked or
+  dropped (`{"files": [{"path": "dice/module.json", "content": "<base64>"}, …]}`); or from GitHub
+  (`{"github": {"repo": "<owner>/<repo>", "ref": "main", "refType"?: "branch", "path": "modules/dice", "commit"?: "<sha>"}}`,
+  below). A tarball or files may name their source for the owner (`"name"`). Up to 64 MiB: the body,
   and the files' bytes together. The tarball, or the files, hold the module at their root or in
   their one directory (as `git archive --prefix=dice/`, GitHub's release tarballs and a folder
   picked make it), which is stripped. A tarball holds files and directories only, nothing outside
   it; a file's path is relative to that root, with `/` (or `\`) between its parts, and one that is
   absolute, a drive's, or goes through `..` refuses the whole upload
-  (`<path> leaves the module's directory`); the files under a `.git` or a `node_modules` directory
-  are left behind, as from a directory. It is staged in `.staging/`, checked (its `module.json`),
-  and replaces `<id>/`, whose version before is kept as `.previous/<id>/`. 400 with why for what is
-  not a module.
+  (`<path> leaves the module's directory`). It is staged in `.staging/`, checked (its
+  `module.json`), pruned to the files it installs (below), checked again (each plugin entry must be
+  among them: `its plugin entry src/p.ts is not there`), and replaces `<id>/`, whose version before
+  is kept as `.previous/<id>/`. The answer is `{id, version, previous?, left?}`, `left` the files
+  left out. 400 with why for what is not a module. Reinstalling an id is how a module is upgraded,
+  or reinstalled at the same version (versions are not always bumped), the version before one
+  rollback away.
+- **What a module installs** (`module-files.ts`): the files under its directory, but `.git` and
+  `node_modules` (never taken) and another module's directory nested in it. Of those, the ones its
+  `module.json`'s `files` globs name (§7.1), or, without `files`, all but its tests: `*.test.ts`,
+  `*.spec.ts` (and `.tsx`, `.js`, …), and the `test/`, `tests/`, `__tests__/` and `__snapshots__/`
+  directories at any depth, and its own top-level `vendor/`. Its `module.json` is always kept. A
+  module's runtime code is under `src/` (§7.1), which no plugin may import its tests from.
+- **Its source** is recorded at each install in `<data>/modules/.sources.json`, never in the
+  module's own files: `{"kind": "folder", "name"?}`, `{"kind": "tarball", "name"?}`,
+  `{"kind": "directory", "path"}` or
+  `{"kind": "github", "repo", "ref", "refType", "path", "commit", "commitDate"?}`, with when it was
+  installed (`installedAt`). The version kept for a rollback keeps its own, and a rollback swaps
+  them. A module installed before has none.
+- **The modules in a tree** (`POST /modules/plan`): a folder may be a module's or a repository's
+  root with several. Given its listing
+  (`{"paths": ["games/modules/dice/module.json", …], "manifests": {"<path>": "<its text>"}}`, the
+  `module.json` files' text only), it answers each module found: every `module.json` at any depth,
+  but under `.git`, `node_modules`, a `vendor/` directory (vendored copies, not the owner's) or a
+  test directory (fixtures). Each with its `path` in the tree, `id`, `version`, `description`, its
+  `status` against the version of its id installed (`new`; `update`, `same` or `older`, with the
+  version `installed`), the `files` it installs and those `left` out, by their paths in the tree; or
+  its `error`: its manifest refused (as `module.json: api: …`), a plugin entry missing or left out
+  by its `files`, its id found twice. Nothing is installed; the web UI then sends each module the
+  owner checks, with only its files.
+- **From GitHub** (`module-github.ts`, #13): `POST /modules/github {"url": "…"}` takes a public
+  repository's link: `https://github.com/<owner>/<repo>` (its default branch), `…/tree/<ref>` or
+  `…/tree/<ref>/<path>` (a branch, which may hold slashes, a tag, or a commit). The shell resolves
+  the ref to a commit through GitHub's API (`GET /repos/<repo>`, for the default branch;
+  `GET /repos/<repo>/commits?sha=<ref>&per_page=1`, the commit and its date; and
+  `GET /repos/<repo>/git/ref/tags/<ref>`, whether it is a tag), downloads the repository's tarball
+  at that commit from codeload (`https://codeload.github.com/<repo>/tar.gz/<commit>`, outside the
+  API's rate limit; the last two are kept in memory, so the installs that follow a look download
+  nothing), and finds its modules under the path as above:
+  `{"source": {"repo", "ref", "refType", "path", "commit", "commitDate"}, "modules": [ … ]}`. Each
+  module is then installed with `{"github": {…, "path": "<the module's>", "commit"}}`, from that
+  commit; without a `commit`, from the ref's head now. 404 for a repository, branch, tag or commit
+  not found (a private repository reads as not found: private sources are not supported), 429 for
+  GitHub's rate limit, 502 for GitHub unreachable or failing.
+- **Updates:** for the modules installed from GitHub, the shell checks at its start, every 6 hours,
+  and when the owner asks (`POST /modules/updates`, which answers the list): each branch's head once
+  (`commits?sha=<branch>`), however many modules follow it, and each repository's tags once
+  (`GET /repos/<repo>/tags`) for the modules installed from a tag. A module whose branch now names
+  another commit, or whose tag has a newer semver tag (`v1.2.3` or `1.2.3`; pre-releases only after
+  a pre-release), has an `update`: `{ref, commit, commitDate?, compare}`, `compare` GitHub's
+  comparison of the two commits. It is installed as any install (`POST /modules` with its `github`
+  source at the new commit and ref), never on its own; a module installed from a commit is pinned.
+- **GitHub's limits:** without a token, its API allows 60 requests an hour. When it refuses one (403
+  or 429, with `x-ratelimit-remaining: 0` or a `retry-after`), the shell makes no request to it
+  until the reset, and each call says until when; the check stops, and its `error` says so. A token
+  raises the limit: the `github_token` Docker secret, or `GITHUB_TOKEN` in the environment; neither
+  is needed. The image's Node reaches `api.github.com` and `codeload.github.com` over HTTPS with its
+  own certificate authorities; behind a proxy, set `HTTPS_PROXY` and `NODE_USE_ENV_PROXY=1`, which
+  Node 24 honours.
 - **Rollback** (`POST /modules/<id>/rollback`): `.previous/<id>/` and `<id>/` swap, so a second
   rollback goes forward again; 409 when there is no previous version.
-- **The list** (`GET /modules`): each module installed (its manifest, or why it does not read), the
-  version kept for a rollback (`previous`), the version the running instance loaded (`loaded`), the
-  modules it refused at its start with why (`failures`), and whether a restart would change what is
-  loaded (`restart`). `GET /available` lists the plugins the instance offers, each as the editor
-  adds a node of it (`describePlugin`, `PluginView`): its id, its module (none for the image's own),
-  version, description and kinds, its account, its input and output ports, its interface, the JSON
-  Schemas of its config and settings, the secrets it declares, the keys of its config that name one
-  (`configSecrets`), and the event types it registers.
+- **The list** (`GET /modules`): each module installed (its manifest, or why it does not read), its
+  `source` (above), the version kept for a rollback (`previous`), the version the running instance
+  loaded (`loaded`), its `update` if the last check found one, the modules it refused at its start
+  with why (`failures`), whether a restart would change what is loaded (`restart`), and the last
+  check for updates (`updates`: `checkedAt`, and its `error`). `GET /available` lists the plugins
+  the instance offers, each as the editor adds a node of it (`describePlugin`, `PluginView`): its
+  id, its module (none for the image's own), version, description and kinds, its account, its input
+  and output ports, its interface, the JSON Schemas of its config and settings, the secrets it
+  declares, the keys of its config that name one (`configSecrets`), and the event types it
+  registers.
 
 From the host, through the loopback: `docker cp dice/ megabottron1999:/tmp/dice`, then
 `docker exec megabottron1999 wget -qO- --header 'content-type: application/json' --post-data '{"dir":"/tmp/dice"}' http://127.0.0.1:8081/modules`,
-and restart it (`POST /restart`). The web UI's Modules page does the same: it lists them, installs
-one from its folder (**Choose folder**, or the folder dropped on the page: it reads the folder's
-`module.json` and shows its id, version and description for the owner to confirm, leaves out `.git`
-and `node_modules`, and sends the rest as `files`) or from an uploaded `.tar.gz` (sent as base64),
-rolls one back, and offers the restart.
+and restart it (`POST /restart`). The web UI's Modules page does the same: **Choose folder** (or a
+folder dropped on the page) or a GitHub link pasted lists the modules found as a checklist (each
+with its path, version and status, and its files left out; all checked but downgrades), installs
+those checked one by one, each on its own, and says how each went; it shows each module's source
+(linked to GitHub at its commit) and when it was installed, its update (**Update**, **Update all**,
+**Check for updates**), installs a `.tar.gz`, rolls one back, and offers the restart.
 
 ### 7.5 Developing a module against MegaBotTron1999
 
@@ -1621,8 +1685,12 @@ git -C vendor/MegaBotTron1999 checkout v0.1.0 && git add vendor/MegaBotTron1999
   and exits 1 if any is refused (`--installed [dir]` checks a modules' directory as it is). It
   catches what the workspaces allow and the instance does not: an npm package imported, a module not
   declared in `imports`.
-- **Shipping:** `git archive --prefix=dice/ -o dice.tar.gz HEAD:packages/dice` makes the tarball of
-  one module, for `POST /modules`.
+- **Shipping:** the owner installs from the repository's folder (its root: every module is found,
+  `vendor/` aside) or, for a public repository on GitHub, from its link, and updates from it (§7.4);
+  `git archive --prefix=dice/ -o dice.tar.gz HEAD:packages/dice` makes the tarball of one module. A
+  module's tests are left out of the install; one whose runtime needs other files than the defaults
+  keep lists them in its `module.json`'s `files` (§7.1), which an older shell than `v0.1.0-alpha.12`
+  refuses.
 
 Upgrading the shell is moving the submodule to a newer tag; a module that targets another plugin API
 than the instance's is refused at start, by name. Moving past the split of chat edges (bot-os.md

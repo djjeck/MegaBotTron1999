@@ -17,8 +17,9 @@ never their values.
 - `src/index.ts` is the public API (`@megabottron1999/core`); plugins import nothing else.
 - `src/devkit.ts`: a core on a virtual clock with fake connectors, for tests and simulators.
 - `src/modules.ts`, `src/module-loader.ts`, `src/module-resolve.ts`, `src/module-hooks.ts`,
-  `src/module-store.ts`: the modules of the data volume, their resolve hook, their loading, install
-  and rollback (docs/bot-os-api.md §7).
+  `src/module-store.ts`, `src/module-files.ts`, `src/module-github.ts`: the modules of the data
+  volume, their resolve hook, their loading, the modules a folder or a repository holds and the
+  files each installs, GitHub links and their updates, install and rollback (docs/bot-os-api.md §7).
 - `tools/modules.ts`: loads module directories as the instance does, for a module repository.
 - `src/react.ts`: `react()`, a reaction: when an event is heard or a message matches, send a command
   through the outbox (docs/bot-os-api.md §4.15).

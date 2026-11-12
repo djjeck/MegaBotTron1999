@@ -18,12 +18,15 @@ import {
   Core,
   CORE_STORE,
   CoreEventLog,
+  GitHub,
+  GitHubModules,
   GraphFile,
   graphFileControls,
   KEY_SECRET,
   LEGACY_DIR,
   LegacyImport,
   loadModules,
+  moduleControls,
   ModuleStore,
   type Plugin,
   Secrets,
@@ -84,7 +87,7 @@ const image: Plugin[] = [
 ];
 core.register(...image);
 // The modules (docs/bot-os-api.md §7): each one refused is named, with why, and the others load.
-const modules = new ModuleStore(path.join(dataDir, 'modules'));
+const modules = new ModuleStore(path.join(dataDir, 'modules'), () => clock.now());
 const loaded = await loadModules({
   dir: modules.dir,
   host: import.meta.url,
@@ -118,6 +121,22 @@ try {
 }
 await core.start();
 
+// Modules from GitHub links, checked for updates at the start and every 6 hours; only the owner
+// installs one (docs/bot-os.md D67). A token is optional: the `github_token` secret, or
+// `GITHUB_TOKEN`, raises the API's limit of 60 requests an hour.
+const GITHUB_TOKEN_SECRET = 'github_token';
+const githubToken = secrets.read(GITHUB_TOKEN_SECRET) ?? (env['GITHUB_TOKEN'] || undefined);
+if (githubToken !== undefined) secrets.remember(githubToken);
+const githubModules = new GitHubModules(
+  modules,
+  new GitHub({
+    ...(githubToken === undefined ? {} : { token: githubToken }),
+    now: () => clock.now(),
+  }),
+  () => clock.now()
+);
+githubModules.start();
+
 // The owner's control API (packages/core/src/control-server.ts): one handler, served on the
 // container's loopback, and under `/api/` by the web UI, only behind its login.
 const controlApi = controlHandler({
@@ -128,7 +147,10 @@ const controlApi = controlHandler({
   available: () => core.available(),
   // The names of the Docker secrets a connector's config may name, never their values; the UI's
   // password and the key of the stored secrets are the shell's own.
-  secrets: () => secrets.names().filter((n) => n !== 'web_ui_password' && n !== KEY_SECRET),
+  secrets: () =>
+    secrets
+      .names()
+      .filter((n) => n !== 'web_ui_password' && n !== KEY_SECRET && n !== GITHUB_TOKEN_SECRET),
   instances: () => core.instances(),
   graphFile: graphFileControls(graphFile, core, (v) => secrets.redactDeep(v)),
   restart: () => void end('restart'),
@@ -140,11 +162,7 @@ const controlApi = controlHandler({
     plugins: () => core.available().map((p) => p.id),
     eventTypes: () => core.available().flatMap((p) => p.events),
   }),
-  modules: {
-    report: () => modules.report(loaded),
-    install: (source) => modules.install(source),
-    rollback: (id) => modules.rollback(id),
-  },
+  modules: moduleControls(modules, loaded, githubModules),
 });
 const control = http.createServer(controlApi).listen(port('CONTROL_PORT', 8081), '127.0.0.1');
 // The web UI, on every interface for a reverse proxy, only with the owner's password (the
@@ -165,6 +183,7 @@ console.log(`megabottron1999: started, ${core.nodes().length} plugin instance(s)
 const end = shutdown({
   stop: () => core.stop(),
   close: () => {
+    githubModules.stop();
     control.close();
     web?.close();
   },

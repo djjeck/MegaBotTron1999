@@ -67,6 +67,15 @@
  *   browser gives them), or from the tarball itself as the body (`content-type: application/gzip`,
  *   `application/x-tar` or `application/octet-stream`); it is loaded at the next start. 400 with
  *   why for what is not a module.
+ *   `{"github": {"repo", "ref", "refType"?, "path", "commit"?}}` installs one module of a GitHub
+ *   repository at a commit (bot-os.md D67). A folder's or a tarball's may name it (`"name"`), as
+ *   its source.
+ * - `POST /modules/plan` with a tree's listing (`{"paths": [...], "manifests": {"<path>": "<text>"}}`,
+ *   as a folder picked gives it): the modules in it, each with its status against the one installed
+ *   and the files it would install and leave out.
+ * - `POST /modules/github {"url": "https://github.com/<owner>/<repo>[/tree/<ref>[/<path>]]"}`: the
+ *   link resolved to a commit, and the modules found in the repository's tarball there, as above.
+ * - `POST /modules/updates`: checks the GitHub sources for newer commits now, and answers the list.
  * - `POST /modules/<id>/rollback`: puts the previous version back (409 when there is none).
  *
  * Ids and names in a path may be URL-encoded.
@@ -80,6 +89,8 @@ import { type GraphFileControls, GraphFileError } from './graph-file.ts';
 import { describeNodes } from './graph-view.ts';
 import { type InstanceInfo } from './instance-registry.ts';
 import { LegacyError } from './legacy.ts';
+import { type TreeListing } from './module-files.ts';
+import { GitHubError, type GitHubPick } from './module-github.ts';
 import { type ModuleFile, type ModuleSource } from './module-store.ts';
 import { ModuleError } from './modules.ts';
 import { PORT_TYPE_INFO } from './ports.ts';
@@ -122,17 +133,63 @@ function moduleFiles(files: unknown[]): ModuleFile[] {
   });
 }
 
-/** What `POST /modules` installs from. */
-async function moduleSource(req: http.IncomingMessage): Promise<ModuleSource> {
+/** What `POST /modules` installs from: a module's source, or a module of a GitHub repository. */
+export type ModuleRequest = ModuleSource | { github: GitHubPick };
+
+/** A GitHub source's module, as `{"github": {…}}` names it. */
+function githubPick(g: unknown): GitHubPick {
+  const text = (key: string): string | undefined => {
+    const v = field(g, key);
+    return typeof v === 'string' ? v : undefined;
+  };
+  const refType = text('refType');
+  const repo = text('repo');
+  const ref = text('ref');
+  const commit = text('commit');
+  const commitDate = text('commitDate');
+  if (repo === undefined || ref === undefined)
+    throw new ModuleError('github: {"repo": "<owner>/<repo>", "ref", "path", "commit"?}');
+  return {
+    repo,
+    ref,
+    path: text('path') ?? '',
+    ...(refType === 'branch' || refType === 'tag' || refType === 'commit' ? { refType } : {}),
+    ...(commit === undefined ? {} : { commit }),
+    ...(commitDate === undefined ? {} : { commitDate }),
+  };
+}
+
+async function moduleSource(req: http.IncomingMessage): Promise<ModuleRequest> {
   if (TARBALL.test(req.headers['content-type'] ?? '')) return { tarball: await bytes(req) };
   const b = await body(req, Math.ceil(MAX_UPLOAD * 1.4));
   const dir = field(b, 'dir');
   const tarball = field(b, 'tarball');
   const files = field(b, 'files');
+  const github = field(b, 'github');
+  const name = field(b, 'name');
+  const named = typeof name === 'string' && name !== '' ? { name } : {};
   if (typeof dir === 'string') return { dir };
-  if (typeof tarball === 'string') return { tarball: Buffer.from(tarball, 'base64') };
-  if (Array.isArray(files)) return { files: moduleFiles(files) };
-  throw new ModuleError('give a dir, a tarball in base64, files, or the tarball as the body');
+  if (typeof tarball === 'string') return { tarball: Buffer.from(tarball, 'base64'), ...named };
+  if (Array.isArray(files)) return { files: moduleFiles(files), ...named };
+  if (typeof github === 'object' && github !== null) return { github: githubPick(github) };
+  throw new ModuleError(
+    'give a dir, a tarball in base64, files, a github module, or the tarball as the body'
+  );
+}
+
+/** A tree's listing, as `POST /modules/plan` takes it. */
+function treeListing(b: unknown): TreeListing {
+  const paths = field(b, 'paths');
+  const manifests = field(b, 'manifests');
+  if (
+    !Array.isArray(paths) ||
+    !paths.every((p) => typeof p === 'string') ||
+    typeof manifests !== 'object' ||
+    manifests === null ||
+    !Object.values(manifests).every((t) => typeof t === 'string')
+  )
+    throw new ModuleError('give {"paths": ["…"], "manifests": {"<path>": "<text>"}}');
+  return { paths: paths as string[], manifests: manifests as Record<string, string> };
 }
 
 /** The import from an older data directory (legacy.ts), as the wiring offers it. */
@@ -146,8 +203,15 @@ export interface LegacyControls {
 /** The owner's changes to the modules (module-store.ts), as the wiring offers them. */
 export interface ModuleControls {
   report(): unknown;
-  install(source: ModuleSource): unknown;
+  /** Installs one module; a GitHub one only when the wiring offers `lookup`. */
+  install(source: ModuleRequest): unknown;
   rollback(id: string): unknown;
+  /** The modules in a tree's listing (module-files.ts). */
+  plan?(listing: TreeListing): unknown;
+  /** A GitHub link's modules (module-github.ts). */
+  lookup?(url: string): Promise<unknown>;
+  /** Checks the GitHub sources for updates now, and answers the list. */
+  checkUpdates?(): Promise<unknown>;
 }
 
 const field = (v: unknown, key: string): unknown =>
@@ -327,11 +391,33 @@ export function controlHandler(
       if (!post && route === '/instances' && o.instances !== undefined)
         return reply(200, o.instances());
       const mods = o.modules;
-      if (mods !== undefined && route === '/modules') {
-        if (!post) return reply(200, mods.report());
+      const moduleRoutes: Record<string, (() => Promise<unknown>) | undefined> = {
+        'POST /modules': async () => mods?.install(await moduleSource(req)),
+        'POST /modules/plan':
+          mods?.plan === undefined
+            ? undefined
+            : async () => mods.plan?.(treeListing(await body(req))),
+        'POST /modules/github':
+          mods?.lookup === undefined
+            ? undefined
+            : async () => {
+                const url = field(await body(req), 'url');
+                if (typeof url !== 'string')
+                  throw new ModuleError('give {"url": "<a GitHub link>"}');
+                return mods.lookup?.(url);
+              },
+        'POST /modules/updates':
+          mods?.checkUpdates === undefined
+            ? undefined
+            : () => mods.checkUpdates?.() as Promise<unknown>,
+      };
+      const moduleRoute = post ? moduleRoutes[`POST ${route}`] : undefined;
+      if (mods !== undefined && route === '/modules' && !post) return reply(200, mods.report());
+      if (mods !== undefined && moduleRoute !== undefined) {
         try {
-          return reply(200, mods.install(await moduleSource(req)));
+          return reply(200, await moduleRoute());
         } catch (e) {
+          if (e instanceof GitHubError) return reply(e.status, { error: e.message });
           if (e instanceof ModuleError) return reply(400, { error: e.message });
           throw e;
         }

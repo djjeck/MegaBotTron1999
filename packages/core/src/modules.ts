@@ -48,6 +48,21 @@ export const moduleManifestSchema = z.strictObject({
         )
     )
     .default([]),
+  /**
+   * What it installs, as globs from its directory (`*`, `**`, `?`; a directory names all under it);
+   * by default all but its tests (module-files.ts). Its `module.json` is always installed.
+   */
+  files: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .refine(
+          (p) => !p.startsWith('/') && !p.split(/[\\/]/u).includes('..'),
+          'a glob inside the module'
+        )
+    )
+    .optional(),
 });
 
 export type ModuleManifest = z.infer<typeof moduleManifestSchema>;

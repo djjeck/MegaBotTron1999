@@ -53,27 +53,39 @@ the server that guards them.
   box) and **Kill selected** kills each: its plugin's own safety stop, then stopped, kept across
   restarts; a stopped node's panel has **Clear stop**, a change of the draft that Review lists and
   Apply makes (`clear-stop`, then the restart), and its forms stay editable. Nodes start in columns
-  (`layout.ts`) and can be moved. **Modules** (`#/modules`) lists the modules installed, installs
-  one from its folder, chosen (**Choose folder**) or dropped on the page, after showing the id,
-  version and description its `module.json` gives (`src/ui/module-folder.ts`), or from a `.tar.gz`,
-  and rolls one back; **Import** (`#/import`) shows an older data directory and imports its event
-  log with a table of type renames. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`,
-  docs/bot-os.md D59) has one section per area, each reached by its route (`#/instance`,
-  `#/graph-history`, `#/graph-text`, `#/accounts`, `#/plugins`), which opens the page scrolled to
-  it: **Instance** (on or off with its switch, uptime, memory, the plugins and accounts by state,
-  the kill switch), **Graph history** (`GraphHistoryPage.tsx`, docs/bot-os.md D61: each version of
-  the saved graph, newest first, with its time, what changed and how the instance started on it, the
-  last that ran marked "last good"; one opened shows what rolling back to it would change, as the
-  review's diff (**Changes**) and as a line diff of the two printouts (**As text**), and **Roll back
-  to this** asks, repeating the diff, then restarts on it), **Graph as text** (the saved graph
-  printed, with a copy button), **Accounts** (each connector, its account and its connection's
-  status) and **Plugins** (each plugin instance with its state, read-only (its reason and its stop),
-  and, opened, its settings, its own status and the reads and actions it declares). Beside it,
-  **Drift** (each parser's counts and the latest reports) and **Events** (the event log's latest
-  records, filtered by type). Every page reads the control API only; the app imports the core's
-  types and nothing else of it, so its bundle holds none of the shell's code. All the pages are in
-  one menu, with no admin part apart: the whole app is the owner's console. A page is a line of
-  `PAGES` in `src/ui/App.tsx`.
+  (`layout.ts`) and can be moved. **Modules** (`#/modules`, `ModulesPage.tsx`, docs/bot-os.md D67)
+  lists the modules installed, each with its version, its source (a folder upload, a tarball, or a
+  GitHub repository linked at its commit) and when it was installed. It installs modules from a
+  folder, chosen (**Choose folder**) or dropped on the page, or from a public GitHub link
+  (`https://github.com/<owner>/<repo>` or `…/tree/<ref>/<path>`): a module's own folder or a
+  repository's that holds several. The folder's paths and its `module.json` files go to
+  `POST /modules/plan` (`src/ui/module-folder.ts`), a link to `POST /modules/github`; the modules
+  found, but those under `vendor/`, are a checklist (`ModuleChecklist.tsx`): each with its path,
+  version, status against the one installed (`new`, `update x → y`, `same version`, `older x → y`),
+  its files and those left out (its tests, unless its `module.json` lists `files`), all checked but
+  downgrades and those refused. **Install** sends each checked module on its own (a folder's files,
+  only that module's, as base64; a GitHub module as its source at the commit looked up), with its
+  progress, and lists how each went; the restart is then offered once. A module from GitHub with a
+  newer commit (the shell checks every 6 hours, or **Check for updates**) says `update available`
+  with the commit and its date, linked to GitHub's comparison, and **Update** or **Update all**
+  installs it. It also installs a `.tar.gz` and rolls a module back; **Import** (`#/import`) shows
+  an older data directory and imports its event log with a table of type renames. **Admin**
+  (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59) has one section per area, each
+  reached by its route (`#/instance`, `#/graph-history`, `#/graph-text`, `#/accounts`, `#/plugins`),
+  which opens the page scrolled to it: **Instance** (on or off with its switch, uptime, memory, the
+  plugins and accounts by state, the kill switch), **Graph history** (`GraphHistoryPage.tsx`,
+  docs/bot-os.md D61: each version of the saved graph, newest first, with its time, what changed and
+  how the instance started on it, the last that ran marked "last good"; one opened shows what
+  rolling back to it would change, as the review's diff (**Changes**) and as a line diff of the two
+  printouts (**As text**), and **Roll back to this** asks, repeating the diff, then restarts on it),
+  **Graph as text** (the saved graph printed, with a copy button), **Accounts** (each connector, its
+  account and its connection's status) and **Plugins** (each plugin instance with its state,
+  read-only (its reason and its stop), and, opened, its settings, its own status and the reads and
+  actions it declares). Beside it, **Drift** (each parser's counts and the latest reports) and
+  **Events** (the event log's latest records, filtered by type). Every page reads the control API
+  only; the app imports the core's types and nothing else of it, so its bundle holds none of the
+  shell's code. All the pages are in one menu, with no admin part apart: the whole app is the
+  owner's console. A page is a line of `PAGES` in `src/ui/App.tsx`.
 - `src/server/web-server.ts`: the UI's own listener. It serves the built app, and the core's control
   API (`controlHandler` of `@megabottron1999/core`) under `/api/`, only to a logged-in owner.
   `startWebUi` starts it only when the `web_ui_password` Docker secret is provided (12 characters at

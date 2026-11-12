@@ -47,17 +47,22 @@ a new instance starts empty, and offers to add its first node, a connector. Add 
 plugins the image and the modules offer, wire its ports, set its config, then review the changes and
 click **Apply**, which saves them and restarts the instance (the page waits for it and comes back by
 itself; the login lasts 30 days, across restarts), or **Revert** to drop them. A module (a game, an
-automation) is a folder holding a `module.json`: get that folder onto your computer (clone its
-repository, or download it as a ZIP from GitHub and unzip it), open the Modules page, click **Choose
-folder** (or drop the folder on the page), pick the module's own folder (for example
-`modules/dice/`, not the whole repository), check the id and version it shows, install it, then
-click **Apply (restart)** to load it. The Modules page also installs a `.tar.gz` and rolls a module
-back to its previous version; the Import page brings in an older data directory's event log
-([docs/bot-os.md](docs/bot-os.md) D55); the Admin page shows the instance (with its off and kill
-switches), the graph's history (each version applied in the last 7 days, what changed, whether the
-instance started on it, and a rollback to it) and the graph as text, its accounts and their
-connections, and its plugins with their states (D59, D61, D64). In a real deployment, use Docker or
-Compose secrets, and put the UI behind a reverse proxy with HTTPS rather than publishing the port.
+automation) is a folder holding a `module.json`. On the Modules page, paste a public repository's
+GitHub link (`https://github.com/<owner>/<repo>`, or a folder's `…/tree/<ref>/<path>`), or click
+**Choose folder** (or drop a folder on the page) and pick a clone or an unzipped download: a
+module's own folder, or a repository's root that holds several. The page lists every module found
+(but those under `vendor/`), each with its version and whether it is new, an update, the same
+version or older; check those to install, install them, then click **Apply (restart)** to load them.
+A module's tests are left out. One installed from GitHub shows its commit, and the page says when
+its branch has a newer one (checked every 6 hours, or with **Check for updates**); **Update**
+installs it. Nothing is installed or restarted but by you. The Modules page also installs a
+`.tar.gz` and rolls a module back to its previous version; the Import page brings in an older data
+directory's event log ([docs/bot-os.md](docs/bot-os.md) D55); the Admin page shows the instance
+(with its off and kill switches), the graph's history (each version applied in the last 7 days, what
+changed, whether the instance started on it, and a rollback to it) and the graph as text, its
+accounts and their connections, and its plugins with their states (D59, D61, D64). In a real
+deployment, use Docker or Compose secrets, and put the UI behind a reverse proxy with HTTPS rather
+than publishing the port.
 
 - **`/data`** is the instance's state: the graph (`graph.json`, and its versions in
   `graph-history/`), each plugin instance's state (`instances/<id>/`), the core's own (`core/`), the
@@ -69,7 +74,10 @@ Compose secrets, and put the UI behind a reverse proxy with HTTPS rather than pu
 - **Secrets** are files under `/run/secrets`, never environment variables: `web_ui_password` (the
   web UI's login; without it there is no UI at all), `bot_os_key` (to encrypt the secrets the core
   stores), and each connector's own (`znc_password`, `telegram_bot_token`, `telegram_user_api_id`,
-  `telegram_user_api_hash`, `telegram_user_session`, `anthropic_api_key`).
+  `telegram_user_api_hash`, `telegram_user_session`, `anthropic_api_key`). Optional, `github_token`
+  (a GitHub token, to raise the API's limit of 60 requests an hour for installing and updating
+  modules from GitHub links; `GITHUB_TOKEN` in the environment is read too, though the secret is the
+  safer place).
 - **An older data directory** (a deployment of before v1) can be mounted read-only at `/legacy`
   (`LEGACY_DIR`) to import its plugins' stores and its event log through the control API
   ([docs/bot-os-api.md](docs/bot-os-api.md) §8).
@@ -143,10 +151,10 @@ export const greeter = definePlugin({
   fake connectors, for tests and simulators.
 
 Games and their automation come as _modules_ in the data volume (`/data/modules/<id>/`, a directory
-of `.ts` files and a `module.json`), installed by the owner through the control API (the previous
-version kept for a rollback) and loaded at start ([docs/bot-os.md](docs/bot-os.md) D49, D53). A
-module repository develops and tests against this one vendored as a git submodule
-([docs/bot-os-api.md](docs/bot-os-api.md) §7). The full API is
+of `.ts` files and a `module.json`), installed by the owner through the control API (from a folder,
+a tarball or a GitHub link, the previous version kept for a rollback) and loaded at start
+([docs/bot-os.md](docs/bot-os.md) D49, D53, D67). A module repository develops and tests against
+this one vendored as a git submodule ([docs/bot-os-api.md](docs/bot-os-api.md) §7). The full API is
 [docs/bot-os-api.md](docs/bot-os-api.md).
 
 ## Layout

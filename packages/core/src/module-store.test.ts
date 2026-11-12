@@ -220,6 +220,7 @@ describe('the modules’ report', () => {
         imports: {},
         plugins: [],
         previous: '0.1.0',
+        source: expect.objectContaining({ kind: 'directory' }) as unknown,
       },
     ]);
     expect(report.failures).toEqual(load.failures);
@@ -229,5 +230,127 @@ describe('the modules’ report', () => {
     expect(store.report(load).restart).toBe(false);
     fs.rmSync(path.join(store.dir, 'cards'), { recursive: true });
     expect(store.report(load).restart).toBe(true);
+  });
+});
+
+describe('what an install keeps', () => {
+  it('leaves out the tests, or keeps what the files globs name, and says how many', () => {
+    const store = new ModuleStore(tempDir());
+    const from = source('dice', '0.1.0', {
+      'src/roll.ts': '',
+      'src/roll.test.ts': '',
+      'test/helpers.ts': '',
+      'README.md': '',
+    });
+    expect(store.install({ dir: from })).toEqual({ id: 'dice', version: '0.1.0', left: 2 });
+    expect(fs.readdirSync(path.join(store.dir, 'dice')).sort()).toEqual([
+      'README.md',
+      'module.json',
+      'src',
+    ]);
+    const globbed = writeModule(
+      tempDir(),
+      'cards',
+      manifestOf('cards', { files: ['src/**/*.ts'] }),
+      {
+        'src/a.ts': '',
+        'src/a.test.ts': '',
+        'notes.md': '',
+      }
+    );
+    expect(store.install({ dir: globbed })).toMatchObject({ left: 1 });
+    expect(fs.existsSync(path.join(store.dir, 'cards', 'src', 'a.test.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(store.dir, 'cards', 'notes.md'))).toBe(false);
+  });
+
+  it('refuses a module whose plugin entry is not among its files', () => {
+    const store = new ModuleStore(tempDir());
+    const from = writeModule(
+      tempDir(),
+      'dice',
+      manifestOf('dice', { plugins: ['src/p.test.ts'] }),
+      {
+        'src/p.test.ts': '',
+      }
+    );
+    expect(() => store.install({ dir: from })).toThrow(
+      'its plugin entry src/p.test.ts is not there'
+    );
+    expect(fs.existsSync(path.join(store.dir, 'dice'))).toBe(false);
+  });
+});
+
+describe('a module’s source', () => {
+  it('is recorded at each install, with its time, and swapped by a rollback', () => {
+    let now = Date.parse('2026-11-12T10:00:00Z');
+    const store = new ModuleStore(tempDir(), () => now);
+    const tarball = (v: string) =>
+      zlib.gzipSync(
+        tarOf([{ name: 'module.json', data: JSON.stringify(manifestOf('dice', { version: v })) }])
+      );
+    store.install({ tarball: tarball('0.1.0'), name: 'dice.tar.gz' });
+    now += 60_000;
+    store.install({
+      files: [
+        {
+          path: 'module.json',
+          content: Buffer.from(JSON.stringify(manifestOf('dice', { version: '0.2.0' }))),
+        },
+      ],
+      name: 'games/dice',
+    });
+    const first = { kind: 'tarball', name: 'dice.tar.gz', installedAt: '2026-11-12T10:00:00.000Z' };
+    const second = { kind: 'folder', name: 'games/dice', installedAt: '2026-11-12T10:01:00.000Z' };
+    expect(store.sources()).toEqual({ dice: { current: second, previous: first } });
+    expect(store.report().installed[0]?.source).toEqual(second);
+    store.rollback('dice');
+    expect(store.sources()).toEqual({ dice: { current: first, previous: second } });
+    // A module with no record, as before D67: none shown, and a rollback leaves the file alone.
+    writeModule(store.dir, 'old', manifestOf('old'));
+    writeModule(path.join(store.dir, '.previous'), 'old', manifestOf('old', { version: '0.0.1' }));
+    store.rollback('old');
+    expect(store.report().installed.find((m) => m.id === 'old')).not.toHaveProperty('source');
+    // The first install of an id has no previous record, even with one of a module removed by hand.
+    fs.rmSync(path.join(store.dir, 'dice'), { recursive: true });
+    store.install({ tarball: tarball('0.3.0') });
+    expect(store.sources()['dice']).toEqual({
+      current: { kind: 'tarball', installedAt: '2026-11-12T10:01:00.000Z' },
+    });
+  });
+
+  it('reads as none from a file that is not a record', () => {
+    const store = new ModuleStore(tempDir());
+    fs.mkdirSync(store.dir, { recursive: true });
+    fs.writeFileSync(path.join(store.dir, '.sources.json'), '[1]');
+    expect(store.sources()).toEqual({});
+    fs.writeFileSync(path.join(store.dir, '.sources.json'), '{ not json');
+    expect(store.sources()).toEqual({});
+    store.install({ dir: source('dice', '0.1.0') });
+    expect(Object.keys(store.sources())).toEqual(['dice']);
+  });
+});
+
+describe('a tree’s modules', () => {
+  it('are compared with those installed', () => {
+    const store = new ModuleStore(tempDir());
+    store.install({ dir: source('dice', '0.2.0') });
+    writeModule(store.dir, 'broken', '{');
+    const m = (id: string, v: string) => JSON.stringify(manifestOf(id, { version: v }));
+    expect(
+      store
+        .plan({
+          paths: ['repo/a/module.json', 'repo/b/module.json', 'repo/c/module.json'],
+          manifests: {
+            'repo/a/module.json': m('dice', '0.1.0'),
+            'repo/b/module.json': m('broken', '1.0.0'),
+            'repo/c/module.json': m('cards', '1.0.0'),
+          },
+        })
+        .map((c) => [c.id, c.status, c.installed])
+    ).toEqual([
+      ['dice', 'older', '0.2.0'],
+      ['broken', 'new', undefined],
+      ['cards', 'new', undefined],
+    ]);
   });
 });

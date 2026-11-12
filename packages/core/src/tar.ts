@@ -61,11 +61,22 @@ function safePath(name: string): string {
   return rel;
 }
 
-/** Unpacks `archive` (a .tar or a .tar.gz) into `dest`, which it creates. */
-export function extractTar(archive: Uint8Array, dest: string): void {
+/** A member of a tarball: its path inside the archive's root, its type flag, and its bytes. */
+export interface TarEntry {
+  path: string;
+  /** `0` a file, `5` a directory, anything else (a link, a device) as tar writes it. */
+  type: string;
+  data: Uint8Array;
+}
+
+/**
+ * The members of `archive` (a .tar or a .tar.gz), in order, each path checked to stay inside the
+ * archive's root (else it throws); the root itself and macOS's `._name` metadata are left out.
+ */
+export function readTar(archive: Uint8Array): TarEntry[] {
   const gzipped = archive[0] === 0x1f && archive[1] === 0x8b;
   const tar = gzipped ? zlib.gunzipSync(archive, { maxOutputLength: MAX_UNPACKED }) : archive;
-  fs.mkdirSync(dest, { recursive: true });
+  const out: TarEntry[] = [];
   let at = 0;
   let longName: string | undefined;
   while (at + BLOCK <= tar.length) {
@@ -92,11 +103,20 @@ export function extractTar(archive: Uint8Array, dest: string): void {
     const rel = safePath(name);
     // macOS's tar adds its metadata as `._name` files.
     if (rel === '' || path.posix.basename(rel).startsWith('._')) continue;
-    const target = path.join(dest, ...rel.split('/'));
-    if (type === '5') fs.mkdirSync(target, { recursive: true });
-    else if (type === '0' || type === '\0' || type === '7') {
+    out.push({ path: rel, type: type === '\0' || type === '7' ? '0' : type, data });
+  }
+  return out;
+}
+
+/** Unpacks `archive` (a .tar or a .tar.gz) into `dest`, which it creates. */
+export function extractTar(archive: Uint8Array, dest: string): void {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of readTar(archive)) {
+    const target = path.join(dest, ...entry.path.split('/'));
+    if (entry.type === '5') fs.mkdirSync(target, { recursive: true });
+    else if (entry.type === '0') {
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, data);
-    } else throw new Error(`tar: ${name} is not a file or a directory (type ${type})`);
+      fs.writeFileSync(target, entry.data);
+    } else throw new Error(`tar: ${entry.path} is not a file or a directory (type ${entry.type})`);
   }
 }
