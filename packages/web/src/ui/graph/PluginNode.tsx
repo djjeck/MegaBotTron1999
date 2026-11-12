@@ -7,7 +7,7 @@
  * running (added, or not applied yet). An edge is dragged from an output to an input; a node or a
  * port the check refuses is marked, with why. A connector is drawn as two cards, its in card and
  * its out card (`cards.ts`, D60): each is titled with its side, and shows itself selected while
- * its twin is.
+ * its twin is. A node that keeps a state (D72) shows a line of it, from its pins.
  */
 import type { Node, NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
@@ -150,7 +150,13 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
             </span>
           )}
         </div>
-        {state.why === undefined || state.badge === 'not running' ? null : (
+        {state.why === undefined || state.badge === 'not running' ? (
+          live?.summary === undefined ? null : (
+            <div className="state-summary small" title={live.summary}>
+              {live.summary}
+            </div>
+          )
+        ) : (
           <div className="state-why small" title={state.why}>
             {state.why}
           </div>

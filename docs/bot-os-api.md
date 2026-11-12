@@ -82,7 +82,10 @@ wiring's objects are put in force by the wiring (`settings.serve`, `putInForce`)
 interface input to it (§2.1). The load checks each member: the other plugin must be there and
 declare the member in its manifest's `interface`; anything else is an error of the deployment.
 `ctx.use(port)` hands over only the members used, as the other's instance offers them, once the
-other is running.
+other is running. A read may declare an `input`, a zod object whose fields are its arguments
+(bot-os.md D72): its function is called with it (`state.get({ path: 'inventory.items' })`), the
+owner's controls parse it against the schema, and the control API takes it from the query
+(`GET /plugins/<id>/state/get?path=inventory.items`); a read without one is called with none.
 
 **Chat commands (P11).** A command of `interface.commands` has its `help` (the owner's words: the
 owner's menu, the UI, the agents), its `args`, its `aliases` (other names it answers to, in no menu)
@@ -547,9 +550,10 @@ interface Instance {
   onTimer?(name: string, payload: unknown): void; // §4.3
   settings?: { apply(key, value): void; read(key): SettingValue }; // its own in force (§2)
   interface?: {
-    state?: Record<string, () => unknown>;
+    state?: Record<string, (input?) => unknown>; // a read's input, if it declares one (§2)
     actions?: Record<string, Function>;
   };
+  view?: { read(): StateView; summary?(): string | undefined }; // the state it keeps (§4.11)
   connector?: Connector; // a connector plugin's (§4.5)
   surface?: ChatSurface; // a connector's chat surface (§2)
 }
@@ -566,7 +570,10 @@ interface PluginContext<Config, Settings> {
   id: string;
   log: Logger; // stdout, prefixed with the id, secrets redacted (§4.9)
   record(type: string, fields: object): void; // to the event log (§4.4), with its instance
-  events: { read(query?: EventQuery): LogEntry[] }; // the log read back, its instance's (§4.4)
+  events: {
+    read(query?: EventQuery): LogEntry[]; // the log read back, its instance's (§4.4)
+    after(cursor: LogCursor, options?: { types? }): LogTail; // what was written after a cursor
+  };
   clock: Clock; // now(), and timers; virtual in tests and simulators
   store: Store; // §4.2
   scheduler: Scheduler; // §4.3
@@ -688,6 +695,8 @@ wake.
   the namespaces of its events inputs, from the instances their edges bind, and its own (§2.1).
   Handlers run in order of subscription, synchronously: a message has reached every consumer before
   the next one is read. It returns the way to stop; a plugin that fails or stops is unsubscribed.
+  The handler gets, with the event, where the log put it (`at`, a `LogPosition`, below; undefined
+  without a log).
 - Every event published is written to the event log, as `{ type, t, instance, ...payload }`, one
   JSON line per record in a file per UTC day (`packages/core/src/event-log.ts`); `instance` is the
   instance whose state the publishing node runs on (§2.2). `type`, `t` and `instance` are the
@@ -712,6 +721,22 @@ wake.
   other's. `all: true` reads every instance's. A record with no `instance` (imported from an older
   log, §8, or written before records carried one) belongs to no instance, and every reader of its
   namespace reads it.
+
+**A cursor into the log** (bot-os.md D72), for a reader that resumes where it left the log (the
+state plugins, §5). A record goes to the file of its own time's UTC day, so one of an old time (a
+missed message, published late) is appended to an old day's file, and no single count orders the
+log. A place in it is a day's: `LogPosition` is `{ day: '2026-11-12', end }`, `end` the file's
+length with the record (bytes; records in the dev kit's log in memory), as the log's `write` returns
+it and the bus hands it to each subscriber. A `LogCursor` is `{ "<day>": <length read> }` for each
+day file: a record whose `end` is at most its day's length is behind it, and a day it does not name
+is read from its start. `ctx.events.after(cursor, { types? })` gives what was written after the
+cursor (`{ entries: [{ entry, at }], cursor }`): each day's file from the cursor, whole lines only
+(a line a crash cut short is passed; the log starts its next write on a new line), in the order
+written, the days merged by time; filtered as `read` filters (its types or namespaces, its
+instances); and the cursor past everything read, kept or not. Files only grow, so a cursor stays
+true across restarts; a file found shorter than it (a backup put back) is not read again. A reader
+that subscribes and reads after its cursor in one synchronous step misses nothing and reads nothing
+twice: what was published before is in the log, what comes after is heard live.
 
 Two plugins registering one type is an error of the deployment; two instances of one plugin share
 its types, and each subscriber hears only the instances its edges bind. A subscriber that throws is
@@ -968,8 +993,9 @@ control API, the web UI and later the agents, whose grants will be subsets of it
 - **Each plugin:** its state (bot-os.md D64, §2.1: `running`; `disabled`; `stopped`, with its
   `stop`, `{ reason, time, source }`; `inactive`, its `reason` the node it needs,
   `needs tg (disabled)`; `failed` with why), its settings with the values in force, the names of the
-  reads and actions its `interface` declares, and its own account of itself if it declares a read
-  named `status`.
+  reads and actions its `interface` declares, its own account of itself if it declares a read named
+  `status`, and, if it keeps a state (its instance's `view`, bot-os.md D72), one line of it
+  (`summary`), for its card.
 - **The owner's changes:** a declared read (`read`) and a declared action (`act`), whose input is
   checked against the action's schema (an error names the field) and which the plugin refuses by
   throwing, with why; a node's stop cleared (`clearStop`), for the next start. No control raises a
@@ -1012,18 +1038,21 @@ connected, 404 for a node that is not a connector); `GET /drift`;
 `GET /events?limit=100&type=<prefix>&hours=24` (the event log's latest records, newest first);
 `POST /off`, `/on`, `/kill`; `GET` and `POST /settings`; `GET /graph` and `GET /graph/view` (§4.12);
 `POST /plugins/<id>/kill` and `POST /plugins/<id>/clear-stop` (409 with why when refused, such as
-`actor is not stopped`); `GET /plugins/<id>/state/<name>`; `POST /plugins/<id>/actions/<name>`, the
-body the action's input (400 for an input refused by its schema, 409 for the plugin's refusal);
-`GET /instances` (§2.2); `GET /graph/file`, `POST /graph/check`, `PUT /graph/file`,
-`GET /graph/history`, `GET /graph/history/<id>`, `POST /graph/history/<id>/rollback`,
-`POST /graph/rollback` and `POST /restart` (§2.3); `GET /legacy`, `GET /legacy/events`,
-`POST /instances/import` and `POST /legacy/events/import` (§8); `GET /available`, `GET /modules`,
-`POST /modules`, `POST /modules/plan`, `POST /modules/github`, `POST /modules/updates`,
-`POST /modules/<id>/rollback` and `DELETE /modules/<id>` (§7.4); `GET /secrets`, the names of the
-Docker secrets provided, never their values, for a connector's config to name (§4.9; the wiring
-leaves out `web_ui_password`, `bot_os_key` and `github_token`, the shell's own). Ids and names in a
-path may be URL-encoded. The control API is the owner's alone: no agent is ever given it (P11), so
-no agent installs a module (P1).
+`actor is not stopped`); `GET /plugins/<id>/state/<name>?<field>=<value>` (a read, its input the
+query's fields, §2); `GET /plugins/<id>/view` (the state a node keeps, read only, D72:
+`{ schema, state, updatedAt?, freshness?, pin? }`, its schema a JSON Schema; 404 for a node that
+keeps none, 409 for one not running); `POST /plugins/<id>/actions/<name>`, the body the action's
+input (400 for an input refused by its schema, 409 for the plugin's refusal); `GET /instances`
+(§2.2); `GET /graph/file`, `POST /graph/check`, `PUT /graph/file`, `GET /graph/history`,
+`GET /graph/history/<id>`, `POST /graph/history/<id>/rollback`, `POST /graph/rollback` and
+`POST /restart` (§2.3); `GET /legacy`, `GET /legacy/events`, `POST /instances/import` and
+`POST /legacy/events/import` (§8); `GET /available`, `GET /modules`, `POST /modules`,
+`POST /modules/plan`, `POST /modules/github`, `POST /modules/updates`, `POST /modules/<id>/rollback`
+and `DELETE /modules/<id>` (§7.4); `GET /secrets`, the names of the Docker secrets provided, never
+their values, for a connector's config to name (§4.9; the wiring leaves out `web_ui_password`,
+`bot_os_key` and `github_token`, the shell's own). Ids and names in a path may be URL-encoded. The
+control API is the owner's alone: no agent is ever given it (P11), so no agent installs a module
+(P1).
 
 **The web UI's login** (`packages/web/src/server/auth.ts`, bot-os.md D45): one password, the
 `web_ui_password` secret; a session is a random token in an `HttpOnly`, `SameSite=Strict` cookie
@@ -1295,6 +1324,7 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
 | (turn parsers)  | parser    | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives     |
 | `turn-actor`    | actor     | `@megabottron1999/turns`      | One game bot's turns, at a person's pace, run as one instance per bot                            |
 | `reactor`       | actor     | `@megabottron1999/turns`      | One reaction (§4.15) from its config: a command sent when an event is heard or a message matches |
+| (states)        | stats     | `@megabottron1999/turns`      | `statePlugin`: a game's player state, kept from its parsers' events, from a spec a game gives    |
 
 - **`irc`** (`packages/connectors/src/plugins/irc.ts`, on the IRC client of
   `packages/connectors/src/transport/irc-client.ts`): one IRC account through ZNC, its configuration
@@ -1426,6 +1456,79 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
     ]
   }
   ```
+
+- **`statePlugin`** (`packages/turns/src/state-plugin.ts`, bot-os.md D72): a game's player state (an
+  inventory, a profile), kept by the shell from the events its parsers publish, one plugin per
+  state, made from a spec a game gives, as a turn parser is. It never sends: acquiring a piece of
+  state is the acting nodes' job, through their outbox's queue (§4.6).
+
+  ```ts
+  import { statePlugin } from '@megabottron1999/turns/state-plugin.ts';
+
+  const Item = z.object({ name: z.string().describe('Item'), count: z.number().describe('Count') });
+  export const questState = statePlugin({
+    id: 'quest-state',
+    description: "The player's inventory at @QuestBot",
+    schema: z.object({
+      inventory: z
+        .object({ items: z.array(Item).describe('Items'), gold: z.number().describe('Gold') })
+        .describe('Inventory'),
+    }),
+    initial: { inventory: { items: [], gold: 0 } },
+    consumes: ['quest.inventory', 'quest.gain'],
+    reduce: (state, event) => /* the next state, pure */ state,
+    freshness: (event, changed) =>
+      event.type === 'quest.inventory' ? { inventory: 'snapshot' } : { inventory: 'delta' },
+    queries: {
+      count: {
+        help: 'How many of an item',
+        input: z.object({ name: z.string() }),
+        output: z.number(),
+        run: (state, { name }) => state.inventory.items.find((i) => i.name === name)?.count ?? 0,
+      },
+    },
+  });
+  ```
+
+  - **The spec:** `schema`, a zod object whose keys are the state's **sections**, each value
+    `.describe()`d (the viewer's labels); `initial`; `consumes`, the event types it applies, heard
+    through an optional events input per namespace (`events`, or `<ns>-events` for several), so it
+    runs, on its log, with its parser disabled; `reduce(state, event)`, pure;
+    `freshness(event, changed)`, what the event says of the sections it touches (`snapshot`, `delta`
+    or `uncertain`; by default each section it changed a `delta`); `queries`, reads of its interface
+    beside `get` and `freshness`; and `migrations` (§4.2) for a kept state whose schema changed (one
+    that does not fit fails the node, with why). Its kind is `stats`; its namespace is its id.
+  - **Kept** in its store, one document, `state`:
+    `{ state, updatedAt, cursor, freshness, batch, unannounced }`. **Freshness** per section:
+    `{ snapshot?: { t, event }, deltas, uncertain, updated?: { t, event } }`, "a full snapshot at T,
+    plus 3 deltas since, 1 of them uncertain"; a snapshot sets `deltas` and `uncertain` back to 0.
+  - **Exactly once** (§4.4, a cursor into the log): at start it subscribes to its namespaces and
+    reads the log after its cursor in one synchronous step, and applies what it finds of its types,
+    in the log's order; then each event live. Each day's cursor moves to the furthest event applied,
+    and the state and the cursor are written together once the bus's delivery is over (a microtask):
+    an event published while another is delivered reaches it first, so the cursor passes the other
+    until it is applied too. A crash before the write: the next start reads both from the log again.
+    A fresh instance reads the whole log. An event the reducer throws on, or whose result the schema
+    refuses, leaves the state as it was, is passed (the cursor moves past it) and recorded
+    (`<id>.refused`, with why), never retried.
+  - **Announced** after the write: each applied event that changed a section's value or freshness as
+    `<id>.changed`, `{ sections, refreshed, event: { type, t } }`; a catch-up at start as one, its
+    sections summed, with no event. A crash between the write and the announcement: the batch kept
+    with the state is announced at the next start (a note, `announced`, says the last done), so a
+    change is announced at least once, and never lost.
+  - **Its interface:** `state.get({ path? })` (the state, or the value at a dotted path: a copy),
+    `state.freshness({ section? })` and the spec's queries (each given a copy of the state), each
+    with its `help` and schemas, which the panel lists (bot-os.md D71).
+  - **Its node's config:** `pin`, dotted paths of the state (each checked against the schema) drawn
+    first in its panel; the first two make the line on its card (`2 Items · Gold: 40`: a list or a
+    map counted, a value shown, each by its schema's description).
+  - **Its view** (§4.11): `GET /plugins/<id>/view` gives its state with the schema as a JSON Schema,
+    its freshness and its pins; the node panel's **State** section draws it with no renderer of any
+    game's (`packages/web/src/ui/graph/StateViewer.tsx`): a list of objects as a table whose columns
+    are the items' properties, sorted by a click on a column's head and searched across its cells; a
+    map (a record) as a table of keys and values; an object as a section that folds; a list of plain
+    values on a line; a plain value as a line labelled by its description; each section with its
+    freshness in words.
 
 ## 6. Boundaries
 

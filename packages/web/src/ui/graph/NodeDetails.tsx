@@ -8,7 +8,8 @@
  * says why, when and by what, with **Clear stop**, a change of the draft that Apply makes; a
  * running one can be killed (D44). Its forms stay editable whatever its state. Its group (D69),
  * the lane it is drawn in, is picked among the draft's, or named anew. Its outputs say what they
- * carry (D71): an events output its event types, an interface output its members.
+ * carry (D71): an events output its event types, an interface output its members. A node up that
+ * keeps a state (D72) shows it, drawn from its schema.
  */
 import { useState } from 'react';
 import type {
@@ -27,6 +28,7 @@ import { withDefaults } from './defaults.ts';
 import { instanceOf } from './draft.ts';
 import { SchemaForm } from './SchemaForm.tsx';
 import { signature } from './signature.ts';
+import { NodeState } from './StateViewer.tsx';
 import { CHATS_KEY, MonitoredChats } from './Surfaces.tsx';
 
 /** A config schema without its `chats` list, which the picker shows; undefined: it has none. */
@@ -363,6 +365,7 @@ export function NodeDetails(props: {
           </button>
         </p>
       )}
+      {live?.state === 'running' || live?.state === 'stopped' ? <NodeState id={view.id} /> : null}
       {!connector ? null : (
         <section>
           <h3>Account</h3>

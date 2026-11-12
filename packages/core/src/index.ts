@@ -2,7 +2,7 @@
  * The core's public API (docs/bot-os-api.md): what plugins and the instance's wiring import.
  * Nothing in here knows of any game.
  */
-export { type BusEvent, type BusHandle } from './bus.ts';
+export { type BusEvent, type BusHandle, type EventHandler } from './bus.ts';
 export { type Clock, type TimerHandle, VirtualClock, wallClock } from './clock.ts';
 export {
   type Answer,
@@ -86,9 +86,14 @@ export {
   type Reading,
 } from './drift.ts';
 export {
+  behind,
   EventLog as CoreEventLog,
+  dayOf,
   type EventReader,
+  type LogCursor,
   type LogEntry,
+  type LogPosition,
+  type LogTail,
   MemoryEventLog,
 } from './event-log.ts';
 export {
@@ -306,6 +311,16 @@ export {
   type SettingValue,
 } from './settings.ts';
 export { shutdown, type ShutdownOptions } from './shutdown.ts';
+export {
+  labelOf,
+  plainSchema,
+  schemaAtPath,
+  type SectionFreshness,
+  type Stamp,
+  type StateView,
+  summaryOf,
+  valueAtPath,
+} from './state-view.ts';
 export {
   CORE_STORE,
   INSTANCES_DIR,

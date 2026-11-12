@@ -98,6 +98,21 @@ describe('the context’s event log', () => {
       instance: 'ledger',
       total: 4,
     });
+    // After a cursor (D72): what was written since, of the types asked, and the cursor past all of
+    // it, the records not asked for included.
+    const tail = counter.events.after({}, { types: ['dice.roll'] });
+    expect(tail.entries.map((e) => e.entry['value'])).toEqual([1, 2]);
+    expect(tail.entries[0]?.at).toEqual({ day: '2026-11-04', end: 1 });
+    kit.clock.advance(1000);
+    let at: unknown;
+    counter.bus.subscribe('dice.roll', (_e, where) => (at = where));
+    dice.bus.publish('dice.roll', { value: 5 });
+    const next = counter.events.after(tail.cursor).entries;
+    expect(next.map((e) => e.entry.type)).toEqual(['dice.roll']);
+    expect(at).toEqual(next.at(-1)?.at);
+    expect(() => counter.events.after({}, { types: ['secret.thing'] })).toThrow(
+      'ledger does not read secret'
+    );
   });
 
   it('reads its own instance’s records, and those of the nodes it hears, or all', async () => {
@@ -146,6 +161,7 @@ describe('the context’s event log', () => {
     core.register(parser(seen));
     await core.start();
     expect(seen[0]?.events.read()).toEqual([]);
+    expect(seen[0]?.events.after({ d: 1 })).toEqual({ entries: [], cursor: { d: 1 } });
     expect(seen[0]?.record('dice.note', { x: 1 })).toBeUndefined();
     expect(new MemoryEventLog().firstDay()).toBeUndefined();
     expect(new MemoryEventLog(history).firstDay()).toBe(Date.UTC(2026, 10, 4));

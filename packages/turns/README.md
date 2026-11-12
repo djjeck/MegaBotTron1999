@@ -1,7 +1,7 @@
 # @megabottron1999/turns
 
-The base plugins for automation: two for a game bot that is played one turn at a time, and one
-reaction.
+The base plugins for automation: two for a game bot that is played one turn at a time, one reaction,
+and a game's player state.
 
 - `turnParserPlugin` (`src/turn-parser.ts`): a parser of one bot's answers on a Telegram user
   account (a chat-in input: it reads, never sends), from a grammar the game provides with its bot's
@@ -20,9 +20,15 @@ reaction.
   only with `match`) matches its `match`, and the payload's fields equal its `when`, it sends its
   `send` template to its `chat`, through its chat-out output's outbox. One plugin, run as one
   instance per reaction.
+- `statePlugin` (`src/state-plugin.ts`): a game's player state (an inventory, a profile), from a
+  spec the game gives: the state's zod schema, its initial value, the event types it applies, a pure
+  reducer, the freshness each event gives its sections, and named queries (docs/bot-os.md D72). The
+  shell keeps it in its store with a cursor into the event log, so that each event is applied once
+  across restarts, announces each change (`<id>.changed`), offers `get`, `freshness` and the
+  queries, and its view, which the web UI draws from the schema alone. It never sends.
 
 Their chats run left to right (docs/bot-os.md D60): a parser has a chat-in input only, the reactor a
 chat-out output (and a chat-in only with `match`), and the turn-actor both, for now. Whether a send
 goes for real is its chat-out edge's: a `dryRun` edge logs it as sent and sends nothing (D64).
 
-The tests play a made-up @QuestBot (`test/quest.ts`).
+The tests play a made-up @QuestBot (`test/quest.ts`), and a made-up game's inventory.

@@ -173,8 +173,9 @@ export class DevKit {
     this.core = new Core({
       events: log,
       record: (r) => {
-        log.write(r);
+        const at = log.write(r);
         o.record?.(r);
+        return at;
       },
       clock: this.clock as Clock,
       ...(o.config === undefined ? {} : { config: o.config }),

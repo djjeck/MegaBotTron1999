@@ -33,6 +33,8 @@ import type {
   PortTypeInfo,
   PortView,
   RemovedModule,
+  SectionFreshness,
+  StateView,
   Surface,
   SurfacesView,
 } from '@megabottron1999/core';
@@ -67,6 +69,8 @@ export type {
   PortTypeInfo,
   PortView,
   RemovedModule,
+  SectionFreshness,
+  StateView,
   Surface,
   SurfacesView,
 };

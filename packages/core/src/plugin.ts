@@ -13,12 +13,13 @@ import {
   type ReadFilter,
 } from './connector.ts';
 import { type DriftReporter } from './drift.ts';
-import { type LogEntry } from './event-log.ts';
+import { type LogCursor, type LogEntry, type LogTail } from './event-log.ts';
 import { type ManifestInput } from './manifest.ts';
 import { type Mode, type OutboxHandle } from './outbox.ts';
 import { type Render } from './render.ts';
 import { type Scheduler } from './scheduler.ts';
 import { type SettingValue } from './settings.ts';
+import { type StateView } from './state-view.ts';
 import { type Store } from './store.ts';
 
 /** A plugin's log lines, on stdout, prefixed with its id. */
@@ -117,7 +118,16 @@ export interface PluginContext {
    * or of all of them; over the whole log or since a time. For a replay of recent history at
    * `ready`, or a fresh instance reading the whole log once.
    */
-  readonly events: { read(query?: EventQuery): LogEntry[] };
+  readonly events: {
+    read(query?: EventQuery): LogEntry[];
+    /**
+     * What was written to the log after `cursor` (bot-os.md D72), of the types or namespaces
+     * `types` (all it may read without), filtered as `read` filters them, each with where it sits;
+     * and the cursor past everything read, kept or not: for a reader that resumes where it left
+     * the log, as the state plugins do. The bus gives each event's place as it delivers it.
+     */
+    after(cursor: LogCursor, options?: { types?: readonly string[] }): LogTail;
+  };
   /**
    * Writes a record to the event log (§4.4), `{ type, t, instance, ...fields }`, `t` now and
    * `instance` its node's instance (§2.2): of a type in a
@@ -168,7 +178,8 @@ export interface PluginSettingsHandle {
  * actions, by the names its manifest declares.
  */
 export interface PluginInterface {
-  state?: Record<string, () => unknown>;
+  /** Its reads; one that declares an input takes it, as its schema makes it. */
+  state?: Record<string, (input: never) => unknown>;
   actions?: Record<string, (input: never) => unknown>;
 }
 
@@ -206,6 +217,12 @@ export interface Instance {
   };
   /** What it offers other plugins (§2 `interface`), for those that use it. */
   readonly interface?: PluginInterface;
+  /**
+   * The state it keeps, for the owner's eyes (bot-os.md D72, §4.11): read whole, with its schema,
+   * by the node panel's generic viewer (`GET /plugins/<id>/view`), and one line of it on its card
+   * (`summary`, in `GET /status`). Read only: nothing changes through it.
+   */
+  readonly view?: { read(): StateView; summary?(): string | undefined };
   /** The handlers of the chat commands its manifest declares (§2 `interface.commands`, P11). */
   readonly commands?: Readonly<Record<string, CommandHandler>>;
   /** The owner turned the instance off (§4.11): stop what it does, and send nothing. */

@@ -138,7 +138,11 @@ export const manifestSchema = z
           name,
           z.strictObject({ help: z.string(), input: schema, output: schema.optional() })
         ),
-        state: z.record(name, z.strictObject({ help: z.string(), output: schema })),
+        /** Reads, by name; one may take an input (an object, its fields its arguments). */
+        state: z.record(
+          name,
+          z.strictObject({ help: z.string(), input: schema.optional(), output: schema })
+        ),
       })
       .partial()
       .default({}),

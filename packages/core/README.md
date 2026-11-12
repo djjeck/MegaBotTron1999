@@ -23,6 +23,9 @@ never their values.
 - `tools/modules.ts`: loads module directories as the instance does, for a module repository.
 - `src/react.ts`: `react()`, a reaction: when an event is heard or a message matches, send a command
   through the outbox (docs/bot-os-api.md §4.15).
+- `src/state-view.ts`: a node's state as the owner sees it (its schema, freshness and pins,
+  docs/bot-os.md D72), for the state plugins and the web UI's viewer; `src/event-log.ts` keeps a
+  cursor into the log (a length read per day file) for a reader that resumes where it left it.
 - `src/rng.ts`: a seeded generator, so that a simulated run repeats exactly.
 - `src/graph.ts`, `src/ports.ts`: the graph, its port types (`chat-in`, `chat-out`, `events`,
   `interface`) and its check; a graph file of version 1 is converted to version 2 as it loads

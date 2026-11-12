@@ -364,6 +364,7 @@ export function describePlugin(m: Manifest): PluginView {
       reads: Object.entries(i.state ?? {}).map(([name, r]) => ({
         name,
         help: r.help,
+        ...(r.input === undefined ? {} : { input: jsonSchema(r.input) }),
         output: jsonSchema(r.output),
       })),
       actions: Object.entries(i.actions ?? {}).map(([name, a]) => ({

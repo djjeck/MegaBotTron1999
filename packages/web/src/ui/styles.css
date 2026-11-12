@@ -619,6 +619,77 @@ main.wide > .page {
   margin: 0;
 }
 
+/* A node's state (D72), drawn from its schema: its pins, then its sections. */
+.state-view details.state-node {
+  margin: 0.4rem 0;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--line);
+}
+
+.state-view details.state-node > summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.state-view .state-pins {
+  margin-bottom: 0.6rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg));
+}
+
+.state-view .freshness {
+  display: block;
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.state-view .state-line {
+  padding: 0.15rem 0;
+  overflow-wrap: anywhere;
+}
+
+.state-view .state-label {
+  color: var(--muted);
+}
+
+.state-view .state-label::after {
+  content: ':';
+}
+
+.state-view .state-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.state-view .table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.state-view table {
+  font-size: 0.85rem;
+}
+
+.state-view th,
+.state-view td {
+  padding: 0.25rem 0.4rem;
+}
+
+.state-view th button.link {
+  padding: 0;
+  margin: 0;
+  font-weight: bold;
+  background: none;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.state-view .state-table input[type='search'] {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0.25rem 0;
+}
+
 /* An output's event types and interface members (D71), under its name. */
 .details ul.outputs > li {
   margin-bottom: 0.3rem;
@@ -700,6 +771,14 @@ main.wide > .page {
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--muted);
+}
+
+/* A node's line of the state it keeps (D72), from its pins. */
+.state-summary {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
 .warning-icon {

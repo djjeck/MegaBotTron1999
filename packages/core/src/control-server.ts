@@ -51,7 +51,9 @@
  *   kept in its instance until the owner clears it.
  * - `POST /plugins/<id>/clear-stop`: that node's stop cleared, for the next start (the editor's
  *   Clear stop, which Apply sends before its restart); 409 when it is not stopped.
- * - `GET /plugins/<id>/state/<name>`: a declared read.
+ * - `GET /plugins/<id>/state/<name>?<field>=<value>`: a declared read, its input the query's fields.
+ * - `GET /plugins/<id>/view`: the state a node keeps, with its schema, for the viewer (D72); 404
+ *   for a node that keeps none, 409 for one not running.
  * - `POST /plugins/<id>/actions/<name>` with the action's input as the body: its output, a 400 for
  *   an input its schema refuses, a 409 when the plugin refuses, with why.
  *
@@ -457,7 +459,9 @@ export function controlHandler(
         }
         return reply(200, settings.current());
       }
-      const m = /^\/plugins\/([^/]+)\/(clear-stop|kill|state|actions)(?:\/([^/]+))?$/u.exec(route);
+      const m = /^\/plugins\/([^/]+)\/(clear-stop|kill|state|actions|view)(?:\/([^/]+))?$/u.exec(
+        route
+      );
       if (m !== null) {
         const [, rawId = '', what, rawName] = m;
         const id = decodeURIComponent(rawId);
@@ -473,8 +477,15 @@ export function controlHandler(
           return 'result' in r ? reply(200, r) : reply(409, r);
         }
         if (!post && what === 'state' && name !== undefined) {
-          const r = controls.read(id, name);
+          // A read's input is its query's parameters, each a text (`?path=inventory.items`).
+          const input = Object.fromEntries(url.searchParams);
+          const r = controls.read(id, name, input);
           return 'error' in r ? reply(404, r) : reply(200, r.value);
+        }
+        if (!post && what === 'view' && name === undefined) {
+          const r = controls.view(id);
+          if (r === undefined) return reply(404, { error: `${id} keeps no state to view` });
+          return 'error' in r ? reply(409, r) : reply(200, r.value);
         }
         if (post && what === 'actions' && name !== undefined) {
           const r = await controls.act(id, name, await body(req));

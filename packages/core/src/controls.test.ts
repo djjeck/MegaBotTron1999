@@ -718,3 +718,77 @@ describe('controlServer', () => {
     await core.stop();
   });
 });
+
+describe('reads with an input, and a node’s state for the viewer (bot-os.md D72)', () => {
+  let server: http.Server | undefined;
+  afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r())));
+  it('parses a read’s input, serves a node’s view and its card’s line, and says why not', async () => {
+    let fail = false;
+    const keeper = definePlugin({
+      manifest: {
+        id: 'keeper',
+        version: '0.1.0',
+        kinds: ['stats'],
+        description: 'keeps a state',
+        interface: {
+          state: {
+            at: {
+              help: 'a value',
+              input: z.object({ path: z.string().optional() }),
+              output: z.unknown(),
+            },
+          },
+        },
+      },
+      create: () => ({
+        interface: { state: { at: (i: { path?: string }) => i.path ?? 'all' } },
+        view: {
+          read: () => {
+            if (fail) throw new Error('unreadable');
+            return { schema: { type: 'object' }, state: { n: 1 }, pin: ['n'] };
+          },
+          summary: () => {
+            if (fail) throw new Error('no line');
+            return 'n: 1';
+          },
+        },
+      }),
+    });
+    const lines: string[] = [];
+    const core = new Core({ clock: new VirtualClock(1000), print: (l) => lines.push(l) });
+    core.register(keeper, broken);
+    await core.start();
+    expect(core.controls.read('keeper', 'at', { path: 'n' })).toEqual({ value: 'n' });
+    expect(core.controls.read('keeper', 'at')).toEqual({ value: 'all' });
+    expect(core.controls.read('keeper', 'at', { path: 3 })).toEqual({
+      error: expect.stringContaining('path:'),
+    });
+    expect(core.controls.status().plugins.map((p) => p.summary)).toEqual(['n: 1', undefined]);
+    server = controlServer({ controls: core.controls, settings: core.settings });
+    await new Promise<void>((r) => server?.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as { port: number };
+    const get = async (p: string) => {
+      const res = await fetch(`http://127.0.0.1:${port}${p}`);
+      return [res.status, await res.json()] as const;
+    };
+    expect(await get('/plugins/keeper/state/at?path=a.b')).toEqual([200, 'a.b']);
+    expect(await get('/plugins/keeper/view')).toEqual([
+      200,
+      { schema: { type: 'object' }, state: { n: 1 }, pin: ['n'] },
+    ]);
+    expect(await get('/plugins/broken/view')).toEqual([
+      404,
+      { error: 'broken keeps no state to view' },
+    ]);
+    expect(await get('/plugins/nobody/view')).toEqual([
+      404,
+      { error: 'nobody keeps no state to view' },
+    ]);
+    fail = true;
+    expect(await get('/plugins/keeper/view')).toEqual([409, { error: 'unreadable' }]);
+    expect(core.controls.status().plugins[0]?.summary).toBeUndefined();
+    expect(lines.some((l) => l.includes('summary: no line'))).toBe(true);
+    await core.stop();
+    expect(core.controls.view('keeper')).toEqual({ error: 'keeper is not running' });
+  });
+});

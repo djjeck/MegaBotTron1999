@@ -29,7 +29,7 @@ import {
 import { type ChatSurface, type Connector, handleOf, type ReadFilter } from './connector.ts';
 import { Controls, type StopRecord, type StopSource } from './controls.ts';
 import { DEFAULT_DRIFT, type DriftCounts, DriftMonitor, type DriftRecord } from './drift.ts';
-import { type EventReader, type LogEntry } from './event-log.ts';
+import { type EventReader, type LogCursor, type LogEntry, type LogTail } from './event-log.ts';
 import {
   type Binding,
   defaultGraph,
@@ -107,8 +107,12 @@ export interface CoreOptions {
   clock: Clock;
   /** Where log lines go (stdout). */
   print?: (line: string) => void;
-  /** Where the core's records and every event published go (the event log). */
-  record?: (r: CoreRecord | BusEvent | SendRecord | DriftRecord) => void;
+  /**
+   * Where the core's records and every event published go (the event log). What it returns, if it
+   * is where the log put the record (`LogPosition`, bot-os.md D72), the bus hands its subscribers
+   * with the event, for those that keep a cursor into the log.
+   */
+  record?: (r: CoreRecord | BusEvent | SendRecord | DriftRecord) => unknown;
   /**
    * Each plugin instance's configuration, by its id, as the deployment sets it: checked against
    * its plugin's `config` schema at load, a bad value naming the instance and the key. A node of
@@ -1315,7 +1319,10 @@ export class Core {
         return false;
       },
       render: this.o.render ?? resvgRender,
-      events: { read: (options) => this.readEvents(entry, options) },
+      events: {
+        read: (options) => this.readEvents(entry, options),
+        after: (cursor, options = {}) => this.tailEvents(entry, cursor, options.types),
+      },
       record: (type, fields) => {
         const ns = type.slice(0, type.indexOf('.'));
         const own = [...entry.manifest.games.registers, entry.manifest.id];
@@ -1339,25 +1346,54 @@ export class Core {
    * `since` (the log's first day) to `until` (now).
    */
   private readEvents(entry: Entry, o: EventQuery = {}): LogEntry[] {
+    const keep = this.logFilter(entry, o.type === undefined ? undefined : [o.type], o.all);
+    const log = this.o.events;
+    if (log === undefined) return [];
+    const until = o.until ?? this.o.clock.now();
+    const since = o.since ?? log.firstDay() ?? until;
+    return log.recordsSince(since, until).filter(keep);
+  }
+
+  /**
+   * The event log's records an instance may read written after its cursor (bot-os.md D72), of the
+   * types or namespaces `wanted` (all it may read without), as `readEvents` filters them, with
+   * where each sits; and the cursor past everything read, kept or not. Without a log, nothing, and
+   * the cursor as it was.
+   */
+  private tailEvents(entry: Entry, cursor: LogCursor, wanted?: readonly string[]): LogTail {
+    const keep = this.logFilter(entry, wanted, false);
+    const log = this.o.events;
+    if (log === undefined) return { entries: [], cursor: { ...cursor } };
+    const tail = log.after(cursor);
+    return { entries: tail.entries.filter((e) => keep(e.entry)), cursor: tail.cursor };
+  }
+
+  /**
+   * Which of the log's records an instance reads (§4.4): of the types or namespaces `wanted`, each
+   * one it may read (refused otherwise, naming what it reads), or of all it may read; and, but with
+   * `all`, only those its own instance wrote of its own namespaces and those of the nodes its
+   * events inputs bind, as the bus delivers them.
+   */
+  private logFilter(
+    entry: Entry,
+    wanted: readonly string[] | undefined,
+    all: boolean | undefined
+  ): (r: LogEntry) => boolean {
     const { manifest, node } = entry;
     const readable = new Set([
       ...manifest.games.registers,
       manifest.id,
       ...Object.values(node.ports).flatMap((i) => (i.type === 'events' ? [i.namespace] : [])),
     ]);
-    const wanted = o.type;
-    if (wanted !== undefined) {
-      const ns = wanted.includes('.') ? wanted.slice(0, wanted.indexOf('.')) : wanted;
+    const nsOf = (type: string): string =>
+      type.includes('.') ? type.slice(0, type.indexOf('.')) : type;
+    for (const w of wanted ?? []) {
+      const ns = nsOf(w);
       if (!readable.has(ns))
         throw new Error(
           `${entry.id} does not read ${ns}: it reads ${[...readable].join(', ')} (add an events input of it)`
         );
     }
-    const log = this.o.events;
-    if (log === undefined) return [];
-    const until = o.until ?? this.o.clock.now();
-    const since = o.since ?? log.firstDay() ?? until;
-    const nsOf = (type: string): string => type.slice(0, type.indexOf('.'));
     // Whose records of each namespace it reads: its own instance's, and those of the nodes its
     // events inputs bind (their instances), as the bus delivers them; with `all`, every instance's.
     // A record with no instance (imported from an older log, D54) is everyone's.
@@ -1369,20 +1405,17 @@ export class Core {
       ]);
     const byNs = new Map<string, Set<string>>();
     const mine = (r: LogEntry): boolean => {
-      if (o.all === true || typeof r['instance'] !== 'string') return true;
+      if (all === true || typeof r['instance'] !== 'string') return true;
       const ns = nsOf(r.type);
       let w = byNs.get(ns);
       if (w === undefined) byNs.set(ns, (w = writers(ns)));
       return w.has(r['instance']);
     };
-    return log
-      .recordsSince(since, until)
-      .filter(
-        (r) =>
-          (wanted === undefined
-            ? readable.has(nsOf(r.type))
-            : r.type === wanted || (!wanted.includes('.') && nsOf(r.type) === wanted)) && mine(r)
-      );
+    const asked = (type: string): boolean =>
+      wanted === undefined
+        ? readable.has(nsOf(type))
+        : wanted.some((w) => type === w || (!w.includes('.') && nsOf(type) === w));
+    return (r) => asked(r.type) && mine(r);
   }
 
   /**

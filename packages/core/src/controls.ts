@@ -28,6 +28,7 @@ import { type Manifest } from './manifest.ts';
 import { type Instance } from './plugin.ts';
 import { type InputPort } from './ports.ts';
 import { type SettingsRegistry, type SettingValue } from './settings.ts';
+import { type StateView } from './state-view.ts';
 
 /** The core's document of the off switch. */
 export const POWER_DOC = 'power';
@@ -140,12 +141,18 @@ export interface PluginControl {
   actions: string[];
   /** Its own account of itself, if it declares a `status` read and runs. */
   status?: unknown;
+  /** One line of the state it keeps, for its card, if it offers a view (bot-os.md D72). */
+  summary?: string;
 }
 
 /** An action's outcome: its output, or why not (`refused`: the plugin's own refusal). */
 export type ActResult = { output: unknown } | { error: string; refused?: boolean };
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/** A schema's refusal of an input, field by field. */
+const issues = (list: readonly { path: readonly PropertyKey[]; message: string }[]): string =>
+  list.map((i) => `${i.path.map(String).join('.') || 'input'}: ${i.message}`).join('; ');
 
 export class Controls {
   private readonly host: ControlsHost;
@@ -175,6 +182,7 @@ export class Controls {
         }
         const reads = Object.keys(m.interface.state ?? {});
         const status = reads.includes('status') ? this.read(id, 'status') : undefined;
+        const summary = this.summary(id);
         return {
           id,
           plugin: m.id,
@@ -187,6 +195,7 @@ export class Controls {
           reads,
           actions: Object.keys(m.interface.actions ?? {}),
           ...(status !== undefined && 'value' in status ? { status: status.value } : {}),
+          ...(summary === undefined ? {} : { summary }),
         };
       }),
     };
@@ -314,17 +323,54 @@ export class Controls {
     return this.host.nodes();
   }
 
-  /** A read the plugin declares, as its instance offers it now. */
-  read(id: string, name: string): { value: unknown } | { error: string } {
+  /**
+   * A read the plugin declares, as its instance offers it now; one that declares an input is given
+   * `input` (an object, its fields its arguments) as its schema makes it.
+   */
+  read(id: string, name: string, input?: unknown): { value: unknown } | { error: string } {
     const m = this.manifest(id);
     if (m === undefined) return { error: `no plugin ${id}` };
-    if (m.interface.state?.[name] === undefined) return { error: `${id} declares no read ${name}` };
-    const fn = this.host.instance(id)?.interface?.state?.[name];
+    const declared = m.interface.state?.[name];
+    if (declared === undefined) return { error: `${id} declares no read ${name}` };
+    let given: unknown;
+    if (declared.input !== undefined) {
+      const parsed = declared.input.safeParse(input ?? {});
+      if (!parsed.success) return { error: issues(parsed.error.issues) };
+      given = parsed.data;
+    }
+    const fn = this.host.instance(id)?.interface?.state?.[name] as
+      ((input?: unknown) => unknown) | undefined;
     if (typeof fn !== 'function') return { error: `${id} is not running` };
     try {
-      return { value: fn() };
+      return { value: declared.input === undefined ? fn() : fn(given) };
     } catch (e) {
       return { error: message(e) };
+    }
+  }
+
+  /**
+   * The state a node keeps, for the viewer (bot-os.md D72): undefined for a node that offers none,
+   * an error for one not running or whose view fails.
+   */
+  view(id: string): { value: StateView } | { error: string } | undefined {
+    if (this.manifest(id) === undefined) return undefined;
+    const i = this.host.instance(id);
+    if (i === undefined) return { error: `${id} is not running` };
+    if (i.view === undefined) return undefined;
+    try {
+      return { value: i.view.read() };
+    } catch (e) {
+      return { error: message(e) };
+    }
+  }
+
+  /** One line of a node's state for its card, if it runs and offers one. */
+  private summary(id: string): string | undefined {
+    try {
+      return this.host.instance(id)?.view?.summary?.();
+    } catch (e) {
+      this.host.error(id, `summary: ${message(e)}`);
+      return undefined;
     }
   }
 
@@ -338,12 +384,7 @@ export class Controls {
     const declared = m.interface.actions?.[name];
     if (declared === undefined) return { error: `${id} declares no action ${name}` };
     const parsed = declared.input.safeParse(input ?? {});
-    if (!parsed.success)
-      return {
-        error: parsed.error.issues
-          .map((i) => `${i.path.map(String).join('.') || 'input'}: ${i.message}`)
-          .join('; '),
-      };
+    if (!parsed.success) return { error: issues(parsed.error.issues) };
     const fn = this.host.instance(id)?.interface?.actions?.[name] as
       ((input: unknown) => unknown) | undefined;
     if (typeof fn !== 'function') return { error: `${id} is not running` };

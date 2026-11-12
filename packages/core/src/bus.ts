@@ -14,6 +14,7 @@
  *   `instance` the one whose state the publishing node runs on.
  */
 import { type z } from 'zod';
+import { type LogPosition } from './event-log.ts';
 import { type Manifest } from './manifest.ts';
 import { type Logger } from './plugin.ts';
 
@@ -27,28 +28,41 @@ export interface BusEvent {
 export interface BusHandle {
   /** Publishes an event of a type the plugin registered, at `t` (now if not given). */
   publish(type: string, payload: Record<string, unknown>, t?: number): void;
-  /** Hears every event of `pattern`: a type, or a namespace. Returns the way to stop. */
-  subscribe(pattern: string, handler: (event: BusEvent) => void): () => void;
+  /**
+   * Hears every event of `pattern`: a type, or a namespace, each with where the event log put it
+   * (`at`, bot-os.md D72; undefined without a log). Returns the way to stop.
+   */
+  subscribe(pattern: string, handler: EventHandler): () => void;
 }
+
+/** A subscriber: the event, and where the log put it (undefined without a log). */
+export type EventHandler = (event: BusEvent, at: LogPosition | undefined) => void;
 
 interface Subscription {
   plugin: string;
   /** The instances whose events of its namespace it hears: the edges' (§2.1). */
   from: ReadonlySet<string>;
   pattern: string;
-  handler: (event: BusEvent) => void;
+  handler: EventHandler;
   log: Logger;
 }
 
 export interface BusOptions {
   now: () => number;
-  /** Where every event published goes: the event log. */
-  record?: (event: BusEvent) => void;
+  /** Where every event published goes: the event log, which may say where it put it (`LogPosition`). */
+  record?: (event: BusEvent) => unknown;
   /** Whether payloads are checked against their schemas: outside production. */
   validate: boolean;
 }
 
 const namespaceOf = (type: string): string => type.slice(0, type.indexOf('.'));
+
+/** Whether what the log said of a record is where it put it (bot-os.md D72). */
+const isPosition = (v: unknown): v is LogPosition =>
+  typeof v === 'object' &&
+  v !== null &&
+  typeof (v as LogPosition).day === 'string' &&
+  typeof (v as LogPosition).end === 'number';
 
 export class Bus {
   private readonly o: BusOptions;
@@ -110,11 +124,12 @@ export class Bus {
         // any, never replaces them.
         const head = { type, t: t ?? this.o.now(), instance: kept };
         const event: BusEvent = Object.assign({ ...head }, payload, head);
-        this.o.record?.(event);
+        const placed = this.o.record?.(event);
+        const at = isPosition(placed) ? placed : undefined;
         for (const s of [...this.subscriptions])
           if ((s.pattern === type || s.pattern === namespaceOf(type)) && s.from.has(instance)) {
             try {
-              s.handler(event);
+              s.handler(event, at);
             } catch (e) {
               s.log.error(`on ${type}: ${e instanceof Error ? e.message : String(e)}`);
             }
