@@ -471,8 +471,64 @@ ul.problems {
   margin-top: 0.4rem;
 }
 
-.react-flow__edge.refused .react-flow__edge-text {
-  fill: var(--bad);
+/* The rhombus at an edge's midpoint, its handle (PortEdge.tsx): its port type's colour, ringed in
+   the page's background and its text colour, so that it stands out on the line in either theme.
+   The button is a square hit area placed by its transform; the rhombus inside it is turned. */
+.edge-handle {
+  position: absolute;
+  pointer-events: all;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.edge-handle .rhombus {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--bg);
+  border-radius: 2px;
+  background: var(--edge-colour, gray);
+  box-shadow: 0 0 0 1px var(--fg);
+  transform: rotate(45deg);
+  transition: transform 0.1s;
+}
+
+.edge-handle:hover .rhombus,
+.edge-handle:focus-visible .rhombus {
+  transform: rotate(45deg) scale(1.35);
+}
+
+.edge-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+.edge-handle.selected .rhombus {
+  transform: rotate(45deg) scale(1.35);
+  box-shadow:
+    0 0 0 2px var(--fg),
+    0 0 0 5px var(--accent);
+}
+
+.edge-handle.refused .rhombus {
+  background: var(--bad);
+}
+
+.edge-problem {
+  position: absolute;
+  pointer-events: none;
+  font-size: 0.75rem;
+  color: var(--bad);
+  background: var(--bg);
+  padding: 0 0.25rem;
+  white-space: nowrap;
 }
 
 ul.plugins {

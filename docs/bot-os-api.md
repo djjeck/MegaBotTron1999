@@ -751,10 +751,13 @@ outputs, zod's `toJSONSchema`), with the node's own id, account and config; the 
 come from `GET /graph/view` (`PORT_TYPE_INFO`). It polls `GET /status` and `GET /drift` for each
 node's live state, mode and drift. Each change of the draft is checked (`POST /graph/check`) and
 every problem shown where it is located (§2.3). A node selected shows its forms, editable, a key of
-`configSecrets` as a choice of `GET /secrets`; an edge selected, its chats and commands. Saving is
-`PUT /graph/file`, applying `POST /restart`, after which the page waits on `GET /session` for the
-new process (another `boot` id), and comes back to the page, still logged in. One or several running
-nodes selected can be killed, each by `POST /plugins/<id>/kill`.
+`configSecrets` as a choice of `GET /secrets`; an edge selected, its chats and commands. Each edge
+has a rhombus at its midpoint in its port type's colour (`PortEdge.tsx`, React Flow's
+`EdgeLabelRenderer`), a button named after the edge (`edge irc.chat → dice.channel`) that selects it
+and opens its panel, by a click or the keyboard. Saving is `PUT /graph/file`, applying
+`POST /restart`, after which the page waits on `GET /session` for the new process (another `boot`
+id), and comes back to the page, still logged in. One or several running nodes selected can be
+killed, each by `POST /plugins/<id>/kill`.
 
 ### 4.13 The standard services
 

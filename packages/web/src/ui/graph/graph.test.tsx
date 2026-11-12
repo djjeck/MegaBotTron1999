@@ -44,6 +44,17 @@ describe('GraphPage', () => {
     expect(out.className).toContain('circle');
     expect(out.className).toContain('react-flow__handle-right');
     await waitFor(() => expect(out.style.background).toBe('#2f7ed8'), slow);
+    // A rhombus at each edge's midpoint, in its port type's colour, named after the edge.
+    const rhombi = await screen.findAllByRole('button', { name: /^edge / });
+    expect(rhombi.map((r) => r.getAttribute('aria-label'))).toEqual([
+      'edge chat.chat → actor-a.chat',
+      'edge parser.events → actor-a.game-events',
+      'edge parser.interface → actor-a.parser',
+    ]);
+    expect(rhombi[0]?.style.getPropertyValue('--edge-colour')).not.toBe('');
+    expect(rhombi[0]?.getAttribute('title')).toBe(
+      'chat.chat → actor-a.chat (chat): open its settings'
+    );
     // The edges: one per binding, the optional one dashed.
     await waitFor(() => expect(container.querySelectorAll('.react-flow__edge')).toHaveLength(3));
     const dashed = container.querySelector('.react-flow__edge.optional path') as SVGElement | null;

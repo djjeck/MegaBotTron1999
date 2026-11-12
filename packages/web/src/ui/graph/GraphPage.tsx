@@ -1,7 +1,8 @@
 /**
  * The graph editor (P17, D55), the UI's home page and its main one: the instance's saved graph
  * (`GET /graph/file`) as a draft, drawn with React Flow, each plugin instance a node with its
- * ports, each binding an edge in its port type's colour (dashed when the input is optional), and on
+ * ports, each binding an edge in its port type's colour (dashed when the input is optional), with a
+ * rhombus at its midpoint that opens its panel (`PortEdge.tsx`), and on
  * each node its live state, mode and drift (`GET /status`, `GET /drift`).
  *
  * - **Add a node** from the plugins the instance offers (`GET /available`), choosing its id and its
@@ -18,7 +19,7 @@
  * A saved graph refused at the last start (`GET /status`, `graph.refused`) runs no node: it is
  * shown first, for the owner to fix. One or several running nodes selected can be killed (D44).
  */
-import type { Connection, Edge } from '@xyflow/react';
+import type { Connection } from '@xyflow/react';
 import {
   Background,
   Controls,
@@ -68,10 +69,13 @@ import { NodeDetails } from './NodeDetails.tsx';
 import { Palette } from './Palette.tsx';
 import type { PluginNodeType } from './PluginNode.tsx';
 import { nodeHeight, PluginNode } from './PluginNode.tsx';
+import type { PortEdgeType } from './PortEdge.tsx';
+import { PortEdge } from './PortEdge.tsx';
 import { Review } from './Review.tsx';
 import '@xyflow/react/dist/style.css';
 
 const NODE_TYPES = { plugin: PluginNode };
+const EDGE_TYPES = { port: PortEdge };
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -105,7 +109,7 @@ export function GraphPage({
   const [busy, setBusy] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [nodes, setNodes, onNodesChange] = useNodesState<PluginNodeType>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<PortEdgeType>([]);
   const [selected, setSelected] = useState<{ nodes: string[]; edges: string[] }>({
     nodes: [],
     edges: [],
@@ -230,7 +234,7 @@ export function GraphPage({
   // The edges as React Flow draws them, kept as they were selected.
   useEffect(() => {
     const inputs = new Map(views.map((v) => [v.id, v.inputs]));
-    const drawn = (draft?.edges ?? []).map((e): Edge => {
+    const drawn = (draft?.edges ?? []).map((e): PortEdgeType => {
       const from = endOf(e.from);
       const to = endOf(e.to);
       const optional = to.port !== undefined && inputs.get(to.node)?.[to.port]?.optional === true;
@@ -243,14 +247,18 @@ export function GraphPage({
             : (portTypes[e.type]?.colour ?? 'gray');
       return {
         id: edgeKey(e),
+        type: 'port',
         source: from.node,
         ...(from.port === undefined ? {} : { sourceHandle: from.port }),
         target: to.node,
         ...(to.port === undefined ? {} : { targetHandle: to.port }),
         className: `${e.type ?? ''}${optional ? ' optional' : ''}${problems.length > 0 ? ' refused' : ''}`,
         style: { stroke: colour, strokeWidth: 2, ...(optional ? { strokeDasharray: '6 4' } : {}) },
-        ...(problems.length > 0 ? { label: `✗ ${problems[0]}` } : {}),
-        ariaLabel: `edge ${edgeKey(e)}`,
+        data: { name: edgeKey(e), colour, type: e.type, problem: problems[0] },
+        // The rhombus at its midpoint is the edge's handle for the keyboard and the screen reader
+        // (`PortEdge.tsx`); the line stays clickable.
+        focusable: false,
+        domAttributes: { 'aria-hidden': true },
       };
     });
     setEdges((before) => {
@@ -260,7 +268,7 @@ export function GraphPage({
   }, [draft, views, placed, portTypes, setEdges]);
 
   const selectionChanged = useCallback(
-    ({ nodes: n, edges: e }: { nodes: PluginNodeType[]; edges: Edge[] }) => {
+    ({ nodes: n, edges: e }: { nodes: PluginNodeType[]; edges: PortEdgeType[] }) => {
       const next = { nodes: n.map((x) => x.id), edges: e.map((x) => x.id) };
       setSelected((was) =>
         was.nodes.join('\n') === next.nodes.join('\n') &&
@@ -520,6 +528,7 @@ export function GraphPage({
             nodes={nodes}
             edges={edges}
             nodeTypes={NODE_TYPES}
+            edgeTypes={EDGE_TYPES}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onSelectionChange={selectionChanged}

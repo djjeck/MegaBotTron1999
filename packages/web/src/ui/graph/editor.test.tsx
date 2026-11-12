@@ -305,10 +305,18 @@ describe('the graph editor', () => {
     );
     fireEvent.change(within(details).getByLabelText('mode'), { target: { value: '' } });
     await waitFor(() => expect(core.checked.at(-1)?.nodes[2]).not.toHaveProperty('mode'));
-    // An edge selected: what it carries.
-    const edge = container.querySelector('[data-id="chat.chat → actor-a.chat"]') as Element;
-    fireEvent.click(edge);
+    // An edge selected by the rhombus at its midpoint: what it carries.
+    const rhombus = screen.getByRole('button', { name: 'edge chat.chat → actor-a.chat' });
+    expect(rhombus.className).toContain('refused');
+    expect(rhombus.getAttribute('title')).toContain('✗ node actor-a: reads #a');
+    expect(screen.getByText('✗ node actor-a: reads #a, which is not its chat')).toBeDefined();
+    expect(rhombus.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(rhombus);
     const panel = await screen.findByLabelText('details of edge chat.chat → actor-a.chat');
+    const pressed = (): HTMLElement =>
+      screen.getByRole('button', { name: 'edge chat.chat → actor-a.chat' });
+    await waitFor(() => expect(pressed().getAttribute('aria-pressed')).toBe('true'));
+    expect(pressed().className).toContain('selected');
     expect((within(panel).getByLabelText('reads') as HTMLTextAreaElement).value).toBe('#a');
     expect(within(panel).getByText('node actor-a: reads #a, which is not its chat')).toBeDefined();
     fireEvent.change(within(panel).getByLabelText('reads'), { target: { value: '#b\n#c, #d' } });
