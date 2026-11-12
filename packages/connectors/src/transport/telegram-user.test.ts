@@ -6,6 +6,7 @@ import {
   type Ask,
   CATCH_UP_CAP,
   CATCH_UP_PAUSE_MS,
+  CATCH_UP_RETRY_MAX_MS,
   createTelegramClient,
   type GramClient,
   LAST_SEEN_DOC,
@@ -14,6 +15,7 @@ import {
   type RawDialog,
   type RawMessage,
   RETRY_MS,
+  SEEN_ABOVE_DOC,
   TelegramUserConnector,
 } from './telegram-user.ts';
 
@@ -40,7 +42,7 @@ function raw(over: Partial<RawMessage> & { sender?: unknown; chat?: unknown } = 
 function fake(
   o: {
     failConnect?: number;
-    send?: () => Promise<{ id: number }>;
+    send?: () => Promise<{ id: number; chatId?: { toString(): string } }>;
     dialogs?: RawDialog[];
     /** Each chat's history, by its peer. */
     history?: Record<string, RawMessage[]>;
@@ -214,8 +216,8 @@ describe('TelegramUserConnector', () => {
 
   it('has no sender for one without a username', async () => {
     const { f, messages } = await connector();
-    for (const sender of [undefined, null, {}, { username: null }])
-      await f.deliver(raw({ sender }));
+    for (const [i, sender] of [undefined, null, {}, { username: null }].entries())
+      await f.deliver(raw({ id: i + 1, sender }));
     expect(messages.map((m) => m.sender)).toEqual(['', '', '', '']);
   });
 
@@ -442,7 +444,9 @@ describe('the catch-up', () => {
     o: {
       chats?: string[];
       seen?: Record<string, number>;
-      readers?: ReadFilter[] | undefined;
+      readers?: ReadFilter[] | (() => ReadFilter[]) | undefined;
+      /** The store's documents, kept from a run before. */
+      docs?: Map<string, unknown>;
     } = {}
   ) {
     const clock = new VirtualClock(0);
@@ -450,7 +454,9 @@ describe('the catch-up', () => {
     const logs: string[] = [];
     const warnings: string[] = [];
     const records: [string, Record<string, unknown>][] = [];
-    const docs = new Map<string, unknown>(o.seen === undefined ? [] : [[LAST_SEEN_DOC, o.seen]]);
+    const docs =
+      o.docs ?? new Map<string, unknown>(o.seen === undefined ? [] : [[LAST_SEEN_DOC, o.seen]]);
+    const readers = o.readers;
     const c = new TelegramUserConnector({
       account: 'telegram:alice',
       client: f.client,
@@ -463,11 +469,14 @@ describe('the catch-up', () => {
         read: <T>(name: string) => docs.get(name) as T | undefined,
         write: (name, value) => docs.set(name, structuredClone(value)),
       },
-      ...(o.readers === undefined ? {} : { readers: () => o.readers ?? [] }),
+      ...(readers === undefined
+        ? {}
+        : { readers: typeof readers === 'function' ? readers : () => readers }),
     });
     c.onMessage((m) => messages.push(m));
     const seen = () => docs.get(LAST_SEEN_DOC);
-    return { c, clock, messages, logs, warnings, records, seen };
+    const above = () => docs.get(SEEN_ABOVE_DOC);
+    return { c, clock, messages, logs, warnings, records, seen, above, docs };
   }
   const history = (f: ReturnType<typeof fake>) => f.calls.filter((x) => x.startsWith('history'));
 
@@ -493,7 +502,7 @@ describe('the catch-up', () => {
     expect(messages).toHaveLength(5);
   });
 
-  it('fetches only the chats its readers read, all monitored ones for *, and none without', async () => {
+  it('fetches only the chats its readers read, all monitored ones for *, skipping the others', async () => {
     const dialogs = [group(20), quiz(9)];
     const hist = { [GROUP]: said(18, 20), '@Quiz_bot': said(7, 9, PRIVATE_ID) };
     const seen = { [GROUP]: 17, [PRIVATE_ID]: 6 };
@@ -503,6 +512,8 @@ describe('the catch-up', () => {
     await settle(one.clock);
     expect(history(f1)).toEqual([`history @Quiz_bot <10 >6 100`]);
     expect(one.messages.map((m) => m.chat)).toEqual(['@Quiz_bot', '@Quiz_bot', '@Quiz_bot']);
+    // The group no reader reads: its gap skipped, not kept for later (D66).
+    expect(one.seen()).toEqual({ [GROUP]: 20, [PRIVATE_ID]: 9 });
 
     const f2 = fake({ dialogs, history: hist });
     const all = make(f2, { seen, readers: [{ reads: [] }, { reads: '*', senders: ['me'] }] });
@@ -523,7 +534,8 @@ describe('the catch-up', () => {
     none.c.start();
     await settle(none.clock);
     expect(history(f4)).toEqual([]);
-    expect(none.seen()).toEqual(seen);
+    expect(none.messages).toEqual([]);
+    expect(none.seen()).toEqual({ [GROUP]: 20, [PRIVATE_ID]: 9 });
   });
 
   it('skips a chat seen for the first time, keeping its latest id for the next connection', async () => {
@@ -567,7 +579,8 @@ describe('the catch-up', () => {
     });
     c.start();
     await settle(clock);
-    expect(history(f).at(-1)).toBe(`history ${GROUP} <1 >0 1`);
+    // Nothing can be older than the last page: no request for more.
+    expect(history(f).at(-1)).toBe(`history ${GROUP} <101 >0 100`);
     expect(messages).toHaveLength(1000);
     expect(warnings).toEqual([]);
     expect(records).toEqual([]);
@@ -648,40 +661,197 @@ describe('the catch-up', () => {
     expect(logs).toContain('message 18 dropped: Error: gone');
   });
 
-  it('logs a chat whose history fails, and goes on with the next', async () => {
+  it('fetches again a chat whose history fails, later, live messages not moving past its gap', async () => {
     const f = fake({
       dialogs: [group(20), quiz(9)],
       history: { [GROUP]: said(19, 20), '@Quiz_bot': said(9, 9, PRIVATE_ID) },
       historyFails: [new Error('CHANNEL_PRIVATE')],
     });
-    const { c, clock, messages, logs, seen } = make(f, {
+    const { c, clock, messages, logs, seen, above } = make(f, {
       seen: { [GROUP]: 18, [PRIVATE_ID]: 8 },
       readers: [{ reads: '*' }],
     });
     c.start();
-    await settle(clock);
-    expect(logs).toContain(`catch-up of ${GROUP} failed: Error: CHANNEL_PRIVATE`);
+    await settle(clock, 5);
+    expect(logs).toContain(`catch-up of ${GROUP} failed, again in 60 s: Error: CHANNEL_PRIVATE`);
     expect(messages.map((m) => m.chat)).toEqual(['@Quiz_bot']);
+    // Heard live meanwhile: kept above the gap, which stays open.
+    await f.deliver(raw({ id: 21, message: 'm21' }));
     expect(seen()).toEqual({ [GROUP]: 18, [PRIVATE_ID]: 9 });
+    expect(above()).toEqual({ [GROUP]: [[21, 21]] });
+    clock.advance(RETRY_MS);
+    await settle(clock);
+    expect(messages.map((m) => [m.id, m.missed === true])).toEqual([
+      ['9', true],
+      ['21', false],
+      ['19', true],
+      ['20', true],
+    ]);
+    expect(seen()).toEqual({ [GROUP]: 21, [PRIVATE_ID]: 9 });
+    expect(above()).toEqual({});
   });
 
-  it('ends when stopped, keeping what was heard live', async () => {
-    const f = fake({
-      dialogs: [group(1500)],
-      history: { [GROUP]: said(2, 1500) },
+  it('waits at most an hour between two tries of a chat that keeps failing', async () => {
+    const fails = Array.from({ length: 9 }, () => new Error('CHANNEL_PRIVATE'));
+    const f = fake({ dialogs: [group(20)], history: {}, historyFails: fails });
+    const { c, clock, logs } = make(f, { seen: { [GROUP]: 18 }, readers: [{ reads: [GROUP] }] });
+    c.start();
+    for (let i = 0; i < 9; i++) {
+      await settle(clock, 2);
+      clock.advance(CATCH_UP_RETRY_MAX_MS);
+    }
+    expect(logs.filter((l) => l.includes('failed, again in')).map((l) => l.split(' ')[6])).toEqual([
+      '60',
+      '120',
+      '240',
+      '480',
+      '960',
+      '1920',
+      '3600',
+      '3600',
+      '3600',
+    ]);
+    await c.stop();
+  });
+
+  it('resumes a catch-up stopped while it delivers, delivering none twice', async () => {
+    const f = fake({ dialogs: [group(20)], history: { [GROUP]: said(11, 20) } });
+    const docs = new Map<string, unknown>([[LAST_SEEN_DOC, { [GROUP]: 10 }]]);
+    const first = make(f, { readers: [{ reads: [GROUP] }], docs });
+    first.c.onMessage((m) => {
+      if (m.id === '13') void first.c.stop();
     });
+    first.c.start();
+    await settle(first.clock);
+    expect(first.messages.map((m) => m.id)).toEqual(['11', '12', '13']);
+    expect(first.seen()).toEqual({ [GROUP]: 13 });
+    // The next run of the instance, from the store as kept.
+    const second = make(f, { readers: [{ reads: [GROUP] }], docs });
+    second.c.start();
+    await settle(second.clock);
+    expect(history(f).at(-1)).toBe(`history ${GROUP} <21 >13 100`);
+    expect(second.messages.map((m) => m.id)).toEqual(['14', '15', '16', '17', '18', '19', '20']);
+    expect(second.seen()).toEqual({ [GROUP]: 20 });
+  });
+
+  it('keeps what was heard live when stopped, and fetches only the gap below it next time', async () => {
+    const f = fake({ dialogs: [group(20)], history: { [GROUP]: said(2, 20) } });
+    const docs = new Map<string, unknown>([[LAST_SEEN_DOC, { [GROUP]: 1 }]]);
+    const first = make(f, { readers: [{ reads: [GROUP] }], docs });
+    f.client.getMessages = () => new Promise(() => {});
+    first.c.start();
+    await settle(first.clock, 3);
+    await f.deliver(raw({ id: 21, message: 'm21' }));
+    await f.deliver(raw({ id: 22, message: 'm22' }));
+    await first.c.stop();
+    expect(first.messages.map((m) => m.id)).toEqual(['21', '22']);
+    expect(first.seen()).toEqual({ [GROUP]: 1 });
+    expect(first.above()).toEqual({ [GROUP]: [[21, 22]] });
+    // Down again; said meanwhile: 23 to 25.
+    const g = fake({ dialogs: [group(25)], history: { [GROUP]: said(2, 25) } });
+    const second = make(g, { readers: [{ reads: [GROUP] }], docs });
+    second.c.start();
+    await settle(second.clock);
+    expect(history(g)).toEqual([`history ${GROUP} <26 >22 100`, `history ${GROUP} <21 >1 100`]);
+    expect(second.messages.map((m) => Number(m.id))).toEqual([
+      ...Array.from({ length: 19 }, (_, i) => i + 2),
+      23,
+      24,
+      25,
+    ]);
+    expect(second.seen()).toEqual({ [GROUP]: 25 });
+    expect(second.above()).toEqual({});
+  });
+
+  it('does not deliver as missed what the account sent itself', async () => {
+    const f = fake({
+      dialogs: [group(20)],
+      send: () => Promise.resolve({ id: 21, chatId: { toString: () => GROUP } }),
+    });
+    const docs = new Map<string, unknown>([[LAST_SEEN_DOC, { [GROUP]: 20 }]]);
+    const first = make(f, { chats: [GROUP, '@Quiz_bot'], readers: [{ reads: [GROUP] }], docs });
+    first.c.start();
+    await settle(first.clock);
+    await f.deliver(raw({ id: 22, out: true, message: 'from the phone' }));
+    await first.c.deliver(GROUP, '/play');
+    expect(first.seen()).toEqual({ [GROUP]: 22 });
+    // Its echo, if Telegram sends one, is delivered once, live.
+    await f.deliver(raw({ id: 21, out: true, message: '/play' }));
+    await f.deliver(raw({ id: 21, out: true, message: '/play' }));
+    expect(first.messages.map((m) => [m.id, m.own])).toEqual([
+      ['22', true],
+      ['21', true],
+    ]);
+    await first.c.stop();
+    // Sent through a private chat by @username: its id is the message's chat's.
+    const sent = await first.c.deliver('@Quiz_bot', 'x').catch((e: unknown) => String(e));
+    expect(sent).toEqual({ id: '21' });
+    const g = fake({ dialogs: [group(22)], history: { [GROUP]: said(21, 22) } });
+    const second = make(g, { readers: [{ reads: [GROUP] }], docs });
+    second.c.start();
+    await settle(second.clock);
+    expect(history(g)).toEqual([]);
+    expect(second.messages).toEqual([]);
+  });
+
+  it('skips a chat whose last reader stopped before its turn came', async () => {
+    const f = fake({
+      dialogs: [group(20), quiz(9)],
+      history: { [GROUP]: said(19, 20), '@Quiz_bot': said(8, 9, PRIVATE_ID) },
+    });
+    let readers: ReadFilter[] = [{ reads: '*' }];
+    const { c, clock, messages, seen } = make(f, {
+      seen: { [GROUP]: 18, [PRIVATE_ID]: 7 },
+      readers: () => readers,
+    });
+    // The group is fetched first; as it delivers, the quiz's reader stops.
+    c.onMessage(() => {
+      readers = [{ reads: [GROUP] }];
+    });
+    c.start();
+    await settle(clock);
+    expect(messages.map((m) => m.chat)).toEqual([GROUP, GROUP]);
+    expect(history(f)).toEqual([`history ${GROUP} <21 >18 100`]);
+    expect(seen()).toEqual({ [GROUP]: 20, [PRIVATE_ID]: 9 });
+  });
+
+  it('delivers once a message heard live twice', async () => {
+    const f = fake({ dialogs: [group(20)] });
+    const { c, clock, messages, seen } = make(f, { seen: { [GROUP]: 20 } });
+    c.start();
+    await settle(clock);
+    await f.deliver(raw({ id: 21 }));
+    await f.deliver(raw({ id: 21 }));
+    // A chat it did not list at the connection: its live ids start at the first heard.
+    await f.deliver(raw({ id: 5, chatId: { toString: () => '-100999' } }));
+    await f.deliver(raw({ id: 6, chatId: { toString: () => '-100999' } }));
+    expect(messages.map((m) => m.id)).toEqual(['21', '5', '6']);
+    expect(seen()).toEqual({ [GROUP]: 21, '-100999': 6 });
+  });
+
+  it('accounts for a message whose sender cannot be fetched, dropped live', async () => {
+    const f = fake({ dialogs: [group(20)] });
+    const { c, clock, seen } = make(f, { seen: { [GROUP]: 20 } });
+    c.start();
+    await settle(clock);
+    await f.deliver(raw({ id: 21, getSender: () => Promise.reject(new Error('gone')) }));
+    expect(seen()).toEqual({ [GROUP]: 21 });
+  });
+
+  it('ends when stopped while it fetches, and ignores what comes after', async () => {
+    const f = fake({ dialogs: [group(1500)], history: { [GROUP]: said(2, 1500) } });
     const { c, clock, messages, seen } = make(f, {
       seen: { [GROUP]: 1 },
       readers: [{ reads: [GROUP] }],
     });
     c.start();
     await settle(clock, 3);
-    await f.deliver(raw({ id: 1501 }));
     await c.stop();
     await settle(clock);
+    await f.deliver(raw({ id: 1501 }));
     expect(history(f).length).toBeLessThan(4);
-    expect(messages.map((m) => m.id)).toEqual(['1501']);
-    expect(seen()).toEqual({ [GROUP]: 1501 });
+    expect(messages).toEqual([]);
+    expect(seen()).toEqual({ [GROUP]: 1 });
   });
 
   it('ends when stopped while it delivers', async () => {
@@ -696,7 +866,7 @@ describe('the catch-up', () => {
     expect(messages.map((m) => m.id)).toEqual(['18']);
   });
 
-  it('releases what it held when the start fails, and holds again at the retry', async () => {
+  it('keeps what is heard while the start fails, and catches up at the retry', async () => {
     const f = fake({ dialogs: [group(20)], history: { [GROUP]: said(18, 20) } });
     let fail = true;
     const me = f.client.getMe;
@@ -708,10 +878,34 @@ describe('the catch-up', () => {
     c.start();
     await flush();
     await f.deliver(raw({ id: 21 }));
-    expect(seen()).toEqual({ [GROUP]: 21 });
+    expect(seen()).toEqual({ [GROUP]: 17 });
     clock.advance(RETRY_MS);
     await settle(clock);
-    expect(history(f)).toEqual([]);
-    expect(messages.map((m) => m.id)).toEqual(['21']);
+    expect(history(f)).toEqual([`history ${GROUP} <21 >17 100`]);
+    expect(messages.map((m) => m.id)).toEqual(['21', '18', '19', '20']);
+    expect(seen()).toEqual({ [GROUP]: 21 });
+  });
+
+  it('stops at the cap across the gaps around what was heard live, skipping the older', async () => {
+    const f = fake({ dialogs: [group(1600)], history: { [GROUP]: said(2, 1600) } });
+    const docs = new Map<string, unknown>([
+      [LAST_SEEN_DOC, { [GROUP]: 1 }],
+      [SEEN_ABOVE_DOC, { [GROUP]: [[1001, 1100]] }],
+    ]);
+    const { c, clock, messages, warnings, seen } = make(f, {
+      readers: [{ reads: [GROUP] }],
+      docs,
+    });
+    c.start();
+    await settle(clock, 60);
+    expect(history(f).slice(0, 6)).toEqual([
+      ...Array.from({ length: 5 }, (_, i) => `history ${GROUP} <${1601 - i * 100} >1100 100`),
+      `history ${GROUP} <1101 >1100 100`,
+    ]);
+    expect(history(f).at(-1)).toBe(`history ${GROUP} <501 >1 1`);
+    expect(messages).toHaveLength(1000);
+    expect(messages[0]?.id).toBe('501');
+    expect(warnings).toHaveLength(1);
+    expect(seen()).toEqual({ [GROUP]: 1600 });
   });
 });

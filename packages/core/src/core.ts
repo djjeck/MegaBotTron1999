@@ -221,6 +221,12 @@ interface Entry {
   modeListeners?: ((mode: Mode) => void)[];
 }
 
+/**
+ * The states of a node that reads (bot-os.md D66): about to start, starting or running; not one
+ * disabled, stopped, inactive, failed or shutting down.
+ */
+const READING: ReadonlySet<PluginState> = new Set(['registered', 'starting', 'running']);
+
 /** The core's own store, beside the instances'. */
 const CORE = CORE_STORE;
 /** The core's document, in each instance's store, of its stop (bot-os.md D64). */
@@ -1379,11 +1385,14 @@ export class Core {
       );
   }
 
-  /** What each chat-in edge leaving the connector node `id` reads (D62). */
+  /**
+   * What each chat-in edge leaving the connector node `id` reads (D62), of the nodes that read
+   * (D66): not those disabled, stopped, inactive or failed, as they are at the call.
+   */
   private readersOf(id: string): ReadFilter[] {
-    return [...this.entries.values()].flatMap((e) =>
-      chatsOf(e.node).flatMap(([, b]) => (b.node === id ? [readFilter(b)] : []))
-    );
+    return [...this.entries.values()]
+      .filter((e) => READING.has(e.status.state))
+      .flatMap((e) => chatsOf(e.node).flatMap(([, b]) => (b.node === id ? [readFilter(b)] : [])));
   }
 
   /** A connector's way to its declared secrets. */

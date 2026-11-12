@@ -41,9 +41,10 @@ export interface PluginContext {
    */
   readonly secrets?: { get(name: string): string };
   /**
-   * A connector's readers (§4.5, bot-os.md D62): what each chat-in edge leaving its node reads, as
-   * the graph says, so that it fetches back only the chats some reader needs. Other kinds of
-   * plugin receive none.
+   * A connector's readers (§4.5, bot-os.md D62, D66): what each chat-in edge leaving its node reads,
+   * as the graph says, of the nodes that read now (starting or running: not disabled, stopped,
+   * inactive or failed), so that it fetches back only the chats some running reader needs. Asked
+   * again, it says what holds then. Other kinds of plugin receive none.
    */
   readers?(): ReadFilter[];
   /** Its configuration, as the deployment set it and its schema made it (§2). */

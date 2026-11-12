@@ -233,6 +233,39 @@ describe('TelegramBotConnector', () => {
     await c.stop();
   });
 
+  it('delivers a message Telegram delivers again only once, across a restart too', async () => {
+    const { c, stub, docs } = connector();
+    const heard: string[] = [];
+    c.onMessage((m) => heard.push(`${m.chat} ${m.id}`));
+    let app = 0;
+    stub.bot.command('map', () => void app++);
+    const update = stub.command(-100123, 5, '/map');
+    const other = stub.command(-100456, 5, '/map');
+    await stub.bot.handleUpdate(update);
+    await stub.bot.handleUpdate(update);
+    await stub.bot.handleUpdate(other);
+    expect(heard).toHaveLength(2);
+    // The app's own handlers are not the readers': they hear it each time.
+    expect(app).toBe(3);
+    expect(docs['last-seen']).toEqual({
+      '-100123': Number(heard[0]?.split(' ')[1]),
+      '-100456': Number(heard[1]?.split(' ')[1]),
+    });
+    // The next run, from the store as kept, after an unconfirmed poll.
+    const next = new TelegramBotConnector({
+      account: 'telegram-bot:ExampleBot',
+      bot: stub.bot,
+      log: () => {},
+      store: {
+        read: <T>(name: string) => docs[name] as T | undefined,
+        write: (name, value) => (docs[name] = structuredClone(value)),
+      },
+    });
+    next.onMessage((m) => heard.push(`again ${m.id}`));
+    await stub.bot.handleUpdate(update);
+    expect(heard).toHaveLength(2);
+  });
+
   it('lists the chats it has seen, latest first, kept, and one searched by id', async () => {
     const { c, stub, docs } = connector();
     await stub.bot.handleUpdate(stub.command(-100123, 5, '/map'));

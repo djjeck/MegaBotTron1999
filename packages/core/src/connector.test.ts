@@ -225,6 +225,56 @@ describe('connectors', () => {
       { reads: ['#lobby'] },
     ]);
     expect(readerHasNone).toBe(true);
+    // A reader stopped is no reader (D66): its chats are not fetched back.
+    core.stopNode('b', 'enough', 'owner');
+    expect(readers?.()).toEqual([{ reads: '*', senders: ['@QuestBot', 'me'] }]);
+    await core.stop();
+  });
+
+  it('gives a connector the readers about to start, and none disabled', async () => {
+    let readers: (() => ReadFilter[]) | undefined;
+    let atCreate: ReadFilter[] | undefined;
+    const reader = (id: string) =>
+      definePlugin({
+        manifest: {
+          id,
+          version: '0.1.0',
+          kinds: ['parser'],
+          description: id,
+          inputs: { chat: { type: 'chat-in' } },
+        },
+        create: () => ({}),
+      });
+    const core = new Core({
+      clock: new VirtualClock(),
+      graph: {
+        version: 2,
+        nodes: [
+          { id: 'test', plugin: 'test' },
+          { id: 'a', plugin: 'a' },
+          { id: 'b', plugin: 'b', disabled: true },
+        ],
+        edges: [
+          { from: 'test.chat', to: 'a.chat', reads: ['#lobby'] },
+          { from: 'test.chat', to: 'b.chat', reads: ['#other'] },
+        ],
+      },
+    });
+    core.register(
+      definePlugin({
+        manifest: manifest('test', 'test:me'),
+        create: (ctx) => {
+          readers = ctx.readers;
+          atCreate = ctx.readers?.();
+          return { connector: new TestConnector('test:me', 'test') };
+        },
+      }),
+      reader('a'),
+      reader('b')
+    );
+    await core.start();
+    expect(atCreate).toEqual([{ reads: ['#lobby'] }]);
+    expect(readers?.()).toEqual([{ reads: ['#lobby'] }]);
     await core.stop();
   });
 });

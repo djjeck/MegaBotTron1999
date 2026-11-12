@@ -13,6 +13,9 @@
  * Given `chats`, it monitors only those (by id or `@username`); none, every chat it hears. What was
  * said while it was down Telegram keeps for the bot (up to a day) and delivers at its next poll: its
  * own catch-up, whose messages, older than the connection, it marks `playback` and `missed`.
+ * Telegram delivers an update again when its poll was not confirmed (the process killed before it
+ * stopped): each message is delivered to the readers at most once all the same, against the last
+ * message id delivered in its chat, kept in its store (`last-seen`, docs/bot-os.md D66).
  */
 import { autoRetry } from '@grammyjs/auto-retry';
 import {
@@ -26,6 +29,7 @@ import {
 import { Bot, GrammyError } from 'grammy';
 import { type Chat, type UserFromGetMe } from 'grammy/types';
 import { markdownToTelegramHtml } from 'grammy-switchboard';
+import { SeenLedger } from './seen-ledger.ts';
 
 // A 429 is waited out as Telegram asks, a few times; network errors and 5xx fail the call, so the
 // notifier reports them and the startup retry below keeps its own backoff.
@@ -150,7 +154,7 @@ export interface BotConnectorOptions {
   log: (line: string) => void;
   /** The chats it monitors, by id or `@username`; none: every chat it hears. */
   chats?: readonly string[] | undefined;
-  /** Where it keeps the chats it has seen, its surfaces. */
+  /** Where it keeps the chats it has seen, its surfaces, and the last message delivered in each. */
   store?: { read<T>(name: string): T | undefined; write(name: string, value: unknown): void };
   /** The time now, in ms: what came before its connection was missed. */
   now?: () => number;
@@ -168,6 +172,8 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
   private since = 0;
   private readonly chats: Set<string> | undefined;
   private readonly seen: Record<string, Surface>;
+  /** The last message id delivered in each chat: one delivered again is not delivered twice. */
+  private readonly ledger: SeenLedger;
 
   constructor(options: BotConnectorOptions) {
     super(options.account, 'telegram');
@@ -176,13 +182,18 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
     this.chats =
       options.chats === undefined ? undefined : new Set(options.chats.map((c) => c.toLowerCase()));
     this.seen = { ...(options.store?.read<Record<string, Surface>>(SURFACES_DOC) ?? {}) };
+    this.ledger = new SeenLedger(options.store);
     // First in the bot's chain, so it hears every message before the app's handlers.
     this.bot.on('message', async (ctx, next) => {
       const m = ctx.message;
       const text = m.text ?? m.caption;
       this.saw(m.chat, m.date * 1000);
       const missed = m.date < this.since;
-      if (text !== undefined && this.monitors(m.chat))
+      const key = String(m.chat.id);
+      // Accounted for before it is delivered, once (D66); the app's handlers still hear it.
+      const again = this.ledger.covered(key, m.message_id);
+      if (!again && this.monitors(m.chat)) this.ledger.advance(key, m.message_id);
+      if (text !== undefined && !again && this.monitors(m.chat))
         try {
           this.received({
             chat: String(m.chat.id),

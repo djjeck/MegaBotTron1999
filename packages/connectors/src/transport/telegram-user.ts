@@ -9,11 +9,14 @@
  * leaves this module. It sends any text to those chats, but only through the account's outbox,
  * which keeps each plugin to the chats and commands of its reach (§4.6).
  *
- * **Catch-up** (docs/bot-os.md D62): GramJS 2.26.22 has no update catch-up (`client.catchUp()` is
- * an empty stub, and its sessions keep no update state), so at each connection it fetches back the
- * history of the chats its readers read whose latest message is newer than the last it saw (kept
- * in its store), at most `CATCH_UP_CAP` per chat, a page at a time, and delivers it oldest first,
- * marked `missed` and `playback`.
+ * **Catch-up** (docs/bot-os.md D62, D66): GramJS 2.26.22 has no update catch-up (`client.catchUp()`
+ * is an empty stub, and its sessions keep no update state), so at each connection it fetches back
+ * the history of the chats its running readers read that it has not accounted for (its ledger, kept
+ * in its store: `seen-ledger.ts`), at most `CATCH_UP_CAP` per chat, a page at a time, and delivers
+ * it oldest first, marked `missed` and `playback`. Each message reaches the readers at most once,
+ * across live delivery, catch-up and restarts; a gap whose fetch failed is fetched again, later in
+ * the connection and at the next one, until it is filled. A chat no running reader reads is not
+ * fetched: its gap is skipped, and what is heard there live is accounted for all the same.
  *
  * The session string gives full access to the account: it comes from the deployment's secrets,
  * never from this repository, and is never printed by this module.
@@ -34,6 +37,9 @@ import { type UserAuthParams } from 'telegram/client/auth.js';
 import { NewMessage } from 'telegram/events/index.js';
 import { Logger, LogLevel } from 'telegram/extensions/Logger.js';
 import { StringSession } from 'telegram/sessions/index.js';
+import { LAST_SEEN_DOC, type LedgerStore, SEEN_ABOVE_DOC, SeenLedger } from './seen-ledger.ts';
+
+export { LAST_SEEN_DOC, SEEN_ABOVE_DOC };
 
 /** The fields of a GramJS message the connector reads. */
 export interface RawMessage {
@@ -76,7 +82,11 @@ export interface GramClient {
   getInputEntity(id: number | string): Promise<unknown>;
   /** The logged-in user. */
   getMe(): Promise<unknown>;
-  sendMessage(entity: never, params: { message: string }): Promise<{ id: number }>;
+  /** The message sent: its id, and its chat's marked id (GramJS's `Message.chatId`). */
+  sendMessage(
+    entity: never,
+    params: { message: string }
+  ): Promise<{ id: number; chatId?: { toString(): string } | undefined }>;
   /** A chat's messages, latest first: below `offsetId` (0: from the latest), above `minId`. */
   getMessages(
     entity: never,
@@ -108,14 +118,16 @@ export const RETRY_MS = 60_000;
 /** How many of the latest chats the surfaces list without a search. */
 export const SURFACES_LIMIT = 50;
 
-/** The store's document of the last message id seen in each chat, by the chat's marked id. */
-export const LAST_SEEN_DOC = 'last-seen';
 /** How many messages the catch-up fetches back in a chat, at most. */
 export const CATCH_UP_CAP = 1000;
 /** How many it asks for at a time. */
 export const CATCH_UP_PAGE = 100;
 /** The pause between two of its requests. */
 export const CATCH_UP_PAUSE_MS = 1000;
+/** A chat whose catch-up failed is fetched again after `RETRY_MS`, doubled each time, up to this. */
+export const CATCH_UP_RETRY_MAX_MS = 3_600_000;
+/** How many of each chat's latest ids it remembers having delivered, against a second delivery. */
+const RECENT = 200;
 
 /** The wait GramJS asks for (its `FloodWaitError` and kin carry `seconds`), in ms. */
 function floodMs(e: unknown): number | undefined {
@@ -148,19 +160,22 @@ export interface UserConnectorOptions {
   warn?: (line: string) => void;
   /** Writes to the event log (`ctx.record`): a catch-up that hit its cap. */
   record?: (type: string, fields: Record<string, unknown>) => void;
-  /** Where the last message id seen in each chat is kept (`LAST_SEEN_DOC`). */
-  store?: { read<T>(name: string): T | undefined; write(name: string, value: unknown): void };
-  /** What its readers read (`ctx.readers`): the chats the catch-up fetches. None: no catch-up. */
+  /** Where what it delivered of each chat is kept (`LAST_SEEN_DOC`, `SEEN_ABOVE_DOC`). */
+  store?: LedgerStore;
+  /**
+   * What its running readers read (`ctx.readers`): the chats the catch-up fetches. None: no
+   * catch-up.
+   */
   readers?: () => readonly ReadFilter[];
 }
 
-/** A chat to catch up on: its dialog, its name, its marked id, from and up to which message. */
+/** A chat to catch up on: its dialog, its name, its marked id, up to which message; its failures. */
 interface Gap {
   dialog: RawDialog;
   chat: string;
   key: string;
-  after: number;
   upTo: number;
+  failures: number;
 }
 
 export class TelegramUserConnector extends ConnectorBase implements Connector {
@@ -174,21 +189,32 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
   private connected = false;
   private told = false;
   private retry: TimerHandle | undefined;
-  /** The last message id seen in each chat, by its marked id, as kept. */
-  private readonly lastSeen: Record<string, number>;
+  /** What it has delivered or skipped of each chat, by its marked id, as kept. */
+  private readonly ledger: SeenLedger;
   /**
-   * The chats whose last id is held while the catch-up runs (all of them until it knows which),
-   * with the ids heard live meanwhile: not delivered twice, and kept once the chat is caught up.
+   * Each chat's first id heard live since this connection (its latest at the connection, plus
+   * one): every message from it on comes live. Undefined until the dialogs say it; meanwhile,
+   * the ids heard live wait in `early`.
    */
-  private held: Set<string> | 'all' | undefined;
-  private readonly live = new Map<string, Set<number>>();
+  private liveFrom: Map<string, number> | undefined;
+  private early = new Map<string, number[]>();
+  /** Each chat's latest ids delivered, so that none is delivered twice. */
+  private readonly recent = new Map<string, Set<number>>();
+  /** The chats to catch up on, in turn, and the connection whose catch-up runs. */
+  private queue: Gap[] = [];
+  private working: number | undefined;
+  private readonly retries = new Set<TimerHandle>();
   /** Each connection's own, so that a catch-up stopped or superseded ends. */
   private generation = 0;
 
   constructor(options: UserConnectorOptions) {
     super(options.account, 'telegram');
     this.o = options;
-    this.lastSeen = { ...(options.store?.read<Record<string, number>>(LAST_SEEN_DOC) ?? {}) };
+    this.ledger = new SeenLedger(options.store, (key, after, before) =>
+      this.warn(
+        `catch-up of ${key}: too many gaps kept, the one after ${after} up to ${before} skipped`
+      )
+    );
     this.chats =
       options.chats === undefined
         ? undefined
@@ -208,7 +234,12 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     this.started = false;
     this.connected = false;
     this.generation++;
-    this.release();
+    this.queue = [];
+    for (const t of this.retries) this.o.clock.clearTimeout(t);
+    this.retries.clear();
+    this.liveFrom = undefined;
+    this.early = new Map();
+    this.recent.clear();
     this.o.clock.clearTimeout(this.retry);
     this.peers.clear();
     this.changed({ state: 'closed', phase: 'closed' });
@@ -230,6 +261,10 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       const sent = await this.o.client.sendMessage((await this.peer(chat)) as never, {
         message: text,
       });
+      // Its own message, never heard back live from this session: accounted for, so that the
+      // catch-up does not deliver it as missed (D66).
+      const key = sent.chatId?.toString() ?? (/^-?\d+$/u.test(chat) ? chat : undefined);
+      if (key !== undefined) this.accountLive(key, sent.id);
       return { id: String(sent.id) };
     } catch (e) {
       const ms = floodMs(e);
@@ -289,9 +324,8 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     try {
       await client.connect();
       if (!this.started) return;
-      // Held from before the first live message, until the catch-up knows which chats it fetches.
-      this.held = 'all';
-      // Once, however often the start is retried; before the dialogs, so nothing falls between.
+      // Once, however often the start is retried; before the dialogs, so nothing falls between:
+      // what is heard before the dialogs waits in `early`.
       if (!this.listening) client.addEventHandler((e) => this.heard(e.message), new NewMessage({}));
       this.listening = true;
       const dialogs = [...(await client.getDialogs({}))];
@@ -305,9 +339,8 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
           this.chats === undefined ? 'every chat' : [...this.chats.values()].join(', ')
         }`
       );
-      void this.catchUp(dialogs, this.generation);
+      this.plan(dialogs, this.generation);
     } catch (err) {
-      this.release();
       if (!this.started) return;
       this.o.log(`start failed, retrying in ${RETRY_MS / 1000} s: ${String(err)}`);
       if (!this.told)
@@ -318,133 +351,193 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     }
   }
 
-  /** A message the account saw: passed on if it is in one of its chats, as an `Inbound`. */
+  /**
+   * A message the account saw: passed on if it is in one of its chats, as an `Inbound`, unless it
+   * was delivered already; accounted for before it is (at most once, D66).
+   */
   private async heard(m: RawMessage): Promise<void> {
+    if (!this.started) return;
     try {
       const chat = await this.chatOf(m);
       if (chat === undefined) return;
       const key = m.chatId?.toString();
-      if (key !== undefined) {
-        if (this.holds(key)) {
-          const ids = this.live.get(key) ?? new Set<number>();
-          ids.add(m.id);
-          this.live.set(key, ids);
-        } else this.saw(key, m.id);
+      if (key !== undefined && !this.remember(key, m.id)) return;
+      let inbound: Omit<Inbound, 'account' | 'network'>;
+      try {
+        inbound = await this.inbound(m, chat);
+      } finally {
+        if (key !== undefined) this.accountLive(key, m.id);
       }
-      this.received(await this.inbound(m, chat));
+      this.received(inbound);
     } catch (err) {
       this.o.log(`message ${m.id} dropped: ${String(err)}`);
     }
   }
 
-  private holds(key: string): boolean {
-    return this.held === 'all' || this.held?.has(key) === true;
-  }
-
-  /** The last id seen in a chat moved to the newest of `ids`, if newer than it was: kept. */
-  private saw(key: string, ...ids: number[]): void {
-    const latest = Math.max(this.lastSeen[key] ?? 0, ...ids);
-    if (latest === (this.lastSeen[key] ?? 0)) return;
-    this.lastSeen[key] = latest;
-    this.o.store?.write(LAST_SEEN_DOC, this.lastSeen);
-  }
-
-  /** A chat no longer held: what was heard live in it meanwhile is kept as seen. */
-  private unhold(key: string, ...ids: number[]): void {
-    if (this.held instanceof Set) this.held.delete(key);
-    this.saw(key, ...ids, ...(this.live.get(key) ?? []));
-    this.live.delete(key);
-  }
-
-  /** Every chat released: the catch-up is over (or never was). */
-  private release(): void {
-    const keys = [...this.live.keys()];
-    this.held = undefined;
-    for (const key of keys) this.unhold(key);
+  /** An id delivered in a chat, remembered; false if it was already. */
+  private remember(key: string, id: number): boolean {
+    let ids = this.recent.get(key);
+    if (ids === undefined) this.recent.set(key, (ids = new Set()));
+    if (ids.has(id)) return false;
+    ids.add(id);
+    if (ids.size > RECENT) ids.delete(ids.values().next().value as number);
+    return true;
   }
 
   /**
-   * At connection (D62): the chats some reader reads whose latest message is newer than the last
-   * seen there, each fetched back to it, at most `CATCH_UP_CAP` messages, and delivered oldest
-   * first, marked `missed` and `playback`. A chat with no last id is not fetched: its latest id is
-   * kept, so that the next connection can.
+   * An id heard live (or sent) in a chat, accounted for: with every id since the connection's
+   * first live one, which all come live; alone if older; waiting in `early` until the dialogs say
+   * where the connection's live ids start.
    */
-  private async catchUp(dialogs: readonly RawDialog[], generation: number): Promise<void> {
-    const readers = this.o.readers?.() ?? [];
-    const all = readers.some((r) => r.reads === '*');
-    const read = new Set(
-      readers.flatMap((r) => (r.reads === '*' ? [] : r.reads.map((c) => c.toLowerCase())))
+  private accountLive(key: string, id: number): void {
+    if (this.liveFrom === undefined) {
+      this.early.set(key, [...(this.early.get(key) ?? []), id]);
+      return;
+    }
+    let from = this.liveFrom.get(key);
+    if (from === undefined) {
+      // A chat the dialogs did not list: its live ids start here.
+      from = this.ledger.last(key) === undefined ? id + 1 : id;
+      this.liveFrom.set(key, from);
+    }
+    if (this.ledger.last(key) === undefined) this.ledger.advance(key, id);
+    else if (id >= from) this.ledger.mark(key, from, id);
+    else this.ledger.mark(key, id);
+  }
+
+  /** Whether a running reader reads `chat` (`ctx.readers`): its gap is fetched, or skipped. */
+  private read(chat: string): boolean {
+    return (this.o.readers?.() ?? []).some(
+      (r) => r.reads === '*' || r.reads.some((c) => c.toLowerCase() === chat.toLowerCase())
     );
-    const gaps: Gap[] = [];
-    let first = false;
+  }
+
+  /**
+   * At connection (D62, D66), from the dialogs: where each chat's live ids start (after its latest
+   * message); the ids heard before, accounted for; a chat seen for the first time, accounted for
+   * up to its latest message (not fetched); and each chat with a gap, fetched if a running reader
+   * reads it, else skipped.
+   */
+  private plan(dialogs: readonly RawDialog[], generation: number): void {
+    const liveFrom = new Map<string, number>();
+    const chats: Gap[] = [];
     for (const dialog of dialogs) {
       const chat = this.nameOf(dialog);
       const key = dialog.id?.toString();
       const upTo = dialog.message?.id;
       if (chat === undefined || key === undefined || upTo === undefined) continue;
-      const after = this.lastSeen[key];
-      if (after === undefined) {
-        this.lastSeen[key] = upTo;
-        first = true;
-      } else if (upTo > after && (all || read.has(chat.toLowerCase())))
-        gaps.push({ dialog, chat, key, after, upTo });
+      liveFrom.set(key, upTo + 1);
+      if (this.ledger.last(key) === undefined) this.ledger.advance(key, upTo);
+      chats.push({ dialog, chat, key, upTo, failures: 0 });
     }
-    if (first) this.o.store?.write(LAST_SEEN_DOC, this.lastSeen);
-    // Only the chats it fetches stay held; the others keep what was heard live.
-    const fetched = new Set(gaps.map((g) => g.key));
-    for (const key of [...this.live.keys()]) if (!fetched.has(key)) this.unhold(key);
-    this.held = fetched;
-    for (const gap of gaps) {
-      if (generation !== this.generation) return;
-      try {
-        await this.fill(gap, generation);
-      } catch (err) {
-        this.o.log(`catch-up of ${gap.chat} failed: ${String(err)}`);
-      }
-      if (generation === this.generation) this.unhold(gap.key);
+    this.liveFrom = liveFrom;
+    for (const [key, ids] of this.early) for (const id of ids) this.accountLive(key, id);
+    this.early = new Map();
+    for (const gap of chats) {
+      if (this.ledger.gaps(gap.key, gap.upTo).length === 0) continue;
+      if (this.read(gap.chat)) this.queue.push(gap);
+      else this.ledger.advance(gap.key, gap.upTo);
     }
-    if (generation === this.generation) this.held = undefined;
+    void this.work(generation);
   }
 
-  /** One chat's gap, fetched a page at a time, then delivered oldest first. */
+  /**
+   * The chats to catch up on, one at a time: a chat no running reader reads any more is skipped,
+   * one whose fetch fails is logged and queued again later (`RETRY_MS`, doubled each time, up to
+   * `CATCH_UP_RETRY_MAX_MS`).
+   */
+  private async work(generation: number): Promise<void> {
+    if (this.working === generation) return;
+    this.working = generation;
+    try {
+      for (;;) {
+        const gap = this.queue.shift();
+        if (gap === undefined || generation !== this.generation) return;
+        if (!this.read(gap.chat)) {
+          this.ledger.advance(gap.key, gap.upTo);
+          continue;
+        }
+        try {
+          await this.fill(gap, generation);
+        } catch (err) {
+          if (generation !== this.generation) return;
+          gap.failures++;
+          const ms = Math.min(RETRY_MS * 2 ** (gap.failures - 1), CATCH_UP_RETRY_MAX_MS);
+          this.o.log(`catch-up of ${gap.chat} failed, again in ${ms / 1000} s: ${String(err)}`);
+          const timer = this.o.clock.setTimeout(() => {
+            this.retries.delete(timer);
+            this.queue.push(gap);
+            void this.work(generation);
+          }, ms);
+          this.retries.add(timer);
+        }
+      }
+    } finally {
+      if (this.working === generation) this.working = undefined;
+    }
+  }
+
+  /**
+   * One chat's gaps, newest first, fetched a page at a time, at most `CATCH_UP_CAP` messages (past
+   * it, the older ones are skipped, warned of and recorded); then delivered oldest first, each
+   * accounted for before it goes, so that a stop in between delivers none twice.
+   */
   private async fill(gap: Gap, generation: number): Promise<void> {
     const peer = gap.dialog.inputEntity ?? gap.dialog.entity;
+    const ranges = this.ledger.gaps(gap.key, gap.upTo);
     const messages: RawMessage[] = [];
-    let offsetId = gap.upTo + 1;
-    let complete = false;
-    while (messages.length < CATCH_UP_CAP) {
-      const page = await this.page(peer, offsetId, gap.after, CATCH_UP_PAGE, generation);
-      if (page === undefined) return;
-      messages.push(...page);
-      if (page.length < CATCH_UP_PAGE) {
-        complete = true;
-        break;
+    /** The oldest message fetched, when older ones are missing past the cap. */
+    let floor: number | undefined;
+    for (const [i, [after, upTo]] of ranges.entries()) {
+      let offsetId = upTo + 1;
+      let complete = false;
+      while (messages.length < CATCH_UP_CAP) {
+        const page = await this.page(peer, offsetId, after, CATCH_UP_PAGE, generation);
+        if (page === undefined) return;
+        messages.push(...page);
+        if (page.length < CATCH_UP_PAGE) {
+          complete = true;
+          break;
+        }
+        offsetId = Math.min(...page.map((m) => m.id));
       }
-      offsetId = Math.min(...page.map((m) => m.id));
-    }
-    if (!complete) {
-      const more = await this.page(peer, offsetId, gap.after, 1, generation);
-      if (more === undefined) return;
-      if (more.length > 0) {
+      if (messages.length < CATCH_UP_CAP) continue;
+      // At the cap: is anything still missing below?
+      const below: [number, number][] = [
+        ...(complete ? [] : [[after, offsetId - 1] as [number, number]]),
+        ...ranges.slice(i + 1),
+      ];
+      for (const [lo, hi] of below) {
+        if (hi <= lo) continue;
+        const more = await this.page(peer, hi + 1, lo, 1, generation);
+        if (more === undefined) return;
+        if (more.length === 0) continue;
+        floor = Math.min(...messages.map((m) => m.id));
         this.warn(
           `catch-up of ${gap.chat} stopped at ${messages.length} messages, older ones missed`
         );
         this.o.record?.('telegram-user.catch-up', { chat: gap.chat, fetched: messages.length });
+        break;
       }
+      break;
     }
-    const live = this.live.get(gap.key);
-    const missed = messages
-      .filter((m) => isText(m) && live?.has(m.id) !== true)
-      .sort((a, b) => a.id - b.id);
-    for (const m of missed) {
+    if (floor !== undefined) this.ledger.advance(gap.key, floor - 1);
+    for (const m of messages.sort((a, b) => a.id - b.id)) {
       if (generation !== this.generation) return;
-      try {
-        this.received({ ...(await this.inbound(m, gap.chat)), playback: true, missed: true });
-      } catch (err) {
-        this.o.log(`message ${m.id} dropped: ${String(err)}`);
-      }
+      if (this.ledger.covered(gap.key, m.id)) continue;
+      let inbound: Omit<Inbound, 'account' | 'network'> | undefined;
+      if (isText(m))
+        try {
+          inbound = await this.inbound(m, gap.chat);
+        } catch (err) {
+          this.o.log(`message ${m.id} dropped: ${String(err)}`);
+        }
+      if (generation !== this.generation) return;
+      this.ledger.advance(gap.key, m.id);
+      if (inbound === undefined || !this.remember(gap.key, m.id)) continue;
+      this.received({ ...inbound, playback: true, missed: true });
     }
-    this.unhold(gap.key, gap.upTo);
+    this.ledger.advance(gap.key, gap.upTo);
   }
 
   /**

@@ -13,8 +13,11 @@ Each lists its surfaces, the chats it can see, for the editor to pick from (`sur
 docs/bot-os.md D63): `telegram-user` its dialogs, `telegram-bot` the chats it has seen (kept in its
 store) and one looked up by id, `irc` its channel. What was said while the instance was down comes
 marked `missed` from `telegram-bot` (Telegram keeps a bot's updates for a day) and from
-`telegram-user`, which at each connection fetches back the chats its readers read, up to the last
-message it saw in each (kept in its store, `last-seen`), at most 1000 a chat (D62).
+`telegram-user`, which at each connection fetches back the chats its running readers read, back to
+what it has accounted for in each (kept in its store, `last-seen` and `seen-above`), at most 1000 a
+chat (D62). Each message reaches the readers once, across live delivery, the catch-up and restarts,
+and a gap whose fetch failed is fetched again until it is filled; `telegram-bot` keeps the last
+message it delivered in each chat, against Telegram's deliveries again (D66).
 
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
   structured output by a zod schema.
