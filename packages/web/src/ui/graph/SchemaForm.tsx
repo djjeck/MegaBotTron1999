@@ -2,24 +2,20 @@
  * A form made from a JSON Schema (P11): the schemas a plugin declares in zod, as the core writes
  * them (`GET /available`, `GET /graph/view`). One field per property, by its type: a check box, a
  * number, a text, a choice of the enum's values, a nested group for an object; anything else as
- * JSON. Each field shows its value, or the schema's default, marked as such.
+ * JSON. Each field shows its value, or the schema's default, unmarked (the editor fills a node's
+ * config with its defaults, `defaults.ts`); its description, the schema's, is its help.
  *
- * Editable when given `onChange` (the editor's draft, D55): a field emptied is taken away, so that
- * its default holds; a key of `secretKeys` (a connector's `configSecrets`, bot-os-api.md §4.9) is a
+ * Editable when given `onChange` (the editor's draft, D55): a field emptied (once left) is taken
+ * away, so that its default holds; a key of `secretKeys` (a connector's `configSecrets`, bot-os-api.md §4.9) is a
  * choice of the secrets' names, never a value; `errors` are the check's, by key. Read-only without
  * it (an action's input). Nothing here depends on the node's state, so a killed node's form is as
  * any other's (D44).
  */
 import { useState } from 'react';
 import type { JsonSchema } from '#src/ui/api.ts';
+import { plain } from './defaults.ts';
 
 const show = (v: unknown): string => JSON.stringify(v, null, 2) ?? '';
-
-/** The schema of a value that may be null: its other branch. */
-function plain(schema: JsonSchema): JsonSchema {
-  const options = (schema['anyOf'] ?? schema['oneOf']) as JsonSchema[] | undefined;
-  return options?.find((o) => o['type'] !== 'null') ?? schema;
-}
 
 /** What a form needs to be edited, passed down to its nested groups. */
 interface Editing {
@@ -68,6 +64,38 @@ function JsonField(props: {
   );
 }
 
+/**
+ * A text or a number. Emptied, it stays empty while the owner types, and is taken away once left,
+ * so that a default, filled back in, does not come back under their cursor.
+ */
+function TextField(props: {
+  name: string;
+  number: boolean;
+  value: string;
+  set: ((v: unknown) => void) | undefined;
+}) {
+  const [emptied, setEmptied] = useState(false);
+  const { set } = props;
+  return (
+    <input
+      aria-label={props.name}
+      type={props.number ? 'number' : 'text'}
+      value={emptied ? '' : props.value}
+      readOnly={set === undefined}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setEmptied(raw === '');
+        if (raw !== '') set?.(props.number ? Number(raw) : raw);
+      }}
+      onBlur={() => {
+        if (!emptied) return;
+        setEmptied(false);
+        set?.(undefined);
+      }}
+    />
+  );
+}
+
 function Field(props: {
   name: string;
   schema: JsonSchema;
@@ -81,18 +109,20 @@ function Field(props: {
   const type = schema['type'];
   const enumOf = schema['enum'] as unknown[] | undefined;
   const fallback = props.schema['default'] ?? schema['default'];
-  const given = props.value !== undefined;
-  const value = given ? props.value : fallback;
+  const value = props.value !== undefined ? props.value : fallback;
   const description = (props.schema['description'] ?? schema['description']) as string | undefined;
   const errors = editing?.errors[name] ?? [];
   if (type === 'object' && schema['properties'] !== undefined)
     return (
-      <SchemaForm
-        legend={name}
-        schema={schema}
-        value={props.value as Record<string, unknown> | undefined}
-        {...(set === undefined ? {} : { onChange: (v) => set(v) })}
-      />
+      <div className="field">
+        <SchemaForm
+          legend={name}
+          schema={schema}
+          value={props.value as Record<string, unknown> | undefined}
+          {...(set === undefined ? {} : { onChange: (v) => set(v) })}
+        />
+        {description === undefined ? null : <small className="muted">{description}</small>}
+      </div>
     );
   let control;
   if (editing?.secretKeys.includes(name) === true && set !== undefined) {
@@ -142,16 +172,11 @@ function Field(props: {
     );
   else if (type === 'string' || type === 'number' || type === 'integer')
     control = (
-      <input
-        aria-label={name}
-        type={type === 'string' ? 'text' : 'number'}
+      <TextField
+        name={name}
+        number={type !== 'string'}
         value={value === undefined ? '' : String(value)}
-        readOnly={set === undefined}
-        onChange={(e) => {
-          const raw = e.target.value;
-          if (raw === '') set?.(undefined);
-          else set?.(type === 'string' ? raw : Number(raw));
-        }}
+        set={set}
       />
     );
   else control = <JsonField name={name} value={value} set={set} />;
@@ -162,7 +187,6 @@ function Field(props: {
         {props.required ? null : <span className="muted"> (optional)</span>}
         {control}
       </label>
-      {!given && fallback !== undefined ? <span className="muted">default</span> : null}
       {description === undefined ? null : <small className="muted">{description}</small>}
       {errors.map((e) => (
         <small key={e} className="error">

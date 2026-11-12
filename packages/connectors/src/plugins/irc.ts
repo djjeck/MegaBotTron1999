@@ -121,18 +121,29 @@ export const STATUS_EVENT = 'irc.status';
 
 /** The `irc` plugin's configuration : the ZNC login, the nick and channel, the rate limiter. */
 export const ircConfig = z.object({
-  host: z.string().min(1),
-  port: z.number().int().min(1).max(65_535),
-  tls: z.boolean(),
-  zncUser: z.string().min(1),
-  zncNetwork: z.string().min(1),
-  nick: z.string().min(1),
-  channel: z.string().regex(/^[#&]\S+$/u, 'expected a channel, such as #lobby'),
-  /** The least seconds between two sends, and the most sends in any hour. */
-  minIntervalS: z.number().int().min(0),
-  maxPerHour: z.number().int().min(1),
-  /** The health endpoint's port (`HEALTH_PORT`); none, no endpoint. */
-  healthPort: z.number().int().min(0).max(65_535).optional(),
+  host: z.string().min(1).describe('The ZNC bouncer’s host name'),
+  port: z.number().int().min(1).max(65_535).describe('The ZNC bouncer’s port'),
+  tls: z.boolean().describe('Whether the connection to ZNC is over TLS'),
+  zncUser: z.string().min(1).describe('The ZNC user it logs in as (its password is a secret)'),
+  zncNetwork: z.string().min(1).describe('The network of that ZNC user to join'),
+  nick: z.string().min(1).describe('Its nick on the network'),
+  channel: z
+    .string()
+    .regex(/^[#&]\S+$/u, 'expected a channel, such as #lobby')
+    .describe('The channel it reads and sends to, such as #lobby'),
+  minIntervalS: z
+    .number()
+    .int()
+    .min(0)
+    .describe('The least seconds between two sends (the rate limiter)'),
+  maxPerHour: z.number().int().min(1).describe('The most sends in any hour (the rate limiter)'),
+  healthPort: z
+    .number()
+    .int()
+    .min(0)
+    .max(65_535)
+    .optional()
+    .describe('The port of its health endpoint; unset, no endpoint'),
 });
 export type IrcConfig = z.infer<typeof ircConfig>;
 

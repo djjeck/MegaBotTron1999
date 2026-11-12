@@ -11,6 +11,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { DEFAULT_SCHEDULE } from '#src/schedule.ts';
 import { QUEST, QUESTBOT, questPlugin } from '#test/quest.ts';
 import {
   CONNECT_WAIT_MS,
@@ -111,6 +113,27 @@ describe('turnActorConfig', () => {
     expect(() => turnActorConfig.parse({ chat: CHAT, schedule: { minGapMin: 10 } })).toThrow(
       'minGapMin must be at least 15'
     );
+  });
+
+  it('carries every default in its schema, the schedule’s included, and applies them as before', () => {
+    expect(turnActorConfig.parse({ chat: CHAT }).schedule).toEqual(DEFAULT_SCHEDULE);
+    expect(turnActorConfig.parse({ chat: CHAT, schedule: {} }).schedule).toEqual(DEFAULT_SCHEDULE);
+    const json = z.toJSONSchema(turnActorConfig, { io: 'input' }) as {
+      properties: Record<string, { default?: unknown; description?: string; properties?: object }>;
+    };
+    const schedule = json.properties['schedule'];
+    expect(schedule?.default).toEqual(DEFAULT_SCHEDULE);
+    expect(schedule?.description).toBeDefined();
+    const fields = (schedule?.properties ?? {}) as Record<string, { default?: unknown }>;
+    expect(Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, v.default]))).toEqual(
+      DEFAULT_SCHEDULE
+    );
+    expect(json.properties['command']?.default).toBe('/play');
+    expect(json.properties['chat']?.description).toContain('@username');
+    // The default is a copy each time: a parse cannot change the next one's.
+    const a = turnActorConfig.parse({ chat: CHAT });
+    a.schedule.minGapMin = 99;
+    expect(turnActorConfig.parse({ chat: CHAT }).schedule.minGapMin).toBe(17);
   });
 });
 

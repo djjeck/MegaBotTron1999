@@ -15,11 +15,13 @@ that guards them.
   is dragged from an output to an input; a rhombus at its midpoint, in its port type's colour
   (`PortEdge.tsx`), is a button that selects it and opens its panel (`EdgeDetails.tsx`), where a
   chat edge's chats and commands are set. A node's config, settings, mode and account are forms made
-  from its schemas (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a secret a choice
-  of the secrets' names. Every change is checked by the core, and each refusal shown on its edge,
-  port, node or field (`draft.ts`, the draft's pure changes). **Review changes** opens a dialog with
-  the diff and two actions (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`) and
-  restarts the instance on it, waiting for it and coming back to the page, still logged in
+  from its schemas, each field's description as its help; a new node's config starts filled with its
+  schema's defaults, and an opened node shows its unset ones filled in, written with its first
+  change (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a secret a
+  choice of the secrets' names. Every change is checked by the core, and each refusal shown on its
+  edge, port, node or field (`draft.ts`, the draft's pure changes). **Review changes** opens a
+  dialog with the diff and two actions (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`)
+  and restarts the instance on it, waiting for it and coming back to the page, still logged in
   (`src/ui/Restart.tsx`), or says why the core refused it and restarts nothing; **Revert** drops the
   draft, back to the graph saved, once confirmed. Its × (or Escape) only closes it, the draft kept.
   When the saved graph is not what runs (changed through the API, rolled back, or a restart that did

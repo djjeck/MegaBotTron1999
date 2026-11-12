@@ -28,14 +28,7 @@
 import { definePlugin, type Plugin, type PluginContext } from '@megabottron1999/core';
 import { Rng } from '@megabottron1999/core/rng.ts';
 import { z } from 'zod';
-import {
-  DEFAULT_SCHEDULE,
-  hash,
-  type Plan,
-  Planner,
-  type ScheduleParams,
-  scheduleProblem,
-} from '#src/schedule.ts';
+import { DEFAULT_SCHEDULE, hash, type Plan, Planner, scheduleProblem } from '#src/schedule.ts';
 import { isTurnCommand, TURN_PARSER_MEMBERS, type TurnParserInterface } from './turn-parser.ts';
 
 export const TURN_ACTOR = 'turn-actor';
@@ -50,43 +43,76 @@ export const CONNECT_WAIT_MS = 60_000;
 /** The turn command when the configuration names none: a placeholder, since each bot has its own. */
 export const DEFAULT_TURN_COMMAND = '/play';
 
+/**
+ * The planner's pace (packages/turns/src/schedule.ts), each field with its default
+ * (`DEFAULT_SCHEDULE`) in the schema itself, so that the editor shows it; a schedule left out is
+ * the defaults whole. The whole is checked as the planner needs it (`scheduleProblem`).
+ */
+const D = DEFAULT_SCHEDULE;
 const scheduleShape = z
   .object({
-    minGapMin: z.number(),
-    maxGapMin: z.number(),
-    skipChance: z.number(),
-    bedtime: z.string(),
-    wake: z.string(),
-    jitterMin: z.number(),
-    wakeDelayMaxMin: z.number(),
-    timeZone: z.string(),
+    minGapMin: z
+      .number()
+      .default(D.minGapMin)
+      .describe(
+        'The shortest interval between two turns, in minutes: 15 at least, the bots’ own rest'
+      ),
+    maxGapMin: z
+      .number()
+      .default(D.maxGapMin)
+      .describe('The longest interval between two turns, in minutes, not under minGapMin'),
+    skipChance: z
+      .number()
+      .default(D.skipChance)
+      .describe('The chance that a turn is forgotten, from 0 to under 1'),
+    bedtime: z
+      .string()
+      .default(D.bedtime)
+      .describe('When the night starts, HH:MM in timeZone, after midnight: no turn until wake'),
+    wake: z.string().default(D.wake).describe('When the night ends, HH:MM in timeZone'),
+    jitterMin: z
+      .number()
+      .default(D.jitterMin)
+      .describe('How far bedtime and wake may each move, either way, in minutes'),
+    wakeDelayMaxMin: z
+      .number()
+      .default(D.wakeDelayMaxMin)
+      .describe('The most extra minutes after waking before the first turn'),
+    timeZone: z
+      .string()
+      .default(D.timeZone)
+      .describe('The time zone of bedtime and wake, an IANA name such as Europe/Rome'),
   })
-  .partial();
+  .superRefine((s, ctx) => {
+    const problem = scheduleProblem(s);
+    if (problem !== undefined) ctx.addIssue({ code: 'custom', message: problem });
+  });
 
 /** An instance's configuration: where it plays, what it sends, and its pace. */
 export const turnActorConfig = z.object({
-  /** The private chat with its bot, by the bot's `@username`. */
-  chat: z.string().regex(/^@\w{4,}$/u, 'expected the bot’s @username'),
-  /** Its turn command. */
+  chat: z
+    .string()
+    .regex(/^@\w{4,}$/u, 'expected the bot’s @username')
+    .describe('The private chat with its bot, by the bot’s @username'),
   command: z
     .string()
     .regex(/^\/\w+$/u, 'expected a command')
-    .default(DEFAULT_TURN_COMMAND),
-  /** Changes to the planner's defaults (packages/turns/src/schedule.ts). */
+    .default(DEFAULT_TURN_COMMAND)
+    .describe('Its turn command, sent to the bot'),
   schedule: scheduleShape
-    .default({})
-    .transform((s) => ({ ...DEFAULT_SCHEDULE, ...s }) as ScheduleParams)
-    .superRefine((s, ctx) => {
-      const problem = scheduleProblem(s);
-      if (problem !== undefined) ctx.addIssue({ code: 'custom', message: problem });
-    }),
-  /**
-   * The night's salt: the instances with the same one sleep the same nights (one person), drawn
-   * from the date; by default every instance's.
-   */
-  nightSalt: z.string().default(''),
-  /** The seed of its draws; by default the clock's and its id's. */
-  seed: z.number().int().optional(),
+    .default(() => ({ ...DEFAULT_SCHEDULE }))
+    .describe('Its pace: the interval between turns, and the night'),
+  nightSalt: z
+    .string()
+    .default('')
+    .describe(
+      'The night’s salt: the instances with the same one sleep the same nights (one person); empty, every instance’s'
+    ),
+  seed: z
+    .number()
+    .int()
+    .optional()
+    .describe('The seed of its draws; unset, drawn from the clock and its id'),
 });
 export type TurnActorConfig = z.output<typeof turnActorConfig>;
 

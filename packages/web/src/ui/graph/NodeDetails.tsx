@@ -16,6 +16,7 @@ import type {
   PluginControl,
   PortView,
 } from '#src/ui/api.ts';
+import { withDefaults } from './defaults.ts';
 import { instanceOf } from './draft.ts';
 import { SchemaForm } from './SchemaForm.tsx';
 
@@ -202,7 +203,8 @@ export function NodeDetails(props: {
           <SchemaForm
             legend="config"
             schema={view.configSchema}
-            value={node.config}
+            // Unset fields shown with their defaults, written with the first change (`defaults.ts`).
+            value={withDefaults(view.configSchema, node.config)}
             onChange={(config) => props.change({ config })}
             secretKeys={view.configSecrets}
             secretNames={props.secretNames}

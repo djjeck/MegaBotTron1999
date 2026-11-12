@@ -188,7 +188,15 @@ describe('GraphPage', () => {
     expect(await screen.findByText('chat: the bot is off: `cli.ts on` first')).toBeDefined();
     const host = within(details).getByLabelText('host') as HTMLInputElement;
     fireEvent.change(host, { target: { value: 'other.test' } });
-    await waitFor(() => expect(checked.at(-1)?.nodes[0]?.config).toEqual({ host: 'other.test' }));
+    // Its defaults, shown filled in, are written with the first change.
+    await waitFor(() =>
+      expect(checked.at(-1)?.nodes[0]?.config).toEqual({
+        host: 'other.test',
+        port: 6667,
+        tls: true,
+        channels: ['#a'],
+      })
+    );
   });
 
   it('says when the saved graph cannot be read, or does not read', async () => {
@@ -252,8 +260,9 @@ describe('SchemaForm', () => {
     expect((screen.getByLabelText('note') as HTMLInputElement).type).toBe('text');
     expect((screen.getByLabelText('burst') as HTMLInputElement).value).toBe('3');
     expect(screen.getByRole('group', { name: 'limits' })).toBeDefined();
-    // Every field but the one given is at its default, or optional.
-    expect(screen.getAllByText('default')).toHaveLength(4);
+    expect(screen.getByText('how fast it sends')).toBeDefined();
+    // A default is shown as a value, unmarked.
+    expect(screen.queryByText('default')).toBeNull();
     expect(screen.getAllByText('(optional)')).toHaveLength(7);
   });
 
@@ -279,8 +288,16 @@ describe('SchemaForm', () => {
     fireEvent.change(screen.getByLabelText('port'), { target: { value: '7000' } });
     expect(value).toMatchObject({ port: 7000 });
     rerender(form());
+    // Emptied: empty while typed, and taken away once left, its default back.
     fireEvent.change(screen.getByLabelText('port'), { target: { value: '' } });
+    expect(value).toMatchObject({ port: 7000 });
+    rerender(form());
+    expect((screen.getByLabelText('port') as HTMLInputElement).value).toBe('');
+    fireEvent.blur(screen.getByLabelText('port'));
     expect(value).not.toHaveProperty('port');
+    rerender(form());
+    expect((screen.getByLabelText('port') as HTMLInputElement).value).toBe('6667');
+    fireEvent.blur(screen.getByLabelText('port'));
     rerender(form());
     fireEvent.click(screen.getByLabelText('tls'));
     expect(value).toMatchObject({ tls: false });

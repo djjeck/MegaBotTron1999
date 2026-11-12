@@ -62,7 +62,10 @@ export interface TurnParserSpec {
 
 /** The parser's configuration: the turn commands of the owner's it recognises, by first word. */
 export const turnParserConfig = z.object({
-  commands: z.array(z.string().regex(/^\/\w+$/u)).default(['/play']),
+  commands: z
+    .array(z.string().regex(/^\/\w+$/u))
+    .default(['/play'])
+    .describe('The owner’s turn commands it recognises, by first word, such as /play'),
 });
 
 /** Until when the bot rests, and why. */

@@ -54,6 +54,7 @@ export const VIEW: GraphViewData = {
           note: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           limits: {
             type: 'object',
+            description: 'how fast it sends',
             properties: { burst: { type: 'number', default: 3 } },
           },
         },

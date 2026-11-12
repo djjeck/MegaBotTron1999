@@ -69,14 +69,20 @@ describe('the graph editor', () => {
     fireEvent.click(within(review).getByRole('button', { name: 'Apply' }));
     expect(await screen.findByRole('dialog', { name: 'restarting' })).toBeDefined();
     expect(screen.queryByRole('dialog', { name: 'review changes' })).toBeNull();
-    expect(core.file).toEqual({
+    // Its config started filled with its defaults, written as if typed.
+    const graph = {
       version: 1,
-      nodes: [{ id: 'irc-main', plugin: 'chat' }],
+      nodes: [
+        {
+          id: 'irc-main',
+          plugin: 'chat',
+          config: { port: 6667, tls: true, channels: ['#a'] },
+        },
+      ],
       edges: [],
-    });
-    const put = core.api.calls.indexOf(
-      'PUT /graph/file {"version":1,"nodes":[{"id":"irc-main","plugin":"chat"}],"edges":[]}'
-    );
+    };
+    expect(core.file).toEqual(graph);
+    const put = core.api.calls.indexOf(`PUT /graph/file ${JSON.stringify(graph)}`);
     expect(put).toBeGreaterThan(-1);
     await waitFor(() => expect(core.api.calls.indexOf('POST /restart {}')).toBeGreaterThan(put));
     // The session outlives the restart: back to the page, logged in still.
@@ -292,7 +298,13 @@ describe('the graph editor', () => {
       expect(core.checked.at(-1)?.nodes[0]).toEqual({
         id: 'chat',
         plugin: 'chat',
-        config: { host: 'example.test', token: 'token_b' },
+        config: {
+          host: 'example.test',
+          token: 'token_b',
+          port: 6667,
+          tls: true,
+          channels: ['#a'],
+        },
         account: 'chat:alice',
       })
     );
@@ -479,6 +491,20 @@ describe('the graph editor', () => {
     ).toBeDefined();
     expect(screen.queryByRole('dialog', { name: 'review changes' })).toBeNull();
     expect(core.api.calls).not.toContain('POST /restart {}');
+  });
+
+  it('shows an opened node’s defaults filled in, and leaves it unchanged until edited', async () => {
+    const core = fakeCore();
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    fireEvent.click(await screen.findByLabelText('node chat', {}, slow));
+    const details = await screen.findByLabelText('details of chat');
+    expect((within(details).getByLabelText('port') as HTMLInputElement).value).toBe('6667');
+    expect((within(details).getByLabelText('tls') as HTMLInputElement).checked).toBe(true);
+    expect(within(details).queryByText('default')).toBeNull();
+    // Opened only: nothing to review.
+    await waitFor(() => expect(core.checked.length).toBeGreaterThan(0));
+    expect(screen.queryByText('Changes not applied')).toBeNull();
+    expect(core.checked.at(-1)?.nodes[0]?.config).toEqual(core.file?.nodes[0]?.config);
   });
 
   it('says what a check and a restart refuse, and when the instance does not come back', async () => {

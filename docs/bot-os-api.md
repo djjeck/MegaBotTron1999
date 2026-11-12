@@ -50,7 +50,7 @@ instance does not start.
 | `events`        | The event types it registers, `<namespace>.<name>` → zod schema of the payload (§4.4)                                                                                                                                                                                                                                                 |
 | `uses`          | Shorthand (§2.1): the other plugins' interfaces it calls, by id and member (`{ dice: ['state.game'] }`): reviewed with both (P6)                                                                                                                                                                                                      |
 | `reach`         | Shorthand (§2.1): what it reads and sends, per connector: `{ connector, reads: chats, sends: chats, commands }`. The outbox refuses a send outside it (§4.6)                                                                                                                                                                          |
-| `config`        | A zod object: what is set at deploy. The core validates it at load; a bad value names the plugin and the key                                                                                                                                                                                                                          |
+| `config`        | A zod object: what is set at deploy. The core validates it at load; a bad value names the plugin and the key. Every default is in the schema, per field (`.default()`, nested ones included), never merged in code after parsing, and each field says what it is (`.describe()`): the editor shows both                               |
 | `settings`      | A zod object: what the owner changes at runtime, each key with its default and its help (`.describe()`). Kept in the plugin's store, offered to every control surface (P11)                                                                                                                                                           |
 | `secrets`       | The secrets it needs, by name (`znc_password`). Only a `connector` may declare any (P9); the manifest of any other kind that does is refused                                                                                                                                                                                          |
 | `configSecrets` | The keys of its `config` whose values name a secret (§4.9): a connector run as several nodes, each with a credential its node's config names. Only a `connector`                                                                                                                                                                      |
@@ -750,17 +750,20 @@ the JSON Schemas of its `config`, its `settings` and its actions' inputs and out
 outputs, zod's `toJSONSchema`), with the node's own id, account and config; the port types' looks
 come from `GET /graph/view` (`PORT_TYPE_INFO`). It polls `GET /status` and `GET /drift` for each
 node's live state, mode and drift. Each change of the draft is checked (`POST /graph/check`) and
-every problem shown where it is located (§2.3). A node selected shows its forms, editable, a key of
-`configSecrets` as a choice of `GET /secrets`; an edge selected, its chats and commands. Each edge
-has a rhombus at its midpoint in its port type's colour (`PortEdge.tsx`, React Flow's
-`EdgeLabelRenderer`), a button named after the edge (`edge irc.chat → dice.channel`) that selects it
-and opens its panel, by a click or the keyboard. Its review shows the diff and two actions: Apply,
-`PUT /graph/file` then `POST /restart` (none if the core refuses the graph, which the review says,
-nor if the saved graph is what runs already), and Revert, the draft back to the saved graph; a
-banner offers Apply (`POST /restart`) when the saved file differs from what runs (`differs`). After
-a restart the page waits on `GET /session` for the new process (another `boot` id), and comes back
-to the page, still logged in. One or several running nodes selected can be killed, each by
-`POST /plugins/<id>/kill`.
+every problem shown where it is located (§2.3). A node's config starts filled with its schema's
+defaults (nested objects within), written to the draft as if typed; a node opened shows the defaults
+of the fields its config leaves unset filled in, unmarked, and writes them with its first change, so
+that merely opening a node changes nothing. A field's description is its help. A node selected shows
+its forms, editable, a key of `configSecrets` as a choice of `GET /secrets`; an edge selected, its
+chats and commands. Each edge has a rhombus at its midpoint in its port type's colour
+(`PortEdge.tsx`, React Flow's `EdgeLabelRenderer`), a button named after the edge
+(`edge irc.chat → dice.channel`) that selects it and opens its panel, by a click or the keyboard.
+Its review shows the diff and two actions: Apply, `PUT /graph/file` then `POST /restart` (none if
+the core refuses the graph, which the review says, nor if the saved graph is what runs already), and
+Revert, the draft back to the saved graph; a banner offers Apply (`POST /restart`) when the saved
+file differs from what runs (`differs`). After a restart the page waits on `GET /session` for the
+new process (another `boot` id), and comes back to the page, still logged in. One or several running
+nodes selected can be killed, each by `POST /plugins/<id>/kill`.
 
 ### 4.13 The standard services
 
@@ -982,20 +985,20 @@ event type nobody registers, and a message trigger on a chat input no edge binds
   on `telegram`, bound to the private chat with its bot (read and sent to, its command only), and
   `parser`, a contract (`state.rest`, `actions.sent`) bound to its bot's parser, required, so that
   drift on the parser pauses it. Its configuration: `chat` (the bot's `@username`), `command` (the
-  bot's turn command; `/play` when unset), `schedule` (changes to the planner's defaults:
-  `packages/turns/src/schedule.ts`, 17–20 minutes between turns, some skipped, nights off in its
-  `timeZone`), `nightSalt` (the instances with one salt sleep the same nights) and `seed`. It plans
-  from the owner's last turn with the bot (kept in its store; a turn sent by hand counts too), as
-  the durable timer `turn` (dropped if it came due more than 10 minutes before a start); when it is
-  due, it asks its parser whether the bot rests and, if so, comes back a few minutes after; in
-  `live` it waits for the account to be connected, sends through its outbox and tells its parser the
-  message's id; a failed send is tried again two minutes later. It plays in `dry-run` and `live`
-  only (a new instance starts `dry-run`, D33). It declares no chat command, since two instances
-  would clash: the owner reaches each with `/plugins <id>` and its read `status`. Each step is
-  published as `turn-actor.step`. The image offers it (`src/main.ts`): the editor adds one node per
-  bot, each on its own instance, its `chat` edge to the owner's `telegram-user` node and its
-  `parser` edge to its bot's parser. The turn parsers are not the image's: each is made from a
-  game's grammar, so a game's module offers it.
+  bot's turn command; `/play` when unset), `schedule` (the planner's pace, each field with its
+  default in the schema, `DEFAULT_SCHEDULE` of `packages/turns/src/schedule.ts`: 17–20 minutes
+  between turns, some skipped, nights off in its `timeZone`), `nightSalt` (the instances with one
+  salt sleep the same nights) and `seed`. It plans from the owner's last turn with the bot (kept in
+  its store; a turn sent by hand counts too), as the durable timer `turn` (dropped if it came due
+  more than 10 minutes before a start); when it is due, it asks its parser whether the bot rests
+  and, if so, comes back a few minutes after; in `live` it waits for the account to be connected,
+  sends through its outbox and tells its parser the message's id; a failed send is tried again two
+  minutes later. It plays in `dry-run` and `live` only (a new instance starts `dry-run`, D33). It
+  declares no chat command, since two instances would clash: the owner reaches each with
+  `/plugins <id>` and its read `status`. Each step is published as `turn-actor.step`. The image
+  offers it (`src/main.ts`): the editor adds one node per bot, each on its own instance, its `chat`
+  edge to the owner's `telegram-user` node and its `parser` edge to its bot's parser. The turn
+  parsers are not the image's: each is made from a game's grammar, so a game's module offers it.
 - **`reactor`** (`packages/turns/src/reactor.ts`): one reaction (`react`, §4.15) made from its
   node's config, with no code, run as one instance per reaction. An actor: it starts `read-only`,
   and the owner sets its mode. Its configuration (`reactorConfig`): `on`, the event type it reacts

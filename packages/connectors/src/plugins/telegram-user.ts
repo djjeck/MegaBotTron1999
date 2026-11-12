@@ -25,7 +25,10 @@ export const USER_SECRETS = [
 
 /** The plugin's configuration: the chats it reads, a group by id or a private chat by `@username`. */
 export const telegramUserConfig = z.object({
-  chats: z.array(z.string().regex(USER_CHAT, 'expected a group id (-100…) or a @username')).min(1),
+  chats: z
+    .array(z.string().regex(USER_CHAT, 'expected a group id (-100…) or a @username'))
+    .min(1)
+    .describe('The chats it reads: a group by its id (-100…), or a private chat by @username'),
 });
 export type TelegramUserConfig = z.infer<typeof telegramUserConfig>;
 

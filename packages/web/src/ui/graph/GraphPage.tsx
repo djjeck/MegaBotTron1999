@@ -49,6 +49,7 @@ import { useLoad } from '#src/ui/hooks.ts';
 import { Restart } from '#src/ui/Restart.tsx';
 import type { NewNode } from './AddNode.tsx';
 import { AddNode } from './AddNode.tsx';
+import { withDefaults } from './defaults.ts';
 import {
   addNode,
   asGraph,
@@ -292,7 +293,9 @@ export function GraphPage({
   const onConnect = (c: Connection): void => change((g) => connect(g, edgeOf(c, plugins, g)));
 
   const added = (n: NewNode): void => {
-    change((g) => addNode(g, n));
+    // Its config starts filled with its defaults, written as if the owner had typed them.
+    const config = withDefaults(plugins.get(n.plugin)?.configSchema, undefined);
+    change((g) => addNode(g, Object.keys(config).length === 0 ? n : { ...n, config }));
     setPanel(undefined);
     setSaid(
       `${n.id} added on the instance ${n.instance}: wire it, set it up, then review and apply`
