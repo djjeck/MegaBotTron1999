@@ -95,6 +95,119 @@ describe('ModulesPage', () => {
     expect(await screen.findByText('restart: not now')).toBeDefined();
   });
 
+  it('removes a module once confirmed, says why one cannot be, and restores one removed', async () => {
+    let removed = false;
+    const api = fakeApi({
+      'GET /modules': () => [
+        200,
+        {
+          installed: [
+            {
+              id: 'dice',
+              version: '0.2.0',
+              loaded: '0.2.0',
+              inUse:
+                "the saved graph's node roller (dice-roll) uses it: delete or replace it first",
+            },
+            ...(removed ? [] : [{ id: 'cards', version: '0.3.0', previous: '0.1.0' }]),
+          ],
+          removed: [
+            {
+              id: 'poker',
+              version: '1.0.0',
+              description: 'a card game',
+              source: { kind: 'folder', name: 'games/poker', installedAt: '2026-11-12T10:00:00Z' },
+            },
+            { id: 'broken', error: 'module.json is not JSON' },
+            ...(removed ? [{ id: 'cards', version: '0.3.0' }] : []),
+          ],
+          failures: [],
+          restart: removed,
+        },
+      ],
+      'DELETE /modules/cards': () => {
+        removed = true;
+        return [200, { id: 'cards', version: '0.3.0' }];
+      },
+      'DELETE /modules/dice': [409, { error: 'dice cannot be removed: in use' }],
+      'POST /modules/poker/rollback': [200, { id: 'poker', version: '1.0.0' }],
+    });
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    render(<ModulesPage loggedOut={vi.fn()} />);
+    // In use: Remove disabled, its reason beside it.
+    const dice = (await screen.findByText('dice')).closest('tr') as HTMLElement;
+    const blocked = within(dice).getByRole('button', { name: 'Remove' });
+    expect((blocked as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      document.getElementById(blocked.getAttribute('aria-describedby') ?? '')?.textContent
+    ).toBe("the saved graph's node roller (dice-roll) uses it: delete or replace it first");
+    expect(blocked.parentElement?.dataset['tip']).toMatch(/^the saved graph's node roller/u);
+    // Asked first, naming the module; cancelled, nothing is sent.
+    const cards = screen.getByText('cards').closest('tr') as HTMLElement;
+    fireEvent.click(within(cards).getByRole('button', { name: 'Remove' }));
+    const dialog = screen.getByRole('dialog', { name: 'remove module' });
+    expect(within(dialog).getByText('Remove cards 0.3.0?')).toBeDefined();
+    expect(within(dialog).getByText('The running instance has not loaded it.')).toBeDefined();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(within(cards).getByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove cards' }));
+    expect(await screen.findByText('cards removed: Restore puts it back', {}, slow)).toBeDefined();
+    expect(api.calls).toContain('DELETE /modules/cards');
+    // Listed as removed, with Restore, and the restart offered.
+    await screen.findByRole('button', { name: 'Apply (restart)' }, slow);
+    const gone = within(screen.getByLabelText('modules installed'))
+      .getAllByText('cards')
+      .map((e) => e.closest('tr') as HTMLElement);
+    expect(gone).toHaveLength(1);
+    expect(within(gone[0] as HTMLElement).getByText('removed')).toBeDefined();
+    expect(
+      within(gone[0] as HTMLElement).getByRole('button', { name: 'Restore 0.3.0' })
+    ).toBeDefined();
+    // One removed before, with its source.
+    const poker = screen.getByText('poker').closest('tr') as HTMLElement;
+    expect(within(poker).getByText('a card game')).toBeDefined();
+    expect(within(poker).getByText('folder upload games/poker')).toBeDefined();
+    const broken = screen.getByText('module.json is not JSON').closest('tr') as HTMLElement;
+    expect(within(broken).getByRole('button', { name: 'Restore' })).toBeDefined();
+    // Restored, once confirmed.
+    fireEvent.click(within(poker).getByRole('button', { name: 'Restore 1.0.0' }));
+    expect(confirm).toHaveBeenCalledWith(
+      'Restore poker 1.0.0? It is installed again, and loaded at the next start.'
+    );
+    expect(api.calls).not.toContain('POST /modules/poker/rollback {}');
+    confirm.mockReturnValue(true);
+    fireEvent.click(within(poker).getByRole('button', { name: 'Restore 1.0.0' }));
+    expect(await screen.findByText('poker 1.0.0 restored: restart to load it')).toBeDefined();
+    fireEvent.click(within(broken).getByRole('button', { name: 'Restore' }));
+    expect(await screen.findByText('broken: not found')).toBeDefined();
+  });
+
+  it('says why a removal was refused, and that the running one goes at the restart', async () => {
+    fakeApi({
+      'GET /modules': [
+        200,
+        {
+          installed: [{ id: 'dice', version: '0.2.0', loaded: '0.2.0' }],
+          failures: [],
+          restart: false,
+        },
+      ],
+      'DELETE /modules/dice': [409, { error: 'dice cannot be removed: in use' }],
+    });
+    render(<ModulesPage loggedOut={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }, slow));
+    expect(
+      screen.getByText('Its plugins run until the next start: restart to apply the removal.')
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove dice' }));
+    expect(
+      await screen.findByText('dice: not removed: dice cannot be removed: in use', {}, slow)
+    ).toBeDefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('restarts to load a module, and comes back to the page, still logged in', async () => {
     let restarted = false;
     fakeApi({

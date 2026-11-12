@@ -166,6 +166,23 @@ describe('the graph file', () => {
     expect(file.read()).toMatchObject({ error: expect.stringMatching(/does not read/) });
   });
 
+  it('lists its nodes and their plugins, disabled ones too, for a module’s removal', () => {
+    const file = new GraphFile(path.join(dir, 'nodes'), () => clock.now());
+    expect(file.nodes()).toEqual([]);
+    fs.mkdirSync(file.dir, { recursive: true });
+    fs.writeFileSync(
+      file.file,
+      JSON.stringify({
+        version: 2,
+        nodes: [{ id: 'roller', plugin: 'dice-roll', disabled: true }, { id: 'odd' }, 'junk'],
+        edges: [],
+      })
+    );
+    expect(file.nodes()).toEqual([{ id: 'roller', plugin: 'dice-roll' }]);
+    fs.writeFileSync(file.file, '{half');
+    expect(file.nodes()).toEqual([]);
+  });
+
   it('locates each problem: its node, edge, port, config or setting', () => {
     const raw = { nodes: [{ id: 'a' }, 'x'], edges: [{ from: 'a', to: 'b.c' }, 1] };
     expect(locateProblem('graph: nodes.0.config.x: bad', raw)).toEqual({

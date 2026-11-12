@@ -9,6 +9,7 @@ import { controlServer, type ModuleControls } from './control-server.ts';
 import { Core } from './core.ts';
 import { GitHub, GitHubModules, moduleControls } from './module-github.ts';
 import { ModuleStore } from './module-store.ts';
+import { moduleManifestSchema } from './modules.ts';
 import { definePlugin, type Plugin } from './plugin.ts';
 
 const plugin = (id: string, description = 'A test plugin'): Plugin =>
@@ -176,6 +177,80 @@ describe('the control API’s modules', () => {
     ]);
   });
 
+  it('removes a module, refused with why while it is used, and restores it', async () => {
+    const core = new Core({
+      clock: new VirtualClock(0),
+      graph: { version: 2, nodes: [], edges: [] },
+    });
+    await core.start();
+    const store = new ModuleStore(tempDir());
+    store.install({ dir: writeModule(tempDir(), 'dice', manifestOf('dice')) });
+    writeModule(store.dir, 'cards', manifestOf('cards', { imports: { '@example/dice': '*' } }));
+    const load = {
+      modules: [
+        {
+          id: 'dice',
+          version: '0.1.0',
+          dir: path.join(store.dir, 'dice'),
+          manifest: moduleManifestSchema.parse(manifestOf('dice')),
+          plugins: ['dice-roll'],
+        },
+      ],
+      failures: [],
+      plugins: [],
+    };
+    let nodes = [{ id: 'roller', plugin: 'dice-roll' }];
+    server = controlServer({
+      controls: core.controls,
+      settings: core.settings,
+      modules: moduleControls(store, load, undefined, () => nodes),
+    });
+    await new Promise<void>((r) => server?.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as { port: number };
+    const call = async (p: string, method = 'GET') => {
+      const res = await fetch(`http://127.0.0.1:${port}${p}`, { method });
+      return [res.status, await res.json()] as const;
+    };
+    const inUse =
+      "the saved graph's node roller (dice-roll) uses it: delete or replace it first; " +
+      'module cards imports it (@example/dice)';
+    expect((await call('/modules'))[1]).toMatchObject({
+      installed: [{ id: 'cards' }, { id: 'dice', inUse }],
+    });
+    expect(await call('/modules/dice', 'DELETE')).toEqual([
+      409,
+      { error: `dice cannot be removed: ${inUse}` },
+    ]);
+    expect(await call('/modules/cards', 'DELETE')).toEqual([
+      200,
+      { id: 'cards', version: '0.1.0' },
+    ]);
+    nodes = [];
+    expect(await call('/modules/dice', 'DELETE')).toEqual([200, { id: 'dice', version: '0.1.0' }]);
+    expect(await call('/modules/dice', 'DELETE')).toEqual([
+      404,
+      { error: 'dice is not installed' },
+    ]);
+    expect((await call('/modules'))[1]).toEqual({
+      installed: [],
+      removed: [
+        { id: 'cards', version: '0.1.0' },
+        {
+          id: 'dice',
+          version: '0.1.0',
+          loaded: '0.1.0',
+          source: expect.objectContaining({ kind: 'directory' }) as unknown,
+        },
+      ],
+      failures: [],
+      restart: true,
+    });
+    expect(await call('/modules/dice/rollback', 'POST')).toEqual([
+      200,
+      { id: 'dice', version: '0.1.0' },
+    ]);
+  });
+
   it('refuses an upload too large, and passes other errors on', async () => {
     const core = new Core({
       clock: new VirtualClock(0),
@@ -191,6 +266,9 @@ describe('the control API’s modules', () => {
           throw new Error('disk full');
         },
         rollback: () => {
+          throw new Error('disk full');
+        },
+        remove: () => {
           throw new Error('disk full');
         },
       },
@@ -210,6 +288,8 @@ describe('the control API’s modules', () => {
       { error: 'Error: disk full' },
     ]);
     expect(await post('/modules/dice/rollback', '')).toEqual([400, { error: 'Error: disk full' }]);
+    const removed = await fetch(`http://127.0.0.1:${port}/modules/dice`, { method: 'DELETE' });
+    expect([removed.status, await removed.json()]).toEqual([400, { error: 'Error: disk full' }]);
     const half = Buffer.alloc(32 * 2 ** 20 + 1).toString('base64');
     const files = [
       { path: 'a', content: half },

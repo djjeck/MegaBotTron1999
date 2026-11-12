@@ -219,7 +219,8 @@ export function webHandler(o: WebOptions): Handler {
       const route = url.pathname;
       if (route !== '/api' && !route.startsWith('/api/')) return serveFile(req, res, route);
       const post = req.method === 'POST';
-      // Every request that changes something (a POST, or the graph's PUT) is the page's own.
+      // Every request that changes something (a POST, the graph's PUT, a module's DELETE) is the
+      // page's own.
       const change = req.method !== 'GET' && req.method !== 'HEAD';
       if (change && !sameOrigin(req)) return json(res, 403, { error: 'not from this page' });
       const token = cookies(req)[SESSION_COOKIE];

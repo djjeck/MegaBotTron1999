@@ -152,10 +152,10 @@ export const greeter = definePlugin({
 
 Games and their automation come as _modules_ in the data volume (`/data/modules/<id>/`, a directory
 of `.ts` files and a `module.json`), installed by the owner through the control API (from a folder,
-a tarball or a GitHub link, the previous version kept for a rollback) and loaded at start
-([docs/bot-os.md](docs/bot-os.md) D49, D53, D67). A module repository develops and tests against
-this one vendored as a git submodule ([docs/bot-os-api.md](docs/bot-os-api.md) §7). The full API is
-[docs/bot-os-api.md](docs/bot-os-api.md).
+a tarball or a GitHub link, the previous version kept for a rollback), removed the same way, and
+loaded at start ([docs/bot-os.md](docs/bot-os.md) D49, D53, D67, D68). A module repository develops
+and tests against this one vendored as a git submodule ([docs/bot-os-api.md](docs/bot-os-api.md)
+§7). The full API is [docs/bot-os-api.md](docs/bot-os-api.md).
 
 ## Layout
 

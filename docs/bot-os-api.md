@@ -1010,12 +1010,12 @@ body the action's input (400 for an input refused by its schema, 409 for the plu
 `GET /graph/history`, `GET /graph/history/<id>`, `POST /graph/history/<id>/rollback`,
 `POST /graph/rollback` and `POST /restart` (§2.3); `GET /legacy`, `GET /legacy/events`,
 `POST /instances/import` and `POST /legacy/events/import` (§8); `GET /available`, `GET /modules`,
-`POST /modules`, `POST /modules/plan`, `POST /modules/github`, `POST /modules/updates` and
-`POST /modules/<id>/rollback` (§7.4); `GET /secrets`, the names of the Docker secrets provided,
-never their values, for a connector's config to name (§4.9; the wiring leaves out `web_ui_password`,
-`bot_os_key` and `github_token`, the shell's own). Ids and names in a path may be URL-encoded. The
-control API is the owner's alone: no agent is ever given it (P11), so no agent installs a module
-(P1).
+`POST /modules`, `POST /modules/plan`, `POST /modules/github`, `POST /modules/updates`,
+`POST /modules/<id>/rollback` and `DELETE /modules/<id>` (§7.4); `GET /secrets`, the names of the
+Docker secrets provided, never their values, for a connector's config to name (§4.9; the wiring
+leaves out `web_ui_password`, `bot_os_key` and `github_token`, the shell's own). Ids and names in a
+path may be URL-encoded. The control API is the owner's alone: no agent is ever given it (P11), so
+no agent installs a module (P1).
 
 **The web UI's login** (`packages/web/src/server/auth.ts`, bot-os.md D45): one password, the
 `web_ui_password` secret; a session is a random token in an `HttpOnly`, `SameSite=Strict` cookie
@@ -1540,7 +1540,7 @@ The plugins loaded are registered with the core beside the image's (`core.regist
 `core.available()` lists them all, each with its module: the plugins the instance offers, which the
 editor will add as nodes. A plugin runs once a node of the saved graph (§2.3) names it.
 
-### 7.4 Installing, and rolling back
+### 7.4 Installing, rolling back and removing
 
 The owner installs a module through the control API (§4.11), never an agent (P1, P11); it is loaded
 at the next start (P8). The shell downloads a module only when the owner asks it to install one from
@@ -1577,7 +1577,8 @@ a GitHub link, and never installs or restarts on its own (bot-os.md D67). `Modul
   `{"kind": "directory", "path"}` or
   `{"kind": "github", "repo", "ref", "refType", "path", "commit", "commitDate"?}`, with when it was
   installed (`installedAt`). The version kept for a rollback keeps its own, and a rollback swaps
-  them. A module installed before has none.
+  them; an install that replaces nothing (the module removed) leaves the previous version, and its
+  record, as they are. A module installed before has none.
 - **The modules in a tree** (`POST /modules/plan`): a folder may be a module's or a repository's
   root with several. Given its listing
   (`{"paths": ["games/modules/dice/module.json", …], "manifests": {"<path>": "<its text>"}}`, the
@@ -1620,16 +1621,29 @@ a GitHub link, and never installs or restarts on its own (bot-os.md D67). `Modul
   Node 24 honours.
 - **Rollback** (`POST /modules/<id>/rollback`): `.previous/<id>/` and `<id>/` swap, so a second
   rollback goes forward again; 409 when there is no previous version.
+- **Removal** (`DELETE /modules/<id>`, bot-os.md D68): `<id>/` is moved aside as `.previous/<id>/`,
+  replacing any older previous version, and its source record follows it in `.sources.json` (the
+  older one dropped), so that the rollback above restores it (the Modules page's **Restore**). The
+  answer is `{id, version?}`. Refused, 409 with why, while the module is used:
+  `dice cannot be removed: the saved graph's node roller (dice-roll) uses it: delete or replace it first; module cards imports it (@example/dice)`.
+  A node uses it when its plugin is one that the module's loaded version offers, read from the saved
+  `graph.json`, disabled nodes too; a module not loaded offers none the instance knows. A module
+  imports it when its manifest's `imports` names what it `provides`. 404 for a module not installed.
+  Like an install, it takes effect at the next start (P8). A module removed stays listed as such,
+  restorable, until an install of its id replaces it; that install keeps the version removed as its
+  previous. It is not checked for updates (its source record is no longer current).
 - **The list** (`GET /modules`): each module installed (its manifest, or why it does not read), its
   `source` (above), the version kept for a rollback (`previous`), the version the running instance
   loaded (`loaded`), its `update` if the last check found one, the modules it refused at its start
   with why (`failures`), whether a restart would change what is loaded (`restart`), and the last
-  check for updates (`updates`: `checkedAt`, and its `error`). `GET /available` lists the plugins
-  the instance offers, each as the editor adds a node of it (`describePlugin`, `PluginView`): its
-  id, its module (none for the image's own), version, description and kinds, its account, its input
-  and output ports, its interface, the JSON Schemas of its config and settings, the secrets it
-  declares, the keys of its config that name one (`configSecrets`), and the event types it
-  registers.
+  check for updates (`updates`: `checkedAt`, and its `error`). Each module installed has `inUse`,
+  why it cannot be removed now, when it cannot; the modules removed are listed apart (`removed`,
+  only when there are some), each with its version kept, its manifest's description or why it does
+  not read, its `source` and the version `loaded`. `GET /available` lists the plugins the instance
+  offers, each as the editor adds a node of it (`describePlugin`, `PluginView`): its id, its module
+  (none for the image's own), version, description and kinds, its account, its input and output
+  ports, its interface, the JSON Schemas of its config and settings, the secrets it declares, the
+  keys of its config that name one (`configSecrets`), and the event types it registers.
 
 From the host, through the loopback: `docker cp dice/ megabottron1999:/tmp/dice`, then
 `docker exec megabottron1999 wget -qO- --header 'content-type: application/json' --post-data '{"dir":"/tmp/dice"}' http://127.0.0.1:8081/modules`,
@@ -1638,7 +1652,9 @@ folder dropped on the page) or a GitHub link pasted lists the modules found as a
 with its path, version and status, and its files left out; all checked but downgrades), installs
 those checked one by one, each on its own, and says how each went; it shows each module's source
 (linked to GitHub at its commit) and when it was installed, its update (**Update**, **Update all**,
-**Check for updates**), installs a `.tar.gz`, rolls one back, and offers the restart.
+**Check for updates**), installs a `.tar.gz`, rolls one back, removes one (**Remove**, confirmed in
+a dialog that names it; disabled, its reason shown on hover, while the module is used) and restores
+one removed (**Restore**), and offers the restart.
 
 ### 7.5 Developing a module against MegaBotTron1999
 

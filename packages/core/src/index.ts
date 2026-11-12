@@ -208,14 +208,17 @@ export {
   type ModulesLoad,
 } from './module-loader.ts';
 export {
+  type GraphNodeRef,
   type InstalledModule,
   type ModuleFile,
+  ModuleInUse,
   type ModuleOrigin,
   type ModuleSource,
   type ModuleSourceRecord,
   type ModulesReport,
   ModuleStore,
   type ModuleUpdate,
+  type RemovedModule,
   type UpdateCheck,
 } from './module-store.ts';
 export {

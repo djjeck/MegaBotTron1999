@@ -1074,6 +1074,56 @@ table.modules a {
   overflow-wrap: anywhere;
 }
 
+/* A module removed (D68): kept for Restore, its row dimmed. */
+table.modules tr.removed td {
+  color: var(--muted);
+}
+
+.tag {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  font-size: 0.85em;
+}
+
+/* Why a button is disabled, shown beside it on hover (not every browser shows a disabled button's title). */
+.tip {
+  position: relative;
+  display: inline-block;
+}
+
+.tip[data-tip]:hover::after,
+.tip[data-tip]:focus-within::after {
+  content: attr(data-tip);
+  position: absolute;
+  right: calc(100% + 0.4rem);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  width: max-content;
+  max-width: 22rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 0.3rem;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.85rem;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 20%);
+  white-space: normal;
+}
+
+@media (max-width: 640px) {
+  .tip[data-tip]:hover::after,
+  .tip[data-tip]:focus-within::after {
+    right: auto;
+    left: 0;
+    top: calc(100% + 0.3rem);
+    transform: none;
+    max-width: 80vw;
+  }
+}
+
 /* On a phone, each module is a card: its cells one under the other, each named. */
 @media (max-width: 640px) {
   table.stack thead {

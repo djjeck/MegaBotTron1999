@@ -162,7 +162,8 @@ const controlApi = controlHandler({
     plugins: () => core.available().map((p) => p.id),
     eventTypes: () => core.available().flatMap((p) => p.events),
   }),
-  modules: moduleControls(modules, loaded, githubModules),
+  // A module is removed only while no node of the saved graph uses its plugins (D68).
+  modules: moduleControls(modules, loaded, githubModules, () => graphFile.nodes()),
 });
 const control = http.createServer(controlApi).listen(port('CONTROL_PORT', 8081), '127.0.0.1');
 // The web UI, on every interface for a reverse proxy, only with the owner's password (the

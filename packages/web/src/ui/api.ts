@@ -31,6 +31,7 @@ import type {
   PortType,
   PortTypeInfo,
   PortView,
+  RemovedModule,
   Surface,
   SurfacesView,
 } from '@megabottron1999/core';
@@ -63,6 +64,7 @@ export type {
   PortType,
   PortTypeInfo,
   PortView,
+  RemovedModule,
   Surface,
   SurfacesView,
 };
@@ -152,24 +154,27 @@ export class ApiError extends Error {
 }
 
 /**
- * Calls the API: a GET, or a POST (a PUT with `method`) of `body` as JSON. Throws an `ApiError` for
- * a refusal.
+ * Calls the API: a GET, or a POST (a PUT with `method`) of `body` as JSON, or a DELETE (`method`,
+ * with no body). Throws an `ApiError` for a refusal.
  */
 export async function api<T>(
   route: string,
   body?: unknown,
-  method: 'POST' | 'PUT' = 'POST'
+  method: 'POST' | 'PUT' | 'DELETE' = 'POST'
 ): Promise<T> {
   const res = await fetch(
     `api${route}`,
-    body === undefined
-      ? { credentials: 'same-origin' }
-      : {
-          method,
-          credentials: 'same-origin',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        }
+    method === 'DELETE'
+      ? // No body, but the type the server asks of every change (its same-origin rule).
+        { method, credentials: 'same-origin', headers: { 'content-type': 'application/json' } }
+      : body === undefined
+        ? { credentials: 'same-origin' }
+        : {
+            method,
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          }
   );
   let value: unknown = null;
   try {

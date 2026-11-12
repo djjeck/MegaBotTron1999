@@ -68,24 +68,29 @@ the server that guards them.
   progress, and lists how each went; the restart is then offered once. A module from GitHub with a
   newer commit (the shell checks every 6 hours, or **Check for updates**) says `update available`
   with the commit and its date, linked to GitHub's comparison, and **Update** or **Update all**
-  installs it. It also installs a `.tar.gz` and rolls a module back; **Import** (`#/import`) shows
-  an older data directory and imports its event log with a table of type renames. **Admin**
-  (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59) has one section per area, each
-  reached by its route (`#/instance`, `#/graph-history`, `#/graph-text`, `#/accounts`, `#/plugins`),
-  which opens the page scrolled to it: **Instance** (on or off with its switch, uptime, memory, the
-  plugins and accounts by state, the kill switch), **Graph history** (`GraphHistoryPage.tsx`,
-  docs/bot-os.md D61: each version of the saved graph, newest first, with its time, what changed and
-  how the instance started on it, the last that ran marked "last good"; one opened shows what
-  rolling back to it would change, as the review's diff (**Changes**) and as a line diff of the two
-  printouts (**As text**), and **Roll back to this** asks, repeating the diff, then restarts on it),
-  **Graph as text** (the saved graph printed, with a copy button), **Accounts** (each connector, its
-  account and its connection's status) and **Plugins** (each plugin instance with its state,
-  read-only (its reason and its stop), and, opened, its settings, its own status and the reads and
-  actions it declares). Beside it, **Drift** (each parser's counts and the latest reports) and
-  **Events** (the event log's latest records, filtered by type). Every page reads the control API
-  only; the app imports the core's types and nothing else of it, so its bundle holds none of the
-  shell's code. All the pages are in one menu, with no admin part apart: the whole app is the
-  owner's console. A page is a line of `PAGES` in `src/ui/App.tsx`.
+  installs it. It also installs a `.tar.gz` and rolls a module back. **Remove** (D68) asks first, in
+  a dialog that names the module, then moves it aside as its previous version
+  (`DELETE /modules/<id>`, sent JSON-typed as the server's same-origin rule asks of every change);
+  it is disabled, its reason shown beside it on hover, while a node of the saved graph (disabled
+  ones too) uses one of its plugins or another module imports it. A module removed is listed as
+  `removed` with **Restore** (its rollback) until an install of its id replaces it, and the restart
+  is offered. **Import** (`#/import`) shows an older data directory and imports its event log with a
+  table of type renames. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59) has
+  one section per area, each reached by its route (`#/instance`, `#/graph-history`, `#/graph-text`,
+  `#/accounts`, `#/plugins`), which opens the page scrolled to it: **Instance** (on or off with its
+  switch, uptime, memory, the plugins and accounts by state, the kill switch), **Graph history**
+  (`GraphHistoryPage.tsx`, docs/bot-os.md D61: each version of the saved graph, newest first, with
+  its time, what changed and how the instance started on it, the last that ran marked "last good";
+  one opened shows what rolling back to it would change, as the review's diff (**Changes**) and as a
+  line diff of the two printouts (**As text**), and **Roll back to this** asks, repeating the diff,
+  then restarts on it), **Graph as text** (the saved graph printed, with a copy button),
+  **Accounts** (each connector, its account and its connection's status) and **Plugins** (each
+  plugin instance with its state, read-only (its reason and its stop), and, opened, its settings,
+  its own status and the reads and actions it declares). Beside it, **Drift** (each parser's counts
+  and the latest reports) and **Events** (the event log's latest records, filtered by type). Every
+  page reads the control API only; the app imports the core's types and nothing else of it, so its
+  bundle holds none of the shell's code. All the pages are in one menu, with no admin part apart:
+  the whole app is the owner's console. A page is a line of `PAGES` in `src/ui/App.tsx`.
 - `src/server/web-server.ts`: the UI's own listener. It serves the built app, and the core's control
   API (`controlHandler` of `@megabottron1999/core`) under `/api/`, only to a logged-in owner.
   `startWebUi` starts it only when the `web_ui_password` Docker secret is provided (12 characters at
@@ -102,8 +107,8 @@ the server that guards them.
   minutes, and that address waits; behind a proxy every visitor shares the proxy's address, so the
   limit is the whole instance's.
 
-A POST or a PUT must carry JSON and come from the UI's own origin. Every response carries a strict
-Content Security Policy and refuses to be framed.
+A POST, a PUT or a DELETE must carry JSON (a DELETE its type alone) and come from the UI's own
+origin. Every response carries a strict Content Security Policy and refuses to be framed.
 
 The app is tested with Vitest on happy-dom and Testing Library, against a fake of the API
 (`test/fake-api.ts`; a fake of the editor's routes in `test/fake-core.ts`, on a made-up instance in

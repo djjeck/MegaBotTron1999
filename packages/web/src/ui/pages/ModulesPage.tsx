@@ -14,10 +14,21 @@
  * the shell every 6 hours, or **Check for updates**): one with a newer commit says so, links
  * GitHub's comparison, and **Update** installs it, as any install. Nothing is installed or
  * restarted but by the owner; the restart is offered here.
+ *
+ * Removing (bot-os.md D68): **Remove**, once confirmed, moves the module aside as its previous
+ * version (`DELETE /modules/<id>`); it is listed as removed, with **Restore** (its rollback), until
+ * an install of its id replaces it. The button is disabled, its reason shown on hover, while a node
+ * of the saved graph uses one of its plugins or another module imports it.
  */
 import type { DragEvent, FormEvent } from 'react';
 import { useRef, useState } from 'react';
-import type { GitHubLookup, InstalledModule, ModuleCandidate, ModulesReport } from '#src/ui/api.ts';
+import type {
+  GitHubLookup,
+  InstalledModule,
+  ModuleCandidate,
+  ModulesReport,
+  RemovedModule,
+} from '#src/ui/api.ts';
 import { api, seg } from '#src/ui/api.ts';
 import type { PageProps } from '#src/ui/App.tsx';
 import { useLoad } from '#src/ui/hooks.ts';
@@ -103,6 +114,42 @@ function SourceCell({ source }: { source: Source | undefined }) {
   );
 }
 
+/** The confirmation of a removal, naming the module and how to undo it. */
+function ConfirmRemove(props: {
+  m: InstalledModule;
+  busy: boolean;
+  confirm: () => void;
+  cancel: () => void;
+}) {
+  const { m } = props;
+  const name = `${m.id}${m.version === undefined ? '' : ` ${m.version}`}`;
+  return (
+    <div className="overlay">
+      <div className="card review" role="dialog" aria-modal="true" aria-label="remove module">
+        <h2>Remove {name}?</h2>
+        <p>
+          <strong>{m.id}</strong> is moved aside, as its previous version
+          {m.previous === undefined ? '' : `, in place of ${m.previous}`}: <strong>Restore</strong>{' '}
+          puts it back, until another install of {m.id} replaces it.
+        </p>
+        <p className="muted small">
+          {m.loaded === undefined
+            ? 'The running instance has not loaded it.'
+            : 'Its plugins run until the next start: restart to apply the removal.'}
+        </p>
+        <p className="actions">
+          <button type="button" className="danger" disabled={props.busy} onClick={props.confirm}>
+            {props.busy ? 'Removing…' : `Remove ${m.id}`}
+          </button>
+          <button type="button" disabled={props.busy} onClick={props.cancel}>
+            Cancel
+          </button>
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function ModulesPage({ loggedOut, restarted }: PageProps) {
   const report = useLoad(() => api<ModulesReport>('/modules'), loggedOut, 30_000);
   const [file, setFile] = useState<File>();
@@ -114,6 +161,7 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
   const [busy, setBusy] = useState<string>();
   const [restarting, setRestarting] = useState(false);
+  const [removing, setRemoving] = useState<InstalledModule>();
   const picker = useRef<HTMLInputElement>(null);
 
   const start = (what: string): void => {
@@ -344,7 +392,37 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
       .finally(report.reload);
   };
 
+  const remove = (m: InstalledModule): void => {
+    setBusy(`Removing ${m.id}…`);
+    api(`/modules/${seg(m.id)}`, undefined, 'DELETE')
+      .then(
+        () =>
+          setSaid(
+            `${m.id} removed: ${m.loaded === undefined ? 'Restore puts it back' : 'restart to apply it, or Restore to put it back'}`
+          ),
+        (err: unknown) => setSaid(`${m.id}: not removed: ${message(err)}`)
+      )
+      .finally(() => {
+        setRemoving(undefined);
+        setBusy(undefined);
+        report.reload();
+      });
+  };
+
+  const restore = (m: RemovedModule): void => {
+    const name = `${m.id}${m.version === undefined ? '' : ` ${m.version}`}`;
+    if (!window.confirm(`Restore ${name}? It is installed again, and loaded at the next start.`))
+      return;
+    api(`/modules/${seg(m.id)}/rollback`, {})
+      .then(
+        () => setSaid(`${name} restored: restart to load it`),
+        (err: unknown) => setSaid(`${m.id}: ${message(err)}`)
+      )
+      .finally(report.reload);
+  };
+
   const r = report.data;
+  const removed = r?.removed ?? [];
   const updates = r?.installed.filter((m) => m.update !== undefined) ?? [];
   const linked = r?.installed.some((m) => m.source?.kind === 'github') === true;
   const toInstall = found?.modules.filter(chosen).length ?? 0;
@@ -520,7 +598,7 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
       ) : null}
       {r === undefined ? (
         <p className="muted">Loading…</p>
-      ) : r.installed.length === 0 ? (
+      ) : r.installed.length === 0 && removed.length === 0 ? (
         <p className="muted">No module is installed.</p>
       ) : (
         <div className="table-scroll">
@@ -583,6 +661,47 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
                         Roll back to {m.previous}
                       </button>
                     )}
+                    <span className="tip" data-tip={m.inUse}>
+                      <button
+                        type="button"
+                        disabled={busy !== undefined || m.inUse !== undefined}
+                        aria-describedby={m.inUse === undefined ? undefined : `in-use-${m.id}`}
+                        onClick={() => setRemoving(m)}
+                      >
+                        Remove
+                      </button>
+                      {m.inUse === undefined ? null : (
+                        <span id={`in-use-${m.id}`} hidden>
+                          {m.inUse}
+                        </span>
+                      )}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {removed.map((m) => (
+                <tr key={`removed ${m.id}`} className="removed">
+                  <td>
+                    <strong>{m.id}</strong>
+                    {m.description === undefined ? null : (
+                      <div className="muted small">{m.description}</div>
+                    )}
+                    {m.error === undefined ? null : <div className="error small">{m.error}</div>}
+                  </td>
+                  <td data-label="Installed">
+                    <span className="tag">removed</span>
+                  </td>
+                  <td data-label="Source">
+                    <SourceCell source={m.source} />
+                  </td>
+                  <td data-label="Running">
+                    {m.loaded ?? <span className="muted">not loaded</span>}
+                  </td>
+                  <td data-label="Previous">{m.version ?? '?'}</td>
+                  <td>
+                    <button type="button" disabled={busy !== undefined} onClick={() => restore(m)}>
+                      Restore{m.version === undefined ? '' : ` ${m.version}`}
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -601,6 +720,14 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
             ))}
           </ul>
         </>
+      )}
+      {removing === undefined ? null : (
+        <ConfirmRemove
+          m={removing}
+          busy={busy !== undefined}
+          confirm={() => remove(removing)}
+          cancel={() => setRemoving(undefined)}
+        />
       )}
       {restarting ? (
         <Restart

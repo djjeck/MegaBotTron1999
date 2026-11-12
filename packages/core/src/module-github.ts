@@ -19,6 +19,7 @@ import { type ModuleControls } from './control-server.ts';
 import { findModules, type ModuleCandidate, type TreeListing } from './module-files.ts';
 import { type ModulesLoad } from './module-loader.ts';
 import {
+  type GraphNodeRef,
   type ModuleFile,
   type ModuleOrigin,
   type ModulesReport,
@@ -472,10 +473,11 @@ export class GitHubModules {
 export function moduleControls(
   store: ModuleStore,
   load: ModulesLoad | undefined,
-  github?: GitHubModules
+  github?: GitHubModules,
+  nodes: () => readonly GraphNodeRef[] = () => []
 ): ModuleControls {
   const report = (): ModulesReport => {
-    const r = store.report(load);
+    const r = store.report(load, nodes());
     return github === undefined ? r : github.decorate(r);
   };
   return {
@@ -486,6 +488,7 @@ export function moduleControls(
       return github.install(source.github);
     },
     rollback: (id) => store.rollback(id),
+    remove: (id) => store.remove(id, load, nodes()),
     plan: (listing) => store.plan(listing),
     ...(github === undefined
       ? {}

@@ -1,7 +1,7 @@
 /**
  * The modules installed in the data volume (docs/bot-os-api.md §7, bot-os.md D49), as the owner
  * changes them: install one (from a directory, a tarball uploaded, or its files uploaded one by one),
- * roll one back, and list them.
+ * roll one back, remove one, and list them.
  * Installing replaces `<modules>/<id>/` and keeps the version it replaces as
  * `<modules>/.previous/<id>/`; a rollback swaps the two, so a second one goes forward again. A
  * change takes effect at the next start (P8). Only the owner reaches this, through the control API;
@@ -9,6 +9,9 @@
  * Each install installs only the module's files that module-files.ts selects (its tests left out,
  * or its `files` globs), and records where it came from and when, in `<modules>/.sources.json`
  * (bot-os.md D67), never in the module's own files; a rollback swaps those records too.
+ * Removing one (bot-os.md D68) moves `<id>/` aside as its `.previous/<id>/`, its source record
+ * following it, so that a rollback restores it; it is refused while a node of the saved graph uses
+ * one of its plugins, or another module installed imports it.
  */
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
@@ -96,6 +99,31 @@ export interface InstalledModule {
   source?: ModuleSourceRecord;
   /** For a module from GitHub, a newer commit or tag found by the last check (module-github.ts). */
   update?: ModuleUpdate;
+  /** Why it cannot be removed now: the saved graph's nodes that use it, the modules importing it. */
+  inUse?: string;
+}
+
+/**
+ * A module removed (bot-os.md D68): its version kept as `.previous/<id>/`, and no `<id>/`, until a
+ * rollback restores it or an install of its id replaces it.
+ */
+export interface RemovedModule {
+  id: string;
+  /** The version removed, which a rollback restores; none when its manifest does not read. */
+  version?: string;
+  description?: string;
+  /** Why its manifest does not read. */
+  error?: string;
+  /** The version the running instance loaded, if it loaded it. */
+  loaded?: string;
+  /** Where the version removed came from, and when it was installed. */
+  source?: ModuleSourceRecord;
+}
+
+/** A node of the saved graph, as removing a module checks it: its id and its plugin's. */
+export interface GraphNodeRef {
+  id: string;
+  plugin: string;
 }
 
 /** A newer commit of a module's GitHub source: the one the module's ref now names. */
@@ -120,6 +148,8 @@ export interface UpdateCheck {
 
 export interface ModulesReport {
   installed: InstalledModule[];
+  /** The modules removed, each restorable by a rollback; only when there are some. */
+  removed?: RemovedModule[];
   /** The modules the running instance refused at its start, with why. */
   failures: ModuleFailure[];
   /** Whether the installed modules differ from those loaded: a restart takes them up. */
@@ -190,28 +220,51 @@ export class ModuleStore {
     return path.join(staging, randomBytes(6).toString('hex'));
   }
 
-  /** The modules installed, with what the running instance loaded and refused (`load`). */
-  report(load?: ModulesLoad): ModulesReport {
+  /**
+   * The modules installed, with what the running instance loaded and refused (`load`), and why each
+   * cannot be removed now, given the saved graph's nodes (`nodes`); and the modules removed.
+   */
+  report(load?: ModulesLoad, nodes: readonly GraphNodeRef[] = []): ModulesReport {
     const loaded = new Map((load?.modules ?? []).map((m) => [m.id, m.version]));
     const sources = this.sources();
-    const installed = installedIds(this.dir).map((id): InstalledModule => {
+    const ids = installedIds(this.dir);
+    const manifests = this.manifests(ids);
+    const installed = ids.map((id): InstalledModule => {
       const kept = this.previousOf(id);
       const ran = loaded.get(id);
       const source = sources[id]?.current;
+      const inUse = this.inUse(id, manifests, load, nodes);
       const extra = {
         ...(kept === undefined ? {} : { previous: kept }),
         ...(ran === undefined ? {} : { loaded: ran }),
         ...(source === undefined ? {} : { source }),
+        ...(inUse === undefined ? {} : { inUse }),
+      };
+      const m = manifests.get(id);
+      if (m === undefined || 'error' in m) return { id, error: m?.error ?? '', ...extra };
+      return {
+        id,
+        version: m.version,
+        ...(m.description === undefined ? {} : { description: m.description }),
+        provides: m.provides,
+        imports: m.imports,
+        plugins: m.plugins,
+        ...extra,
+      };
+    });
+    const removed = this.removedIds(ids).map((id): RemovedModule => {
+      const ran = loaded.get(id);
+      const source = sources[id]?.previous;
+      const extra = {
+        ...(ran === undefined ? {} : { loaded: ran }),
+        ...(source === undefined ? {} : { source }),
       };
       try {
-        const m = readModuleManifest(path.join(this.dir, id));
+        const m = readModuleManifest(path.join(this.dir, PREVIOUS_DIR, id));
         return {
           id,
           version: m.version,
           ...(m.description === undefined ? {} : { description: m.description }),
-          provides: m.provides,
-          imports: m.imports,
-          plugins: m.plugins,
           ...extra,
         };
       } catch (e) {
@@ -222,7 +275,69 @@ export class ModuleStore {
     const restart =
       installed.some((m) => !failed.has(m.id) && m.version !== m.loaded) ||
       [...loaded.keys()].some((id) => !installed.some((m) => m.id === id));
-    return { installed, failures: load?.failures ?? [], restart };
+    return {
+      installed,
+      ...(removed.length === 0 ? {} : { removed }),
+      failures: load?.failures ?? [],
+      restart,
+    };
+  }
+
+  /** Each installed module's manifest, or why it does not read. */
+  private manifests(ids: readonly string[]): Map<string, ModuleManifest | { error: string }> {
+    return new Map(
+      ids.map((id): [string, ModuleManifest | { error: string }] => {
+        try {
+          return [id, readModuleManifest(path.join(this.dir, id))];
+        } catch (e) {
+          return [id, { error: (e as Error).message }];
+        }
+      })
+    );
+  }
+
+  /** The modules removed: those kept in `.previous/` with none of their id installed. */
+  private removedIds(installed: readonly string[]): string[] {
+    return installedIds(path.join(this.dir, PREVIOUS_DIR)).filter((id) => !installed.includes(id));
+  }
+
+  /**
+   * Why a module cannot be removed now, if it cannot: the saved graph's nodes that use one of the
+   * plugins its loaded version offers (disabled ones too), and the other modules installed that
+   * import the name it provides.
+   */
+  private inUse(
+    id: string,
+    manifests: ReadonlyMap<string, ModuleManifest | { error: string }>,
+    load: ModulesLoad | undefined,
+    nodes: readonly GraphNodeRef[]
+  ): string | undefined {
+    const plugins = load?.modules.find((m) => m.id === id)?.plugins ?? [];
+    const users = nodes.filter((n) => plugins.includes(n.plugin));
+    const own = manifests.get(id);
+    const provides = own === undefined || 'error' in own ? undefined : own.provides;
+    const importers = [...manifests]
+      .filter(
+        ([other, m]) =>
+          other !== id && provides !== undefined && !('error' in m) && provides in m.imports
+      )
+      .map(([other]) => other);
+    const why: string[] = [];
+    if (users.length > 0)
+      why.push(
+        `the saved graph's ${users.length === 1 ? 'node' : 'nodes'} ${and(
+          users.map((n) => `${n.id} (${n.plugin})`)
+        )} ${users.length === 1 ? 'uses' : 'use'} it: delete or replace ${
+          users.length === 1 ? 'it' : 'them'
+        } first`
+      );
+    if (importers.length > 0)
+      why.push(
+        `${importers.length === 1 ? 'module' : 'modules'} ${and(importers)} ${
+          importers.length === 1 ? 'imports' : 'import'
+        } it (${provides as string})`
+      );
+    return why.length === 0 ? undefined : why.join('; ');
   }
 
   /**
@@ -256,15 +371,18 @@ export class ModuleStore {
           throw new ModuleError(`its plugin entry ${entry} is not there`);
       const target = path.join(this.dir, manifest.id);
       const keep = path.join(this.dir, PREVIOUS_DIR, manifest.id);
-      const previous = fs.existsSync(target) ? readVersion(target) : undefined;
-      if (fs.existsSync(target)) {
+      const existed = fs.existsSync(target);
+      const previous = existed ? readVersion(target) : undefined;
+      if (existed) {
         fs.mkdirSync(path.dirname(keep), { recursive: true });
         fs.rmSync(keep, { recursive: true, force: true });
         fs.renameSync(target, keep);
       }
       fs.renameSync(root, target);
       const sources = this.sources();
-      const was = sources[manifest.id]?.current;
+      // What becomes the previous version's record: the one replaced; when none is (a module
+      // removed), the previous version stays, and so does its record.
+      const was = existed ? sources[manifest.id]?.current : sources[manifest.id]?.previous;
       const from: ModuleOrigin =
         origin ??
         ('dir' in source
@@ -275,7 +393,7 @@ export class ModuleStore {
             });
       sources[manifest.id] = {
         current: { ...from, installedAt: new Date(this.now()).toISOString() },
-        ...(previous === undefined || was === undefined ? {} : { previous: was }),
+        ...(was === undefined ? {} : { previous: was }),
       };
       this.writeSources(sources);
       return {
@@ -318,6 +436,48 @@ export class ModuleStore {
     }
     return { id, version, ...(current === undefined ? {} : { previous: current }) };
   }
+
+  /**
+   * Removes a module (bot-os.md D68): `<id>/` becomes its `.previous/<id>/`, replacing any older
+   * one, and its source record follows it, so that a rollback restores it. Refused, with why (a
+   * `ModuleInUse`), while a node of the saved graph (`nodes`) uses one of the plugins its loaded
+   * version offers (`load`), or another module installed imports it. It takes effect at the next
+   * start. Throws a `ModuleError` for an id not installed.
+   */
+  remove(
+    id: string,
+    load?: ModulesLoad,
+    nodes: readonly GraphNodeRef[] = []
+  ): { id: string; version?: string } {
+    const target = path.join(this.dir, id);
+    if (path.basename(id) !== id || id.startsWith('.') || !installedIds(this.dir).includes(id))
+      throw new ModuleError(`${id} is not installed`);
+    const why = this.inUse(id, this.manifests(installedIds(this.dir)), load, nodes);
+    if (why !== undefined) throw new ModuleInUse(`${id} cannot be removed: ${why}`);
+    const version = readVersion(target);
+    const keep = path.join(this.dir, PREVIOUS_DIR, id);
+    fs.mkdirSync(path.dirname(keep), { recursive: true });
+    fs.rmSync(keep, { recursive: true, force: true });
+    fs.renameSync(target, keep);
+    const sources = this.sources();
+    const was = sources[id]?.current;
+    if (sources[id] !== undefined) {
+      if (was === undefined) delete sources[id];
+      else sources[id] = { previous: was };
+      this.writeSources(sources);
+    }
+    return { id, ...(version === undefined ? {} : { version }) };
+  }
+}
+
+/** A module's removal refused while something uses it: the control API's 409. */
+export class ModuleInUse extends ModuleError {}
+
+/** Names joined for the owner: `a`, `a and b`, `a, b and c`. */
+function and(names: readonly string[]): string {
+  return names.length < 2
+    ? names.join('')
+    : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1] ?? ''}`;
 }
 
 /**

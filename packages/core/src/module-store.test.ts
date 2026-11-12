@@ -5,7 +5,7 @@ import zlib from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { manifestOf, tarOf, tempDir, writeModule } from '#test/modules.ts';
 import { type ModulesLoad } from './module-loader.ts';
-import { ModuleStore } from './module-store.ts';
+import { type GraphNodeRef, ModuleInUse, ModuleStore } from './module-store.ts';
 import { moduleManifestSchema } from './modules.ts';
 
 const version = (dir: string): unknown =>
@@ -310,11 +310,13 @@ describe('a module’s source', () => {
     writeModule(path.join(store.dir, '.previous'), 'old', manifestOf('old', { version: '0.0.1' }));
     store.rollback('old');
     expect(store.report().installed.find((m) => m.id === 'old')).not.toHaveProperty('source');
-    // The first install of an id has no previous record, even with one of a module removed by hand.
+    // An install that replaces nothing (a module removed by hand) keeps the previous version, and
+    // so its record.
     fs.rmSync(path.join(store.dir, 'dice'), { recursive: true });
     store.install({ tarball: tarball('0.3.0') });
     expect(store.sources()['dice']).toEqual({
       current: { kind: 'tarball', installedAt: '2026-11-12T10:01:00.000Z' },
+      previous: second,
     });
   });
 
@@ -352,5 +354,135 @@ describe('a tree’s modules', () => {
       ['broken', 'new', undefined],
       ['cards', 'new', undefined],
     ]);
+  });
+});
+
+/** What the running instance loaded: each module given, with the plugins it offers. */
+function loadOf(store: ModuleStore, plugins: Record<string, string[]>): ModulesLoad {
+  return {
+    modules: Object.entries(plugins).map(([id, ids]) => ({
+      id,
+      version: '0.1.0',
+      dir: path.join(store.dir, id),
+      manifest: moduleManifestSchema.parse(manifestOf(id)),
+      plugins: ids,
+    })),
+    failures: [],
+    plugins: [],
+  };
+}
+
+describe('removing a module', () => {
+  it('keeps it as the previous version, its record too, lists it removed, and restores it', () => {
+    let now = Date.parse('2026-11-12T10:00:00Z');
+    const store = new ModuleStore(tempDir(), () => now);
+    store.install({ dir: source('dice', '0.1.0') });
+    now += 60_000;
+    store.install({ dir: source('dice', '0.2.0', { 'src/p.ts': '' }) });
+    const second = store.sources()['dice']?.current;
+    const load = loadOf(store, { dice: ['dice-roll'] });
+    expect(store.remove('dice', load)).toEqual({ id: 'dice', version: '0.2.0' });
+    // The version removed replaced the older previous one, and its record followed it.
+    expect(fs.existsSync(path.join(store.dir, 'dice'))).toBe(false);
+    expect(version(path.join(store.dir, '.previous', 'dice'))).toBe('0.2.0');
+    expect(store.sources()).toEqual({ dice: { previous: second } });
+    const report = store.report(load);
+    expect(report.installed).toEqual([]);
+    expect(report.removed).toEqual([
+      { id: 'dice', version: '0.2.0', loaded: '0.1.0', source: second },
+    ]);
+    // dice is loaded and removed: a restart applies it. Not loaded, nothing to apply.
+    expect(report.restart).toBe(true);
+    expect(store.report().restart).toBe(false);
+    expect(() => store.remove('dice')).toThrow('dice is not installed');
+    // Restore is the rollback.
+    expect(store.rollback('dice')).toEqual({ id: 'dice', version: '0.2.0' });
+    expect(store.sources()).toEqual({ dice: { current: second } });
+    expect(store.report().removed).toBeUndefined();
+  });
+
+  it('is replaced by an install of its id, which keeps the version removed as its previous', () => {
+    const store = new ModuleStore(tempDir());
+    store.install({ dir: source('dice', '0.2.0') });
+    store.remove('dice');
+    expect(store.install({ dir: source('dice', '0.3.0') })).toEqual({
+      id: 'dice',
+      version: '0.3.0',
+    });
+    const report = store.report();
+    expect(report.removed).toBeUndefined();
+    expect(report.installed).toMatchObject([{ id: 'dice', version: '0.3.0', previous: '0.2.0' }]);
+    expect(store.sources()['dice']).toMatchObject({
+      current: { kind: 'directory' },
+      previous: { kind: 'directory' },
+    });
+    expect(store.rollback('dice')).toMatchObject({ version: '0.2.0', previous: '0.3.0' });
+  });
+
+  it('removes one with no record, or whose manifest does not read, and lists it so', () => {
+    const store = new ModuleStore(tempDir());
+    writeModule(store.dir, 'old', manifestOf('old'));
+    writeModule(store.dir, 'broken', '{');
+    writeModule(store.dir, 'dice', manifestOf('dice'));
+    // dice: no current record, but a previous one, dropped as its version is replaced.
+    fs.writeFileSync(
+      path.join(store.dir, '.sources.json'),
+      JSON.stringify({ dice: { previous: { kind: 'tarball', installedAt: '2026-11-12' } } })
+    );
+    store.remove('dice');
+    expect(store.sources()).toEqual({});
+    expect(store.remove('old')).toEqual({ id: 'old', version: '0.1.0' });
+    expect(store.remove('broken')).toEqual({ id: 'broken' });
+    expect(store.report().removed).toEqual([
+      { id: 'broken', error: expect.stringMatching(/^module\.json: /u) as unknown },
+      { id: 'dice', version: '0.1.0' },
+      { id: 'old', version: '0.1.0' },
+    ]);
+    expect(() => store.remove('../etc')).toThrow('../etc is not installed');
+    expect(() => store.remove('.previous')).toThrow('.previous is not installed');
+  });
+
+  it('is refused while the saved graph’s nodes use its plugins, or another module imports it', () => {
+    const store = new ModuleStore(tempDir());
+    store.install({ dir: source('dice', '0.1.0') });
+    writeModule(
+      store.dir,
+      'cards',
+      manifestOf('cards', { imports: { '@example/dice': '^0.1.0' } })
+    );
+    writeModule(
+      store.dir,
+      'poker',
+      manifestOf('poker', { imports: { '@example/dice': '*', '@example/cards': '*' } })
+    );
+    writeModule(store.dir, 'broken', '{');
+    const load = loadOf(store, { dice: ['dice-roll', 'dice-score'], cards: ['cards'] });
+    const nodes: GraphNodeRef[] = [
+      { id: 'roller', plugin: 'dice-roll' },
+      { id: 'scorer', plugin: 'dice-score' },
+      { id: 'dealer', plugin: 'cards' },
+      { id: 'irc', plugin: 'irc' },
+    ];
+    const why = (id: string) => store.report(load, nodes).installed.find((m) => m.id === id)?.inUse;
+    expect(why('dice')).toBe(
+      "the saved graph's nodes roller (dice-roll) and scorer (dice-score) use it: delete or " +
+        'replace them first; modules cards and poker import it (@example/dice)'
+    );
+    expect(why('cards')).toBe(
+      "the saved graph's node dealer (cards) uses it: delete or replace it first; module poker " +
+        'imports it (@example/cards)'
+    );
+    expect(why('poker')).toBeUndefined();
+    expect(why('broken')).toBeUndefined();
+    expect(() => store.remove('dice', load, nodes)).toThrow(ModuleInUse);
+    expect(() => store.remove('cards', load, nodes)).toThrow(
+      "cards cannot be removed: the saved graph's node dealer (cards) uses it"
+    );
+    expect(fs.existsSync(path.join(store.dir, 'dice'))).toBe(true);
+    // Without its importers, a module not loaded uses no node: its plugins are not known.
+    expect(store.remove('poker', load, nodes)).toEqual({ id: 'poker', version: '0.1.0' });
+    expect(() => store.remove('cards', load, nodes)).toThrow('uses it');
+    expect(store.remove('cards', load, [])).toEqual({ id: 'cards', version: '0.1.0' });
+    expect(store.remove('dice', undefined, nodes)).toEqual({ id: 'dice', version: '0.1.0' });
   });
 });

@@ -311,6 +311,18 @@ export class GraphFile {
   }
 
   /** The file's graph, unchecked. */
+  /**
+   * The saved file's nodes, each with its plugin, as it is (disabled ones too); none when it does
+   * not read. Removing a module checks them (module-store.ts).
+   */
+  nodes(): { id: string; plugin: string }[] {
+    const r = this.read();
+    return list(r.exists && 'raw' in r ? r.raw : undefined, 'nodes').flatMap((n) => {
+      const { id, plugin } = record(n) ?? {};
+      return typeof id === 'string' && typeof plugin === 'string' ? [{ id, plugin }] : [];
+    });
+  }
+
   read(): GraphFileRead {
     let source: string;
     try {

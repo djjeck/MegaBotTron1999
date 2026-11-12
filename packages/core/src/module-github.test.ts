@@ -324,6 +324,25 @@ describe('modules from GitHub', () => {
     ).rejects.toThrow(/^module\.json: /u);
   });
 
+  it('skips the modules removed: never checked, no update shown', async () => {
+    const { gh, store, modules } = setup();
+    const base = { repo: 'example/games', ref: 'main', refType: 'branch' as const };
+    await modules.install({ ...base, commit: MAIN1, path: 'modules/dice' });
+    await modules.install({ ...base, commit: MAIN1, path: 'modules/cards' });
+    gh.repos['example/games']!.branches!.main = MAIN2;
+    await modules.check();
+    store.remove('dice');
+    const report = modules.decorate(store.report());
+    expect(report.installed.map((m) => [m.id, m.update?.commit])).toEqual([['cards', MAIN2]]);
+    expect(report.removed).toEqual([
+      expect.not.objectContaining({ update: expect.anything() as unknown }),
+    ]);
+    store.remove('cards');
+    gh.calls.length = 0;
+    await modules.check();
+    expect(gh.calls).toEqual([]);
+  });
+
   it('finds updates: a branch moved, a newer tag, each ref resolved once', async () => {
     const { gh, store, modules, tick } = setup();
     const base = { repo: 'example/games', ref: 'main', refType: 'branch' as const };

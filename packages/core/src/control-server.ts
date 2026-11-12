@@ -77,6 +77,9 @@
  *   link resolved to a commit, and the modules found in the repository's tarball there, as above.
  * - `POST /modules/updates`: checks the GitHub sources for newer commits now, and answers the list.
  * - `POST /modules/<id>/rollback`: puts the previous version back (409 when there is none).
+ * - `DELETE /modules/<id>`: removes a module, kept as its previous version for a rollback to
+ *   restore (bot-os.md D68); 409 with why while the saved graph's nodes use its plugins or another
+ *   module imports it, 404 for a module not installed. It takes effect at the next start.
  *
  * Ids and names in a path may be URL-encoded.
  */
@@ -91,7 +94,7 @@ import { type InstanceInfo } from './instance-registry.ts';
 import { LegacyError } from './legacy.ts';
 import { type TreeListing } from './module-files.ts';
 import { GitHubError, type GitHubPick } from './module-github.ts';
-import { type ModuleFile, type ModuleSource } from './module-store.ts';
+import { type ModuleFile, ModuleInUse, type ModuleSource } from './module-store.ts';
 import { ModuleError } from './modules.ts';
 import { PORT_TYPE_INFO } from './ports.ts';
 import { type SettingsRegistry } from './settings.ts';
@@ -206,6 +209,8 @@ export interface ModuleControls {
   /** Installs one module; a GitHub one only when the wiring offers `lookup`. */
   install(source: ModuleRequest): unknown;
   rollback(id: string): unknown;
+  /** Removes a module; refused (`ModuleInUse`) while it is used, with why. */
+  remove?(id: string): unknown;
   /** The modules in a tree's listing (module-files.ts). */
   plan?(listing: TreeListing): unknown;
   /** A GitHub link's modules (module-github.ts). */
@@ -428,6 +433,16 @@ export function controlHandler(
           return reply(200, mods.rollback(decodeURIComponent(rollback[1] ?? '')));
         } catch (e) {
           if (e instanceof ModuleError) return reply(409, { error: e.message });
+          throw e;
+        }
+      }
+      const removing = /^\/modules\/([^/]+)$/u.exec(route);
+      if (req.method === 'DELETE' && mods?.remove !== undefined && removing !== null) {
+        try {
+          return reply(200, mods.remove(decodeURIComponent(removing[1] ?? '')));
+        } catch (e) {
+          if (e instanceof ModuleInUse) return reply(409, { error: e.message });
+          if (e instanceof ModuleError) return reply(404, { error: e.message });
           throw e;
         }
       }
