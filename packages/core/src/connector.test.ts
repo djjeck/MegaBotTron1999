@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { VirtualClock } from './clock.ts';
-import { type Connector, ConnectorBase, handleOf, hears, type Inbound } from './connector.ts';
+import {
+  type Connector,
+  ConnectorBase,
+  handleOf,
+  hears,
+  type Inbound,
+  type ReadFilter,
+} from './connector.ts';
 import { Core } from './core.ts';
 import { definePlugin } from './plugin.ts';
 
@@ -162,6 +169,8 @@ describe('connectors', () => {
   it('let each reader hear only its edge’s chats and senders', async () => {
     const c = new TestConnector('test:me', 'test');
     const heard: Record<string, string[]> = { a: [], b: [] };
+    let readers: (() => ReadFilter[]) | undefined;
+    let readerHasNone = false;
     const reader = (id: string) =>
       definePlugin({
         manifest: {
@@ -172,6 +181,7 @@ describe('connectors', () => {
           inputs: { chat: { type: 'chat-in' } },
         },
         create: (ctx) => {
+          readerHasNone ||= ctx.readers === undefined;
           ctx.connector('chat').onMessage((m) => heard[id]?.push(m.text));
           return {};
         },
@@ -194,7 +204,10 @@ describe('connectors', () => {
     core.register(
       definePlugin({
         manifest: manifest('test', 'test:me'),
-        create: () => ({ connector: c }),
+        create: (ctx) => {
+          readers = ctx.readers;
+          return { connector: c };
+        },
       }),
       reader('a'),
       reader('b')
@@ -206,6 +219,12 @@ describe('connectors', () => {
     c.hear('four', '#lobby', 'bob');
     expect(heard).toEqual({ a: ['one', 'three'], b: ['one', 'four'] });
     expect(core.graph()?.edges[0]).toMatchObject({ reads: '*', senders: ['@QuestBot', 'me'] });
+    // The connector learns what its readers read from the graph (its catch-up's chats, D62).
+    expect(readers?.()).toEqual([
+      { reads: '*', senders: ['@QuestBot', 'me'] },
+      { reads: ['#lobby'] },
+    ]);
+    expect(readerHasNone).toBe(true);
     await core.stop();
   });
 });

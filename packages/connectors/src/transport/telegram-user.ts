@@ -9,9 +9,11 @@
  * leaves this module. It sends any text to those chats, but only through the account's outbox,
  * which keeps each plugin to the chats and commands of its reach (§4.6).
  *
- * **No catch-up yet**: what was said while the instance was down is not delivered. GramJS 2.26.22
- * has no update catch-up (`client.catchUp()` is an empty stub, and its sessions keep no update
- * state); how to fill the gap is the author's to choose (docs/bot-os.md D62).
+ * **Catch-up** (docs/bot-os.md D62): GramJS 2.26.22 has no update catch-up (`client.catchUp()` is
+ * an empty stub, and its sessions keep no update state), so at each connection it fetches back the
+ * history of the chats its readers read whose latest message is newer than the last it saw (kept
+ * in its store), at most `CATCH_UP_CAP` per chat, a page at a time, and delivers it oldest first,
+ * marked `missed` and `playback`.
  *
  * The session string gives full access to the account: it comes from the deployment's secrets,
  * never from this repository, and is never printed by this module.
@@ -22,6 +24,7 @@ import {
   ConnectorBase,
   FloodWait,
   type Inbound,
+  type ReadFilter,
   type Surface,
   type SurfaceQuery,
   type TimerHandle,
@@ -74,6 +77,11 @@ export interface GramClient {
   /** The logged-in user. */
   getMe(): Promise<unknown>;
   sendMessage(entity: never, params: { message: string }): Promise<{ id: number }>;
+  /** A chat's messages, latest first: below `offsetId` (0: from the latest), above `minId`. */
+  getMessages(
+    entity: never,
+    params: { limit: number; offsetId: number; minId: number }
+  ): Promise<Iterable<RawMessage>>;
   addEventHandler(
     handler: (event: { message: RawMessage }) => Promise<void>,
     builder: NewMessage
@@ -100,10 +108,24 @@ export const RETRY_MS = 60_000;
 /** How many of the latest chats the surfaces list without a search. */
 export const SURFACES_LIMIT = 50;
 
+/** The store's document of the last message id seen in each chat, by the chat's marked id. */
+export const LAST_SEEN_DOC = 'last-seen';
+/** How many messages the catch-up fetches back in a chat, at most. */
+export const CATCH_UP_CAP = 1000;
+/** How many it asks for at a time. */
+export const CATCH_UP_PAGE = 100;
+/** The pause between two of its requests. */
+export const CATCH_UP_PAUSE_MS = 1000;
+
 /** The wait GramJS asks for (its `FloodWaitError` and kin carry `seconds`), in ms. */
 function floodMs(e: unknown): number | undefined {
   if (!(e instanceof Error) || !('seconds' in e) || typeof e.seconds !== 'number') return undefined;
   return e.seconds * 1000;
+}
+
+/** A message with text (perhaps empty, under a photo), not a service message (a join, a pin). */
+function isText(m: object): boolean {
+  return typeof (m as { message?: unknown }).message === 'string';
 }
 
 /** The kind of a dialog's chat. */
@@ -122,6 +144,23 @@ export interface UserConnectorOptions {
   log: (line: string) => void;
   /** Told of the first failed start (a revoked session needs a login). */
   notify?: (text: string) => void;
+  /** Warned of (the plugin's `warn`); `log` without. */
+  warn?: (line: string) => void;
+  /** Writes to the event log (`ctx.record`): a catch-up that hit its cap. */
+  record?: (type: string, fields: Record<string, unknown>) => void;
+  /** Where the last message id seen in each chat is kept (`LAST_SEEN_DOC`). */
+  store?: { read<T>(name: string): T | undefined; write(name: string, value: unknown): void };
+  /** What its readers read (`ctx.readers`): the chats the catch-up fetches. None: no catch-up. */
+  readers?: () => readonly ReadFilter[];
+}
+
+/** A chat to catch up on: its dialog, its name, its marked id, from and up to which message. */
+interface Gap {
+  dialog: RawDialog;
+  chat: string;
+  key: string;
+  after: number;
+  upTo: number;
 }
 
 export class TelegramUserConnector extends ConnectorBase implements Connector {
@@ -135,10 +174,21 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
   private connected = false;
   private told = false;
   private retry: TimerHandle | undefined;
+  /** The last message id seen in each chat, by its marked id, as kept. */
+  private readonly lastSeen: Record<string, number>;
+  /**
+   * The chats whose last id is held while the catch-up runs (all of them until it knows which),
+   * with the ids heard live meanwhile: not delivered twice, and kept once the chat is caught up.
+   */
+  private held: Set<string> | 'all' | undefined;
+  private readonly live = new Map<string, Set<number>>();
+  /** Each connection's own, so that a catch-up stopped or superseded ends. */
+  private generation = 0;
 
   constructor(options: UserConnectorOptions) {
     super(options.account, 'telegram');
     this.o = options;
+    this.lastSeen = { ...(options.store?.read<Record<string, number>>(LAST_SEEN_DOC) ?? {}) };
     this.chats =
       options.chats === undefined
         ? undefined
@@ -157,6 +207,8 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     if (!this.started) return;
     this.started = false;
     this.connected = false;
+    this.generation++;
+    this.release();
     this.o.clock.clearTimeout(this.retry);
     this.peers.clear();
     this.changed({ state: 'closed', phase: 'closed' });
@@ -237,10 +289,12 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     try {
       await client.connect();
       if (!this.started) return;
+      // Held from before the first live message, until the catch-up knows which chats it fetches.
+      this.held = 'all';
       // Once, however often the start is retried; before the dialogs, so nothing falls between.
       if (!this.listening) client.addEventHandler((e) => this.heard(e.message), new NewMessage({}));
       this.listening = true;
-      await client.getDialogs({});
+      const dialogs = [...(await client.getDialogs({}))];
       for (const chat of this.chats?.values() ?? []) await this.peer(chat);
       this.named(username(await client.getMe()));
       if (!this.started) return;
@@ -251,7 +305,9 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
           this.chats === undefined ? 'every chat' : [...this.chats.values()].join(', ')
         }`
       );
+      void this.catchUp(dialogs, this.generation);
     } catch (err) {
+      this.release();
       if (!this.started) return;
       this.o.log(`start failed, retrying in ${RETRY_MS / 1000} s: ${String(err)}`);
       if (!this.told)
@@ -267,10 +323,164 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     try {
       const chat = await this.chatOf(m);
       if (chat === undefined) return;
+      const key = m.chatId?.toString();
+      if (key !== undefined) {
+        if (this.holds(key)) {
+          const ids = this.live.get(key) ?? new Set<number>();
+          ids.add(m.id);
+          this.live.set(key, ids);
+        } else this.saw(key, m.id);
+      }
       this.received(await this.inbound(m, chat));
     } catch (err) {
       this.o.log(`message ${m.id} dropped: ${String(err)}`);
     }
+  }
+
+  private holds(key: string): boolean {
+    return this.held === 'all' || this.held?.has(key) === true;
+  }
+
+  /** The last id seen in a chat moved to the newest of `ids`, if newer than it was: kept. */
+  private saw(key: string, ...ids: number[]): void {
+    const latest = Math.max(this.lastSeen[key] ?? 0, ...ids);
+    if (latest === (this.lastSeen[key] ?? 0)) return;
+    this.lastSeen[key] = latest;
+    this.o.store?.write(LAST_SEEN_DOC, this.lastSeen);
+  }
+
+  /** A chat no longer held: what was heard live in it meanwhile is kept as seen. */
+  private unhold(key: string, ...ids: number[]): void {
+    if (this.held instanceof Set) this.held.delete(key);
+    this.saw(key, ...ids, ...(this.live.get(key) ?? []));
+    this.live.delete(key);
+  }
+
+  /** Every chat released: the catch-up is over (or never was). */
+  private release(): void {
+    const keys = [...this.live.keys()];
+    this.held = undefined;
+    for (const key of keys) this.unhold(key);
+  }
+
+  /**
+   * At connection (D62): the chats some reader reads whose latest message is newer than the last
+   * seen there, each fetched back to it, at most `CATCH_UP_CAP` messages, and delivered oldest
+   * first, marked `missed` and `playback`. A chat with no last id is not fetched: its latest id is
+   * kept, so that the next connection can.
+   */
+  private async catchUp(dialogs: readonly RawDialog[], generation: number): Promise<void> {
+    const readers = this.o.readers?.() ?? [];
+    const all = readers.some((r) => r.reads === '*');
+    const read = new Set(
+      readers.flatMap((r) => (r.reads === '*' ? [] : r.reads.map((c) => c.toLowerCase())))
+    );
+    const gaps: Gap[] = [];
+    let first = false;
+    for (const dialog of dialogs) {
+      const chat = this.nameOf(dialog);
+      const key = dialog.id?.toString();
+      const upTo = dialog.message?.id;
+      if (chat === undefined || key === undefined || upTo === undefined) continue;
+      const after = this.lastSeen[key];
+      if (after === undefined) {
+        this.lastSeen[key] = upTo;
+        first = true;
+      } else if (upTo > after && (all || read.has(chat.toLowerCase())))
+        gaps.push({ dialog, chat, key, after, upTo });
+    }
+    if (first) this.o.store?.write(LAST_SEEN_DOC, this.lastSeen);
+    // Only the chats it fetches stay held; the others keep what was heard live.
+    const fetched = new Set(gaps.map((g) => g.key));
+    for (const key of [...this.live.keys()]) if (!fetched.has(key)) this.unhold(key);
+    this.held = fetched;
+    for (const gap of gaps) {
+      if (generation !== this.generation) return;
+      try {
+        await this.fill(gap, generation);
+      } catch (err) {
+        this.o.log(`catch-up of ${gap.chat} failed: ${String(err)}`);
+      }
+      if (generation === this.generation) this.unhold(gap.key);
+    }
+    if (generation === this.generation) this.held = undefined;
+  }
+
+  /** One chat's gap, fetched a page at a time, then delivered oldest first. */
+  private async fill(gap: Gap, generation: number): Promise<void> {
+    const peer = gap.dialog.inputEntity ?? gap.dialog.entity;
+    const messages: RawMessage[] = [];
+    let offsetId = gap.upTo + 1;
+    let complete = false;
+    while (messages.length < CATCH_UP_CAP) {
+      const page = await this.page(peer, offsetId, gap.after, CATCH_UP_PAGE, generation);
+      if (page === undefined) return;
+      messages.push(...page);
+      if (page.length < CATCH_UP_PAGE) {
+        complete = true;
+        break;
+      }
+      offsetId = Math.min(...page.map((m) => m.id));
+    }
+    if (!complete) {
+      const more = await this.page(peer, offsetId, gap.after, 1, generation);
+      if (more === undefined) return;
+      if (more.length > 0) {
+        this.warn(
+          `catch-up of ${gap.chat} stopped at ${messages.length} messages, older ones missed`
+        );
+        this.o.record?.('telegram-user.catch-up', { chat: gap.chat, fetched: messages.length });
+      }
+    }
+    const live = this.live.get(gap.key);
+    const missed = messages
+      .filter((m) => isText(m) && live?.has(m.id) !== true)
+      .sort((a, b) => a.id - b.id);
+    for (const m of missed) {
+      if (generation !== this.generation) return;
+      try {
+        this.received({ ...(await this.inbound(m, gap.chat)), playback: true, missed: true });
+      } catch (err) {
+        this.o.log(`message ${m.id} dropped: ${String(err)}`);
+      }
+    }
+    this.unhold(gap.key, gap.upTo);
+  }
+
+  /**
+   * One page of a chat's history, after the pause between requests: Telegram's `FLOOD_WAIT` is
+   * waited out, then asked again. Undefined once the connection it belongs to is over.
+   */
+  private async page(
+    peer: unknown,
+    offsetId: number,
+    minId: number,
+    limit: number,
+    generation: number
+  ): Promise<RawMessage[] | undefined> {
+    let wait = CATCH_UP_PAUSE_MS;
+    for (;;) {
+      await this.sleep(wait);
+      if (generation !== this.generation) return undefined;
+      try {
+        return [
+          ...(await this.o.client.getMessages(peer as never, { limit, offsetId, minId })),
+        ].filter((m) => m.id > minId && m.id < offsetId);
+      } catch (err) {
+        const ms = floodMs(err);
+        if (ms === undefined) throw err;
+        this.o.log(`catch-up: Telegram asks to wait ${ms / 1000} s`);
+        wait = ms;
+      }
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => this.o.clock.setTimeout(resolve, ms));
+  }
+
+  private warn(line: string): void {
+    (this.o.warn ?? this.o.log)(line);
   }
 
   private async inbound(

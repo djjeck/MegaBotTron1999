@@ -523,7 +523,9 @@ interface PluginContext<Config, Settings> {
 ```
 
 A connector's context also has `secrets.get(name)`, for the secrets it declared or its config names
-(§4.9), and `account`, its node's account (§4.5), on which it makes its connector.
+(§4.9), `account`, its node's account (§4.5), on which it makes its connector, and `readers()`, what
+each chat-in edge leaving its node reads (`{ reads, senders? }`, §2.1), as the graph says: the chats
+a catch-up fetches (§4.5).
 
 **Built from its saved config alone** (bot-os.md D50): everything a plugin needs is its node's
 `config` and its context, so the graph's nodes are data the editor can make. A plugin factory may
@@ -691,11 +693,28 @@ deliver once, marked `playback` (so nothing acts on it: the reactor skips it, an
 matchers too) and `missed` (so a parser reads it as any other). `telegram-bot`: Telegram keeps a
 bot's updates for a day and delivers them at the next poll, and the connector marks those sent
 before it connected. `irc`: ZNC's buffer, played back at connection, is `playback` (not `missed`:
-ZNC may play back what was already heard). `telegram-user`: **none yet**. GramJS 2.26.22 offers no
-update catch-up (`client.catchUp()` is an empty stub, and neither `StringSession` nor the client
-keeps the update state, `pts`, `qts`, `date` and each supergroup's own `pts`, that
-`updates.getDifference` and `updates.getChannelDifference` need); the way to fill the gap is the
-author's to choose (D62).
+ZNC may play back what was already heard). `telegram-user`: GramJS 2.26.22 offers no update catch-up
+(`client.catchUp()` is an empty stub, and neither `StringSession` nor the client keeps the update
+state that `updates.getDifference` needs), so the connector fetches back each chat's history at
+connection:
+
+- **Which chats**: those some reader reads (an edge's `reads`, every monitored chat for `"*"`, as
+  `ctx.readers()` gives them) whose latest message (the dialog's top message, from `getDialogs`) is
+  newer than the last one the connector saw there. It keeps the last id seen in each chat in its
+  store (`last-seen`: `{ "<the chat's marked id>": <message id> }`), updated as messages arrive in
+  the chats it monitors. A chat with no last id (seen for the first time) is not fetched: its latest
+  id is kept, so that the next connection can.
+- **How far**: back to the last message seen, at most **1000** a chat, in pages of 100. A chat still
+  missing older messages at the cap is warned of in the log and recorded in the event log
+  (`telegram-user.catch-up`, with the `chat` and how many were `fetched`).
+- **Rate limits**: one request at a time, a second apart; a `FLOOD_WAIT` is waited out, then the
+  page asked again. Live messages are delivered meanwhile, and those already delivered live are not
+  delivered again.
+- **Delivery**: chat after chat, each chat's oldest first, each message once, marked `missed` and
+  `playback`, through the edges' filters (`reads`, `senders`) as any message: parsers read it,
+  reactors and reply matchers skip it. Service messages (a join, a pin) are skipped. While a chat is
+  being caught up its last id stays where it was, and moves past the gap once it is delivered; a
+  stop in the middle keeps what was heard live, and a chat whose fetch fails is logged and left.
 
 As built (`packages/core/src/connector.ts`): a connector plugin's instance offers its `connector`,
 whose account must be the manifest's (or its node's); `ConnectorBase` keeps the listeners and the
@@ -1150,10 +1169,11 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   of its configuration (`chats`: a group by its id, a private chat by the other's `@username`, or
   their id when they have none), or every chat of the account when `chats` is unset (a new
   connection), each edge reading a subset (§2.1); it lists its dialogs as its surfaces (§4.5), and
-  has no catch-up yet (§4.5, D62). It starts without waiting, retries every minute, and tells the
-  owner of the first failure; a message carries its id, the one it replies to, and `own` for the
-  owner's own from any device. It sends only through the account's outbox (`deliver`, with the
-  message's id); GramJS's flood waits become `FloodWait`.
+  catches up at each connection on what its readers' chats said while it was down (§4.5, D62). It
+  starts without waiting, retries every minute, and tells the owner of the first failure; a message
+  carries its id, the one it replies to, and `own` for the owner's own from any device. It sends
+  only through the account's outbox (`deliver`, with the message's id); GramJS's flood waits become
+  `FloodWait`.
 - **`ServiceConnector`** (`packages/connectors/src/plugins/service.ts`): for a connector plugin that
   holds an account's secrets and offers what it makes from them through its declared interface, but
   has no chat: it reads and sends nothing. The `anthropic` connector is one.

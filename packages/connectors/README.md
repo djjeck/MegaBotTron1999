@@ -12,8 +12,9 @@ other plugins a handle:
 Each lists its surfaces, the chats it can see, for the editor to pick from (`surfaces`,
 docs/bot-os.md D63): `telegram-user` its dialogs, `telegram-bot` the chats it has seen (kept in its
 store) and one looked up by id, `irc` its channel. What was said while the instance was down comes
-marked `missed` from `telegram-bot` (Telegram keeps a bot's updates for a day); `telegram-user` has
-no catch-up yet (D62).
+marked `missed` from `telegram-bot` (Telegram keeps a bot's updates for a day) and from
+`telegram-user`, which at each connection fetches back the chats its readers read, up to the last
+message it saw in each (kept in its store, `last-seen`), at most 1000 a chat (D62).
 
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
   structured output by a zod schema.

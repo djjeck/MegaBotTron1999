@@ -1,4 +1,4 @@
-import { Core, definePlugin, VirtualClock } from '@megabottron1999/core';
+import { Core, definePlugin, type Inbound, VirtualClock } from '@megabottron1999/core';
 import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
 import { describe, expect, it } from 'vitest';
 import {
@@ -15,6 +15,23 @@ const USER = {
 };
 const GROUP = '-1001000000001';
 
+/** A parser reading the account's chats as its edge says. */
+function reader(heard: (m: Inbound) => void) {
+  return definePlugin({
+    manifest: {
+      id: 'reader',
+      version: '0.1.0',
+      kinds: ['parser'],
+      description: 'reader',
+      inputs: { chat: { type: 'chat-in', network: 'telegram' } },
+    },
+    create: (ctx) => {
+      ctx.connector('chat').onMessage(heard);
+      return {};
+    },
+  });
+}
+
 function client(): GramClient {
   return {
     connect: () => Promise.resolve(true),
@@ -24,6 +41,7 @@ function client(): GramClient {
     getMe: () => Promise.resolve({ username: 'alice' }),
     sendMessage: () => Promise.resolve({ id: 1 }),
     addEventHandler: () => {},
+    getMessages: () => Promise.resolve([]),
   };
 }
 
@@ -128,6 +146,99 @@ describe('the telegram-user plugin', () => {
     await deliver?.({ message: said('QuestBot') });
     await deliver?.({ message: said('bob') });
     expect(heard).toEqual([`${GROUP} /play QuestBot`]);
+    await core.stop();
+  });
+
+  it('catches up on the chats its readers read, through their filters, from its store', async () => {
+    const heard: string[] = [];
+    const clock = new VirtualClock();
+    const said = (id: number, sender: string): RawMessage => ({
+      id,
+      date: 1,
+      message: `/play ${sender}`,
+      getSender: () => Promise.resolve({ username: sender }),
+      getChat: () => Promise.resolve(undefined),
+    });
+    const c = client();
+    c.getDialogs = () =>
+      Promise.resolve([
+        { id: { toString: () => GROUP }, inputEntity: { peer: GROUP }, message: { id: 4 } },
+      ]);
+    c.getMessages = () =>
+      Promise.resolve([said(4, 'bob'), said(3, 'QuestBot'), said(2, 'QuestBot')]);
+    const core = new Core({
+      clock,
+      secrets: secretsWith(USER),
+      documents: { tg: { 'last-seen': { [GROUP]: 1 } } },
+      graph: {
+        version: 2,
+        nodes: [
+          { id: 'tg', plugin: 'telegram-user' },
+          { id: 'reader', plugin: 'reader' },
+        ],
+        edges: [{ from: 'tg.chat', to: 'reader.chat', reads: [GROUP], senders: ['@QuestBot'] }],
+      },
+    });
+    core.register(
+      telegramUserPlugin({ client: () => c }),
+      reader((m) => heard.push(`${m.id} ${m.text} ${m.missed} ${m.playback}`))
+    );
+    await core.start();
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setImmediate(r));
+      clock.advance(1000);
+    }
+    await new Promise((r) => setImmediate(r));
+    expect(heard).toEqual(['2 /play QuestBot true true', '3 /play QuestBot true true']);
+    await core.stop();
+  });
+
+  it('warns of a catch-up that hit its cap, in its log and the event log', async () => {
+    const clock = new VirtualClock();
+    const records: unknown[] = [];
+    const c = client();
+    c.getDialogs = () =>
+      Promise.resolve([
+        { id: { toString: () => GROUP }, inputEntity: { peer: GROUP }, message: { id: 2000 } },
+      ]);
+    c.getMessages = (_, { limit, offsetId }) =>
+      Promise.resolve(
+        Array.from({ length: limit }, (_x, i) => ({
+          id: offsetId - 1 - i,
+          date: 1,
+          message: 'hi',
+          getSender: () => Promise.resolve({ username: 'QuestBot' }),
+          getChat: () => Promise.resolve(undefined),
+        }))
+      );
+    const core = new Core({
+      clock,
+      secrets: secretsWith(USER),
+      record: (r) => records.push(r),
+      documents: { tg: { 'last-seen': { [GROUP]: 1 } } },
+      graph: {
+        version: 2,
+        nodes: [
+          { id: 'tg', plugin: 'telegram-user' },
+          { id: 'reader', plugin: 'reader' },
+        ],
+        edges: [{ from: 'tg.chat', to: 'reader.chat', reads: '*' }],
+      },
+    });
+    let heard = 0;
+    core.register(
+      telegramUserPlugin({ client: () => c }),
+      reader(() => heard++)
+    );
+    await core.start();
+    for (let i = 0; i < 15; i++) {
+      await new Promise((r) => setImmediate(r));
+      clock.advance(1000);
+    }
+    expect(heard).toBe(1000);
+    expect(records).toContainEqual(
+      expect.objectContaining({ type: 'telegram-user.catch-up', chat: GROUP, fetched: 1000 })
+    );
     await core.stop();
   });
 

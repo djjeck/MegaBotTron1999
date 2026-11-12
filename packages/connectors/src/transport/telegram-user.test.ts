@@ -1,11 +1,14 @@
-import { FloodWait, type Inbound, VirtualClock } from '@megabottron1999/core';
+import { FloodWait, type Inbound, type ReadFilter, VirtualClock } from '@megabottron1999/core';
 import { type UserAuthParams } from 'telegram/client/auth.js';
 import { type StringSession } from 'telegram/sessions/index.js';
 import { describe, expect, it } from 'vitest';
 import {
   type Ask,
+  CATCH_UP_CAP,
+  CATCH_UP_PAUSE_MS,
   createTelegramClient,
   type GramClient,
+  LAST_SEEN_DOC,
   login,
   type LoginClient,
   type RawDialog,
@@ -39,6 +42,10 @@ function fake(
     failConnect?: number;
     send?: () => Promise<{ id: number }>;
     dialogs?: RawDialog[];
+    /** Each chat's history, by its peer. */
+    history?: Record<string, RawMessage[]>;
+    /** Fails the history's next requests with these, in turn. */
+    historyFails?: Error[];
   } = {}
 ) {
   const calls: string[] = [];
@@ -67,12 +74,32 @@ function fake(
       handler = h;
       handlers++;
     },
+    getMessages: (entity, { limit, offsetId, minId }) => {
+      const peer = String((entity as { peer: unknown }).peer);
+      calls.push(`history ${peer} <${offsetId} >${minId} ${limit}`);
+      const fail = o.historyFails?.shift();
+      if (fail !== undefined) return Promise.reject(fail);
+      return Promise.resolve(
+        (o.history?.[peer] ?? [])
+          .filter((m) => (offsetId === 0 || m.id < offsetId) && m.id > minId)
+          .sort((a, b) => b.id - a.id)
+          .slice(0, limit)
+      );
+    },
   };
   const deliver = (message: RawMessage) => handler?.({ message }) ?? Promise.resolve();
   return { client, calls, sent, deliver, handlers: () => handlers };
 }
 
 const flush = () => new Promise((r) => setImmediate(r));
+/** Lets the catch-up run, a pause at a time. */
+async function settle(clock: VirtualClock, steps = 40): Promise<void> {
+  for (let i = 0; i < steps; i++) {
+    await flush();
+    clock.advance(CATCH_UP_PAUSE_MS);
+  }
+  await flush();
+}
 
 async function connector(f = fake(), chats = [GROUP, '@Quiz_bot']) {
   const clock = new VirtualClock(0);
@@ -385,5 +412,306 @@ describe('login', () => {
     await expect(login(credentials, () => Promise.resolve(''), make)).rejects.toThrow(
       'API_ID_INVALID'
     );
+  });
+});
+
+describe('the catch-up', () => {
+  const PRIVATE_ID = '5000001';
+  const group = (top: number): RawDialog => ({
+    id: { toString: () => GROUP },
+    title: 'The Lobby',
+    isGroup: true,
+    inputEntity: { peer: GROUP },
+    message: { id: top },
+  });
+  const quiz = (top: number): RawDialog => ({
+    id: { toString: () => PRIVATE_ID },
+    title: 'Quiz Bot',
+    isUser: true,
+    entity: { username: 'Quiz_bot', bot: true },
+    inputEntity: { peer: '@Quiz_bot' },
+    message: { id: top },
+  });
+  const said = (from: number, to: number, chat = GROUP): RawMessage[] =>
+    Array.from({ length: to - from + 1 }, (_, i) =>
+      raw({ id: from + i, message: `m${from + i}`, chatId: { toString: () => chat } })
+    );
+
+  function make(
+    f: ReturnType<typeof fake>,
+    o: {
+      chats?: string[];
+      seen?: Record<string, number>;
+      readers?: ReadFilter[] | undefined;
+    } = {}
+  ) {
+    const clock = new VirtualClock(0);
+    const messages: Inbound[] = [];
+    const logs: string[] = [];
+    const warnings: string[] = [];
+    const records: [string, Record<string, unknown>][] = [];
+    const docs = new Map<string, unknown>(o.seen === undefined ? [] : [[LAST_SEEN_DOC, o.seen]]);
+    const c = new TelegramUserConnector({
+      account: 'telegram:alice',
+      client: f.client,
+      ...(o.chats === undefined ? {} : { chats: o.chats }),
+      clock,
+      log: (l) => logs.push(l),
+      warn: (l) => warnings.push(l),
+      record: (type, fields) => records.push([type, fields]),
+      store: {
+        read: <T>(name: string) => docs.get(name) as T | undefined,
+        write: (name, value) => docs.set(name, structuredClone(value)),
+      },
+      ...(o.readers === undefined ? {} : { readers: () => o.readers ?? [] }),
+    });
+    c.onMessage((m) => messages.push(m));
+    const seen = () => docs.get(LAST_SEEN_DOC);
+    return { c, clock, messages, logs, warnings, records, seen };
+  }
+  const history = (f: ReturnType<typeof fake>) => f.calls.filter((x) => x.startsWith('history'));
+
+  it('fetches a read chat back to the last id seen, and delivers it oldest first, once, missed', async () => {
+    const f = fake({ dialogs: [group(20)], history: { [GROUP]: said(10, 20) } });
+    const { c, clock, messages, seen } = make(f, {
+      chats: [GROUP],
+      seen: { [GROUP]: 15 },
+      readers: [{ reads: [GROUP] }],
+    });
+    c.start();
+    await settle(clock);
+    expect(history(f)).toEqual([`history ${GROUP} <21 >15 100`]);
+    expect(messages.map((m) => [m.id, m.text, m.chat, m.playback, m.missed])).toEqual(
+      [16, 17, 18, 19, 20].map((id) => [String(id), `m${id}`, GROUP, true, true])
+    );
+    expect(seen()).toEqual({ [GROUP]: 20 });
+    // Connected again, there is nothing new: nothing is fetched or delivered twice.
+    await c.stop();
+    c.start();
+    await settle(clock);
+    expect(history(f)).toHaveLength(1);
+    expect(messages).toHaveLength(5);
+  });
+
+  it('fetches only the chats its readers read, all monitored ones for *, and none without', async () => {
+    const dialogs = [group(20), quiz(9)];
+    const hist = { [GROUP]: said(18, 20), '@Quiz_bot': said(7, 9, PRIVATE_ID) };
+    const seen = { [GROUP]: 17, [PRIVATE_ID]: 6 };
+    const f1 = fake({ dialogs, history: hist });
+    const one = make(f1, { seen, readers: [{ reads: ['@quiz_bot'] }] });
+    one.c.start();
+    await settle(one.clock);
+    expect(history(f1)).toEqual([`history @Quiz_bot <10 >6 100`]);
+    expect(one.messages.map((m) => m.chat)).toEqual(['@Quiz_bot', '@Quiz_bot', '@Quiz_bot']);
+
+    const f2 = fake({ dialogs, history: hist });
+    const all = make(f2, { seen, readers: [{ reads: [] }, { reads: '*', senders: ['me'] }] });
+    all.c.start();
+    await settle(all.clock);
+    expect(history(f2)).toHaveLength(2);
+    expect(all.messages).toHaveLength(6);
+
+    // Monitored chats only: '*' is every chat the connector monitors.
+    const f3 = fake({ dialogs, history: hist });
+    const some = make(f3, { chats: [GROUP], seen, readers: [{ reads: '*' }] });
+    some.c.start();
+    await settle(some.clock);
+    expect(history(f3)).toEqual([`history ${GROUP} <21 >17 100`]);
+
+    const f4 = fake({ dialogs, history: hist });
+    const none = make(f4, { seen });
+    none.c.start();
+    await settle(none.clock);
+    expect(history(f4)).toEqual([]);
+    expect(none.seen()).toEqual(seen);
+  });
+
+  it('skips a chat seen for the first time, keeping its latest id for the next connection', async () => {
+    const f = fake({ dialogs: [group(20), quiz(9), { title: 'no id' }] });
+    const { c, clock, messages, seen } = make(f, { readers: [{ reads: '*' }] });
+    c.start();
+    await settle(clock);
+    expect(history(f)).toEqual([]);
+    expect(messages).toEqual([]);
+    expect(seen()).toEqual({ [GROUP]: 20, [PRIVATE_ID]: 9 });
+  });
+
+  it(`stops at ${CATCH_UP_CAP} messages a chat, a page of 100 at a time, warning and recording`, async () => {
+    const f = fake({ dialogs: [group(1500)], history: { [GROUP]: said(2, 1500) } });
+    const { c, clock, messages, warnings, records, seen } = make(f, {
+      seen: { [GROUP]: 1 },
+      readers: [{ reads: [GROUP] }],
+    });
+    c.start();
+    await settle(clock, 5);
+    // Paced: one request a pause.
+    expect(history(f).length).toBeLessThan(6);
+    await settle(clock);
+    expect(history(f)).toEqual([
+      ...Array.from({ length: 10 }, (_, i) => `history ${GROUP} <${1501 - i * 100} >1 100`),
+      `history ${GROUP} <501 >1 1`,
+    ]);
+    expect(messages).toHaveLength(CATCH_UP_CAP);
+    expect(messages[0]?.id).toBe('501');
+    expect(messages.at(-1)?.id).toBe('1500');
+    expect(warnings).toEqual([`catch-up of ${GROUP} stopped at 1000 messages, older ones missed`]);
+    expect(records).toEqual([['telegram-user.catch-up', { chat: GROUP, fetched: 1000 }]]);
+    expect(seen()).toEqual({ [GROUP]: 1500 });
+  });
+
+  it('does not warn when exactly the cap was missing', async () => {
+    const f = fake({ dialogs: [group(1000)], history: { [GROUP]: said(1, 1000) } });
+    const { c, clock, messages, warnings, records } = make(f, {
+      seen: { [GROUP]: 0 },
+      readers: [{ reads: [GROUP] }],
+    });
+    c.start();
+    await settle(clock);
+    expect(history(f).at(-1)).toBe(`history ${GROUP} <1 >0 1`);
+    expect(messages).toHaveLength(1000);
+    expect(warnings).toEqual([]);
+    expect(records).toEqual([]);
+  });
+
+  it('waits out a FLOOD_WAIT, delivering live messages meanwhile, each once', async () => {
+    const flood = Object.assign(new Error('A wait of 30 seconds is required'), { seconds: 30 });
+    const f = fake({
+      dialogs: [group(20)],
+      history: { [GROUP]: said(16, 20) },
+      historyFails: [flood],
+    });
+    const { c, clock, messages, logs, seen } = make(f, {
+      seen: { [GROUP]: 15 },
+      readers: [{ reads: [GROUP] }],
+    });
+    c.start();
+    await settle(clock, 2);
+    expect(history(f)).toHaveLength(1);
+    expect(logs.at(-1)).toBe('catch-up: Telegram asks to wait 30 s');
+    // Heard live while it waits: one it is about to fetch (19), one newer (21).
+    await f.deliver(raw({ id: 19, message: 'm19' }));
+    await f.deliver(raw({ id: 21, message: 'm21' }));
+    expect(seen()).toEqual({ [GROUP]: 15 });
+    clock.advance(27_000);
+    await flush();
+    expect(history(f)).toHaveLength(1);
+    await settle(clock);
+    expect(history(f)).toHaveLength(2);
+    expect(messages.map((m) => [m.id, m.missed === true])).toEqual([
+      ['19', false],
+      ['21', false],
+      ['16', true],
+      ['17', true],
+      ['18', true],
+      ['20', true],
+    ]);
+    expect(seen()).toEqual({ [GROUP]: 21 });
+  });
+
+  it('keeps what is heard live in the chats it does not fetch', async () => {
+    const f = fake({ dialogs: [group(20), quiz(9)], history: { [GROUP]: said(18, 20) } });
+    const { c, clock, messages, seen } = make(f, {
+      seen: { [GROUP]: 17, [PRIVATE_ID]: 9 },
+      readers: [{ reads: [GROUP] }],
+    });
+    // Heard as it connects, before it knows which chats it fetches.
+    const dialogs = f.client.getDialogs;
+    f.client.getDialogs = async (p) => {
+      await f.deliver(raw({ id: 10, chatId: { toString: () => PRIVATE_ID }, isPrivate: true }));
+      await f.deliver(raw({ id: 19 }));
+      return dialogs(p);
+    };
+    c.start();
+    await settle(clock);
+    expect(seen()).toEqual({ [GROUP]: 20, [PRIVATE_ID]: 10 });
+    expect(messages.map((m) => m.id)).toEqual(['10', '19', '18', '20']);
+    await f.deliver(raw({ id: 11, chatId: { toString: () => PRIVATE_ID }, isPrivate: true }));
+    await f.deliver(raw({ id: 21 }));
+    await f.deliver(raw({ id: 4, chatId: undefined }));
+    expect(seen()).toEqual({ [GROUP]: 21, [PRIVATE_ID]: 11 });
+  });
+
+  it('skips service messages, and drops one whose sender cannot be fetched', async () => {
+    const service = { ...raw({ id: 17 }), message: undefined } as unknown as RawMessage;
+    const broken = raw({ id: 18, getSender: () => Promise.reject(new Error('gone')) });
+    const f = fake({
+      dialogs: [group(19)],
+      history: { [GROUP]: [service, broken, ...said(19, 19)] },
+    });
+    const { c, clock, messages, logs } = make(f, {
+      seen: { [GROUP]: 16 },
+      readers: [{ reads: [GROUP] }],
+    });
+    c.start();
+    await settle(clock);
+    expect(messages.map((m) => m.id)).toEqual(['19']);
+    expect(logs).toContain('message 18 dropped: Error: gone');
+  });
+
+  it('logs a chat whose history fails, and goes on with the next', async () => {
+    const f = fake({
+      dialogs: [group(20), quiz(9)],
+      history: { [GROUP]: said(19, 20), '@Quiz_bot': said(9, 9, PRIVATE_ID) },
+      historyFails: [new Error('CHANNEL_PRIVATE')],
+    });
+    const { c, clock, messages, logs, seen } = make(f, {
+      seen: { [GROUP]: 18, [PRIVATE_ID]: 8 },
+      readers: [{ reads: '*' }],
+    });
+    c.start();
+    await settle(clock);
+    expect(logs).toContain(`catch-up of ${GROUP} failed: Error: CHANNEL_PRIVATE`);
+    expect(messages.map((m) => m.chat)).toEqual(['@Quiz_bot']);
+    expect(seen()).toEqual({ [GROUP]: 18, [PRIVATE_ID]: 9 });
+  });
+
+  it('ends when stopped, keeping what was heard live', async () => {
+    const f = fake({
+      dialogs: [group(1500)],
+      history: { [GROUP]: said(2, 1500) },
+    });
+    const { c, clock, messages, seen } = make(f, {
+      seen: { [GROUP]: 1 },
+      readers: [{ reads: [GROUP] }],
+    });
+    c.start();
+    await settle(clock, 3);
+    await f.deliver(raw({ id: 1501 }));
+    await c.stop();
+    await settle(clock);
+    expect(history(f).length).toBeLessThan(4);
+    expect(messages.map((m) => m.id)).toEqual(['1501']);
+    expect(seen()).toEqual({ [GROUP]: 1501 });
+  });
+
+  it('ends when stopped while it delivers', async () => {
+    const f = fake({ dialogs: [group(20)], history: { [GROUP]: said(18, 20) } });
+    const { c, clock, messages } = make(f, {
+      seen: { [GROUP]: 17 },
+      readers: [{ reads: [GROUP] }],
+    });
+    c.onMessage(() => void c.stop());
+    c.start();
+    await settle(clock);
+    expect(messages.map((m) => m.id)).toEqual(['18']);
+  });
+
+  it('releases what it held when the start fails, and holds again at the retry', async () => {
+    const f = fake({ dialogs: [group(20)], history: { [GROUP]: said(18, 20) } });
+    let fail = true;
+    const me = f.client.getMe;
+    f.client.getMe = () => (fail ? ((fail = false), Promise.reject(new Error('x'))) : me());
+    const { c, clock, messages, seen } = make(f, {
+      seen: { [GROUP]: 17 },
+      readers: [{ reads: [GROUP] }],
+    });
+    c.start();
+    await flush();
+    await f.deliver(raw({ id: 21 }));
+    expect(seen()).toEqual({ [GROUP]: 21 });
+    clock.advance(RETRY_MS);
+    await settle(clock);
+    expect(history(f)).toEqual([]);
+    expect(messages.map((m) => m.id)).toEqual(['21']);
   });
 });

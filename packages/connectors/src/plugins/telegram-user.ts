@@ -5,7 +5,9 @@
  * handle, which hears only the chats their reach reads, and send through the account's outbox,
  * within the chats and commands their reach names. It monitors the chats of its configuration
  * only (groups by id, private chats by `@username`), or every chat of the account when it names
- * none (its surfaces, bot-os.md D63); each edge reads a subset (D62).
+ * none (its surfaces, bot-os.md D63); each edge reads a subset (D62). At each connection it
+ * catches up on what its readers' chats said while it was down (D62), keeping the last message id
+ * seen in each chat in its store.
  */
 import { definePlugin, type Plugin } from '@megabottron1999/core';
 import { z } from 'zod';
@@ -85,6 +87,10 @@ export function telegramUserPlugin(
         clock: ctx.clock,
         log: (line) => ctx.log.info(line),
         notify: (text) => ctx.notify(text),
+        warn: (line) => ctx.log.warn(line),
+        record: (type, fields) => ctx.record(type, fields),
+        store: ctx.store,
+        readers: () => ctx.readers?.() ?? [],
       });
       return { connector, start: () => connector.start(), stop: () => connector.stop() };
     },

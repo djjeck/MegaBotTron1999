@@ -1047,7 +1047,9 @@ export class Core {
       clock: this.o.clock,
       store: this.stores.open(node.instance),
       config: entry.config,
-      ...(entry.manifest.kinds.includes('connector') ? { secrets: this.secretsOf(id) } : {}),
+      ...(entry.manifest.kinds.includes('connector')
+        ? { secrets: this.secretsOf(id), readers: () => this.readersOf(id) }
+        : {}),
       scheduler,
       bus: this.bus.handle(id, entry.manifest, sourcesOf(node), log, node.instance),
       drift: this.driftMonitor.reporter(id),
@@ -1159,6 +1161,13 @@ export class Core {
             ? readable.has(nsOf(r.type))
             : r.type === wanted || (!wanted.includes('.') && nsOf(r.type) === wanted)) && mine(r)
       );
+  }
+
+  /** What each chat-in edge leaving the connector node `id` reads (D62). */
+  private readersOf(id: string): ReadFilter[] {
+    return [...this.entries.values()].flatMap((e) =>
+      chatsOf(e.node).flatMap(([, b]) => (b.node === id ? [readFilter(b)] : []))
+    );
   }
 
   /** A connector's way to its declared secrets. */

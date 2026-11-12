@@ -6,7 +6,12 @@
 import { type BusHandle } from './bus.ts';
 import { type Clock } from './clock.ts';
 import { type Buttons, type CommandHandler } from './commands.ts';
-import { type ChatSurface, type Connector, type ConnectorHandle } from './connector.ts';
+import {
+  type ChatSurface,
+  type Connector,
+  type ConnectorHandle,
+  type ReadFilter,
+} from './connector.ts';
 import { type DriftReporter } from './drift.ts';
 import { type LogEntry } from './event-log.ts';
 import { type ManifestInput } from './manifest.ts';
@@ -35,6 +40,12 @@ export interface PluginContext {
    * kinds of plugin receive none.
    */
   readonly secrets?: { get(name: string): string };
+  /**
+   * A connector's readers (§4.5, bot-os.md D62): what each chat-in edge leaving its node reads, as
+   * the graph says, so that it fetches back only the chats some reader needs. Other kinds of
+   * plugin receive none.
+   */
+  readers?(): ReadFilter[];
   /** Its configuration, as the deployment set it and its schema made it (§2). */
   readonly config: Readonly<Record<string, unknown>>;
   /** Its own durable timers, which fire through its instance's `onTimer` (§4.3). */
