@@ -56,7 +56,7 @@ for (const method of ['log', 'info', 'debug', 'warn', 'error'] as const) {
 const events = new CoreEventLog(dataDir);
 const clock = wallClock();
 // The instance's composition, saved in the volume (D50): read at load, edited by the owner.
-const graphFile = new GraphFile(dataDir);
+const graphFile = new GraphFile(dataDir, () => clock.now());
 
 const core = new Core({
   clock,
@@ -109,6 +109,12 @@ try {
     process.exit(2);
   }
   throw e;
+}
+// The graph's history (D61): the file kept as a version if none holds it, marked as run or refused.
+try {
+  graphFile.started(core);
+} catch (e) {
+  console.error(`megabottron1999: the graph's history: ${String(e)}`);
 }
 await core.start();
 

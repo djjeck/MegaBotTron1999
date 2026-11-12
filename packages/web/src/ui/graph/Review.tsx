@@ -9,9 +9,11 @@
  * - **Revert**: the draft discarded, back to the saved graph (asked first).
  *
  * Its close button (×), or Escape, only closes it: the draft is kept.
+ *
+ * The diff's lists (`DiffView`) are the graph history's too (Admin → Graph history, D61).
  */
 import { useEffect, useRef } from 'react';
-import type { GraphCheckView, GraphProblem } from '#src/ui/api.ts';
+import type { GraphCheckView, GraphDiff, GraphProblem } from '#src/ui/api.ts';
 
 const ends = (e: { from: string; to: string }): string => `${e.from} → ${e.to}`;
 
@@ -31,6 +33,39 @@ function Items(props: { title: string; items: string[] }) {
   );
 }
 
+/** Whether a diff changes nothing. */
+export const noChange = (d: GraphDiff): boolean =>
+  [
+    d.nodes.added,
+    d.nodes.removed,
+    d.nodes.changed,
+    d.edges.added,
+    d.edges.removed,
+    d.edges.changed,
+  ].every((l) => l.length === 0);
+
+/** A diff's nodes and edges added, removed and changed, a list each (none for an empty one). */
+export function DiffView({ diff: d }: { diff: GraphDiff }) {
+  return (
+    <>
+      <Items title="Nodes added" items={d.nodes.added} />
+      <Items title="Nodes removed (their instances kept)" items={d.nodes.removed} />
+      <Items
+        title="Nodes changed"
+        items={d.nodes.changed.map((c) => `${c.id}: ${c.fields.join(', ')}`)}
+      />
+      <Items title="Edges added" items={d.edges.added.map(ends)} />
+      <Items title="Edges removed" items={d.edges.removed.map(ends)} />
+      <Items
+        title="Edges changed"
+        items={d.edges.changed.map((e) =>
+          e.fields.length === 0 ? ends(e) : `${ends(e)}: ${e.fields.join(', ')}`
+        )}
+      />
+    </>
+  );
+}
+
 export function Review(props: {
   check: GraphCheckView | undefined;
   /** Whether the draft differs from the saved graph. */
@@ -45,16 +80,7 @@ export function Review(props: {
 }) {
   const { check, refused } = props;
   const d = check?.diff;
-  const none =
-    d !== undefined &&
-    [
-      d.nodes.added,
-      d.nodes.removed,
-      d.nodes.changed,
-      d.edges.added,
-      d.edges.removed,
-      d.edges.changed,
-    ].every((l) => l.length === 0);
+  const none = d !== undefined && noChange(d);
   const ok = check?.ok === true;
   const first = useRef<HTMLButtonElement>(null);
   const { close } = props;
@@ -87,17 +113,7 @@ export function Review(props: {
         ) : none ? (
           <p className="muted">Nothing differs from the saved graph.</p>
         ) : (
-          <>
-            <Items title="Nodes added" items={d.nodes.added} />
-            <Items title="Nodes removed (their instances kept)" items={d.nodes.removed} />
-            <Items
-              title="Nodes changed"
-              items={d.nodes.changed.map((c) => `${c.id}: ${c.fields.join(', ')}`)}
-            />
-            <Items title="Edges added" items={d.edges.added.map(ends)} />
-            <Items title="Edges removed" items={d.edges.removed.map(ends)} />
-            <Items title="Edges changed" items={d.edges.changed.map(ends)} />
-          </>
+          <DiffView diff={d} />
         )}
         {check === undefined || ok ? null : (
           <>

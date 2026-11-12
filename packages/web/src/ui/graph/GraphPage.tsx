@@ -15,8 +15,11 @@
  * - **Remove it**: its instance is kept, and deleted after 7 days if no node uses it.
  * - **Review and apply**: the diff from the saved file, then Apply (`PUT /graph/file`, then a
  *   restart, which the UI waits through) or Revert (the draft back to the saved graph). A saved
- *   graph that differs from what runs (changed through the API, or its restart failed) has its own
- *   banner with Apply. Roll back puts the previous file back (`POST /graph/rollback`).
+ *   graph that differs from what runs (changed through the API, a rollback, or its restart failed)
+ *   has its own banner with Apply. The versions before, and their rollback, are on the admin page
+ *   (Admin → Graph history, D61).
+ * - **Read it as text**: the Text toggle shows the draft printed (`POST /graph/check`'s `text`),
+ *   read-only, with a copy button.
  *
  * A saved graph refused at the last start (`GET /status`, `graph.refused`) runs no node: it is
  * shown first, for the owner to fix. One or several running nodes selected can be killed (D44).
@@ -73,6 +76,7 @@ import {
   viewOf,
 } from './draft.ts';
 import { EdgeDetails } from './EdgeDetails.tsx';
+import { TextView } from './GraphText.tsx';
 import { layout } from './layout.ts';
 import { NodeDetails } from './NodeDetails.tsx';
 import { Palette } from './Palette.tsx';
@@ -113,7 +117,7 @@ export function GraphPage({
   const [saved, setSaved] = useState<Graph>();
   const [draft, setDraft] = useState<Graph>();
   const [check, setCheck] = useState<GraphCheckView>();
-  const [panel, setPanel] = useState<'palette' | 'review' | AvailablePlugin>();
+  const [panel, setPanel] = useState<'palette' | 'review' | 'text' | AvailablePlugin>();
   const [busy, setBusy] = useState(false);
   /** Why the last Apply was refused. */
   const [refusedApply, setRefusedApply] = useState<{ error: string; problems: GraphProblem[] }>();
@@ -382,27 +386,6 @@ export function GraphPage({
     if (dirty) setSaid('Reverted to the graph saved.');
   };
 
-  const rollback = (): void => {
-    if (
-      !window.confirm(
-        'Roll back: put the previous saved graph back in place of this one? (A second rollback goes forward again.)'
-      )
-    )
-      return;
-    api<{ problems?: unknown[] }>('/graph/rollback', {}).then(
-      (r) => {
-        setSaid(
-          `Rolled back to the previous saved graph${r.problems === undefined ? '' : ', which the check refuses'}: apply it to run it.`
-        );
-        savedRef.current = undefined;
-        setDraft(undefined);
-        setSaved(undefined);
-        file.reload();
-      },
-      (e: unknown) => setSaid(`rollback: ${message(e)}`)
-    );
-  };
-
   const closeReview = useCallback(() => setPanel(undefined), []);
 
   if (draft === undefined) return <p className="muted">{file.error ?? 'Loading…'}</p>;
@@ -429,6 +412,22 @@ export function GraphPage({
         pick={(p) => setPanel(p)}
         close={() => setPanel(undefined)}
       />
+    );
+  else if (panel === 'text')
+    side = (
+      <aside className="details text" aria-label="the draft as text">
+        <h2>
+          As text{' '}
+          <button type="button" className="link" onClick={() => setPanel(undefined)}>
+            close
+          </button>
+        </h2>
+        <p className="muted small">
+          The draft printed{dirty ? ', changes not applied included' : ''}: a node per line, then a
+          line per value of its config, then an edge per line.
+        </p>
+        <TextView text={check?.text} label="the draft as text" />
+      </aside>
     );
   else if (panel === 'review')
     side = (
@@ -508,7 +507,8 @@ export function GraphPage({
       {refused.length === 0 ? null : (
         <div role="alert" className="banner bad">
           <strong>The saved graph was refused at the last start: no node runs.</strong> Fix it here,
-          then review and apply it; or roll back to the previous one.
+          then review and apply it; or roll back to a version that ran, in{' '}
+          <a href="#/graph-history">Admin → Graph history</a>.
           <ul>
             {refused.map((p) => (
               <li key={p.text}>{p.text}</li>
@@ -547,8 +547,12 @@ export function GraphPage({
             {check.problems.length} problem{check.problems.length === 1 ? '' : 's'}
           </span>
         )}
-        <button type="button" onClick={rollback}>
-          Roll back
+        <button
+          type="button"
+          aria-pressed={panel === 'text'}
+          onClick={() => setPanel(panel === 'text' ? undefined : 'text')}
+        >
+          Text
         </button>
         {status.data?.off === true ? <span className="badge off">instance off</span> : null}
         <span className="muted">

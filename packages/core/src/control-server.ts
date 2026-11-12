@@ -20,13 +20,19 @@
  * - `GET /graph`: the graph the instance runs (§2.1), every edge written out.
  * - `GET /graph/view`: what the web UI's graph view draws: the graph, the port types' looks,
  *   and each node's ports, interface and the JSON Schemas of its config and settings.
- * - `GET /graph/file`: the saved graph (`<data>/graph.json`, §2.3), whether it differs from the one
- *   running, and its problems if it is refused.
+ * - `GET /graph/file`: the saved graph (`<data>/graph.json`, §2.3) and its text, whether it
+ *   differs from the one running, and its problems if it is refused.
  * - `POST /graph/check` with a graph as the body: its problems, each located (node, edge, port,
- *   config or setting), and how it differs from the saved file; nothing is saved.
- * - `PUT /graph/file` with a graph as the body: checked, then saved, the file before kept as
- *   `graph.previous.json`; 400 with its problems when refused.
- * - `POST /graph/rollback`: the previous version back (409 when there is none).
+ *   config or setting), its text, and how it differs from the saved file; nothing is saved.
+ * - `PUT /graph/file` with a graph as the body: checked, then saved, and kept as a version of the
+ *   history; 400 with its problems when refused.
+ * - `GET /graph/history`: the history's versions, newest first, each with its time, its summary
+ *   and how the instance started on it; which one is current, and the last one that ran.
+ * - `GET /graph/history/<id>`: one version: its graph and text, and the diff from the current
+ *   graph to it, structured and line by line; 404 for none.
+ * - `POST /graph/history/<id>/rollback`: that version written as the current graph, kept as a new
+ *   version that names it (404 for none, 409 when it is the current graph already).
+ * - `POST /graph/rollback`: the version before the current one back, as above (409 when none).
  * - `GET /legacy`: what an older data directory mounted read-only offers to import (§8): its
  *   stores, and its event log's days; 404 when none is mounted.
  * - `GET /legacy/events`: its event log's types that are not namespaced, counted, each with the
@@ -220,11 +226,17 @@ export function controlHandler(
       }
       if (gf !== undefined && post && route === '/graph/check')
         return reply(200, gf.check(await body(req)));
-      if (gf !== undefined && post && route === '/graph/rollback') {
+      const history = /^\/graph\/history(?:\/([^/]+)(\/rollback)?)?$/u.exec(route);
+      if (gf !== undefined && (route === '/graph/rollback' ? post : history !== null)) {
+        const id = history?.[1] === undefined ? undefined : decodeURIComponent(history[1]);
+        const rollingBack = history?.[2] !== undefined;
         try {
-          return reply(200, gf.rollback());
+          if (route === '/graph/rollback') return reply(200, gf.rollback());
+          if (id === undefined && !post) return reply(200, gf.history());
+          if (id !== undefined && !post && !rollingBack) return reply(200, gf.version(id));
+          if (id !== undefined && post && rollingBack) return reply(200, gf.rollbackTo(id));
         } catch (e) {
-          if (e instanceof GraphFileError) return reply(409, { error: e.message });
+          if (e instanceof GraphFileError) return reply(e.status ?? 409, { error: e.message });
           throw e;
         }
       }

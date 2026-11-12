@@ -425,25 +425,59 @@ describe('the graph editor', () => {
     expect(await screen.findByLabelText('node actor-a', {}, slow)).toBeDefined();
     expect(screen.getByText('Reverted to the graph saved.')).toBeDefined();
     expect(screen.queryByText('Changes not applied')).toBeNull();
-    // A rollback puts the previous file back; the banner offers to apply it.
-    core.previous = { version: 2, nodes: [], edges: [] };
-    fireEvent.click(screen.getByRole('button', { name: 'Roll back' }));
+    // No rollback here: it is the admin page's, with the history.
+    expect(screen.queryByRole('button', { name: 'Roll back' })).toBeNull();
+  });
+
+  it('shows the draft as text, read-only, to copy', async () => {
+    fakeCore();
+    const copied: string[] = [];
+    let copies = true;
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      clipboard: {
+        writeText: (t: string) => {
+          copied.push(t);
+          return copies ? Promise.resolve() : Promise.reject(new Error('denied'));
+        },
+      },
+    });
+    vi.stubGlobal('confirm', () => true);
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    await screen.findByLabelText('node actor-a', {}, slow);
+    const toggle = screen.getByRole('button', { name: 'Text' });
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(toggle);
+    const panel = await screen.findByRole('complementary', { name: 'the draft as text' });
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    const text = within(panel).getByLabelText('the draft as text');
+    await waitFor(() => expect(text.textContent).toContain('  actor-a (actor)'));
+    expect(within(panel).queryByText(/changes not applied included/u)).toBeNull();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Copy' }));
+    expect(await within(panel).findByText('Copied.')).toBeDefined();
+    expect(copied).toEqual([text.textContent]);
+    copies = false;
+    fireEvent.click(within(panel).getByRole('button', { name: 'Copy' }));
     expect(
-      await screen.findByText('Rolled back to the previous saved graph: apply it to run it.')
+      await within(panel).findByText('Not copied: select the text and copy it.')
     ).toBeDefined();
-    const banner = await screen.findByRole('region', { name: 'not applied' }, slow);
-    expect(within(banner).getByText('The saved graph is not what runs.')).toBeDefined();
-    expect(within(banner).getByRole('button', { name: 'Apply (restart)' })).toBeDefined();
-    await waitFor(() => expect(screen.queryByLabelText('node actor-a')).toBeNull());
-    // No previous: the core says so.
-    core.api.routes['POST /graph/rollback'] = [
-      409,
-      { error: 'there is no graph.previous.json to roll back to' },
-    ];
-    fireEvent.click(screen.getByRole('button', { name: 'Roll back' }));
-    expect(
-      await screen.findByText('rollback: there is no graph.previous.json to roll back to')
-    ).toBeDefined();
+    // The draft changed: the text follows it.
+    fireEvent.click(within(panel).getByRole('button', { name: 'close' }));
+    expect(screen.queryByRole('complementary', { name: 'the draft as text' })).toBeNull();
+    fireEvent.click(screen.getByLabelText('node actor-a'));
+    fireEvent.click(
+      within(await screen.findByLabelText('details of actor-a')).getByRole('button', {
+        name: 'Remove actor-a',
+      })
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Text' }));
+    const again = await screen.findByRole('complementary', { name: 'the draft as text' });
+    expect(within(again).getByText(/changes not applied included/u)).toBeDefined();
+    await waitFor(() =>
+      expect(within(again).getByLabelText('the draft as text').textContent).not.toContain('actor-a')
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Text' }));
+    expect(screen.queryByRole('complementary', { name: 'the draft as text' })).toBeNull();
   });
 
   it('applies a draft the saved graph matches what runs without a restart, and says why an Apply is refused', async () => {

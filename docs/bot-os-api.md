@@ -322,8 +322,8 @@ node whose plugin is unknown, so nothing is lost. The port names stay the same, 
 mechanical: `tg.chat → quest.chat` (a parser) stays one edge, of `chat-in`; `tg.chat → look.chat` (a
 reactor on events) becomes `look.chat → tg.chat`, of `chat-out`. The instance runs a version 1 file
 so converted, `GET /graph/file` shows it so, and `POST /graph/check` and `PUT /graph/file` take
-version 1 too; the file itself is rewritten (as version 2) only by the next save, so
-`graph.previous.json` and a rollback keep working on either version.
+version 1 too; the file itself is rewritten (as version 2) only by the next save or rollback, and a
+version of the history (below) written in version 1 is shown, diffed and rolled back as version 2.
 
 **At start** (`packages/core/src/graph-file.ts`, `GraphFile`), the core reads it and checks it as
 any graph (§2.1), against the plugins `core.available()` lists, their configuration and settings
@@ -333,6 +333,35 @@ fail again: it starts with no nodes, the file is kept as it is, and why is print
 (`core.graph`, `event: "refused"`), told to the owner, and reported by `GET /status`
 (`graph.refused`) and `GET /graph/file` (`problems`), for the owner to fix.
 
+**The history** (`packages/core/src/graph-history.ts`, bot-os.md D61) keeps every graph written to
+the file, by a save or a rollback, as a version: `/data/graph-history/<id>.json`, the id its time in
+ISO 8601 with `:` written `-` (`2026-11-12T10-00-00.000Z`, then `-1`, `-2` for another in the same
+millisecond), holding the graph as written and its metadata:
+
+```json
+{
+  "time": "2026-11-12T10:00:00.000Z",
+  "source": "rollback",
+  "summary": "+ node examine; − edge a.chat → b.chat; ~ node x: config",
+  "restores": "2026-11-11T09-30-00.000Z",
+  "start": { "result": "ran", "at": "2026-11-12T10:00:05.000Z" },
+  "graph": { "version": 2, "nodes": [], "edges": [] }
+}
+```
+
+`source` is `save`, `rollback` (which names the version it `restores`), `found` (a file that no
+version holds, written by hand: kept at the next start, or before the next write replaces it) or
+`migrated`. `summary` is what changed from the version before (`diffSummary`): `+` added, `−`
+removed, `~` changed with the fields that changed, nodes then edges, at most 8 named and the rest
+counted (`… 3 more`). `start` is how the instance last started on it, set at each start once the
+graph is loaded (`GraphFile.started`): `ran`, or `refused` with its `problems`; none if it never
+started on it. A write that leaves the graph the same (a version 1 file rewritten as version 2) is
+no new version. Versions are kept 7 days, and never fewer than the 5 latest; the others are pruned
+at each new one. The history replaces `graph.previous.json`, which earlier releases kept: the first
+start with no history takes `graph.previous.json` and then `graph.json` in as `migrated` versions,
+at their files' times (one, if they are the same graph), and removes `graph.previous.json`; nothing
+writes it again.
+
 **A problem** (`GraphProblem`) is its words as the load says them (`text`) and, where it can be
 told, the `node`, the `edge` (`{ from, to }`), the `port`, and the `config` or `setting` key it is
 about, so that the editor marks it there. An edge between ports of two types is refused with why
@@ -340,18 +369,36 @@ about, so that the editor marks it there. An edge between ports of two types is 
 
 **The control API's graph routes** (§4.11), the owner's alone:
 
-- `GET /graph/file`: the saved file (`graph`, as written, a version 1 file as version 2), whether
-  there is one (`exists`), why it does not read (`error`) or is refused (`problems`), and whether it
-  differs from the graph running (`differs`: a restart would change what runs).
+- `GET /graph/file`: the saved file (`graph`, as written, a version 1 file as version 2) and its
+  `text` (`graphText`, §4.12), whether there is one (`exists`), why it does not read (`error`) or is
+  refused (`problems`), and whether it differs from the graph running (`differs`: a restart would
+  change what runs).
 - `POST /graph/check`, a graph as the body: checked as the load would, nothing saved: `ok`, its
-  `problems`, and its `diff` from the saved file: the nodes `added`, `removed` and `changed` (with
-  the fields that changed), and the edges `added`, `removed` and `changed`, by their two ends.
+  `problems`, its `text`, and its `diff` from the saved file: the nodes `added`, `removed` and
+  `changed` (with the fields that changed), and the edges `added`, `removed` and `changed` (with the
+  fields that changed), by their two ends.
 - `PUT /graph/file`, a graph as the body: checked, then saved as the core holds it (each edge's ends
-  and type written out), the file before kept as `graph.previous.json`; `saved` (false when nothing
-  changed) and `restart` (whether it differs from what runs). A graph refused is not saved: 400,
-  with its `problems`.
-- `POST /graph/rollback`: `graph.previous.json` and `graph.json` swap, so a second rollback goes
-  forward again; 409 when there is no previous version. Its `problems`, if the check refuses it.
+  and type written out), and kept as a version of the history; `saved` (false when nothing changed)
+  and `restart` (whether it differs from what runs). A graph refused is not saved: 400, with its
+  `problems`.
+- `GET /graph/history`: the history, without the graphs: `versions`, newest first, each its `id`,
+  `time`, `source`, `summary`, and `restores` and `start` if any; `current`, the id of the version
+  that is the saved file, if one is; `lastGood`, the newest whose last start `ran`; and `keep`
+  (`{ "days": 7, "latest": 5 }`).
+- `GET /graph/history/<id>`: one version: its metadata, its `graph` (as version 2), whether it is
+  the `current` one, the `diff` from the saved graph to it (as `POST /graph/check` gives it: what a
+  rollback to it would change), its `text` and the saved graph's (`currentText`), their line diff
+  (`lines`, `[{ "op": " " | "-" | "+", "text" }]`, §4.12), and its `problems` if the check refuses
+  it now. 404 for a version not kept.
+- `POST /graph/history/<id>/rollback`: that version written as the saved graph (as the check holds
+  it, or as it is if the check refuses it now), kept as a new version that `restores` it, so a
+  rollback can be undone; the file it replaces is kept first if no version holds it.
+  `{ "rolledBack": true, "version", "restores", "restart" }`, and its `problems` if the check
+  refuses it. 404 for a version not kept, 409 when it is the saved graph already. Nothing restarts:
+  the UI then asks `POST /restart`.
+- `POST /graph/rollback`: the same, to the version before the current one (the second newest, or the
+  newest if the file was written by hand since), as the route of earlier releases did; a second goes
+  forward again. 409 when there is none.
 - `POST /restart`: applies it. The answer goes, then the instance ends as at `SIGTERM` (§3): the
   core stops, each plugin's state kept, and the process exits 0, so that Docker's
   `restart: unless-stopped` starts it again on the saved graph.
@@ -767,6 +814,7 @@ accounts counted by state); `GET /accounts`; `GET /drift`;
 refused); `GET /plugins/<id>/state/<name>`; `POST /plugins/<id>/actions/<name>`, the body the
 action's input (400 for an input refused by its schema, 409 for the plugin's refusal);
 `GET /instances` (§2.2); `GET /graph/file`, `POST /graph/check`, `PUT /graph/file`,
+`GET /graph/history`, `GET /graph/history/<id>`, `POST /graph/history/<id>/rollback`,
 `POST /graph/rollback` and `POST /restart` (§2.3); `GET /legacy`, `GET /legacy/events`,
 `POST /instances/import` and `POST /legacy/events/import` (§8); `GET /available`, `GET /modules`,
 `POST /modules` and `POST /modules/<id>/rollback` (§7); `GET /secrets`, the names of the Docker
@@ -787,13 +835,33 @@ every session; `POST /api/logout` ends its own; expired ones are pruned. `GET /a
 
 ### 4.12 The graph printed and drawn
 
-`packages/core/src/graph-view.ts`: `graphText` prints the nodes and the edges
-(`irc.chat → dice.channel (chat-in): reads #lobby`); `graphMermaid` draws a Mermaid flowchart, left
-to right, a box per node (and a second, `<id> · out`, for a connector that chat-out edges reach, so
-that the sends flow left to right too) and an arrow per edge, coloured by its port type;
-`writeGraphFile` writes a graph to `<dir>/graph.json` atomically, the one before kept as
-`graph.previous.json` when it changed. `packages/core/tools/graph.ts [file] [--mermaid]` prints a
-graph file, a version 1 file as version 2.
+`packages/core/src/graph-view.ts`: `graphText` prints the graph so that a changed value is a changed
+line (bot-os.md D61): each node a line, `<id> (<plugin>)`, then its instance when not its id, its
+mode and its account; then a line per key of its config and of its settings, the value as compact
+JSON with its keys sorted; then each edge a line, with its type and what it carries; nodes sorted by
+id, edges by their text, so the same graph prints the same:
+
+```text
+nodes:
+  quest (quest-parser)
+  quest-turns (turn-actor), instance quest-turns-old, mode dry-run
+    config.chat: "@QuestBot"
+  tg (telegram-user), account telegram:alice
+    config.chats: ["@QuestBot"]
+edges:
+  quest-turns.chat → tg.chat (chat-out): sends @QuestBot; commands /play
+  quest.interface → quest-turns.parser (interface)
+  tg.chat → quest.chat (chat-in): reads @QuestBot
+```
+
+`lineDiff` gives two printouts' line diff, their longest common subsequence of lines kept and the
+rest removed (`-`) or added (`+`), with no dependency (two texts of over 4 million line pairs give
+every line removed, then every one added). `graphMermaid` draws a Mermaid flowchart, left to right,
+a box per node (and a second, `<id> · out`, for a connector that chat-out edges reach, so that the
+sends flow left to right too) and an arrow per edge, coloured by its port type; `writeGraphFile`
+writes a graph to `<dir>/graph.json` atomically (the versions before it are the history's, §2.3).
+`packages/core/tools/graph.ts [file] [--mermaid]` prints a graph file, a version 1 file as
+version 2.
 
 **The graph editor** (bot-os.md D47, D55) is the web UI's home page (`packages/web/src/ui/graph/`),
 drawn with React Flow. It edits a draft of the saved graph (`GET /graph/file`), each node drawn from
@@ -823,7 +891,13 @@ the review says, nor if the saved graph is what runs already), and Revert, the d
 saved graph; a banner offers Apply (`POST /restart`) when the saved file differs from what runs
 (`differs`). After a restart the page waits on `GET /session` for the new process (another `boot`
 id), and comes back to the page, still logged in. One or several running nodes selected can be
-killed, each by `POST /plugins/<id>/kill`.
+killed, each by `POST /plugins/<id>/kill`. Its **Text** toggle shows the draft printed (the check's
+`text`), read-only, with a copy button. The rollback is not the editor's: it is the admin page's
+**Graph history** (`#/graph-history`), which lists the versions newest first (time, summary, start,
+the last that ran marked "last good"), shows one opened in two tabs, **Changes** (the review's diff
+from the saved graph to it) and **As text** (the line diff), and rolls back to it after a
+confirmation repeating the diff, then restarts as Apply does; beside it, **Graph as text**, the
+saved graph printed.
 
 ### 4.13 The standard services
 

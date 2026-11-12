@@ -24,6 +24,12 @@ settings' JSON Schemas), with the names of the secrets provided, never their val
 - `src/graph.ts`, `src/ports.ts`: the graph, its port types (`chat-in`, `chat-out`, `events`,
   `interface`) and its check; a graph file of version 1 is converted to version 2 as it loads
   (`upgradeGraph`, docs/bot-os.md D60).
+- `src/graph-file.ts`, `src/graph-history.ts`: the graph file of the data volume, its check, diff
+  and rollback for the control API, and its history: every graph written kept as a version for 7
+  days (never fewer than the 5 latest), with what changed and whether the instance started on it
+  (docs/bot-os-api.md §2.3, docs/bot-os.md D61).
+- `src/graph-view.ts`: the graph printed (`graphText`, a value per line, and `lineDiff`, two
+  printouts' line diff) and drawn (`graphMermaid`).
 - `tools/graph.ts`: prints a graph file as text or as a Mermaid flowchart.
 
 The full description of the API is [docs/bot-os-api.md](../../docs/bot-os-api.md).

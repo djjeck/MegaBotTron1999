@@ -50,14 +50,15 @@ folder** (or drop the folder on the page), pick the module's own folder (for exa
 click **Apply (restart)** to load it. The Modules page also installs a `.tar.gz` and rolls a module
 back to its previous version; the Import page brings in an older data directory's event log
 ([docs/bot-os.md](docs/bot-os.md) D55); the Admin page shows the instance (with its off and kill
-switches), its accounts and their connections, and its plugins with their modes (D59). In a real
-deployment, use Docker or Compose secrets, and put the UI behind a reverse proxy with HTTPS rather
-than publishing the port.
+switches), the graph's history (each version applied in the last 7 days, what changed, whether the
+instance started on it, and a rollback to it) and the graph as text, its accounts and their
+connections, and its plugins with their modes (D59, D61). In a real deployment, use Docker or
+Compose secrets, and put the UI behind a reverse proxy with HTTPS rather than publishing the port.
 
-- **`/data`** is the instance's state: the graph (`graph.json`, and `graph.previous.json`), each
-  plugin instance's state (`instances/<id>/`), the core's own (`core/`), the event log
-  (`events-<day>.jsonl`) and the modules installed (`modules/`). Back it up as one, with the
-  container stopped.
+- **`/data`** is the instance's state: the graph (`graph.json`, and its versions in
+  `graph-history/`), each plugin instance's state (`instances/<id>/`), the core's own (`core/`), the
+  event log (`events-<day>.jsonl`) and the modules installed (`modules/`). Back it up as one, with
+  the container stopped.
 - **Restart policy:** run it with `--restart unless-stopped` (or Compose's
   `restart: unless-stopped`): the owner applies a saved graph or an installed module by
   `POST /restart`, which stops the instance, its state kept, and exits for Docker to start it again.

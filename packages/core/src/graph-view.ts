@@ -1,9 +1,8 @@
 /**
- * The graph printed (docs/bot-os-api.md §4.12): the instance's wiring as text and as a Mermaid
- * flowchart, the first, read-only form of the graph's view; what the web UI's graph view draws of
+ * The graph printed (docs/bot-os-api.md §4.12): the instance's wiring as text (and two printouts'
+ * line diff) and as a Mermaid flowchart, the first, read-only form of the graph's view; what the web UI's graph view draws of
  * each node (`describeNodes`): its ports and the JSON Schemas of its config, settings and
- * interface, made from the zod schemas its manifest declares (P11); and the graph file the instance
- * writes at each start, for the view, the tools and the editor.
+ * interface, made from the zod schemas its manifest declares (P11); and the graph file's write.
  *
  * Nothing in here knows of any game.
  */
@@ -22,8 +21,23 @@ import {
 
 /** The graph file, in the data volume. */
 export const GRAPH_FILE = 'graph.json';
-/** The graph before the last change, kept beside it. */
+/**
+ * The graph before the last change, as releases before the history kept it beside the file: read
+ * once, at the first start with a history, into it (`graph-history.ts`), then removed.
+ */
 export const PREVIOUS_GRAPH_FILE = 'graph.previous.json';
+
+/** JSON with its object keys sorted, on one line: two values that mean the same print the same. */
+export const stableJson = (v: unknown): string =>
+  JSON.stringify(v, (_, x: unknown) =>
+    typeof x === 'object' && x !== null && !Array.isArray(x)
+      ? Object.fromEntries(
+          Object.keys(x)
+            .sort()
+            .map((k) => [k, (x as Record<string, unknown>)[k]])
+        )
+      : x
+  ) ?? 'null';
 
 const carried = (e: GraphEdge): string =>
   [
@@ -34,23 +48,83 @@ const carried = (e: GraphEdge): string =>
     .filter((x) => x !== '')
     .join('; ');
 
-/** The graph as text: its nodes (with their plugin and configuration's keys), then its edges. */
+const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * The graph as text, for reading and for a line diff (`lineDiff`): so that a changed value is a
+ * changed line, each node is a line (its id, its plugin, its instance when not its id, its mode and
+ * its account), then a line per key of its config and of its settings, the value as compact JSON
+ * with its keys sorted; then each edge is a line, with what it carries. Nodes are sorted by id and
+ * edges by their ends, so that the same graph always prints the same.
+ */
 export function graphText(graph: Graph): string {
   const lines = ['nodes:'];
-  for (const n of graph.nodes) {
-    const keys = Object.keys(n.config ?? {});
-    lines.push(
-      `  ${n.id}${n.plugin === n.id ? '' : ` (${n.plugin})`}` +
-        (n.account === undefined ? '' : ` ${n.account}`) +
-        (keys.length === 0 ? '' : `: ${keys.join(', ')}`)
-    );
+  for (const n of [...graph.nodes].sort((a, b) => byText(a.id, b.id))) {
+    const about = [
+      n.instance === undefined || n.instance === n.id ? '' : `instance ${n.instance}`,
+      n.mode === undefined ? '' : `mode ${n.mode}`,
+      n.account === undefined ? '' : `account ${n.account}`,
+    ].filter((x) => x !== '');
+    lines.push(`  ${n.id} (${n.plugin})${about.map((x) => `, ${x}`).join('')}`);
+    for (const [part, values] of [
+      ['config', n.config],
+      ['settings', n.settings],
+    ] as const)
+      for (const key of Object.keys(values ?? {}).sort(byText))
+        lines.push(`    ${part}.${key}: ${stableJson(values?.[key])}`);
   }
   lines.push('edges:');
-  for (const e of graph.edges) {
+  const edges = graph.edges.map((e) => {
     const what = carried(e);
-    lines.push(`  ${e.from} → ${e.to} (${e.type ?? '?'})${what === '' ? '' : `: ${what}`}`);
-  }
+    return `  ${e.from} → ${e.to} (${e.type ?? '?'})${what === '' ? '' : `: ${what}`}`;
+  });
+  lines.push(...edges.sort(byText));
   return lines.join('\n');
+}
+
+/** One line of a line diff: kept (` `), only in the first text (`-`), or only in the second (`+`). */
+export interface DiffLine {
+  op: ' ' | '-' | '+';
+  text: string;
+}
+
+/** Past this many cells (lines × lines), `lineDiff` gives up on the shortest diff. */
+const DIFF_CELLS = 4_000_000;
+
+/**
+ * The lines of `before` and `after` (two printouts, `graphText`) as a diff: their longest common
+ * subsequence kept, and what each has besides, a line removed before one added at the same place.
+ * Two texts too long for it (`DIFF_CELLS`) give every line removed, then every one added.
+ */
+export function lineDiff(before: string, after: string): DiffLine[] {
+  const a = before === '' ? [] : before.split('\n');
+  const b = after === '' ? [] : after.split('\n');
+  if (a.length * b.length > DIFF_CELLS)
+    return [
+      ...a.map((text) => ({ op: '-' as const, text })),
+      ...b.map((text) => ({ op: '+' as const, text })),
+    ];
+  // The length of the longest common subsequence of each pair of suffixes.
+  const w = b.length + 1;
+  const lcs = new Uint32Array((a.length + 1) * w);
+  const at = (i: number, j: number): number => lcs[i * w + j] as number;
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--)
+      lcs[i * w + j] = a[i] === b[j] ? at(i + 1, j + 1) + 1 : Math.max(at(i + 1, j), at(i, j + 1));
+  const out: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      out.push({ op: ' ', text: a[i] as string });
+      i++;
+      j++;
+    } else if (at(i + 1, j) >= at(i, j + 1)) out.push({ op: '-', text: a[i++] as string });
+    else out.push({ op: '+', text: b[j++] as string });
+  }
+  while (i < a.length) out.push({ op: '-', text: a[i++] as string });
+  while (j < b.length) out.push({ op: '+', text: b[j++] as string });
+  return out;
 }
 
 /** A Mermaid id: the node's, with dashes made underscores. */
@@ -92,8 +166,8 @@ export function graphMermaid(graph: Graph): string {
 }
 
 /**
- * Writes the graph to `<dir>/graph.json` (atomically: a temporary file, then a rename), keeping
- * the one before as `graph.previous.json` when it changed. True if it changed.
+ * Writes the graph to `<dir>/graph.json` (atomically: a temporary file, then a rename). True if it
+ * changed. The versions before it are the history's (`GraphFile`, `graph-history.ts`).
  */
 export function writeGraphFile(dir: string, graph: Graph): boolean {
   const file = path.join(dir, GRAPH_FILE);
@@ -105,7 +179,6 @@ export function writeGraphFile(dir: string, graph: Graph): boolean {
     before = undefined;
   }
   if (before === text) return false;
-  if (before !== undefined) fs.writeFileSync(path.join(dir, PREVIOUS_GRAPH_FILE), before);
   const tmp = `${file}.tmp`;
   fs.writeFileSync(tmp, text);
   fs.renameSync(tmp, file);

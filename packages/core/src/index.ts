@@ -97,6 +97,7 @@ export {
   withInstances,
 } from './graph.ts';
 export {
+  diffSummary,
   type GraphCheck,
   type GraphChecker,
   type GraphDiff,
@@ -108,22 +109,36 @@ export {
   type GraphFileRead,
   type GraphProblem,
   locateProblem,
+  printable,
   sameGraph,
 } from './graph-file.ts';
 export {
+  GRAPH_HISTORY_DIR,
+  GraphHistory,
+  type GraphStart,
+  type GraphVersion,
+  type GraphVersionMeta,
+  type GraphVersionSource,
+  HISTORY_DAYS,
+  HISTORY_KEEP,
+} from './graph-history.ts';
+export {
   describeNodes,
   describePlugin,
+  type DiffLine,
   GRAPH_FILE,
   graphMermaid,
   graphText,
   type JsonSchema,
   jsonSchema,
+  lineDiff,
   type MemberView,
   type NodeView,
   type PluginView,
   type PortView,
   PREVIOUS_GRAPH_FILE,
   readGraphFile,
+  stableJson,
   writeGraphFile,
 } from './graph-view.ts';
 export {

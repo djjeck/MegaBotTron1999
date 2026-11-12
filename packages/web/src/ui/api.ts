@@ -6,12 +6,15 @@
 import type {
   AccountControl,
   AvailablePlugin,
+  DiffLine,
   DriftCounts,
   Graph,
   GraphDiff,
   GraphEdge,
   GraphNode,
   GraphProblem,
+  GraphStart,
+  GraphVersionMeta,
   InstanceInfo,
   JsonSchema,
   LegacyEventTypes,
@@ -31,12 +34,15 @@ import type {
 export type {
   AccountControl,
   AvailablePlugin,
+  DiffLine,
   DriftCounts,
   Graph,
   GraphDiff,
   GraphEdge,
   GraphNode,
   GraphProblem,
+  GraphStart,
+  GraphVersionMeta,
   InstanceInfo,
   JsonSchema,
   LegacyEventTypes,
@@ -85,13 +91,44 @@ export interface GraphFileView {
   problems?: GraphProblem[];
   /** Whether a restart would change what runs. */
   differs: boolean;
+  /** The graph printed (`graphText`), when the file reads. */
+  text?: string;
 }
 
-/** A graph checked, as `POST /graph/check` gives it: its problems, and its diff from the saved file. */
+/**
+ * A graph checked, as `POST /graph/check` gives it: its problems, its diff from the saved file, and
+ * the graph printed (`graphText`).
+ */
 export interface GraphCheckView {
   ok: boolean;
   problems: GraphProblem[];
   diff: GraphDiff;
+  text?: string;
+}
+
+/** The graph's history, as `GET /graph/history` gives it (docs/bot-os-api.md §2.3). */
+export interface GraphHistoryView {
+  /** Newest first. */
+  versions: GraphVersionMeta[];
+  /** The version that is the saved graph, if one is. */
+  current?: string;
+  /** The newest version the instance last started cleanly on. */
+  lastGood?: string;
+  keep: { days: number; latest: number };
+}
+
+/**
+ * One version, as `GET /graph/history/<id>` gives it: its graph and text, and how the saved graph
+ * would change to it (`diff`, `lines`); `problems`, if the check refuses it now.
+ */
+export interface GraphVersionView extends GraphVersionMeta {
+  graph: unknown;
+  current: boolean;
+  diff: GraphDiff;
+  text: string;
+  currentText: string;
+  lines: DiffLine[];
+  problems?: GraphProblem[];
 }
 
 /** A refusal of the API: its status and why, and the problems it names, if any (a graph refused). */

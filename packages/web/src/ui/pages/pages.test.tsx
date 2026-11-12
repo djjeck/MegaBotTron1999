@@ -26,19 +26,25 @@ const HEALTH = {
 };
 
 describe('AdminPage', () => {
-  it('shows the instance, the accounts and the plugins, one section each, in order', async () => {
+  it('shows the instance, the graph history and text, the accounts and the plugins, in order', async () => {
     fakeApi({
       'GET /instance': [200, HEALTH],
       'GET /accounts': [200, []],
       'GET /status': [200, { off: false, plugins: [] }],
+      'GET /graph/history': [200, { versions: [], keep: { days: 7, latest: 5 } }],
+      'GET /graph/file': [200, { exists: false, differs: false }],
     });
     const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
     render(<AdminPage loggedOut={loggedOut} />);
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       'Instance',
+      'Graph history',
+      'Graph as text',
       'Accounts',
       'Plugins',
     ]);
+    expect(await screen.findByText('No graph has been applied yet.')).toBeDefined();
+    expect(await screen.findByText('No graph is saved yet.')).toBeDefined();
     expect(
       await within(screen.getByRole('region', { name: 'Accounts' })).findByText(
         'No connector runs.'

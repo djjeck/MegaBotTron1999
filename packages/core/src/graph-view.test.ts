@@ -10,6 +10,7 @@ import {
   GRAPH_FILE,
   graphMermaid,
   graphText,
+  lineDiff,
   PREVIOUS_GRAPH_FILE,
   readGraphFile,
   writeGraphFile,
@@ -21,7 +22,15 @@ const graph: Graph = {
   nodes: [
     { id: 'irc', plugin: 'irc', config: { host: 'znc', nick: 'me' } },
     { id: 'game', plugin: 'game' },
-    { id: 'actor-b', plugin: 'actor', account: 'x:y' },
+    {
+      id: 'actor-b',
+      plugin: 'actor',
+      account: 'x:y',
+      instance: 'actor-1',
+      mode: 'dry-run',
+      config: { z: { b: 1, a: [2] }, a: 'x' },
+      settings: { verbose: true },
+    },
   ],
   edges: [
     { from: 'irc.chat', to: 'game.channel', type: 'chat-in', reads: ['#a'] },
@@ -39,21 +48,60 @@ const graph: Graph = {
 };
 
 describe('the graph printed', () => {
-  it('as text: the nodes, then the edges with what they carry', () => {
+  it('as text: each node and each value a line, then the edges, in a stable order', () => {
     expect(graphText(graph)).toBe(
       [
         'nodes:',
-        '  irc: host, nick',
-        '  game',
-        '  actor-b (actor) x:y',
+        '  actor-b (actor), instance actor-1, mode dry-run, account x:y',
+        '    config.a: "x"',
+        '    config.z: {"a":[2],"b":1}',
+        '    settings.verbose: true',
+        '  game (game)',
+        '  irc (irc)',
+        '    config.host: "znc"',
+        '    config.nick: "me"',
         'edges:',
-        '  irc.chat → game.channel (chat-in): reads #a',
-        '  game.interface → actor-b.game (interface)',
-        '  irc.chat → actor-b.channel (chat-in)',
         '  actor-b.channel → irc.chat (chat-out): sends #a; commands !go "q"',
         '  game.events → actor-b.notices (?)',
+        '  game.interface → actor-b.game (interface)',
+        '  irc.chat → actor-b.channel (chat-in)',
+        '  irc.chat → game.channel (chat-in): reads #a',
       ].join('\n')
     );
+    // Reordered, the same graph prints the same.
+    const reordered = {
+      ...graph,
+      nodes: [...graph.nodes].reverse(),
+      edges: [...graph.edges].reverse(),
+    };
+    expect(graphText(reordered)).toBe(graphText(graph));
+    expect(
+      graphText({ version: 2, nodes: [{ id: 'a', plugin: 'a', instance: 'a' }], edges: [] })
+    ).toBe('nodes:\n  a (a)\nedges:');
+  });
+
+  it('two printouts line by line: what is kept, removed and added', () => {
+    expect(lineDiff('a\nb\nc\nd', 'a\nc\nx\nd\ne')).toEqual([
+      { op: ' ', text: 'a' },
+      { op: '-', text: 'b' },
+      { op: ' ', text: 'c' },
+      { op: '+', text: 'x' },
+      { op: ' ', text: 'd' },
+      { op: '+', text: 'e' },
+    ]);
+    expect(lineDiff('a\nb', 'b\na')).toEqual([
+      { op: '-', text: 'a' },
+      { op: ' ', text: 'b' },
+      { op: '+', text: 'a' },
+    ]);
+    expect(lineDiff('', 'a')).toEqual([{ op: '+', text: 'a' }]);
+    expect(lineDiff('a', '')).toEqual([{ op: '-', text: 'a' }]);
+    // Too long for the shortest diff: all removed, then all added.
+    const long = Array.from({ length: 2001 }, (_, i) => `${i}`).join('\n');
+    const diff = lineDiff(long, long);
+    expect(diff).toHaveLength(4002);
+    expect(diff[0]).toEqual({ op: '-', text: '0' });
+    expect(diff[2001]).toEqual({ op: '+', text: '0' });
   });
 
   it('as a Mermaid flowchart, each edge coloured by its port type', () => {
@@ -86,7 +134,8 @@ describe('the graph printed', () => {
     const next = { ...graph, edges: [] };
     expect(writeGraphFile(dir, next)).toBe(true);
     expect(readGraphFile(path.join(dir, GRAPH_FILE))).toEqual(next);
-    expect(readGraphFile(path.join(dir, PREVIOUS_GRAPH_FILE))).toEqual(graph);
+    // The versions before are the history's: no previous file.
+    expect(fs.existsSync(path.join(dir, PREVIOUS_GRAPH_FILE))).toBe(false);
     fs.rmSync(dir, { recursive: true });
   });
 });

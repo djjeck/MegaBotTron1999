@@ -1,7 +1,7 @@
 /**
  * A fake of the core's control API for the graph editor's tests (`test/fake-api.ts` underneath):
- * the saved graph file and the one before it, a check that refuses what `refuse` says, a save, a
- * rollback, the instances kept, the secrets' names, an older data directory, and a restart, after
+ * the saved graph file, a check that refuses what `refuse` says (and prints the draft: its node ids,
+ * a line each), a save, the instances kept, the secrets' names, an older data directory, and a restart, after
  * which a new process answers, the session kept. Synthetic: made-up plugins (`test/graph-view.ts`).
  */
 import {
@@ -17,9 +17,8 @@ import { AVAILABLE, DRIFT, status, VIEW } from './graph-view.ts';
 
 export interface FakeCore {
   api: FakeApi;
-  /** The saved file's graph, and the one before it. */
+  /** The saved file's graph. */
   file: Graph | undefined;
-  previous: Graph | undefined;
   /** What the running instance runs, for `differs`. */
   running: Graph;
   restarted: boolean;
@@ -49,7 +48,6 @@ export function fakeCore(
   const core: FakeCore = {
     api: fakeApi({}),
     file: 'file' in o ? o.file : VIEW.graph,
-    previous: undefined,
     running: VIEW.graph,
     restarted: false,
     checked: [],
@@ -80,6 +78,7 @@ export function fakeCore(
         {
           ok: problems.length === 0,
           problems,
+          text: `nodes:\n${g.nodes.map((n) => `  ${n.id} (${n.plugin})\n`).join('')}edges:`,
           diff: {
             nodes: {
               added: b.filter((id) => !a.includes(id)),
@@ -104,15 +103,8 @@ export function fakeCore(
       const g = body as Graph;
       const problems = refuse(g);
       if (problems.length > 0) return [400, { error: 'the graph is refused', problems }];
-      core.previous = core.file;
       core.file = g;
       return [200, { saved: true, restart: !same(g, core.running) }];
-    },
-    'POST /graph/rollback': () => {
-      if (core.previous === undefined)
-        return [409, { error: 'there is no graph.previous.json to roll back to' }];
-      [core.file, core.previous] = [core.previous, core.file];
-      return [200, { rolledBack: true }];
     },
     'POST /instances/import': (body) => {
       const b = body as { from: string; instance: string; plugin: string };

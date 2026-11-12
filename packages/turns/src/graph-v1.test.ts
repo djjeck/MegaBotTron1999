@@ -83,6 +83,7 @@ describe('a version 1 graph of the shell’s plugins', () => {
       expect(graphFileControls(file, core).file()).toEqual({
         exists: true,
         graph: { version: 2, nodes: V1.nodes, edges },
+        text: expect.stringContaining(`  ${QUEST}.interface → quest-turns.parser (interface)`),
         differs: false,
       });
       await core.stop();
