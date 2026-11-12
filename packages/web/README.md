@@ -17,14 +17,18 @@ that guards them.
   chat edge's chats and commands are set. A node's config, settings, mode and account are forms made
   from its schemas (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a secret a choice
   of the secrets' names. Every change is checked by the core, and each refusal shown on its edge,
-  port, node or field (`draft.ts`, the draft's pure changes). **Review changes** shows the diff,
-  **Save** writes the file, **Apply (restart)** restarts the instance and waits for it, then comes
-  back to the page, still logged in (`src/ui/Restart.tsx`), **Roll back** puts the previous file
-  back; a saved graph refused at the last start is shown first. Select one node or several (Shift,
-  Ctrl or Cmd with a click; Shift and drag for a box) and **Kill selected** kills each: its plugin's
-  own safety stop, then paused until reinstated; a killed node is drawn disabled, with a
-  **Reinstate** button, and its forms stay editable. Nodes start in columns (`layout.ts`) and can be
-  moved. **Modules** (`#/modules`) lists the modules installed, installs one from its folder, chosen
+  port, node or field (`draft.ts`, the draft's pure changes). **Review changes** opens a dialog with
+  the diff and two actions (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`) and
+  restarts the instance on it, waiting for it and coming back to the page, still logged in
+  (`src/ui/Restart.tsx`), or says why the core refused it and restarts nothing; **Revert** drops the
+  draft, back to the graph saved, once confirmed. Its × (or Escape) only closes it, the draft kept.
+  When the saved graph is not what runs (changed through the API, rolled back, or a restart that did
+  not happen), a banner offers **Apply (restart)**. **Roll back** puts the previous file back; a
+  saved graph refused at the last start is shown first. Select one node or several (Shift, Ctrl or
+  Cmd with a click; Shift and drag for a box) and **Kill selected** kills each: its plugin's own
+  safety stop, then paused until reinstated; a killed node is drawn disabled, with a **Reinstate**
+  button, and its forms stay editable. Nodes start in columns (`layout.ts`) and can be moved.
+  **Modules** (`#/modules`) lists the modules installed, installs one from its folder, chosen
   (**Choose folder**) or dropped on the page, after showing the id, version and description its
   `module.json` gives (`src/ui/module-folder.ts`), or from a `.tar.gz`, and rolls one back;
   **Import** (`#/import`) shows an older data directory and imports its event log with a table of

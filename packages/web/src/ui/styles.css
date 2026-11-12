@@ -625,3 +625,30 @@ button.primary:disabled {
 .picked {
   margin-top: 0.75rem;
 }
+
+/* The review of the draft's changes (Review.tsx), a dialog over the editor. */
+.overlay .card.review {
+  max-width: 36rem;
+  max-height: 85vh;
+  overflow: auto;
+}
+
+.card.review h2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+button.close {
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}

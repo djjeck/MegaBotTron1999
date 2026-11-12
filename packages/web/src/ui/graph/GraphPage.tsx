@@ -13,8 +13,10 @@
  * - **Configure it**: its config, settings, mode and account in forms made from its schemas; a
  *   config key that names a secret is a choice of the secrets' names (`GET /secrets`).
  * - **Remove it**: its instance is kept, and deleted after 7 days if no node uses it.
- * - **Review, save and apply**: the diff from the saved file, `PUT /graph/file`, then a restart,
- *   which the UI waits through; or roll the file back (`POST /graph/rollback`).
+ * - **Review and apply**: the diff from the saved file, then Apply (`PUT /graph/file`, then a
+ *   restart, which the UI waits through) or Revert (the draft back to the saved graph). A saved
+ *   graph that differs from what runs (changed through the API, or its restart failed) has its own
+ *   banner with Apply. Roll back puts the previous file back (`POST /graph/rollback`).
  *
  * A saved graph refused at the last start (`GET /status`, `graph.refused`) runs no node: it is
  * shown first, for the owner to fix. One or several running nodes selected can be killed (D44).
@@ -35,12 +37,13 @@ import type {
   Graph,
   GraphCheckView,
   GraphFileView,
+  GraphProblem,
   GraphViewData,
   InstanceInfo,
   PortTypeInfo,
   Status,
 } from '#src/ui/api.ts';
-import { api, seg } from '#src/ui/api.ts';
+import { api, ApiError, seg } from '#src/ui/api.ts';
 import type { PageProps } from '#src/ui/App.tsx';
 import { useLoad } from '#src/ui/hooks.ts';
 import { Restart } from '#src/ui/Restart.tsx';
@@ -105,8 +108,9 @@ export function GraphPage({
   const [draft, setDraft] = useState<Graph>();
   const [check, setCheck] = useState<GraphCheckView>();
   const [panel, setPanel] = useState<'palette' | 'review' | AvailablePlugin>();
-  const [lastSave, setLastSave] = useState<{ restart: boolean }>();
   const [busy, setBusy] = useState(false);
+  /** Why the last Apply was refused. */
+  const [refusedApply, setRefusedApply] = useState<{ error: string; problems: GraphProblem[] }>();
   const [restarting, setRestarting] = useState(false);
   const [nodes, setNodes, onNodesChange] = useNodesState<PluginNodeType>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<PortEdgeType>([]);
@@ -281,7 +285,7 @@ export function GraphPage({
   );
 
   const change = (next: (g: Graph) => Graph): void => {
-    setLastSave(undefined);
+    setRefusedApply(undefined);
     setDraft((d) => next(d ?? EMPTY_GRAPH));
   };
 
@@ -291,28 +295,48 @@ export function GraphPage({
     change((g) => addNode(g, n));
     setPanel(undefined);
     setSaid(
-      `${n.id} added on the instance ${n.instance}: wire it, set it up, then review and save`
+      `${n.id} added on the instance ${n.instance}: wire it, set it up, then review and apply`
     );
     instances.reload();
   };
 
-  const save = (): void => {
+  /** Apply: the draft saved, then the instance restarted on it, unless it runs already. */
+  const apply = (): void => {
     if (draft === undefined) return;
     setBusy(true);
+    setRefusedApply(undefined);
     api<{ saved: boolean; restart: boolean }>('/graph/file', draft, 'PUT').then(
       (r) => {
         setBusy(false);
-        setLastSave({ restart: r.restart });
         savedRef.current = draft;
         setSaved(draft);
-        file.reload();
+        setPanel(undefined);
+        if (r.restart) setRestarting(true);
+        else {
+          setSaid('Saved: it is what runs already, so no restart is needed.');
+          file.reload();
+        }
         instances.reload();
       },
       (e: unknown) => {
         setBusy(false);
-        setSaid(`not saved: ${message(e)}`);
+        setRefusedApply({
+          error: message(e),
+          problems: e instanceof ApiError ? e.problems : [],
+        });
       }
     );
+  };
+
+  /** Revert: the draft back to the saved graph, once confirmed if it has changes. */
+  const revert = (dirty: boolean): void => {
+    if (dirty && !window.confirm('Revert: drop every change made here, back to the graph saved?'))
+      return;
+    if (saved !== undefined) setDraft(saved);
+    setRefusedApply(undefined);
+    setPanel(undefined);
+    setSelected({ nodes: [], edges: [] });
+    if (dirty) setSaid('Reverted to the graph saved.');
   };
 
   const rollback = (): void => {
@@ -325,17 +349,18 @@ export function GraphPage({
     api<{ problems?: unknown[] }>('/graph/rollback', {}).then(
       (r) => {
         setSaid(
-          `Rolled back to the previous saved graph${r.problems === undefined ? '' : ', which the check refuses'}: apply it with a restart.`
+          `Rolled back to the previous saved graph${r.problems === undefined ? '' : ', which the check refuses'}: apply it to run it.`
         );
         savedRef.current = undefined;
         setDraft(undefined);
         setSaved(undefined);
-        setLastSave({ restart: true });
         file.reload();
       },
       (e: unknown) => setSaid(`rollback: ${message(e)}`)
     );
   };
+
+  const closeReview = useCallback(() => setPanel(undefined), []);
 
   if (draft === undefined) return <p className="muted">{file.error ?? 'Loading…'}</p>;
   const dirty = saved === undefined || !sameGraph(draft, saved);
@@ -367,11 +392,11 @@ export function GraphPage({
       <Review
         check={check}
         dirty={dirty}
-        saved={lastSave}
         busy={busy}
-        save={save}
-        apply={() => setRestarting(true)}
-        close={() => setPanel(undefined)}
+        refused={refusedApply}
+        apply={apply}
+        revert={() => revert(dirty)}
+        close={closeReview}
       />
     );
   else if (panel !== undefined)
@@ -436,8 +461,8 @@ export function GraphPage({
     <div className="graph-page">
       {refused.length === 0 ? null : (
         <div role="alert" className="banner bad">
-          <strong>The saved graph was refused at the last start: no node runs.</strong> Fix it here
-          and save, or roll back, then apply it with a restart.
+          <strong>The saved graph was refused at the last start: no node runs.</strong> Fix it here,
+          then review and apply it; or roll back to the previous one.
           <ul>
             {refused.map((p) => (
               <li key={p.text}>{p.text}</li>
@@ -447,7 +472,16 @@ export function GraphPage({
       )}
       {fileGraph?.error === undefined ? null : (
         <div role="alert" className="banner bad">
-          {fileGraph.error}. Saving a graph here replaces it.
+          {fileGraph.error}. Applying a graph here replaces it.
+        </div>
+      )}
+      {dirty || fileGraph?.differs !== true || fileGraph.problems !== undefined ? null : (
+        <div role="region" aria-label="not applied" className="banner warn">
+          <strong>The saved graph is not what runs.</strong> It was changed outside this page (the
+          API, a rollback), or the restart of the last Apply did not happen.{' '}
+          <button type="button" className="primary" onClick={() => setRestarting(true)}>
+            Apply (restart)
+          </button>
         </div>
       )}
       <div className="toolbar">
@@ -456,25 +490,9 @@ export function GraphPage({
         </button>
         {dirty ? (
           <>
-            <strong className="warn">Unsaved changes</strong>
-            <button type="button" onClick={() => setPanel('review')}>
+            <strong className="warn">Changes not applied</strong>
+            <button type="button" className="primary" onClick={() => setPanel('review')}>
               Review changes
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (saved !== undefined) setDraft(saved);
-                setLastSave(undefined);
-              }}
-            >
-              Discard
-            </button>
-          </>
-        ) : fileGraph?.differs === true || lastSave?.restart === true ? (
-          <>
-            <strong className="warn">Saved, not running yet</strong>
-            <button type="button" onClick={() => setRestarting(true)}>
-              Apply (restart)
             </button>
           </>
         ) : null}

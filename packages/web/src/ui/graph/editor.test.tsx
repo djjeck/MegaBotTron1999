@@ -22,7 +22,7 @@ const slow = { timeout: 5000 };
 const EMPTY: Graph = { version: 1, nodes: [], edges: [] };
 
 describe('the graph editor', () => {
-  it('builds a graph from nothing: a connector added, saved, and applied by a restart', async () => {
+  it('builds a graph from nothing: a connector added, reviewed, and applied (saved and restarted)', async () => {
     const core = fakeCore({ file: undefined, status: { off: false, plugins: [] } });
     core.running = EMPTY;
     const loggedOut = vi.fn();
@@ -49,27 +49,36 @@ describe('the graph editor', () => {
       'irc-main added on the instance irc-main'
     );
     expect(screen.queryByRole('region', { name: 'first step' })).toBeNull();
-    // Reviewed: the diff the core gives, then saved and applied.
-    expect(screen.getByText('Unsaved changes')).toBeDefined();
+    // Reviewed: the diff the core gives, then applied: saved, and restarted at once.
+    expect(screen.getByText('Changes not applied')).toBeDefined();
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }));
-    const review = await screen.findByLabelText('review changes');
+    const review = await screen.findByRole('dialog', { name: 'review changes' });
     await waitFor(() => expect(within(review).getByText('irc-main')).toBeDefined());
     expect(within(review).getByRole('heading', { name: 'Nodes added' })).toBeDefined();
-    fireEvent.click(within(review).getByRole('button', { name: 'Save' }));
+    // Two actions only, and the close button; no separate Save.
     expect(
-      await within(review).findByText(/Saved: it runs once the instance restarts/u)
-    ).toBeDefined();
+      within(review)
+        .getAllByRole('button')
+        .map((b) => b.textContent)
+    ).toEqual(['×', 'Apply', 'Revert']);
+    await waitFor(() =>
+      expect(
+        (within(review).getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled
+      ).toBe(false)
+    );
+    fireEvent.click(within(review).getByRole('button', { name: 'Apply' }));
+    expect(await screen.findByRole('dialog', { name: 'restarting' })).toBeDefined();
+    expect(screen.queryByRole('dialog', { name: 'review changes' })).toBeNull();
     expect(core.file).toEqual({
       version: 1,
       nodes: [{ id: 'irc-main', plugin: 'chat' }],
       edges: [],
     });
-    expect(core.api.calls).toContain(
+    const put = core.api.calls.indexOf(
       'PUT /graph/file {"version":1,"nodes":[{"id":"irc-main","plugin":"chat"}],"edges":[]}'
     );
-    expect(screen.queryByText('Unsaved changes')).toBeNull();
-    fireEvent.click(within(review).getByRole('button', { name: 'Apply (restart)' }));
-    expect(await screen.findByRole('dialog', { name: 'restarting' })).toBeDefined();
+    expect(put).toBeGreaterThan(-1);
+    await waitFor(() => expect(core.api.calls.indexOf('POST /restart {}')).toBeGreaterThan(put));
     // The session outlives the restart: back to the page, logged in still.
     expect(
       await screen.findByText(
@@ -346,7 +355,7 @@ describe('the graph editor', () => {
     ).toBeDefined();
   });
 
-  it('removes a node, keeping its instance; discards, refuses a save, and rolls back', async () => {
+  it('removes a node, keeping its instance; reverts, keeps the draft on close, and rolls back', async () => {
     const core = fakeCore({
       refuse: (g) => (g.nodes.length === 1 ? [{ text: 'node chat: alone', node: 'chat' }] : []),
     });
@@ -364,34 +373,39 @@ describe('the graph editor', () => {
     fireEvent.click(within(details).getByRole('button', { name: 'Remove actor-a' }));
     await waitFor(() => expect(screen.queryByLabelText('node actor-a')).toBeNull());
     await waitFor(() => expect(core.checked.at(-1)?.edges).toEqual([]));
-    // Discarded: the saved graph back.
-    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
-    expect(await screen.findByLabelText('node actor-a', {}, slow)).toBeDefined();
-    // A save the core refuses is not offered; one it takes is, and a rollback swaps it back.
-    fireEvent.click(screen.getByLabelText('node parser'));
-    fireEvent.click(
-      within(await screen.findByLabelText('details of parser')).getByRole('button', {
-        name: 'Remove parser',
-      })
-    );
+    // Reverted, once confirmed: the saved graph back. Closing the review keeps the draft.
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }));
-    const review = await screen.findByLabelText('review changes');
-    await waitFor(() =>
-      expect(within(review).getByText('Nodes removed (their instances kept)')).toBeDefined()
+    let review = await screen.findByRole('dialog', { name: 'review changes' });
+    fireEvent.click(within(review).getByRole('button', { name: 'Close, keeping the changes' }));
+    expect(screen.queryByRole('dialog', { name: 'review changes' })).toBeNull();
+    expect(screen.queryByLabelText('node actor-a')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }));
+    review = await screen.findByRole('dialog', { name: 'review changes' });
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'review changes' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }));
+    review = await screen.findByRole('dialog', { name: 'review changes' });
+    confirm.mockReturnValue(false);
+    fireEvent.click(within(review).getByRole('button', { name: 'Revert' }));
+    expect(confirm).toHaveBeenLastCalledWith(
+      'Revert: drop every change made here, back to the graph saved?'
     );
-    expect(
-      (within(review).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled
-    ).toBe(false);
-    fireEvent.click(within(review).getByRole('button', { name: 'Save' }));
-    expect(await within(review).findByText(/Saved: it runs once/u)).toBeDefined();
-    await waitFor(() => expect(screen.getByText('Saved, not running yet')).toBeDefined());
-    fireEvent.click(within(review).getByRole('button', { name: 'close' }));
+    expect(screen.queryByLabelText('node actor-a')).toBeNull();
+    confirm.mockReturnValue(true);
+    fireEvent.click(within(review).getByRole('button', { name: 'Revert' }));
+    expect(await screen.findByLabelText('node actor-a', {}, slow)).toBeDefined();
+    expect(screen.getByText('Reverted to the graph saved.')).toBeDefined();
+    expect(screen.queryByText('Changes not applied')).toBeNull();
+    // A rollback puts the previous file back; the banner offers to apply it.
+    core.previous = { version: 1, nodes: [], edges: [] };
     fireEvent.click(screen.getByRole('button', { name: 'Roll back' }));
     expect(
-      await screen.findByText('Rolled back to the previous saved graph: apply it with a restart.')
+      await screen.findByText('Rolled back to the previous saved graph: apply it to run it.')
     ).toBeDefined();
-    expect(await screen.findByLabelText('node parser', {}, slow)).toBeDefined();
-    expect(core.file?.nodes).toHaveLength(3);
+    const banner = await screen.findByRole('region', { name: 'not applied' }, slow);
+    expect(within(banner).getByText('The saved graph is not what runs.')).toBeDefined();
+    expect(within(banner).getByRole('button', { name: 'Apply (restart)' })).toBeDefined();
+    await waitFor(() => expect(screen.queryByLabelText('node actor-a')).toBeNull());
     // No previous: the core says so.
     core.api.routes['POST /graph/rollback'] = [
       409,
@@ -401,28 +415,73 @@ describe('the graph editor', () => {
     expect(
       await screen.findByText('rollback: there is no graph.previous.json to roll back to')
     ).toBeDefined();
-    // Refused on save: the check said it, the save says it too.
-    fireEvent.click(screen.getByLabelText('node parser'));
-    fireEvent.click(
-      within(await screen.findByLabelText('details of parser')).getByRole('button', {
-        name: 'Remove parser',
-      })
-    );
-    fireEvent.click(screen.getByLabelText('node actor-a'));
-    fireEvent.click(
-      within(await screen.findByLabelText('details of actor-a')).getByRole('button', {
-        name: 'Remove actor-a',
-      })
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }));
-    const refused = await screen.findByLabelText('review changes');
-    await waitFor(() => expect(within(refused).getByText('node chat: alone')).toBeDefined());
-    expect(
-      (within(refused).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled
-    ).toBe(true);
   });
 
-  it('says what a save, a check and a restart refuse, and when the instance does not come back', async () => {
+  it('applies a draft the saved graph matches what runs without a restart, and says why an Apply is refused', async () => {
+    const core = fakeCore({
+      refuse: (g) => (g.nodes.length === 1 ? [{ text: 'node chat: alone', node: 'chat' }] : []),
+    });
+    vi.stubGlobal('confirm', () => true);
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    const remove = async (id: string): Promise<void> => {
+      fireEvent.click(await screen.findByLabelText(`node ${id}`, {}, slow));
+      fireEvent.click(
+        within(await screen.findByLabelText(`details of ${id}`)).getByRole('button', {
+          name: `Remove ${id}`,
+        })
+      );
+      await waitFor(() => expect(screen.queryByLabelText(`node ${id}`)).toBeNull());
+    };
+    // The check refuses the draft: Apply is not offered, and the review says why.
+    await remove('parser');
+    await remove('actor-a');
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }));
+    const review = await screen.findByRole('dialog', { name: 'review changes' });
+    await waitFor(() => expect(within(review).getByText('node chat: alone')).toBeDefined());
+    expect(
+      (within(review).getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled
+    ).toBe(true);
+    // A refusal at the save (the check passed, the save did not): said, and no restart.
+    core.api.routes['POST /graph/check'] = [
+      200,
+      {
+        ok: true,
+        problems: [],
+        diff: {
+          nodes: { added: [], removed: ['parser', 'actor-a'], changed: [] },
+          edges: { added: [], removed: [], changed: [] },
+        },
+      },
+    ];
+    fireEvent.click(within(review).getByRole('button', { name: 'Revert' }));
+    await remove('parser');
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }));
+    const again = await screen.findByRole('dialog', { name: 'review changes' });
+    core.api.routes['PUT /graph/file'] = [
+      400,
+      { error: 'the graph is refused', problems: [{ text: 'node actor-a: parser is not bound' }] },
+    ];
+    await waitFor(() =>
+      expect(
+        (within(again).getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled
+      ).toBe(false)
+    );
+    fireEvent.click(within(again).getByRole('button', { name: 'Apply' }));
+    const alert = await within(again).findByRole('alert');
+    expect(alert.textContent).toContain('Not applied: the graph is refused.');
+    expect(within(alert).getByText('node actor-a: parser is not bound')).toBeDefined();
+    expect(core.api.calls).not.toContain('POST /restart {}');
+    // What runs already: saved, no restart needed.
+    core.api.routes['PUT /graph/file'] = [200, { saved: true, restart: false }];
+    fireEvent.click(within(again).getByRole('button', { name: 'Apply' }));
+    expect(
+      await screen.findByText('Saved: it is what runs already, so no restart is needed.')
+    ).toBeDefined();
+    expect(screen.queryByRole('dialog', { name: 'review changes' })).toBeNull();
+    expect(core.api.calls).not.toContain('POST /restart {}');
+  });
+
+  it('says what a check and a restart refuse, and when the instance does not come back', async () => {
     const core = fakeCore({ routes: { 'POST /graph/check': [500, { error: 'check broke' }] } });
     vi.stubGlobal('confirm', () => true);
     render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);

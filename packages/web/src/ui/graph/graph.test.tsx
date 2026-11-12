@@ -207,7 +207,7 @@ describe('GraphPage', () => {
     render(<GraphPage loggedOut={loggedOut} checkAfterMs={0} />);
     expect(
       await screen.findByText(
-        'graph.json is not JSON: x. Saving a graph here replaces it.',
+        'graph.json is not JSON: x. Applying a graph here replaces it.',
         {},
         slow
       )

@@ -94,13 +94,15 @@ export interface GraphCheckView {
   diff: GraphDiff;
 }
 
-/** A refusal of the API: its status and why. */
+/** A refusal of the API: its status and why, and the problems it names, if any (a graph refused). */
 export class ApiError extends Error {
   readonly status: number;
+  readonly problems: GraphProblem[];
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, problems: GraphProblem[] = []) {
     super(message);
     this.status = status;
+    this.problems = problems;
   }
 }
 
@@ -131,8 +133,12 @@ export async function api<T>(
     // No JSON: the status says it.
   }
   if (!res.ok) {
-    const error = (value as { error?: unknown } | null)?.error;
-    throw new ApiError(res.status, typeof error === 'string' ? error : `HTTP ${res.status}`);
+    const { error, problems } = (value ?? {}) as { error?: unknown; problems?: unknown };
+    throw new ApiError(
+      res.status,
+      typeof error === 'string' ? error : `HTTP ${res.status}`,
+      Array.isArray(problems) ? (problems as GraphProblem[]) : []
+    );
   }
   return value as T;
 }

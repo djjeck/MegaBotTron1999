@@ -1,9 +1,17 @@
 /**
- * "Review changes" (D55): what the draft changes from the saved file, as `POST /graph/check` says
- * it (nodes and edges added, removed, changed), with every problem the check finds; then "Save"
- * (`PUT /graph/file`), and, once saved, "Apply (restart)". A graph the check refuses is not saved.
+ * "Review changes" (D55), a dialog: what the draft changes from the saved graph, as
+ * `POST /graph/check` says it (nodes and edges added, removed, changed), with every problem the
+ * check finds, and two actions:
+ *
+ * - **Apply**: the draft saved (`PUT /graph/file`), then the instance restarted on it, with the
+ *   reconnect overlay. A graph the check refuses is neither saved nor applied, and the dialog says
+ *   why.
+ * - **Revert**: the draft discarded, back to the saved graph (asked first).
+ *
+ * Its close button (×), or Escape, only closes it: the draft is kept.
  */
-import type { GraphCheckView } from '#src/ui/api.ts';
+import { useEffect, useRef } from 'react';
+import type { GraphCheckView, GraphProblem } from '#src/ui/api.ts';
 
 const ends = (e: { from: string; to: string }): string => `${e.from} → ${e.to}`;
 
@@ -25,16 +33,17 @@ function Items(props: { title: string; items: string[] }) {
 
 export function Review(props: {
   check: GraphCheckView | undefined;
-  /** Whether the draft differs from the saved file. */
+  /** Whether the draft differs from the saved graph. */
   dirty: boolean;
-  /** What the last save answered. */
-  saved?: { restart: boolean } | undefined;
+  /** Applying: the save or the restart under way. */
   busy: boolean;
-  save: () => void;
+  /** Why the last Apply was refused, with the problems named. */
+  refused?: { error: string; problems: GraphProblem[] } | undefined;
   apply: () => void;
+  revert: () => void;
   close: () => void;
 }) {
-  const { check } = props;
+  const { check, refused } = props;
   const d = check?.diff;
   const none =
     d !== undefined &&
@@ -46,61 +55,91 @@ export function Review(props: {
       d.edges.removed,
       d.edges.changed,
     ].every((l) => l.length === 0);
+  const ok = check?.ok === true;
+  const first = useRef<HTMLButtonElement>(null);
+  const { close } = props;
+  useEffect(() => {
+    first.current?.focus();
+    const key = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') close();
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [close]);
   return (
-    <aside className="details" aria-label="review changes">
-      <h2>
-        Review changes{' '}
-        <button type="button" className="link" onClick={props.close}>
-          close
-        </button>
-      </h2>
-      {d === undefined ? (
-        <p className="muted">Checking…</p>
-      ) : none ? (
-        <p className="muted">Nothing differs from the saved graph.</p>
-      ) : (
-        <>
-          <Items title="Nodes added" items={d.nodes.added} />
-          <Items title="Nodes removed (their instances kept)" items={d.nodes.removed} />
-          <Items
-            title="Nodes changed"
-            items={d.nodes.changed.map((c) => `${c.id}: ${c.fields.join(', ')}`)}
-          />
-          <Items title="Edges added" items={d.edges.added.map(ends)} />
-          <Items title="Edges removed" items={d.edges.removed.map(ends)} />
-          <Items title="Edges changed" items={d.edges.changed.map(ends)} />
-        </>
-      )}
-      {check === undefined || check.ok ? null : (
-        <>
-          <h4 className="error">The check refuses it</h4>
-          <ul className="problems" aria-label="problems">
-            {check.problems.map((p) => (
-              <li key={p.text}>{p.text}</li>
-            ))}
-          </ul>
-        </>
-      )}
-      <p>
-        <button
-          type="button"
-          disabled={!props.dirty || check?.ok !== true || props.busy}
-          onClick={props.save}
-        >
-          Save
-        </button>
-        {props.saved === undefined ? null : props.saved.restart ? (
-          <>
-            {' '}
-            Saved: it runs once the instance restarts.{' '}
-            <button type="button" onClick={props.apply}>
-              Apply (restart)
-            </button>
-          </>
+    <div className="overlay">
+      <div className="card review" role="dialog" aria-modal="true" aria-label="review changes">
+        <h2>
+          Review changes
+          <button
+            type="button"
+            className="close"
+            aria-label="Close, keeping the changes"
+            title="Close, keeping the changes"
+            onClick={close}
+            ref={first}
+          >
+            ×
+          </button>
+        </h2>
+        {d === undefined ? (
+          <p className="muted">Checking…</p>
+        ) : none ? (
+          <p className="muted">Nothing differs from the saved graph.</p>
         ) : (
-          <span> Saved: it is what runs already.</span>
+          <>
+            <Items title="Nodes added" items={d.nodes.added} />
+            <Items title="Nodes removed (their instances kept)" items={d.nodes.removed} />
+            <Items
+              title="Nodes changed"
+              items={d.nodes.changed.map((c) => `${c.id}: ${c.fields.join(', ')}`)}
+            />
+            <Items title="Edges added" items={d.edges.added.map(ends)} />
+            <Items title="Edges removed" items={d.edges.removed.map(ends)} />
+            <Items title="Edges changed" items={d.edges.changed.map(ends)} />
+          </>
         )}
-      </p>
-    </aside>
+        {check === undefined || ok ? null : (
+          <>
+            <h4 className="error">The check refuses it: fix these first</h4>
+            <ul className="problems" aria-label="problems">
+              {check.problems.map((p) => (
+                <li key={p.text}>{p.text}</li>
+              ))}
+            </ul>
+          </>
+        )}
+        {refused === undefined ? null : (
+          <div role="alert" className="banner bad">
+            Not applied: {refused.error}.
+            {refused.problems.length === 0 ? null : (
+              <ul className="problems" aria-label="why it was not applied">
+                {refused.problems.map((p) => (
+                  <li key={p.text}>{p.text}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        <p className="muted small">
+          <strong>Apply</strong> saves the graph and restarts the instance on it: each plugin keeps
+          its state, and this page comes back by itself. <strong>Revert</strong> drops these
+          changes, back to the graph saved.
+        </p>
+        <p className="actions">
+          <button
+            type="button"
+            className="primary"
+            disabled={!props.dirty || !ok || props.busy}
+            onClick={props.apply}
+          >
+            {props.busy ? 'Applying…' : 'Apply'}
+          </button>
+          <button type="button" disabled={props.busy} onClick={props.revert}>
+            Revert
+          </button>
+        </p>
+      </div>
+    </div>
   );
 }

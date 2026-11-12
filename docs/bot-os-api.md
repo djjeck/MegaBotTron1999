@@ -754,10 +754,13 @@ every problem shown where it is located (§2.3). A node selected shows its forms
 `configSecrets` as a choice of `GET /secrets`; an edge selected, its chats and commands. Each edge
 has a rhombus at its midpoint in its port type's colour (`PortEdge.tsx`, React Flow's
 `EdgeLabelRenderer`), a button named after the edge (`edge irc.chat → dice.channel`) that selects it
-and opens its panel, by a click or the keyboard. Saving is `PUT /graph/file`, applying
-`POST /restart`, after which the page waits on `GET /session` for the new process (another `boot`
-id), and comes back to the page, still logged in. One or several running nodes selected can be
-killed, each by `POST /plugins/<id>/kill`.
+and opens its panel, by a click or the keyboard. Its review shows the diff and two actions: Apply,
+`PUT /graph/file` then `POST /restart` (none if the core refuses the graph, which the review says,
+nor if the saved graph is what runs already), and Revert, the draft back to the saved graph; a
+banner offers Apply (`POST /restart`) when the saved file differs from what runs (`differs`). After
+a restart the page waits on `GET /session` for the new process (another `boot` id), and comes back
+to the page, still logged in. One or several running nodes selected can be killed, each by
+`POST /plugins/<id>/kill`.
 
 ### 4.13 The standard services
 
