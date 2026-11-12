@@ -1,6 +1,7 @@
 /**
  * A made-up instance for the graph view's tests, as `GET /graph/view`, `GET /status` and
- * `GET /drift` give it: a chat connector, a parser of a game, and an actor bound to both.
+ * `GET /drift` give it: a chat connector, a parser of a game, and an actor bound to both, which
+ * reads the chat (chat-in) and sends to it (chat-out).
  */
 import {
   type AvailablePlugin,
@@ -11,7 +12,8 @@ import {
 } from '#src/ui/api.ts';
 
 const PORT_TYPES: GraphViewData['portTypes'] = {
-  chat: { id: 'chat', description: 'a chat', shape: 'circle', colour: '#2f7ed8' },
+  'chat-in': { id: 'chat-in', description: 'chats read', shape: 'circle', colour: '#2f7ed8' },
+  'chat-out': { id: 'chat-out', description: 'chats sent', shape: 'circle', colour: '#8a4fd1' },
   events: { id: 'events', description: 'events', shape: 'diamond', colour: '#d97b29' },
   interface: { id: 'interface', description: 'an interface', shape: 'square', colour: '#3a9a5b' },
 };
@@ -22,14 +24,15 @@ const declares = { secrets: [], configSecrets: [], events: [] };
 export const VIEW: GraphViewData = {
   portTypes: PORT_TYPES,
   graph: {
-    version: 1,
+    version: 2,
     nodes: [
       { id: 'chat', plugin: 'chat', config: { host: 'example.test' } },
       { id: 'parser', plugin: 'parser' },
       { id: 'actor-a', plugin: 'actor' },
     ],
     edges: [
-      { from: 'chat.chat', to: 'actor-a.chat', type: 'chat', reads: ['#a'], sends: ['#a'] },
+      { from: 'chat.chat', to: 'actor-a.chat', type: 'chat-in', reads: ['#a'] },
+      { from: 'actor-a.chat', to: 'chat.chat', type: 'chat-out', sends: ['#a'] },
       { from: 'parser.events', to: 'actor-a.game-events', type: 'events' },
       { from: 'parser.interface', to: 'actor-a.parser', type: 'interface' },
     ],
@@ -60,8 +63,12 @@ export const VIEW: GraphViewData = {
         },
         required: ['host'],
       },
-      inputs: {},
-      outputs: { chat: { type: 'chat', network: 'chat', label: 'chat of chat', optional: false } },
+      inputs: {
+        chat: { type: 'chat-out', network: 'chat', label: 'chat-out of chat', optional: true },
+      },
+      outputs: {
+        chat: { type: 'chat-in', network: 'chat', label: 'chat-in of chat', optional: false },
+      },
       interface: none,
       secrets: ['chat_password'],
       configSecrets: ['token'],
@@ -103,7 +110,7 @@ export const VIEW: GraphViewData = {
         properties: { loud: { type: 'boolean', default: false }, level: { type: 'number' } },
       },
       inputs: {
-        chat: { type: 'chat', label: 'chat of any network', optional: false },
+        chat: { type: 'chat-in', label: 'chat-in of any network', optional: false },
         parser: {
           type: 'interface',
           plugin: 'parser',
@@ -119,7 +126,9 @@ export const VIEW: GraphViewData = {
           help: 'what happens',
         },
       },
-      outputs: {},
+      outputs: {
+        chat: { type: 'chat-out', label: 'chat-out of any network', optional: false },
+      },
       interface: {
         reads: [{ name: 'status', help: 'how it is', output: { type: 'object' } }],
         actions: [

@@ -205,7 +205,7 @@ describe('react on an event', () => {
     await flush();
     expect(live.account.sent).toEqual([]);
     expect(live.records().map((r) => `${String(r['outcome'])}: ${String(r['reason'])}`)).toEqual([
-      'refused: watcher has no reach on the account nothing: no edge binds it',
+      'refused: watcher has no reach on the account nothing: no edge binds a chat-out of it',
       expect.stringMatching(/^refused: .*\/drop/u),
       expect.stringMatching(/^refused: .*#lobby/u),
     ]);

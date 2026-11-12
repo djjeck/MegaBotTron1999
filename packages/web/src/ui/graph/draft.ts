@@ -1,7 +1,7 @@
 /**
  * The editor's draft graph (docs/bot-os.md D55): the saved file's graph, changed node by node and
  * edge by edge in the UI before it is checked, saved and applied. Pure functions of the graph as
- * the file holds it (`{ version: 1, nodes, edges }`), so that the editor's changes are tested
+ * the file holds it (`{ version: 2, nodes, edges }`), so that the editor's changes are tested
  * apart from React. Nothing here checks the graph: the core does (`POST /graph/check`).
  */
 import type {
@@ -14,7 +14,7 @@ import type {
   PortView,
 } from '#src/ui/api.ts';
 
-export const EMPTY_GRAPH: Graph = { version: 1, nodes: [], edges: [] };
+export const EMPTY_GRAPH: Graph = { version: 2, nodes: [], edges: [] };
 
 /** A node's or an instance's id, as the core's graph allows it: lower-case words and dashes. */
 export const NODE_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
@@ -31,7 +31,7 @@ export function asGraph(raw: unknown): Graph {
   const nodes = Array.isArray(raw['nodes']) ? raw['nodes'] : [];
   const edges = Array.isArray(raw['edges']) ? raw['edges'] : [];
   return {
-    version: 1,
+    version: 2,
     nodes: nodes.filter(
       (n): n is GraphNode =>
         isRecord(n) && typeof n['id'] === 'string' && typeof n['plugin'] === 'string'
@@ -128,7 +128,8 @@ export function connect(g: Graph, edge: GraphEdge): Graph {
 
 /**
  * The edge an output dragged to an input makes: its two ends, and the type of the output, which
- * the check compares with the input's (`connection` as React Flow gives it).
+ * the check compares with the input's (`connection` as React Flow gives it; a connector's out
+ * card stands for its node, `cards.ts`).
  */
 export function edgeOf(
   c: { source: string; sourceHandle?: string | null; target: string; targetHandle?: string | null },
@@ -142,7 +143,7 @@ export function edgeOf(
       : plugins.get(from?.plugin ?? '')?.outputs[c.sourceHandle]?.type;
   return {
     from: c.sourceHandle == null ? c.source : `${c.source}.${c.sourceHandle}`,
-    to: `${c.target}.${c.targetHandle ?? ''}`,
+    to: `${c.target.endsWith('::out') ? c.target.slice(0, -'::out'.length) : c.target}.${c.targetHandle ?? ''}`,
     ...(type === undefined ? {} : { type }),
   };
 }
@@ -231,7 +232,8 @@ const NAMESPACE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
  * A node's input ports, each events input whose namespace its config names (`config`) resolved
  * from the node's config as written, as the core resolves it (bot-os-api.md §2.1): the value's
  * namespace, or its event type's. Unresolved, an optional one is not there, and a required one is
- * left for the check to refuse.
+ * left for the check to refuse. A chat-in input there only with a config key (`when`, the
+ * reactor's `match`) is not there while the key is unset.
  */
 export function inputsOf(
   inputs: Readonly<Record<string, PortView>>,
@@ -239,6 +241,10 @@ export function inputsOf(
 ): Record<string, PortView> {
   const out: Record<string, PortView> = {};
   for (const [name, p] of Object.entries(inputs)) {
+    if (p.type === 'chat-in' && p.when !== undefined) {
+      if (config?.[p.when] !== undefined && config[p.when] !== null) out[name] = p;
+      continue;
+    }
     if (p.type !== 'events' || p.config === undefined) {
       out[name] = p;
       continue;

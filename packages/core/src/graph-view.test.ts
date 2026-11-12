@@ -17,20 +17,20 @@ import {
 import { parseManifest } from './manifest.ts';
 
 const graph: Graph = {
-  version: 1,
+  version: 2,
   nodes: [
     { id: 'irc', plugin: 'irc', config: { host: 'znc', nick: 'me' } },
     { id: 'game', plugin: 'game' },
     { id: 'actor-b', plugin: 'actor', account: 'x:y' },
   ],
   edges: [
-    { from: 'irc.chat', to: 'game.channel', type: 'chat', reads: ['#a'], sends: [] },
+    { from: 'irc.chat', to: 'game.channel', type: 'chat-in', reads: ['#a'] },
     { from: 'game.interface', to: 'actor-b.game', type: 'interface' },
+    { from: 'irc.chat', to: 'actor-b.channel', type: 'chat-in', reads: [] },
     {
-      from: 'irc.chat',
-      to: 'actor-b.channel',
-      type: 'chat',
-      reads: ['#a'],
+      from: 'actor-b.channel',
+      to: 'irc.chat',
+      type: 'chat-out',
       sends: ['#a'],
       commands: ['!go', '"q"'],
     },
@@ -47,9 +47,10 @@ describe('the graph printed', () => {
         '  game',
         '  actor-b (actor) x:y',
         'edges:',
-        '  irc.chat → game.channel (chat): reads #a',
+        '  irc.chat → game.channel (chat-in): reads #a',
         '  game.interface → actor-b.game (interface)',
-        '  irc.chat → actor-b.channel (chat): reads #a; sends #a; commands !go "q"',
+        '  irc.chat → actor-b.channel (chat-in)',
+        '  actor-b.channel → irc.chat (chat-out): sends #a; commands !go "q"',
         '  game.events → actor-b.notices (?)',
       ].join('\n')
     );
@@ -62,13 +63,16 @@ describe('the graph printed', () => {
         '  irc["irc"]',
         '  game["game"]',
         '  actor_b["actor-b<br/><i>actor</i>"]',
+        '  irc_out["irc · out"]',
         '  irc -- "chat → channel<br/>reads #a" --> game',
         '  game -- "interface → game" --> actor_b',
-        '  irc -- "chat → channel<br/>reads #a; sends #a; commands !go #quot;q#quot;" --> actor_b',
+        '  irc -- "chat → channel" --> actor_b',
+        '  actor_b -- "channel → chat<br/>sends #a; commands !go #quot;q#quot;" --> irc_out',
         '  game -- "events → notices" --> actor_b',
         '  linkStyle 0 stroke:#2f7ed8',
         '  linkStyle 1 stroke:#3a9a5b',
         '  linkStyle 2 stroke:#2f7ed8',
+        '  linkStyle 3 stroke:#8a4fd1',
       ].join('\n')
     );
   });
@@ -157,8 +161,18 @@ describe('the nodes as the graph view shows them', () => {
           port: { type: 'number', default: 6667 },
         },
       },
-      inputs: {},
-      outputs: { chat: { type: 'chat', network: 'irc', label: 'chat of irc', optional: false } },
+      inputs: {
+        chat: {
+          type: 'chat-out',
+          network: 'irc',
+          label: 'chat-out of irc',
+          optional: true,
+          help: 'What the plugins send through its account',
+        },
+      },
+      outputs: {
+        chat: { type: 'chat-in', network: 'irc', label: 'chat-in of irc', optional: false },
+      },
       interface: { reads: [], actions: [], commands: [] },
       secrets: ['irc_password'],
       configSecrets: ['token'],
@@ -177,7 +191,7 @@ describe('the nodes as the graph view shows them', () => {
     expect(b).toMatchObject({ id: 'actor-b', plugin: 'actor', account: 'x:y' });
     expect(b?.settingsSchema).toMatchObject({ properties: { loud: { default: false } } });
     expect(b?.inputs).toEqual({
-      irc: { type: 'chat', label: 'chat of any network', optional: false },
+      irc: { type: 'chat-in', label: 'chat-in of any network', optional: false },
       game: {
         type: 'interface',
         plugin: 'game',
@@ -193,7 +207,12 @@ describe('the nodes as the graph view shows them', () => {
         optional: true,
         help: 'any helper',
       },
-      lobby: { type: 'chat', network: 'irc', label: 'chat of irc', optional: true },
+      lobby: { type: 'chat-in', network: 'irc', label: 'chat-in of irc', optional: true },
+    });
+    // Its old chat inputs are chat-out outputs too, of the same names (module API 1).
+    expect(b?.outputs).toMatchObject({
+      irc: { type: 'chat-out', label: 'chat-out of any network', optional: false },
+      lobby: { type: 'chat-out', network: 'irc', optional: true },
     });
     expect(b?.interface.reads).toMatchObject([{ name: 'status', help: 'how it is' }]);
     expect(b?.interface.actions).toMatchObject([

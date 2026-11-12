@@ -2,11 +2,17 @@
  * Ports (docs/bot-os-api.md §2.1, P17, D27): what a plugin consumes (its inputs, drawn on the left)
  * and what it produces (its outputs, on the right), each of a port type the core defines. An edge of
  * the instance's graph (packages/core/src/graph.ts) binds an input to an output of the same
- * type; the edges are the permissions (P6): a plugin reaches a connector, an outbox, an interface
- * or a namespace's events only through an input an edge binds.
+ * type; the edges are the permissions (P6): a plugin reads a chat, sends through an outbox, uses an
+ * interface or hears a namespace's events only through a port an edge binds.
  *
- * - `chat`: a chat connection of a network, a connector's account. Bound, it carries the chats the
- *   plugin reads and sends to, and the commands it may send (what a manifest's `reach` lists).
+ * - `chat-in`: the chats a plugin reads, from a connector's account (bot-os.md D60). A connector's
+ *   output; a parser's input, on its left. Bound, it carries the chats read (`reads`).
+ * - `chat-out`: what a plugin sends, to a connector's account. A plugin's output, on its right; the
+ *   connector's input. Bound, it carries the chats sent to (`sends`) and the commands sent
+ *   (`commands`). Data flows left to right: the connector reads on the left of the graph, and is
+ *   written to on its right.
+ * - The old `chat` input of a manifest (module API 1), and the `requires`/`reach` shorthand, are
+ *   read as both: a chat-in input and a chat-out output of the same name (`normalise`).
  * - `events`: the events of a namespace, from the plugins that register it. The manifest names the
  *   namespace, or the key of its node's config that does (`{ config: 'on' }`), so that a plugin
  *   that learns what it listens to from its config (the reactor) has the port resolved per node.
@@ -19,7 +25,7 @@
 import { z } from 'zod';
 
 /** The port types, by their stable id. */
-export const PORT_TYPES = ['chat', 'events', 'interface'] as const;
+export const PORT_TYPES = ['chat-in', 'chat-out', 'events', 'interface'] as const;
 export type PortType = (typeof PORT_TYPES)[number];
 
 /** What the UI shows of a port type: stable, so that a drawing keeps its look. */
@@ -34,12 +40,19 @@ export interface PortTypeInfo {
 }
 
 export const PORT_TYPE_INFO: Readonly<Record<PortType, PortTypeInfo>> = {
-  chat: {
-    id: 'chat',
+  'chat-in': {
+    id: 'chat-in',
     description:
-      'A chat connection of a network: an account a connector holds, bound with the chats read and sent to, and the commands sent',
+      'The chats read from a connector’s account: from the connector, on its left, to a plugin that reads them',
     shape: 'circle',
     colour: '#2f7ed8',
+  },
+  'chat-out': {
+    id: 'chat-out',
+    description:
+      'What a plugin sends through a connector’s account, the chats sent to and the commands sent: from the plugin to the connector, on its right',
+    shape: 'circle',
+    colour: '#8a4fd1',
   },
   events: {
     id: 'events',
@@ -63,7 +76,10 @@ const ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
 const chats = z.array(z.string().min(1));
 
-/** What a bound chat carries: the chats read and sent to, and the commands (first words) sent. */
+/**
+ * What a bound chat carries: the chats read (a chat-in edge's), the chats sent to and the commands
+ * (first words) sent (a chat-out edge's). Each edge carries only its own: the others are empty.
+ */
 export const chatBindingSchema = z.strictObject({
   reads: chats.default([]),
   sends: chats.default([]),
@@ -82,11 +98,34 @@ const common = {
   optional: z.boolean().default(false),
 };
 
+/** A key of a node's config, as a port names it. */
+const configKey = z.strictObject({
+  config: z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key'),
+});
+
 /**
  * An input port, as a manifest declares it. `bind` is the edge the programmatic wiring gives it
  * by default (the core's default graph); an explicit graph binds it as it says.
  */
 export const inputSchema = z.discriminatedUnion('type', [
+  z.strictObject({
+    type: z.literal('chat-in'),
+    /** The network it reads; none: any. */
+    network: z.string().regex(NETWORK).optional(),
+    /**
+     * The key of its node's config that, set, gives the node this port; unset, the node has none
+     * (`resolveInputs`): a reactor reads a chat only with a `match`.
+     */
+    when: configKey.optional(),
+    ...common,
+    bind: z
+      .strictObject({ node: z.string().regex(ID), reads: chatBindingSchema.shape.reads })
+      .optional(),
+  }),
+  /**
+   * The old chat input (module API 1): read as a chat-in input and a chat-out output of the same
+   * name, its `bind` split between them.
+   */
   z.strictObject({
     type: z.literal('chat'),
     /** The network it connects to; none: any. */
@@ -100,10 +139,7 @@ export const inputSchema = z.discriminatedUnion('type', [
      * Its namespace; or `{ config: key }`, the key of its node's config whose value names it (a
      * namespace, or an event type of it), resolved per node (`resolveInputs`).
      */
-    namespace: z.union([
-      z.string().regex(ID),
-      z.strictObject({ config: z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key') }),
-    ]),
+    namespace: z.union([z.string().regex(ID), configKey]),
     ...common,
     /** By default, every other node whose plugin registers the namespace. */
     bind: z.strictObject({ nodes: z.array(z.string().regex(ID)) }).optional(),
@@ -127,28 +163,66 @@ export const inputSchema = z.discriminatedUnion('type', [
       path: ['members'],
     }),
 ]);
-/** An input port as a manifest declares it: an events input's namespace may come from config. */
+
+/**
+ * An output port a manifest declares: a chat-out, what it sends through a connector's account
+ * (the others, a connector's chat-in, events and interface, are derived from the manifest).
+ * Required unless `optional`: the plugin needs the connector started first.
+ */
+export const outputSchema = z.discriminatedUnion('type', [
+  z.strictObject({
+    type: z.literal('chat-out'),
+    /** The network it sends on; none: any. */
+    network: z.string().regex(NETWORK).optional(),
+    ...common,
+    bind: z
+      .strictObject({
+        node: z.string().regex(ID),
+        sends: chatBindingSchema.shape.sends,
+        commands: chatBindingSchema.shape.commands,
+      })
+      .optional(),
+  }),
+]);
+export type DeclaredOutput = z.output<typeof outputSchema>;
+export type OutputPortInput = z.input<typeof outputSchema>;
+
+/** An input port as a manifest writes it, the old `chat` included. */
 export type DeclaredInput = z.output<typeof inputSchema>;
 export type InputPortInput = z.input<typeof inputSchema>;
+/** A connector's chat-out input, derived from its account: what the plugins send through it. */
+export interface ChatOutInput {
+  type: 'chat-out';
+  network?: string;
+  optional: boolean;
+  help?: string;
+}
+/**
+ * An input port of a manifest as the core holds it: the old `chat` read as a chat-in (and a
+ * chat-out output), a connector's chat-out added.
+ */
+export type ManifestInputPort = Exclude<DeclaredInput, { type: 'chat' }> | ChatOutInput;
 /** An events input's namespace as declared: a namespace, or the config key that names one. */
 export type NamespaceSource = Extract<DeclaredInput, { type: 'events' }>['namespace'];
 /** An input port of a node: its namespace resolved (`resolveInputs`), as the graph compares it. */
 export type InputPort =
-  | Exclude<DeclaredInput, { type: 'events' }>
+  | Exclude<ManifestInputPort, { type: 'events' }>
   | (Omit<Extract<DeclaredInput, { type: 'events' }>, 'namespace'> & { namespace: string });
 
-/** An output port: derived from the manifest, never written by hand. */
+/** An output port: a connector's chat-in, a declared chat-out, and the derived events and interface. */
 export type OutputPort =
-  | { type: 'chat'; network: string }
+  | { type: 'chat-in'; network: string }
+  | DeclaredOutput
   | { type: 'events'; namespace: string }
   | { type: 'interface'; plugin: string; members: string[] };
 
 /**
- * A port in words: `chat of irc`, `events of dice`, `interface of dice`; an events input whose
- * namespace its node's config names, unresolved, `events of config on`.
+ * A port in words: `chat-in of irc`, `chat-out of any network`, `events of dice`, `interface of
+ * dice`; an events input whose namespace its node's config names, unresolved, `events of config on`.
  */
-export function describePort(p: DeclaredInput | InputPort | OutputPort): string {
-  if (p.type === 'chat') return `chat of ${p.network ?? 'any network'}`;
+export function describePort(p: ManifestInputPort | InputPort | OutputPort): string {
+  if (p.type === 'chat-in' || p.type === 'chat-out')
+    return `${p.type} of ${p.network ?? 'any network'}`;
   if (p.type === 'events')
     return `events of ${typeof p.namespace === 'string' ? p.namespace : `config ${p.namespace.config}`}`;
   return p.plugin === undefined
@@ -159,8 +233,15 @@ export function describePort(p: DeclaredInput | InputPort | OutputPort): string 
 /** Why an output cannot feed an input, or undefined if it can. */
 export function mismatch(input: InputPort, output: OutputPort): string | undefined {
   const no = `${describePort(output)} cannot bind ${describePort(input)}`;
-  if (input.type === 'chat')
-    return output.type === 'chat' && (input.network ?? output.network) === output.network
+  if (input.type === 'chat-in')
+    return output.type === 'chat-in' && (input.network ?? output.network) === output.network
+      ? undefined
+      : no;
+  if (input.type === 'chat-out')
+    return output.type === 'chat-out' &&
+      (output.network === undefined ||
+        input.network === undefined ||
+        output.network === input.network)
       ? undefined
       : no;
   if (input.type === 'events')
@@ -183,19 +264,25 @@ export function namespaceOf(value: unknown): string | undefined {
 }
 
 /**
- * A node's input ports, each events input's namespace resolved from its node's `config` when the
- * manifest says it comes from there (`{ config: key }`): the namespace the key's value names, or
- * the event type's. One whose key is not set is left out if it is optional (the node has no such
- * port), and is a problem if it is required; one whose value names no namespace is a problem.
- * Each problem names the port; the caller names the node.
+ * A node's input ports, each resolved from its node's `config` when the manifest says so: an
+ * events input's namespace (`{ config: key }`), the namespace the key's value names, or the event
+ * type's; a chat-in input's presence (`when: { config: key }`), there only while the key is set.
+ * An events input whose key is not set is left out if it is optional (the node has no such port),
+ * and is a problem if it is required; one whose value names no namespace is a problem. Each problem
+ * names the port; the caller names the node.
  */
 export function resolveInputs(
-  inputs: Readonly<Record<string, DeclaredInput>>,
+  inputs: Readonly<Record<string, ManifestInputPort>>,
   config: Readonly<Record<string, unknown>> | undefined
 ): { ports: Record<string, InputPort>; problems: string[] } {
   const ports: Record<string, InputPort> = {};
   const problems: string[] = [];
+  const set = (key: string): boolean => config?.[key] !== undefined && config[key] !== null;
   for (const [name, p] of Object.entries(inputs)) {
+    if (p.type === 'chat-in' && p.when !== undefined) {
+      if (set(p.when.config)) ports[name] = p;
+      continue;
+    }
     if (p.type !== 'events' || typeof p.namespace === 'string') {
       ports[name] = p as InputPort;
       continue;
@@ -204,7 +291,7 @@ export function resolveInputs(
     const value = config?.[key];
     const ns = namespaceOf(value);
     if (ns !== undefined) ports[name] = { ...p, namespace: ns };
-    else if (value !== undefined && value !== null)
+    else if (set(key))
       problems.push(
         `input port ${name}: its namespace comes from config ${key}, and ${JSON.stringify(value)} names no event type or namespace`
       );

@@ -61,7 +61,7 @@ const read = (file: string): unknown =>
 describe('instances apart from nodes', () => {
   it('file a node’s state under its instance, which another node of its plugin takes up', async () => {
     const first = core({
-      version: 1,
+      version: 2,
       nodes: [{ id: 'a', plugin: 'counter', instance: 'tally', settings: { step: 2 } }],
     }).core;
     await first.start();
@@ -83,7 +83,7 @@ describe('instances apart from nodes', () => {
     });
     // Another node, on the same instance: its count, its settings, its mode and its timer.
     const second = core({
-      version: 1,
+      version: 2,
       nodes: [{ id: 'b', plugin: 'counter', instance: 'tally', mode: 'live' }],
     }).core;
     await second.start();
@@ -104,7 +104,7 @@ describe('instances apart from nodes', () => {
 
   it('start a fresh instance in its node’s mode and settings, and a node on its own id', async () => {
     const { core: c } = core({
-      version: 1,
+      version: 2,
       nodes: [{ id: 'c', plugin: 'counter', mode: 'live', settings: { step: 5 } }],
     });
     await c.start();
@@ -118,13 +118,13 @@ describe('instances apart from nodes', () => {
     new InstanceRegistry(new Stores(dataDir), () => 0).create('kept', 'other');
     let problems = '';
     try {
-      core({ version: 1, nodes: [{ id: 'x', plugin: 'counter', instance: 'kept' }] }).core.load();
+      core({ version: 2, nodes: [{ id: 'x', plugin: 'counter', instance: 'kept' }] }).core.load();
     } catch (e) {
       problems = (e as Error).message;
     }
     expect(problems).toBe('node x: its instance kept is of the plugin other, not counter');
     const again = core({
-      version: 1,
+      version: 2,
       nodes: [
         { id: 'b', plugin: 'counter', instance: 'shared' },
         { id: 'c', plugin: 'counter', instance: 'shared' },
@@ -132,7 +132,7 @@ describe('instances apart from nodes', () => {
     }).core;
     expect(() => again.load()).toThrow("node c: its instance shared is node b's");
     const bad = core({
-      version: 1,
+      version: 2,
       nodes: [
         { id: 'c', plugin: 'counter', settings: { step: 'x', nope: 1 } },
         { id: 'd', plugin: 'other', settings: { any: 1 } },
@@ -151,7 +151,7 @@ describe('instances apart from nodes', () => {
   });
 
   it('delete an instance no node has referenced for 7 days, at start and daily', async () => {
-    const first = core({ version: 1, nodes: [{ id: 'a', plugin: 'counter', instance: 'old' }] });
+    const first = core({ version: 2, nodes: [{ id: 'a', plugin: 'counter', instance: 'old' }] });
     await first.core.start();
     await first.core.stop();
     // A directory without its record is left alone.
@@ -161,7 +161,7 @@ describe('instances apart from nodes', () => {
     new InstanceRegistry(new Stores(dataDir), () => clock.now()).create('saved', 'counter');
     const records: unknown[] = [];
     const empty = core(
-      { version: 1, nodes: [] },
+      { version: 2, nodes: [] },
       { referenced: () => new Set(['saved']), record: (r) => records.push(r) }
     );
     await empty.core.start();
@@ -187,19 +187,19 @@ describe('instances apart from nodes', () => {
     // Stopped, it sweeps no more; and a saved graph that does not read keeps every instance.
     clock.advance(30 * DAY);
     expect(fs.existsSync(path.join(dataDir, 'instances', 'saved'))).toBe(true);
-    const unread = core({ version: 1, nodes: [] }, { referenced: () => undefined }).core;
+    const unread = core({ version: 2, nodes: [] }, { referenced: () => undefined }).core;
     await unread.start();
     expect(unread.sweepInstances()).toEqual([]);
     expect(unread.instances().find((i) => i.id === 'saved')?.used).toBe(false);
     await unread.stop();
-    const none = core({ version: 1, nodes: [] }).core;
+    const none = core({ version: 2, nodes: [] }).core;
     await none.start();
     expect(fs.existsSync(path.join(dataDir, 'instances', 'saved'))).toBe(false);
     await none.stop();
   });
 
   it('list and expire instances in memory too', async () => {
-    const c = new Core({ clock, graph: { version: 1, nodes: [{ id: 'a', plugin: 'counter' }] } });
+    const c = new Core({ clock, graph: { version: 2, nodes: [{ id: 'a', plugin: 'counter' }] } });
     c.register(counter);
     await c.start();
     expect(c.instances().map((i) => i.id)).toEqual(['a']);

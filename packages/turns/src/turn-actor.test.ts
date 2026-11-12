@@ -71,10 +71,10 @@ async function run(
           // One interval, 17 minutes: a plan "at once" is at once.
           config: { chat: CHAT, seed: 7, schedule: { maxGapMin: 17 }, ...o.config },
           edges: [
+            { from: TELEGRAM_USER, to: 'quest-turns.chat', reads: [CHAT] },
             {
-              from: TELEGRAM_USER,
-              to: 'quest-turns.chat',
-              reads: [CHAT],
+              from: 'quest-turns.chat',
+              to: `${TELEGRAM_USER}.chat`,
               sends: [CHAT],
               commands: ['/play'],
             },
@@ -297,21 +297,30 @@ describe('several turn-actor nodes', () => {
     const account = new Account({ account: 'telegram:alice' });
     const records: { type: string; instance?: unknown; event?: unknown }[] = [];
     const clock = new VirtualClock(T0);
-    const chat = (to: string, bot: string) => ({
+    // Each actor reads its bot's chat (chat-in) and sends its command there (chat-out).
+    const read = (to: string, bot: string) => ({
       from: `${TELEGRAM_USER}.chat`,
       to: `${to}.chat`,
-      type: 'chat' as const,
+      type: 'chat-in' as const,
       reads: [bot],
-      sends: [bot],
-      commands: ['/play'],
     });
+    const chat = (to: string, bot: string, commands = ['/play']) => [
+      read(to, bot),
+      {
+        from: `${to}.chat`,
+        to: `${TELEGRAM_USER}.chat`,
+        type: 'chat-out' as const,
+        sends: [bot],
+        commands,
+      },
+    ];
     const core = new Core({
       clock,
       dataDir,
       record: (r) => records.push(r as (typeof records)[number]),
       // As the editor saves it: plain data, each node its instance, config and mode.
       graph: {
-        version: 1,
+        version: 2,
         nodes: [
           { id: TELEGRAM_USER, plugin: TELEGRAM_USER, account: 'telegram:alice' },
           { id: QUEST, plugin: QUEST },
@@ -330,9 +339,9 @@ describe('several turn-actor nodes', () => {
           },
         ],
         edges: [
-          { ...chat(QUEST, CHAT), sends: [], commands: [] },
-          chat('quest-a', CHAT),
-          { ...chat('quest-b', CHAT), commands: ['/quest'] },
+          read(QUEST, CHAT),
+          ...chat('quest-a', CHAT),
+          ...chat('quest-b', CHAT, ['/quest']),
           { from: `${QUEST}.interface`, to: 'quest-a.parser', type: 'interface' },
           { from: `${QUEST}.interface`, to: 'quest-b.parser', type: 'interface' },
         ],

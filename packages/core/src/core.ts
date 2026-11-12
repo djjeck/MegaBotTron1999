@@ -29,12 +29,14 @@ import {
   type Binding,
   defaultGraph,
   type Graph,
+  GRAPH_VERSION,
   GraphError,
   type GraphInput,
   loadOrder,
   requiredOf,
   type ResolvedNode,
   resolveGraph,
+  upgradeGraph,
 } from './graph.ts';
 import { type GraphCheck, type GraphFile, type GraphProblem, locateProblem } from './graph-file.ts';
 import { describePlugin, type PluginView } from './graph-view.ts';
@@ -165,7 +167,7 @@ export interface AvailablePlugin extends PluginView {
 }
 
 /** A graph with no node: the instance's when it has none saved. */
-const EMPTY_GRAPH: Graph = { version: 1, nodes: [], edges: [] };
+const EMPTY_GRAPH: Graph = { version: GRAPH_VERSION, nodes: [], edges: [] };
 
 /** A graph compiled: its instances in load order, the graph as held, and their bus. */
 interface Compiled {
@@ -420,7 +422,7 @@ export class Core {
     const entry = this.entries.get(plugin);
     if (entry === undefined) return { reach: { sends: [] } };
     const holder = [...this.entries.values()].find((e) => e.node.account === account);
-    const reaches = chatsOf(entry.node)
+    const reaches = sendsOf(entry.node)
       .filter(([, b]) => b.node === holder?.id)
       .map(([, b]) => b.chat ?? { reads: [], sends: [] });
     const { state, reason } = entry.status;
@@ -587,10 +589,10 @@ export class Core {
     return this.loadedGraph === undefined ? undefined : structuredClone(this.loadedGraph);
   }
 
-  /** Whether an instance sends anywhere (an edge binds a chat it sends to): it has a mode (P10). */
+  /** Whether an instance sends anywhere (a chat-out edge binds a chat it sends to): it has a mode (P10). */
   sends(id: string): boolean {
     const node = this.entries.get(id)?.node;
-    return node !== undefined && chatsOf(node).some(([, b]) => (b.chat?.sends.length ?? 0) > 0);
+    return node !== undefined && sendsOf(node).some(([, b]) => (b.chat?.sends.length ?? 0) > 0);
   }
 
   /**
@@ -823,6 +825,22 @@ export class Core {
     }
   }
 
+  /**
+   * A graph file of version 1 as version 2 (§2.3, bot-os.md D60), against the plugins the
+   * instance offers; any other as it is. Nothing is checked.
+   */
+  upgrade(raw: unknown): unknown {
+    const manifests = new Map<string, Manifest>();
+    for (const p of this.plugins)
+      try {
+        const m = parseManifest(p.manifest);
+        if (!manifests.has(m.id)) manifests.set(m.id, m);
+      } catch {
+        // The check says why.
+      }
+    return upgradeGraph(raw, manifests);
+  }
+
   /** Why the saved graph was not run at this start (§2.3); none when it was. */
   graphProblems(): GraphProblem[] {
     return structuredClone(this.refused);
@@ -1034,16 +1052,18 @@ export class Core {
       bus: this.bus.handle(id, entry.manifest, sourcesOf(node), log, node.instance),
       drift: this.driftMonitor.reporter(id),
       outbox: (key) => {
-        const bound = this.chatInput(node, key);
+        const bound = this.chatEnd(sendsOf(node), key);
         const holder = bound === undefined ? undefined : this.entries.get(bound[1].node);
         if (holder?.node.account === undefined)
-          throw new Error(`${id} has no reach on the account ${key}: no edge binds it`);
+          throw new Error(
+            `${id} has no reach on the account ${key}: no edge binds a chat-out of it`
+          );
         return this.outbox(holder.node.account).as(id);
       },
       connector: (key) => {
-        const bound = this.chatInput(node, key);
+        const bound = this.chatEnd(chatsOf(node), key);
         if (bound === undefined)
-          throw new Error(`${id} has no reach on ${key}: no edge binds a chat input of it`);
+          throw new Error(`${id} has no reach on ${key}: no edge binds a chat-in input of it`);
         const c = this.connector(bound[1].node);
         if (c === undefined) throw new Error(`${bound[1].node} is not a running connector`);
         // It hears only the chats its edge reads (P6).
@@ -1149,11 +1169,11 @@ export class Core {
   }
 
   /**
-   * A node's chat input `key` (a port's name; or, by the other end, a connector instance's id or
-   * its account) and its edge; undefined if no edge binds one.
+   * Of a node's bound chat ports (its chat-in inputs, or its chat-out outputs), the one `key` names
+   * (a port's name; or, by the other end, a connector instance's id or its account) and its edge;
+   * undefined if no edge binds one.
    */
-  private chatInput(node: ResolvedNode, key: string): [string, Binding] | undefined {
-    const chats = chatsOf(node);
+  private chatEnd(chats: [string, Binding][], key: string): [string, Binding] | undefined {
     return (
       chats.find(([port]) => port === key) ??
       chats.find(([, b]) => b.node === key || this.entries.get(b.node)?.node.account === key)
@@ -1239,11 +1259,16 @@ function commandProblems(entries: readonly { id: string; manifest: Manifest }[])
   return problems;
 }
 
-/** A node's chat inputs that an edge binds, each with its edge. */
+/** A node's chat-in inputs that an edge binds, each with its edge: the chats it reads. */
 function chatsOf(node: ResolvedNode): [string, Binding][] {
   return [...node.inputs].flatMap(([port, bs]) =>
-    bs.filter((b) => b.type === 'chat').map((b): [string, Binding] => [port, b])
+    bs.filter((b) => b.type === 'chat-in').map((b): [string, Binding] => [port, b])
   );
+}
+
+/** A node's chat-out outputs that an edge binds, each with its edge: what it sends, and where. */
+function sendsOf(node: ResolvedNode): [string, Binding][] {
+  return [...node.outputs].flatMap(([port, bs]) => bs.map((b): [string, Binding] => [port, b]));
 }
 
 /** The nodes whose events a node hears, by namespace: its edges', and its own of its namespaces. */

@@ -8,6 +8,9 @@
  *   the instance with no nodes, and the file is kept as it is: the problems are reported (the
  *   status, the control API, the owner), for the owner to fix in the UI, so it never crash-loops.
  * - Saving keeps the file before as `graph.previous.json`; a rollback swaps the two.
+ * - A file of version 1 (one chat edge for reads and sends) is converted to version 2 as it is
+ *   read (bot-os.md D60): the instance runs it, `GET /graph/file` shows it, and the check and a
+ *   save take it, as version 2; the file itself is rewritten only by the next save.
  * - A problem is located where it can be: its node, its edge, its port, its config or setting key,
  *   for the editor to mark.
  *
@@ -50,6 +53,8 @@ export type GraphCheck = { ok: true; graph: Graph } | { ok: false; problems: Gra
 export interface GraphChecker {
   /** Checks a graph against the plugins the instance offers, as the load does. */
   check(raw: unknown): GraphCheck;
+  /** A graph file of an older version as the current one (bot-os.md D60); none: as it is. */
+  upgrade?(raw: unknown): unknown;
   /** The graph the instance runs. */
   graph(): Graph | undefined;
   /** Why the saved graph was not run at start; none when it was. */
@@ -105,7 +110,9 @@ export function locateProblem(problem: string, raw: unknown): GraphProblem {
   }
   const node = /^(?:node|plugin) (\S+): /u.exec(problem);
   if (node !== null) out.node = node[1] as string;
-  const port = /^node \S+: (?:no (?:input|output) port|input port) ([^\s:(]+)/u.exec(problem);
+  const port = /^node \S+: (?:no (?:input|output) port|(?:input|output) port) ([^\s:(]+)/u.exec(
+    problem
+  );
   if (port !== null) out.port = port[1] as string;
   const key = /^plugin \S+: (config|settings) ([^\s:]+):/u.exec(problem);
   if (key?.[1] === 'config' && key[2] !== '(all)') out.config = key[2] as string;
@@ -281,6 +288,8 @@ export function graphFileControls(
   core: GraphChecker,
   redact: <T>(v: T) => T = (v) => v
 ): GraphFileControls {
+  /** A graph as the current version writes it, an older file's converted (D60). */
+  const current = (raw: unknown): unknown => (core.upgrade === undefined ? raw : core.upgrade(raw));
   /** The saved graph, unchecked, or undefined. */
   const saved = (): unknown => {
     const r = file.read();
@@ -296,7 +305,7 @@ export function graphFileControls(
         : checked === undefined || !checked.ok || !sameGraph(checked.graph, running);
       return redact({
         exists: r.exists,
-        ...(r.exists && 'raw' in r ? { graph: r.raw } : {}),
+        ...(r.exists && 'raw' in r ? { graph: current(r.raw) } : {}),
         ...(r.exists && 'error' in r ? { error: r.error } : {}),
         ...(checked !== undefined && !checked.ok ? { problems: checked.problems } : {}),
         differs,
@@ -307,7 +316,7 @@ export function graphFileControls(
       return redact({
         ok: checked.ok,
         problems: checked.ok ? [] : checked.problems,
-        diff: graphDiff(saved() ?? { nodes: [], edges: [] }, raw),
+        diff: graphDiff(current(saved() ?? { nodes: [], edges: [] }), current(raw)),
       });
     },
     save: (raw) => {

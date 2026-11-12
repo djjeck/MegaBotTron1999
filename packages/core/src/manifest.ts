@@ -4,7 +4,15 @@
  * and the field, and the instance does not start: it is a mistake in the image, best seen at once.
  */
 import { z } from 'zod';
-import { type DeclaredInput, inputSchema, type OutputPort, PORT_NAME } from './ports.ts';
+import {
+  type DeclaredInput,
+  type DeclaredOutput,
+  inputSchema,
+  type ManifestInputPort,
+  type OutputPort,
+  outputSchema,
+  PORT_NAME,
+} from './ports.ts';
 
 export const KINDS = ['connector', 'parser', 'actor', 'stats', 'agent', 'simulator'] as const;
 export type Kind = (typeof KINDS)[number];
@@ -52,6 +60,14 @@ export const manifestSchema = z
      */
     inputs: z
       .record(z.string().regex(PORT_NAME, 'expected lower-case words and dashes'), inputSchema)
+      .default({}),
+    /**
+     * Its declared output ports, by name (§2.1): its chat-outs, what it sends through a connector's
+     * account, each with the binding the programmatic wiring gives it by default. Its other
+     * outputs (a connector's chat-in, its events, its interface) are derived.
+     */
+    outputs: z
+      .record(z.string().regex(PORT_NAME, 'expected lower-case words and dashes'), outputSchema)
       .default({}),
     /** Shorthand (§2.1): the plugins it needs started first, by id, read as input ports. */
     requires: z.array(z.string().regex(PLUGIN_ID)).default([]),
@@ -187,15 +203,49 @@ export const manifestSchema = z
           path: ['inputs', port, 'namespace'],
           message: `its config has no key ${p.namespace.config}`,
         });
+      if (
+        p.type === 'chat-in' &&
+        p.when !== undefined &&
+        !Object.hasOwn(m.config?.shape ?? {}, p.when.config)
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['inputs', port, 'when'],
+          message: `its config has no key ${p.when.config}`,
+        });
     }
+    const derived = new Set([
+      'interface',
+      ...(m.account === undefined ? [] : ['chat']),
+      ...m.games.registers.map((ns) =>
+        m.games.registers.length === 1 ? 'events' : `${ns}-events`
+      ),
+    ]);
+    const chatOuts = [
+      ...Object.keys(m.outputs),
+      ...Object.entries(m.inputs).flatMap(([n, p]) => (p.type === 'chat' ? [n] : [])),
+    ];
+    for (const port of chatOuts)
+      if (derived.has(port))
+        ctx.addIssue({
+          code: 'custom',
+          path: [Object.hasOwn(m.outputs, port) ? 'outputs' : 'inputs', port],
+          message: `the output ${port} is derived: name its chat-out otherwise`,
+        });
   })
   .transform(normalise);
 
 /**
- * The manifest with its shorthand read as input ports (§2.1), and its output ports derived:
- * `requires` with `reach` a chat input named after the connector, `requires` with `uses` (or
- * alone) an interface input named after the plugin, `games.consumes` an optional events input
+ * The manifest with its shorthand read as ports (§2.1), and its output ports derived: `requires`
+ * with `reach` a chat input named after the connector, `requires` with `uses` (or alone) an
+ * interface input named after the plugin, `games.consumes` an optional events input
  * `<namespace>-events`. A port declared in `inputs` under one of these names is left as written.
+ *
+ * A chat input (the old `chat` type, module API 1, or the shorthand's) is then read as a chat-in
+ * input and a chat-out output of the same name (bot-os.md D60), its `bind` split between them: the
+ * reads to the input, the sends and commands to the output. A chat-out output declared in
+ * `outputs` under that name is left as written. A connector (its `account`) has a chat-in output
+ * and a chat-out input, both named `chat`.
  */
 function normalise<
   M extends {
@@ -211,13 +261,14 @@ function normalise<
     }[];
     games: { registers: string[]; consumes: string[] };
     inputs: Record<string, DeclaredInput>;
+    outputs: Record<string, DeclaredOutput>;
     interface: {
       state?: Record<string, unknown> | undefined;
       actions?: Record<string, unknown> | undefined;
     };
   },
 >(m: M) {
-  const { requires, uses, reach, games, inputs: declared, ...rest } = m;
+  const { requires, uses, reach, games, inputs: declared, outputs: declaredOut, ...rest } = m;
   const inputs: Record<string, DeclaredInput> = {};
   const add = (name: string, port: DeclaredInput): void => {
     let n = name;
@@ -248,10 +299,46 @@ function normalise<
   for (const r of reach) if (!requires.includes(r.connector)) add(r.connector, chatOf(r, true));
   for (const ns of games.consumes)
     add(`${ns}-events`, { type: 'events', namespace: ns, optional: true });
-  const all = { ...inputs, ...declared };
+  const all: Record<string, ManifestInputPort> = {};
+  const chatOuts: Record<string, DeclaredOutput> = {};
+  for (const [name, p] of Object.entries({ ...inputs, ...declared })) {
+    if (p.type !== 'chat') {
+      all[name] = p;
+      continue;
+    }
+    const { bind, type: _, ...port } = p;
+    all[name] = {
+      ...port,
+      type: 'chat-in',
+      ...(bind === undefined ? {} : { bind: { node: bind.node, reads: bind.reads } }),
+    };
+    chatOuts[name] = {
+      ...port,
+      type: 'chat-out',
+      ...(bind === undefined
+        ? {}
+        : {
+            bind: {
+              node: bind.node,
+              sends: bind.sends,
+              ...(bind.commands === undefined ? {} : { commands: bind.commands }),
+            },
+          }),
+    };
+  }
   const outputs: Record<string, OutputPort> = {};
-  if (m.account !== undefined)
-    outputs['chat'] = { type: 'chat', network: m.account.slice(0, m.account.indexOf(':')) };
+  if (m.account !== undefined) {
+    const network = m.account.slice(0, m.account.indexOf(':'));
+    outputs['chat'] = { type: 'chat-in', network };
+    if (!Object.hasOwn(all, 'chat'))
+      all['chat'] = {
+        type: 'chat-out',
+        network,
+        optional: true,
+        help: 'What the plugins send through its account',
+      };
+  }
+  Object.assign(outputs, chatOuts, declaredOut);
   for (const ns of games.registers)
     outputs[games.registers.length === 1 ? 'events' : `${ns}-events`] = {
       type: 'events',

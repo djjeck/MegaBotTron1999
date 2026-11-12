@@ -113,7 +113,7 @@ describe('the context’s event log', () => {
       ],
       plugins: [parser(seen), ledger(seen)],
       graph: {
-        version: 1,
+        version: 2,
         nodes: [
           { id: 'd1', plugin: 'dice', instance: 'one' },
           { id: 'd2', plugin: 'dice', instance: 'two' },
@@ -179,7 +179,7 @@ describe('the context’s connector services', () => {
       clock: new VirtualClock(T0),
       secrets: secretsWith({ token_a: 'aaaa-1111', token_b: 'bbbb-2222' }),
       graph: {
-        version: 1,
+        version: 2,
         nodes: [
           { id: 'a', plugin: 'api', account: 'api:a', config: { token: 'token_a' } },
           { id: 'b', plugin: 'api', account: 'api:b', config: { token: 'token_b' } },
@@ -205,7 +205,7 @@ describe('the context’s connector services', () => {
       clock: new VirtualClock(T0),
       secrets: secretsWith({}),
       graph: {
-        version: 1,
+        version: 2,
         nodes: [
           { id: 'a', plugin: 'api', account: 'api:a', config: { token: 'Not A Name' } },
           { id: 'b', plugin: 'api', account: 'api:b', config: { token: 'missing' } },
@@ -218,7 +218,7 @@ describe('the context’s connector services', () => {
     const without = new Core({
       clock: new VirtualClock(T0),
       graph: {
-        version: 1,
+        version: 2,
         nodes: [{ id: 'a', plugin: 'api', config: { token: 'missing' } }],
         edges: [],
       },

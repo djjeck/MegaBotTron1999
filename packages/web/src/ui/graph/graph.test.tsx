@@ -40,26 +40,57 @@ describe('GraphPage', () => {
     expect(events.getAttribute('title')).toBe(
       'game-events: events of game (optional) — what happens'
     );
-    const out = within(screen.getByLabelText('node chat')).getByTestId('port out chat');
+    // The connector is two cards (D60): its in card, whose chat-in output feeds the readers, and
+    // its out card, whose chat-out input takes the senders' edges.
+    const out = within(screen.getByLabelText('node chat · in')).getByTestId('port out chat');
     expect(out.className).toContain('circle');
     expect(out.className).toContain('react-flow__handle-right');
     await waitFor(() => expect(out.style.background).toBe('#2f7ed8'), slow);
+    const outCard = screen.getByLabelText('node chat · out');
+    expect(within(outCard).getByText('chat · out')).toBeDefined();
+    expect(within(outCard).queryByTestId('port out chat')).toBeNull();
+    const into = within(outCard).getByTestId('port in chat');
+    expect(into.className).toContain('react-flow__handle-left');
+    expect(into.style.background).toBe('#8a4fd1');
+    expect(
+      within(screen.getByLabelText('node chat · in')).queryByTestId('port in chat')
+    ).toBeNull();
+    // The actor reads on its left and sends on its right.
+    expect(within(actor).getByTestId('port in chat').className).toContain('handle-left');
+    expect(within(actor).getByTestId('port out chat').className).toContain('handle-right');
     // A rhombus at each edge's midpoint, in its port type's colour, named after the edge.
     const rhombi = await screen.findAllByRole('button', { name: /^edge / });
     expect(rhombi.map((r) => r.getAttribute('aria-label'))).toEqual([
       'edge chat.chat → actor-a.chat',
+      'edge actor-a.chat → chat.chat',
       'edge parser.events → actor-a.game-events',
       'edge parser.interface → actor-a.parser',
     ]);
     expect(rhombi[0]?.style.getPropertyValue('--edge-colour')).not.toBe('');
     expect(rhombi[0]?.getAttribute('title')).toBe(
-      'chat.chat → actor-a.chat (chat): open its settings'
+      'chat.chat → actor-a.chat (chat-in): open its settings'
     );
     // The edges: one per binding, the optional one dashed.
-    await waitFor(() => expect(container.querySelectorAll('.react-flow__edge')).toHaveLength(3));
+    await waitFor(() => expect(container.querySelectorAll('.react-flow__edge')).toHaveLength(4));
+    // Left to right: the in card, the actor, the out card, past every other.
+    const x = (label: string): number =>
+      Number(
+        /translate\(([\d.-]+)px/u.exec(
+          (screen.getByLabelText(label).closest('.react-flow__node') as HTMLElement).style.transform
+        )?.[1]
+      );
+    expect(x('node chat · in')).toBeLessThan(x('node actor-a'));
+    expect(x('node actor-a')).toBeLessThan(x('node chat · out'));
     const dashed = container.querySelector('.react-flow__edge.optional path') as SVGElement | null;
     expect(dashed?.style.strokeDasharray).toBe('6 4');
-    expect(screen.getByText('optional input')).toBeDefined();
+    // A chat-out edge is dashed by its sender's output, not by the connector's input, which is
+    // optional only in that it takes any number of them.
+    expect(
+      container
+        .querySelector('[data-id="actor-a.chat → chat.chat"]')
+        ?.classList.contains('optional')
+    ).toBe(false);
+    expect(screen.getByText('optional port')).toBeDefined();
   });
 
   it('shows a node’s details: its instance, forms, and interface', async () => {
@@ -82,8 +113,12 @@ describe('GraphPage', () => {
     expect(within(details).getByRole('group', { name: 'bump input' })).toBeDefined();
     expect(within(details).queryByRole('group', { name: 'stay input' })).toBeNull();
 
-    fireEvent.click(screen.getByLabelText('node chat'));
+    // Either card of the connector opens its one node.
+    fireEvent.click(screen.getByLabelText('node chat · out'));
     const chat = await screen.findByLabelText('details of chat');
+    await waitFor(() =>
+      expect(screen.getByLabelText('node chat · in').className).toContain('selected')
+    );
     expect(within(chat).getByText('(kept; last referenced 2026-11-01 00:00)')).toBeDefined();
     expect((within(chat).getByLabelText('account') as HTMLInputElement).placeholder).toBe(
       'chat:me'
@@ -91,6 +126,14 @@ describe('GraphPage', () => {
     expect(within(chat).getByText('no settings')).toBeDefined();
     expect(within(chat).getByText('Secrets it reads: chat_password')).toBeDefined();
     expect((within(chat).getByLabelText('host') as HTMLInputElement).value).toBe('example.test');
+    // Removing it, from either card, removes both: the confirmation names them.
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    fireEvent.click(within(chat).getByRole('button', { name: 'Remove chat' }));
+    expect(confirm).toHaveBeenCalledWith(
+      'Remove chat? Both its cards go, chat · in and chat · out: they are one node. Its instance chat is kept, with its state, and deleted after 7 days if no node uses it.'
+    );
+    expect(screen.getByLabelText('node chat · out')).toBeDefined();
 
     fireEvent.click(screen.getByLabelText('node parser'));
     const parser = await screen.findByLabelText('details of parser');
@@ -177,7 +220,7 @@ describe('GraphPage', () => {
     vi.stubGlobal('confirm', () => true);
     render(<GraphPage loggedOut={loggedOut} checkAfterMs={0} />);
     expect(await screen.findByText('instance off', {}, slow)).toBeDefined();
-    fireEvent.click(await screen.findByLabelText('node chat', {}, slow));
+    fireEvent.click(await screen.findByLabelText('node chat · in', {}, slow));
     const details = await screen.findByLabelText('details of chat');
     await waitFor(() => expect(within(details).getByRole('button', { name: 'Kill chat' })));
     fireEvent.click(within(details).getByRole('button', { name: 'Kill chat' }));

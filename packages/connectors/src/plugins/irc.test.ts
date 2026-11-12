@@ -191,7 +191,7 @@ describe('the irc plugin in the core', () => {
       clock: new VirtualClock(),
       secrets: secretsWith(IRC_SECRETS),
       graph: {
-        version: 1,
+        version: 2,
         nodes: [{ id: 'net', plugin: 'irc', account: 'irc:bob', config: IRC_CONFIG }],
         edges: [],
       },

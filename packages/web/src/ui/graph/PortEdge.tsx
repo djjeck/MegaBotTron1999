@@ -1,8 +1,8 @@
 /**
  * One edge of the graph editor (D55): a curve from an output to an input in its port type's colour
  * (dashed when the input is optional), and at its midpoint a rhombus in the same colour, the
- * edge's handle. An edge carries configuration (a chat edge's reads, sends and commands) that a
- * line does not show; the rhombus says there is something to open. It is a button: a click, or
+ * edge's handle. An edge carries configuration (a chat-in edge's reads, a chat-out edge's sends and
+ * commands) that a line does not show; the rhombus says there is something to open. It is a button: a click, or
  * Enter or Space once focused, selects the edge (as a click on its line does) and so opens its
  * panel; it grows under the pointer and is ringed while its edge is selected. Drawn with React
  * Flow's custom-edge API: `BaseEdge` for the line, `EdgeLabelRenderer` for the rhombus, an HTML

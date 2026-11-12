@@ -19,7 +19,7 @@ describe('the plugins available', () => {
   it('are the image’s and the modules’, each with its module', async () => {
     const core = new Core({
       clock: new VirtualClock(0),
-      graph: { version: 1, nodes: [], edges: [] },
+      graph: { version: 2, nodes: [], edges: [] },
     });
     const broken = { manifest: { id: 'Broken' }, create: () => ({}) } as unknown as Plugin;
     core.register(plugin('image-plugin'));
@@ -59,7 +59,7 @@ describe('the control API’s modules', () => {
   it('lists, installs from a directory or a tarball, and rolls back', async () => {
     const core = new Core({
       clock: new VirtualClock(0),
-      graph: { version: 1, nodes: [], edges: [] },
+      graph: { version: 2, nodes: [], edges: [] },
     });
     core.register(plugin('image-plugin'));
     await core.start();
@@ -177,7 +177,7 @@ describe('the control API’s modules', () => {
   it('refuses an upload too large, and passes other errors on', async () => {
     const core = new Core({
       clock: new VirtualClock(0),
-      graph: { version: 1, nodes: [], edges: [] },
+      graph: { version: 2, nodes: [], edges: [] },
     });
     await core.start();
     server = controlServer({

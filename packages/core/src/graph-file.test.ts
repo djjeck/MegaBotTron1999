@@ -48,15 +48,26 @@ const actor = definePlugin({
 });
 
 const good: GraphInput = {
-  version: 1,
+  version: 2,
   nodes: [
     { id: 'chat', plugin: 'chat' },
     { id: 'scorer', plugin: 'scorer' },
     { id: 'actor', plugin: 'actor', instance: 'actor-1', config: { every: 2 } },
   ],
   edges: [
-    { from: 'chat', to: 'actor.chat', reads: ['#lobby'], sends: ['#lobby'] },
+    { from: 'chat', to: 'actor.chat', reads: ['#lobby'] },
+    { from: 'actor.chat', to: 'chat.chat', sends: ['#lobby'] },
     { from: 'scorer', to: 'actor.score' },
+  ],
+};
+
+/** The good graph as version 1 wrote it: one chat edge for the reads and the sends. */
+const legacy = {
+  ...good,
+  version: 1,
+  edges: [
+    { from: 'chat.chat', to: 'actor.chat', type: 'chat', reads: ['#lobby'], sends: ['#lobby'] },
+    { from: 'scorer.interface', to: 'actor.score', type: 'interface' },
   ],
 };
 
@@ -115,10 +126,10 @@ describe('the graph file', () => {
     expect(file.read()).toEqual({ exists: false });
     expect(file.references()).toEqual(new Set());
     expect(() => file.rollback()).toThrow(GraphFileError);
-    expect(file.save({ version: 1, nodes: [{ id: 'a', plugin: 'p' }], edges: [] })).toBe(true);
+    expect(file.save({ version: 2, nodes: [{ id: 'a', plugin: 'p' }], edges: [] })).toBe(true);
     expect(file.references()).toEqual(new Set(['a']));
     expect(
-      file.save({ version: 1, nodes: [{ id: 'b', plugin: 'p', instance: 'i' }], edges: [] })
+      file.save({ version: 2, nodes: [{ id: 'b', plugin: 'p', instance: 'i' }], edges: [] })
     ).toBe(true);
     expect(file.references()).toEqual(new Set(['i']));
     file.rollback();
@@ -188,6 +199,7 @@ describe('the graph file', () => {
         ],
         removed: [
           { from: 'chat', to: 'actor.chat' },
+          { from: 'actor.chat', to: 'chat.chat' },
           { from: 'scorer', to: 'actor.score' },
         ],
         changed: [],
@@ -228,17 +240,22 @@ describe('the core on the graph file', () => {
     expect(core.nodes()).toEqual([]);
     expect(core.graphProblems()).toEqual([
       {
-        text: 'node actor: input port score: chat of chat cannot bind interface of scorer (edge chat.chat → actor.score)',
+        text: 'node actor: input port score: chat-in of chat cannot bind interface of scorer (edge chat.chat → actor.score)',
         node: 'actor',
         port: 'score',
         edge: { from: 'chat.chat', to: 'actor.score' },
       },
       {
-        text: 'edge scorer → actor.chat: no output of scorer fits chat of chat; name it',
+        text: 'edge scorer → actor.chat: no output of scorer fits chat-in of chat; name it',
         edge: { from: 'scorer', to: 'actor.chat' },
       },
       {
-        text: 'node actor: input port chat (chat of chat) is not bound',
+        text: 'node actor: input port chat (chat-in of chat) is not bound',
+        node: 'actor',
+        port: 'chat',
+      },
+      {
+        text: 'node actor: output port chat (chat-out of chat) is not bound',
         node: 'actor',
         port: 'chat',
       },
@@ -295,6 +312,7 @@ describe('the graph API', () => {
         { node: 'actor', port: 'score', edge: { from: 'chat.chat', to: 'actor.score' } },
         { edge: { from: 'scorer', to: 'actor.chat' } },
         { node: 'actor', port: 'chat' },
+        { node: 'actor', port: 'chat' },
       ],
       diff: { nodes: { added: ['chat', 'scorer', 'actor'] } },
     });
@@ -302,7 +320,7 @@ describe('the graph API', () => {
     expect(status).toBe(400);
     expect(refused).toMatchObject({
       error: 'the graph is refused',
-      problems: [{ node: 'actor' }, {}, {}],
+      problems: [{ node: 'actor' }, {}, {}, {}],
     });
     expect(fs.existsSync(file.file)).toBe(false);
     // A good one is saved, and differs from the empty graph running.
@@ -325,8 +343,13 @@ describe('the graph API', () => {
     // A saved file that the check refuses says so.
     write('graph.json', bad);
     write('graph.previous.json', bad);
-    expect((await call('/graph/file'))[1]).toMatchObject({ differs: true, problems: [{}, {}, {}] });
-    expect((await call('/graph/rollback', 'POST'))[1]).toMatchObject({ problems: [{}, {}, {}] });
+    expect((await call('/graph/file'))[1]).toMatchObject({
+      differs: true,
+      problems: [{}, {}, {}, {}],
+    });
+    expect((await call('/graph/rollback', 'POST'))[1]).toMatchObject({
+      problems: [{}, {}, {}, {}],
+    });
     write('graph.json', '{half');
     expect((await call('/graph/file'))[1]).toMatchObject({ error: expect.any(String) });
     expect((await call('/status'))[1]).not.toHaveProperty('graph');
@@ -358,10 +381,72 @@ describe('the graph API', () => {
     await refused.core.start();
     const again = await serve(refused.core, refused.file);
     expect((await again('/status'))[1]).toMatchObject({
-      graph: { refused: [{ node: 'actor', port: 'score' }, { edge: {} }, { port: 'chat' }] },
+      graph: {
+        refused: [
+          { node: 'actor', port: 'score' },
+          { edge: {} },
+          { port: 'chat' },
+          { port: 'chat' },
+        ],
+      },
     });
     expect(await again('/restart', 'POST')).toEqual([404, { error: 'not found' }]);
     await refused.core.stop();
+  });
+});
+
+describe('a graph file of version 1', () => {
+  let server: http.Server | undefined;
+  afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r())));
+
+  it('runs converted, is shown and saved as version 2, and rolls back as it was', async () => {
+    write('graph.json', legacy);
+    write('graph.previous.json', legacy);
+    const { core, file } = instance();
+    await core.start();
+    expect(core.status().map((s) => s.state)).toEqual(['running', 'running', 'running']);
+    const converted = [
+      { from: 'chat.chat', to: 'actor.chat', type: 'chat-in', reads: ['#lobby'] },
+      { from: 'actor.chat', to: 'chat.chat', type: 'chat-out', sends: ['#lobby'] },
+      { from: 'scorer.interface', to: 'actor.score', type: 'interface' },
+    ];
+    expect(core.graph()).toMatchObject({ version: 2, edges: converted });
+    expect(core.sends('actor')).toBe(true);
+    server = controlServer({
+      controls: core.controls,
+      settings: core.settings,
+      graphFile: graphFileControls(file, core),
+    });
+    await new Promise<void>((r) => server?.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as { port: number };
+    const call = async (p: string, method = 'GET', payload?: unknown) => {
+      const res = await fetch(`http://127.0.0.1:${port}${p}`, {
+        method,
+        ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+      });
+      return (await res.json()) as Record<string, unknown>;
+    };
+    // Shown as version 2, the file left as it is until a save; what runs already.
+    expect(await call('/graph/file')).toMatchObject({
+      differs: false,
+      graph: { version: 2, edges: converted },
+    });
+    expect(JSON.parse(fs.readFileSync(file.file, 'utf8'))).toMatchObject({ version: 1 });
+    // Checked against the saved file, both converted: nothing changes.
+    expect(await call('/graph/check', 'POST', legacy)).toMatchObject({
+      ok: true,
+      diff: { edges: { added: [], removed: [], changed: [] } },
+    });
+    // Saved, as version 2; and rolled back, to the version 1 file, which still runs.
+    expect(await call('/graph/file', 'PUT', legacy)).toEqual({ saved: true, restart: false });
+    expect(JSON.parse(fs.readFileSync(file.file, 'utf8'))).toMatchObject({
+      version: 2,
+      edges: converted,
+    });
+    expect(await call('/graph/rollback', 'POST')).toEqual({ rolledBack: true });
+    expect(JSON.parse(fs.readFileSync(file.file, 'utf8'))).toMatchObject({ version: 1 });
+    expect(await call('/graph/file')).toMatchObject({ differs: false });
+    await core.stop();
   });
 });
 

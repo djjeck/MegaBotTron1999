@@ -7,8 +7,8 @@
  *
  * - **Add a node** from the plugins the instance offers (`GET /available`), choosing its id and its
  *   instance: fresh, kept already, or imported from an older data directory.
- * - **Wire it**: an edge dragged from an output to an input; a chat edge's chats and commands set in
- *   its panel. Every change is checked by the core as the load would (`POST /graph/check`), and
+ * - **Wire it**: an edge dragged from an output to an input; a chat-in edge's chats, or a chat-out
+ *   edge's chats and commands, set in its panel. Every change is checked by the core as the load would (`POST /graph/check`), and
  *   each refusal shown where it is: on the edge, the port, the node or the field.
  * - **Configure it**: its config, settings, mode and account in forms made from its schemas; a
  *   config key that names a secret is a choice of the secrets' names (`GET /secrets`).
@@ -20,6 +20,10 @@
  *
  * A saved graph refused at the last start (`GET /status`, `graph.refused`) runs no node: it is
  * shown first, for the owner to fix. One or several running nodes selected can be killed (D44).
+ *
+ * Chats flow left to right (D60): a connector is drawn as two cards (`cards.ts`), its in card at
+ * the left, whose chat-in output feeds the readers, and its out card at the right, whose chat-out
+ * input takes the senders' edges. Either card selects the node; removing it removes both.
  */
 import type { Connection } from '@xyflow/react';
 import {
@@ -49,6 +53,7 @@ import { useLoad } from '#src/ui/hooks.ts';
 import { Restart } from '#src/ui/Restart.tsx';
 import type { NewNode } from './AddNode.tsx';
 import { AddNode } from './AddNode.tsx';
+import { cardsOf, cardTitle, isSplit, nodesOfCards, targetCard } from './cards.ts';
 import { withDefaults } from './defaults.ts';
 import {
   addNode,
@@ -203,46 +208,80 @@ export function GraphPage({
     () => (draft?.nodes ?? []).map((n) => viewOf(n, plugins.get(n.plugin))),
     [draft, plugins]
   );
+  const viewsById = useMemo(() => new Map(views.map((v) => [v.id, v])), [views]);
+  /** Each node's cards: one, or a connector's in and out cards (D60). */
+  const cards = useMemo(() => views.flatMap(cardsOf), [views]);
+  const selectedNodes = selected.nodes.join('\n');
+  // The plugins' ports make the cards (and their heights): placed once they are known, or known not
+  // to come, so that a first placement made without them does not stay.
+  const pluginsKnown = available.data !== undefined || available.error !== undefined;
   useEffect(() => {
-    if (draft === undefined) return;
-    const byId = new Map(views.map((v) => [v.id, v]));
+    if (draft === undefined || !pluginsKnown) return;
+    const byId = new Map(cards.map((c) => [c.id, c]));
     const start = layout(
-      views.map((v) => v.id),
-      draft.edges,
-      (id) => nodeHeight(byId.get(id) as (typeof views)[number])
+      cards.map((c) => c.id),
+      draft.edges.map((e) => ({ from: endOf(e.from).node, to: targetCard(e, viewsById) })),
+      (id) => nodeHeight((byId.get(id) as (typeof cards)[number]).view),
+      new Set(cards.filter((c) => c.side === 'out').map((c) => c.id))
     );
+    const chosen = new Set(selectedNodes.split('\n'));
     setNodes((before) => {
       const was = new Map(before.map((n) => [n.id, n]));
-      return views.map((v) => {
+      return cards.map((c) => {
         const portProblems: Record<string, string[]> = {};
         for (const [key, texts] of placed.ports)
-          if (key.startsWith(`${v.id}.`)) portProblems[key.slice(v.id.length + 1)] = texts;
+          if (key.startsWith(`${c.node}.`)) {
+            const port = key.slice(c.node.length + 1);
+            if (port in c.view.inputs || port in c.view.outputs) portProblems[port] = texts;
+          }
+        const selectedHere = was.get(c.id)?.selected ?? false;
         return {
-          id: v.id,
+          id: c.id,
           type: 'plugin' as const,
-          position: was.get(v.id)?.position ?? start.get(v.id) ?? { x: 0, y: 0 },
-          selected: was.get(v.id)?.selected ?? false,
+          position: was.get(c.id)?.position ?? start.get(c.id) ?? { x: 0, y: 0 },
+          selected: selectedHere,
           data: {
-            view: v,
-            live: live.get(v.id),
-            drift: drifts.get(v.id),
+            view: c.view,
+            live: live.get(c.node),
+            drift: drifts.get(c.node),
             portTypes,
             reinstate,
-            problems: placed.nodes.get(v.id) ?? [],
+            problems: placed.nodes.get(c.node) ?? [],
             portProblems,
+            side: c.side,
+            twinSelected: !selectedHere && c.side !== undefined && chosen.has(c.node),
           },
         };
       });
     });
-  }, [draft, views, live, drifts, placed, portTypes, reinstate, setNodes]);
+  }, [
+    draft,
+    cards,
+    viewsById,
+    live,
+    drifts,
+    placed,
+    portTypes,
+    reinstate,
+    setNodes,
+    selectedNodes,
+    pluginsKnown,
+  ]);
 
   // The edges as React Flow draws them, kept as they were selected.
   useEffect(() => {
     const inputs = new Map(views.map((v) => [v.id, v.inputs]));
+    const outputs = new Map(views.map((v) => [v.id, v.outputs]));
     const drawn = (draft?.edges ?? []).map((e): PortEdgeType => {
       const from = endOf(e.from);
       const to = endOf(e.to);
-      const optional = to.port !== undefined && inputs.get(to.node)?.[to.port]?.optional === true;
+      // A chat-out edge is the sender's: dashed when its output is optional, whatever the
+      // connector's input, which takes any number (D60).
+      const input = to.port === undefined ? undefined : inputs.get(to.node)?.[to.port];
+      const optional =
+        input?.type === 'chat-out'
+          ? from.port !== undefined && outputs.get(from.node)?.[from.port]?.optional === true
+          : input?.optional === true;
       const problems = placed.edges.get(edgeKey(e)) ?? [];
       const colour =
         problems.length > 0
@@ -255,7 +294,7 @@ export function GraphPage({
         type: 'port',
         source: from.node,
         ...(from.port === undefined ? {} : { sourceHandle: from.port }),
-        target: to.node,
+        target: targetCard(e, viewsById),
         ...(to.port === undefined ? {} : { targetHandle: to.port }),
         className: `${e.type ?? ''}${optional ? ' optional' : ''}${problems.length > 0 ? ' refused' : ''}`,
         style: { stroke: colour, strokeWidth: 2, ...(optional ? { strokeDasharray: '6 4' } : {}) },
@@ -270,11 +309,12 @@ export function GraphPage({
       const was = new Set(before.filter((e) => e.selected === true).map((e) => e.id));
       return drawn.map((e) => ({ ...e, selected: was.has(e.id) }));
     });
-  }, [draft, views, placed, portTypes, setEdges]);
+  }, [draft, views, viewsById, placed, portTypes, setEdges]);
 
   const selectionChanged = useCallback(
     ({ nodes: n, edges: e }: { nodes: PluginNodeType[]; edges: PortEdgeType[] }) => {
-      const next = { nodes: n.map((x) => x.id), edges: e.map((x) => x.id) };
+      // A connector's two cards are one node.
+      const next = { nodes: nodesOfCards(n.map((x) => x.id)), edges: e.map((x) => x.id) };
       setSelected((was) =>
         was.nodes.join('\n') === next.nodes.join('\n') &&
         was.edges.join('\n') === next.edges.join('\n')
@@ -433,9 +473,12 @@ export function GraphPage({
         secretNames={secrets.data?.names ?? []}
         change={(c) => change((g) => updateNode(g, shownNode.id, c))}
         remove={() => {
+          const both = isSplit(view)
+            ? ` Both its cards go, ${cardTitle(shownNode.id, 'in')} and ${cardTitle(shownNode.id, 'out')}: they are one node.`
+            : '';
           if (
             !window.confirm(
-              `Remove ${shownNode.id}? Its instance ${instanceOf(shownNode)} is kept, with its state, and deleted after 7 days if no node uses it.`
+              `Remove ${shownNode.id}?${both} Its instance ${instanceOf(shownNode)} is kept, with its state, and deleted after 7 days if no node uses it.`
             )
           )
             return;
@@ -527,7 +570,7 @@ export function GraphPage({
           </span>
         ))}
         <span className="legend-item">
-          <span className="edge-sample optional" /> optional input
+          <span className="edge-sample optional" /> optional port
         </span>
       </div>
       {said === undefined ? null : (

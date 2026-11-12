@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AVAILABLE, VIEW } from '#test/graph-view.ts';
+import { cardsOf, cardTitle, isSplit, nodesOfCards, targetCard } from './cards.ts';
 import {
   addNode,
   asGraph,
@@ -30,12 +31,12 @@ describe('the draft', () => {
     expect(asGraph({ nodes: 'x' })).toEqual(EMPTY_GRAPH);
     expect(
       asGraph({
-        version: 1,
+        version: 2,
         nodes: [{ id: 'a', plugin: 'p' }, { id: 1 }, null],
         edges: [{ from: 'a.x', to: 'b.y' }, { from: 'a' }],
       })
     ).toEqual({
-      version: 1,
+      version: 2,
       nodes: [{ id: 'a', plugin: 'p' }],
       edges: [{ from: 'a.x', to: 'b.y' }],
     });
@@ -63,19 +64,24 @@ describe('the draft', () => {
     g = updateNode(g, 'a', { config: { host: 'h' }, account: 'chat:x' });
     g = updateNode(g, 'a', { account: '', settings: {}, mode: undefined });
     expect(g.nodes[0]).toEqual({ id: 'a', plugin: 'chat', config: { host: 'h' } });
-    g = connect(g, { from: 'a.chat', to: 'b.chat', type: 'chat' });
-    g = connect(g, { from: 'a.chat', to: 'b.chat', type: 'chat', reads: ['#a'] });
+    g = connect(g, { from: 'a.chat', to: 'b.chat', type: 'chat-out' });
+    g = connect(g, { from: 'a.chat', to: 'b.chat', type: 'chat-out', reads: ['#a'] });
     g = connect(g, { from: 'b.interface', to: 'c.x' });
     expect(g.edges).toHaveLength(2);
     expect(removeNode(g, 'a')).toEqual({
-      version: 1,
+      version: 2,
       nodes: [{ id: 'b', plugin: 'actor', instance: 'old-b' }],
       edges: [{ from: 'b.interface', to: 'c.x' }],
     });
   });
 
   it('changes an edge’s chats and commands, and removes it', () => {
-    let g = connect(EMPTY_GRAPH, { from: 'a.chat', to: 'b.chat', type: 'chat', commands: ['/x'] });
+    let g = connect(EMPTY_GRAPH, {
+      from: 'a.chat',
+      to: 'b.chat',
+      type: 'chat-out',
+      commands: ['/x'],
+    });
     g = connect(g, { from: 'c', to: 'b.other' });
     const key = edgeKey({ from: 'a.chat', to: 'b.chat' });
     expect(key).toBe('a.chat → b.chat');
@@ -83,7 +89,7 @@ describe('the draft', () => {
     expect(g.edges[0]).toEqual({
       from: 'a.chat',
       to: 'b.chat',
-      type: 'chat',
+      type: 'chat-out',
       reads: ['#a'],
       sends: [],
     });
@@ -91,7 +97,7 @@ describe('the draft', () => {
     expect(g.edges[0]).toEqual({
       from: 'a.chat',
       to: 'b.chat',
-      type: 'chat',
+      type: 'chat-out',
       sends: [],
       commands: ['/play'],
     });
@@ -111,8 +117,16 @@ describe('the draft', () => {
     ).toEqual({
       from: 'chat.chat',
       to: 'actor-a.chat',
-      type: 'chat',
+      type: 'chat-in',
     });
+    // Dragged to a connector's out card: an edge to its node.
+    expect(
+      edgeOf(
+        { source: 'actor-a', sourceHandle: 'chat', target: 'chat::out', targetHandle: 'chat' },
+        plugins,
+        g
+      )
+    ).toEqual({ from: 'actor-a.chat', to: 'chat.chat', type: 'chat-out' });
     expect(
       edgeOf(
         { source: 'gone', sourceHandle: null, target: 'actor-a', targetHandle: null },
@@ -167,7 +181,8 @@ describe('the draft', () => {
     const ports = {
       heard: { type: 'events', config: 'on', label: 'events of config on', optional: false },
       maybe: { type: 'events', config: 'also', label: 'events of config also', optional: true },
-      chat: { type: 'chat', label: 'chat of any network', optional: false },
+      chat: { type: 'chat-in', label: 'chat-in of any network', optional: false },
+      matched: { type: 'chat-in', when: 'match', label: 'chat-in of any network', optional: false },
     } as const;
     expect(inputsOf(ports, { on: 'dice.roll', also: 'cards' })).toEqual({
       heard: { ...ports.heard, namespace: 'dice', label: 'events of dice' },
@@ -177,5 +192,48 @@ describe('the draft', () => {
     // Unresolved: a required one stays, for the check to refuse; an optional one is not there.
     expect(inputsOf(ports, { on: 'Bad' })).toEqual({ heard: ports.heard, chat: ports.chat });
     expect(inputsOf(ports, undefined)).toEqual({ heard: ports.heard, chat: ports.chat });
+    // A chat-in there only with its config key (the reactor's match).
+    expect(inputsOf(ports, { match: 'x' })).toEqual({
+      heard: ports.heard,
+      chat: ports.chat,
+      matched: ports.matched,
+    });
+  });
+});
+
+describe('the cards', () => {
+  const views = new Map(VIEW.nodes.map((v) => [v.id, v]));
+  const chat = views.get('chat') as (typeof VIEW.nodes)[number];
+
+  it('draw a connector as an in card and an out card, and any other node as one', () => {
+    expect(isSplit(chat)).toBe(true);
+    const [inCard, outCard] = cardsOf(chat);
+    expect(inCard).toMatchObject({ id: 'chat', node: 'chat', side: 'in' });
+    expect(Object.keys(inCard?.view.inputs ?? {})).toEqual([]);
+    expect(Object.keys(inCard?.view.outputs ?? {})).toEqual(['chat']);
+    expect(outCard).toMatchObject({ id: 'chat::out', node: 'chat', side: 'out' });
+    expect(Object.keys(outCard?.view.inputs ?? {})).toEqual(['chat']);
+    expect(outCard?.view.outputs).toEqual({});
+    const actor = views.get('actor-a') as (typeof VIEW.nodes)[number];
+    expect(cardsOf(actor)).toEqual([
+      { id: 'actor-a', node: 'actor-a', side: undefined, view: actor },
+    ]);
+    expect(cardTitle('chat', 'out')).toBe('chat · out');
+    expect(cardTitle('actor-a', undefined)).toBe('actor-a');
+    expect(nodesOfCards(['chat::out', 'actor-a', 'chat'])).toEqual(['chat', 'actor-a']);
+  });
+
+  it('end a chat-out edge on the out card, and every other on the node’s card', () => {
+    expect(targetCard({ from: 'actor-a.chat', to: 'chat.chat', type: 'chat-out' }, views)).toBe(
+      'chat::out'
+    );
+    expect(targetCard({ from: 'actor-a.chat', to: 'chat', type: 'chat-out' }, views)).toBe(
+      'chat::out'
+    );
+    expect(targetCard({ from: 'chat.chat', to: 'actor-a.chat', type: 'chat-in' }, views)).toBe(
+      'actor-a'
+    );
+    expect(targetCard({ from: 'x', to: 'chat.other' }, views)).toBe('chat');
+    expect(targetCard({ from: 'x', to: 'gone.y' }, views)).toBe('gone');
   });
 });

@@ -118,10 +118,10 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       },
       inputs: {
         chat: {
-          type: 'chat',
+          type: 'chat-in',
           network: 'telegram',
-          help: `the owner's own account: the private chat with @${spec.bot}, and the game's group if the edge reads it; read only`,
-          bind: { node: TELEGRAM_USER, reads: [privateChat], sends: [] },
+          help: `the owner's own account: the private chat with @${spec.bot}, and the game's group if the edge reads it`,
+          bind: { node: TELEGRAM_USER, reads: [privateChat] },
         },
       },
       interface: {

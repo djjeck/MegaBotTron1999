@@ -21,6 +21,9 @@ settings' JSON Schemas), with the names of the secrets provided, never their val
 - `src/react.ts`: `react()`, a reaction: when an event is heard or a message matches, send a command
   through the outbox (docs/bot-os-api.md §4.15).
 - `src/rng.ts`: a seeded generator, so that a simulated run repeats exactly.
+- `src/graph.ts`, `src/ports.ts`: the graph, its port types (`chat-in`, `chat-out`, `events`,
+  `interface`) and its check; a graph file of version 1 is converted to version 2 as it loads
+  (`upgradeGraph`, docs/bot-os.md D60).
 - `tools/graph.ts`: prints a graph file as text or as a Mermaid flowchart.
 
 The full description of the API is [docs/bot-os-api.md](../../docs/bot-os-api.md).

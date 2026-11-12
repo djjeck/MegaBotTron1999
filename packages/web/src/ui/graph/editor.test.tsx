@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 const slow = { timeout: 5000 };
-const EMPTY: Graph = { version: 1, nodes: [], edges: [] };
+const EMPTY: Graph = { version: 2, nodes: [], edges: [] };
 
 describe('the graph editor', () => {
   it('builds a graph from nothing: a connector added, reviewed, and applied (saved and restarted)', async () => {
@@ -44,7 +44,9 @@ describe('the graph editor', () => {
       'irc-main'
     );
     fireEvent.click(within(add).getByRole('button', { name: 'Add irc-main' }));
-    expect(await screen.findByLabelText('node irc-main', {}, slow)).toBeDefined();
+    // A connector: its in card, and its out card.
+    expect(await screen.findByLabelText('node irc-main · in', {}, slow)).toBeDefined();
+    expect(screen.getByLabelText('node irc-main · out')).toBeDefined();
     expect(screen.getByRole('status').textContent).toContain(
       'irc-main added on the instance irc-main'
     );
@@ -71,7 +73,7 @@ describe('the graph editor', () => {
     expect(screen.queryByRole('dialog', { name: 'review changes' })).toBeNull();
     // Its config started filled with its defaults, written as if typed.
     const graph = {
-      version: 1,
+      version: 2,
       nodes: [
         {
           id: 'irc-main',
@@ -288,7 +290,7 @@ describe('the graph editor', () => {
     await waitFor(() =>
       expect(container.querySelector('.react-flow__edge.refused')).not.toBeNull()
     );
-    fireEvent.click(screen.getByLabelText('node chat'));
+    fireEvent.click(screen.getByLabelText('node chat · in'));
     const chat = await screen.findByLabelText('details of chat');
     expect(within(chat).getByText('plugin chat: config host: too short')).toBeDefined();
     // Its config, a secret among the names provided, and its account.
@@ -340,23 +342,38 @@ describe('the graph editor', () => {
     expect(pressed().className).toContain('selected');
     expect((within(panel).getByLabelText('reads') as HTMLTextAreaElement).value).toBe('#a');
     expect(within(panel).getByText('node actor-a: reads #a, which is not its chat')).toBeDefined();
+    // A chat-in edge carries its reads alone.
+    expect(within(panel).queryByLabelText('sends')).toBeNull();
+    expect(within(panel).queryByLabelText('commands')).toBeNull();
     fireEvent.change(within(panel).getByLabelText('reads'), { target: { value: '#b\n#c, #d' } });
     fireEvent.blur(within(panel).getByLabelText('reads'));
-    fireEvent.change(within(panel).getByLabelText('commands'), { target: { value: '/play' } });
-    fireEvent.blur(within(panel).getByLabelText('commands'));
     await waitFor(() =>
       expect(core.checked.at(-1)?.edges[0]).toEqual({
         from: 'chat.chat',
         to: 'actor-a.chat',
-        type: 'chat',
+        type: 'chat-in',
         reads: ['#b', '#c', '#d'],
-        sends: ['#a'],
-        commands: ['/play'],
       })
     );
     await waitFor(() => expect(container.querySelector('.react-flow__edge.refused')).toBeNull());
     fireEvent.click(within(panel).getByRole('button', { name: 'Remove edge' }));
-    await waitFor(() => expect(core.checked.at(-1)?.edges).toHaveLength(2));
+    await waitFor(() => expect(core.checked.at(-1)?.edges).toHaveLength(3));
+    // A chat-out edge carries its sends and commands, and no reads.
+    fireEvent.click(screen.getByRole('button', { name: 'edge actor-a.chat → chat.chat' }));
+    const sends = await screen.findByLabelText('details of edge actor-a.chat → chat.chat');
+    expect(within(sends).queryByLabelText('reads')).toBeNull();
+    expect((within(sends).getByLabelText('sends') as HTMLTextAreaElement).value).toBe('#a');
+    fireEvent.change(within(sends).getByLabelText('commands'), { target: { value: '/play' } });
+    fireEvent.blur(within(sends).getByLabelText('commands'));
+    await waitFor(() =>
+      expect(core.checked.at(-1)?.edges[0]).toEqual({
+        from: 'actor-a.chat',
+        to: 'chat.chat',
+        type: 'chat-out',
+        sends: ['#a'],
+        commands: ['/play'],
+      })
+    );
     // An edge that carries nothing to set.
     fireEvent.click(
       container.querySelector('[data-id="parser.interface → actor-a.parser"]') as Element
@@ -409,7 +426,7 @@ describe('the graph editor', () => {
     expect(screen.getByText('Reverted to the graph saved.')).toBeDefined();
     expect(screen.queryByText('Changes not applied')).toBeNull();
     // A rollback puts the previous file back; the banner offers to apply it.
-    core.previous = { version: 1, nodes: [], edges: [] };
+    core.previous = { version: 2, nodes: [], edges: [] };
     fireEvent.click(screen.getByRole('button', { name: 'Roll back' }));
     expect(
       await screen.findByText('Rolled back to the previous saved graph: apply it to run it.')
@@ -496,7 +513,7 @@ describe('the graph editor', () => {
   it('shows an opened node’s defaults filled in, and leaves it unchanged until edited', async () => {
     const core = fakeCore();
     render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
-    fireEvent.click(await screen.findByLabelText('node chat', {}, slow));
+    fireEvent.click(await screen.findByLabelText('node chat · in', {}, slow));
     const details = await screen.findByLabelText('details of chat');
     expect((within(details).getByLabelText('port') as HTMLInputElement).value).toBe('6667');
     expect((within(details).getByLabelText('tls') as HTMLInputElement).checked).toBe(true);
@@ -513,7 +530,7 @@ describe('the graph editor', () => {
     render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
     expect(await screen.findByText('check: check broke', {}, slow)).toBeDefined();
     // The saved graph differs from what runs: apply it.
-    core.running = { version: 1, nodes: [], edges: [] };
+    core.running = { version: 2, nodes: [], edges: [] };
     cleanup();
     core.api.routes['POST /graph/check'] = [
       200,

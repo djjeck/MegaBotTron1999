@@ -1,8 +1,9 @@
 /**
  * The edge selected in the graph editor (D55): its two ends, its type, why the check refuses it,
- * and, for a chat, what it carries (bot-os-api.md §2.1): the chats it `reads`, those it `sends` to,
- * and the `commands` sent (their first words), one per line; then its removal. The edges are the
- * permissions (P6): a plugin reads and sends only what its edge says.
+ * and, for a chat, what it carries (bot-os-api.md §2.1, D60): a chat-in edge, the chats it `reads`;
+ * a chat-out edge, those it `sends` to and the `commands` sent (their first words); one per line.
+ * Then its removal. The edges are the permissions (P6): a plugin reads and sends only what its edge
+ * says.
  */
 import { useState } from 'react';
 import type { GraphEdge } from '#src/ui/api.ts';
@@ -45,7 +46,8 @@ export function EdgeDetails(props: {
   remove: () => void;
 }) {
   const { edge } = props;
-  const chat = edge.type === 'chat';
+  const reads = edge.type === 'chat-in';
+  const sends = edge.type === 'chat-out';
   const name = `${edge.from} → ${edge.to}`;
   return (
     <aside className="details" aria-label={`details of edge ${name}`} key={name}>
@@ -60,24 +62,28 @@ export function EdgeDetails(props: {
           ))}
         </ul>
       )}
-      {chat ? (
+      {reads ? (
         <section>
-          <h3>What it carries</h3>
+          <h3>What it reads</h3>
           <ListField
             name="reads"
-            help="The chats its input hears (a channel, a chat id, a bot’s @username), one per line"
+            help="The chats the plugin hears from the connector (a channel, a chat id, a bot’s @username), one per line; it hears no other"
             value={edge.reads}
-            set={(reads) => props.change({ reads })}
+            set={(r) => props.change({ reads: r })}
           />
+        </section>
+      ) : sends ? (
+        <section>
+          <h3>What it sends</h3>
           <ListField
             name="sends"
-            help="The chats it may send to; the outbox refuses any other"
+            help="The chats the plugin may send to through the connector, one per line; the outbox refuses any other"
             value={edge.sends}
-            set={(sends) => props.change({ sends })}
+            set={(s) => props.change({ sends: s })}
           />
           <ListField
             name="commands"
-            help="The commands it may send, by first word (/play); empty: any text"
+            help="The commands it may send there, by first word (/play); empty: any text"
             value={edge.commands}
             set={(commands) => props.change({ commands })}
           />

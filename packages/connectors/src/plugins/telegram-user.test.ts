@@ -49,7 +49,7 @@ describe('the telegram-user plugin', () => {
       clock: new VirtualClock(),
       secrets: secretsWith(USER),
       graph: {
-        version: 1,
+        version: 2,
         nodes: [
           {
             id: 'me',

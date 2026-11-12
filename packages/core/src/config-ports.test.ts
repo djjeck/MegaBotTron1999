@@ -46,7 +46,7 @@ const problems = (raw: GraphInput, plugins = image()): string[] => {
 };
 
 const graph = (config: Record<string, unknown> | undefined, from = 'dice.events'): GraphInput => ({
-  version: 1,
+  version: 2,
   nodes: [
     { id: 'dice', plugin: 'dice' },
     { id: 'cards', plugin: 'cards' },

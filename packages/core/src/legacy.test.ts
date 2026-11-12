@@ -147,7 +147,7 @@ describe('the import from an older data directory', () => {
     const core = new Core({
       clock: new VirtualClock(T0),
       dataDir: data,
-      graph: { version: 1, nodes: [{ id: 'c', plugin: 'counter', instance: 'tally' }], edges: [] },
+      graph: { version: 2, nodes: [{ id: 'c', plugin: 'counter', instance: 'tally' }], edges: [] },
     });
     core.register(counter(seen));
     await core.start();

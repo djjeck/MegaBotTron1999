@@ -9,19 +9,25 @@ the server that guards them.
   React Flow (`@xyflow/react`): a draft of the saved graph, each plugin instance a node with its
   input ports on the left and its output ports on the right, each port type in its own shape and
   colour, each binding an edge in its type's colour, dashed when the input is optional, and on each
-  node its live state, mode and drift. An empty graph offers its first node, a connector. **Add a
-  node** lists the plugins offered, by the image and each module (`Palette.tsx`), and asks its id
-  and its instance: fresh, kept, or imported from an older data directory (`AddNode.tsx`). An edge
-  is dragged from an output to an input; a rhombus at its midpoint, in its port type's colour
-  (`PortEdge.tsx`), is a button that selects it and opens its panel (`EdgeDetails.tsx`), where a
-  chat edge's chats and commands are set. A node's config, settings, mode and account are forms made
-  from its schemas, each field's description as its help; a new node's config starts filled with its
-  schema's defaults, and an opened node shows its unset ones filled in, written with its first
-  change (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a secret a
-  choice of the secrets' names. Every change is checked by the core, and each refusal shown on its
-  edge, port, node or field (`draft.ts`, the draft's pure changes). **Review changes** opens a
-  dialog with the diff and two actions (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`)
-  and restarts the instance on it, waiting for it and coming back to the page, still logged in
+  node its live state, mode and drift. Chats flow left to right (docs/bot-os.md D60): a connector is
+  drawn as two cards (`cards.ts`), its **in** card (`telegram-user · in`) at the left, whose chat-in
+  output feeds the readers, and its **out** card (`telegram-user · out`) in a column of its own at
+  the right, whose chat-out input takes the senders' edges; one node in the graph file all the same.
+  Each card is placed on its own, either selects the node and opens its panel, and removing it
+  removes both, after a confirmation that names them. An empty graph offers its first node, a
+  connector. **Add a node** lists the plugins offered, by the image and each module (`Palette.tsx`),
+  and asks its id and its instance: fresh, kept, or imported from an older data directory
+  (`AddNode.tsx`). An edge is dragged from an output to an input; a rhombus at its midpoint, in its
+  port type's colour (`PortEdge.tsx`), is a button that selects it and opens its panel
+  (`EdgeDetails.tsx`), where a chat-in edge's `reads`, or a chat-out edge's `sends` and `commands`,
+  are set. A node's config, settings, mode and account are forms made from its schemas, each field's
+  description as its help; a new node's config starts filled with its schema's defaults, and an
+  opened node shows its unset ones filled in, written with its first change (`defaults.ts`)
+  (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a secret a choice of the secrets'
+  names. Every change is checked by the core, and each refusal shown on its edge, port, node or
+  field (`draft.ts`, the draft's pure changes). **Review changes** opens a dialog with the diff and
+  two actions (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`) and restarts the
+  instance on it, waiting for it and coming back to the page, still logged in
   (`src/ui/Restart.tsx`), or says why the core refused it and restarts nothing; **Revert** drops the
   draft, back to the graph saved, once confirmed. Its × (or Escape) only closes it, the draft kept.
   When the saved graph is not what runs (changed through the API, rolled back, or a restart that did

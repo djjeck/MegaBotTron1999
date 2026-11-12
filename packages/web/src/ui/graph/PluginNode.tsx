@@ -3,11 +3,15 @@
  * the right, each port drawn in its type's shape and colour (`PORT_TYPE_INFO`), and its live state:
  * running or paused, its mode, its parser's drift, or not running (added, or not applied yet). A
  * killed node (D44) is drawn disabled, with its reinstatement at hand. An edge is dragged from an
- * output to an input; a node or a port the check refuses is marked, with why.
+ * output to an input; a node or a port the check refuses is marked, with why. A connector is drawn
+ * as two cards, its in card and its out card (`cards.ts`, D60): each is titled with its side, and
+ * shows itself selected while its twin is.
  */
 import type { Node, NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
 import type { DriftCounts, NodeView, PluginControl, PortTypeInfo, PortView } from '#src/ui/api.ts';
+import type { CardSide } from './cards.ts';
+import { cardTitle } from './cards.ts';
 
 export interface PluginNodeData extends Record<string, unknown> {
   view: NodeView;
@@ -18,6 +22,10 @@ export interface PluginNodeData extends Record<string, unknown> {
   /** The check's problems with the node itself, and with each of its ports by name. */
   problems?: string[];
   portProblems?: Record<string, string[]>;
+  /** A connector's in or out card; none for a node of one card. */
+  side?: CardSide;
+  /** Its node is selected through its other card. */
+  twinSelected?: boolean;
 }
 
 export type PluginNodeType = Node<PluginNodeData, 'plugin'>;
@@ -68,19 +76,21 @@ function Port(props: {
 }
 
 export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
-  const { view, live, drift, portTypes, problems = [], portProblems = {} } = data;
+  const { view, live, drift, portTypes, problems = [], portProblems = {}, side } = data;
   const killed = live?.killed === true;
+  const title = cardTitle(view.id, side);
+  const shown = selected || data.twinSelected === true;
   const inputs = Object.entries(view.inputs);
   const outputs = Object.entries(view.outputs);
   return (
     <div
-      className={`plugin-node${killed ? ' killed' : ''}${selected ? ' selected' : ''}${problems.length > 0 ? ' refused' : ''}`}
+      className={`plugin-node${killed ? ' killed' : ''}${shown ? ' selected' : ''}${problems.length > 0 ? ' refused' : ''}${side === undefined ? '' : ` card-${side}`}`}
       style={{ height: nodeHeight(view) }}
-      aria-label={`node ${view.id}`}
+      aria-label={`node ${title}`}
       aria-disabled={killed}
     >
       <div className="head">
-        <strong>{view.id}</strong>
+        <strong>{title}</strong>
         {view.plugin === view.id ? null : <span className="muted"> {view.plugin}</span>}
         <div className="muted small">{view.kinds.join(', ')}</div>
         <div>

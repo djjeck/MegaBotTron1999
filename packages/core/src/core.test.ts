@@ -635,7 +635,7 @@ describe('archived plugins (bot-os.md D32)', () => {
     const seen: string[] = [];
     const { core: c } = core({
       allowArchived: false,
-      graph: { version: 1, nodes: [{ id: 'renamed', plugin: 'old' }], edges: [] },
+      graph: { version: 2, nodes: [{ id: 'renamed', plugin: 'old' }], edges: [] },
     });
     c.register(archive('old', seen));
     expect(() => c.load()).toThrow('plugin renamed: old is archived');
@@ -689,7 +689,7 @@ describe('the owner’s notices (bot-os-api.md §4.8)', () => {
       clock: new VirtualClock(0),
       print: (l) => lines.push(l),
       graph: {
-        version: 1,
+        version: 2,
         nodes: [
           { id: 'teller', plugin: 'teller' },
           { id: 'a', plugin: 'a' },

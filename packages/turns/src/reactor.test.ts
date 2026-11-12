@@ -44,18 +44,21 @@ function questParser(seen: { ctx?: PluginContext }) {
 
 /** The graph file of the editor: alice's account, the parser, and one reactor node `look`. */
 const graph = (config: Record<string, unknown>, events = true): GraphInput => ({
-  version: 1,
+  version: 2,
   nodes: [
     { id: 'tg', plugin: 'tg', account: 'telegram:alice' },
     { id: 'quest', plugin: 'quest' },
     { id: 'look', plugin: REACTOR, config },
   ],
   edges: [
+    // It reads only with match (its chat-in is there only then), and always sends.
+    ...('match' in config
+      ? [{ from: 'tg.chat', to: 'look.chat', type: 'chat-in' as const, reads: [BOT] }]
+      : []),
     {
-      from: 'tg.chat',
-      to: 'look.chat',
-      type: 'chat',
-      reads: [BOT],
+      from: 'look.chat',
+      to: 'tg.chat',
+      type: 'chat-out',
       sends: [BOT],
       commands: ['/look'],
     },

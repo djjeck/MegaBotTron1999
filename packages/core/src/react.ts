@@ -4,9 +4,9 @@
  * `react` as often as it likes, and stops each reaction with the function it returns.
  *
  * - **What it reacts to** (`on`): an event type (`dice.roll`) or a namespace (`dice`) on the bus,
- *   among those its events inputs consume (or its own); or the messages read on one of its chat
- *   inputs, of some chats or all its edge reads, whose text contains a text or matches a regular
- *   expression, played back and its own account's never.
+ *   among those its events inputs consume (or its own); or the messages read on one of its
+ *   chat-in inputs, of some chats or all its edge reads, whose text contains a text or matches a
+ *   regular expression, played back and its own account's never.
  * - **The payload** it reads: the event as published (`{ type, t, instance, ...payload }`); for a
  *   message, `{ chat, sender, text, time, id?, replyTo? }` with the named groups of a regular
  *   expression beside them (a group of one of those names is shadowed).
@@ -16,7 +16,7 @@
  *   values at those paths, or a function of the payload. A path with no value there (or one that
  *   is not a string, number or boolean) sends nothing: the reaction is skipped and recorded, never
  *   sent half made.
- * - **How:** through the outbox of its chat input `via` (`enqueue`), so its mode, the edge's reach,
+ * - **How:** through the outbox of its chat-out output `via` (`enqueue`), so its mode, the edge's reach,
  *   the account's pacing and the `core.send` log all apply. An event older than `maxAgeMs` (a
  *   parser's replay of its history at start) is skipped, so that history is never acted on twice.
  * - **Its trace:** each reaction, sent, refused, dry run or skipped, is written with `ctx.record` as
@@ -33,9 +33,9 @@ export type ReactionPayload = Readonly<Record<string, unknown>>;
 /** A text with `{path}` placeholders, or a function of the payload (undefined: send nothing). */
 export type ReactionText = string | ((payload: ReactionPayload) => string | undefined);
 
-/** The messages read on a chat input that a reaction reacts to. */
+/** The messages read on a chat-in input that a reaction reacts to. */
 export interface MessageTrigger {
-  /** The chat input whose messages it reads, by port; `chat` by default. */
+  /** The chat-in input whose messages it reads, by port; `chat` by default. */
   port?: string;
   /** The chats it reacts in (compared without case); none: every chat its edge reads. */
   chats?: readonly string[];
@@ -44,7 +44,7 @@ export interface MessageTrigger {
 }
 
 export interface Reaction {
-  /** An event type (`dice.roll`) or a namespace (`dice`) on the bus, or messages on a chat input. */
+  /** An event type (`dice.roll`) or a namespace (`dice`) on the bus, or messages on a chat-in input. */
   on: string | MessageTrigger;
   /** Fields of the payload by dotted path, each equal to its value; none: every one. */
   when?: Readonly<Record<string, unknown>>;
@@ -52,7 +52,7 @@ export interface Reaction {
   chat: ReactionText;
   /** What it sends. */
   send: ReactionText;
-  /** The chat input whose outbox it sends through, by port; `chat` by default. */
+  /** The chat-out output whose outbox it sends through, by port; `chat` by default. */
   via?: string;
   /** The type of its records: of its plugin's id or a namespace it registers (`ctx.record`). */
   record: string;
@@ -132,7 +132,7 @@ function messagePayload(m: Inbound, match: string | RegExp): ReactionPayload | u
 /**
  * Reacts to an event or a message with a send, as `reaction` says, until the function it returns
  * is called. Throws, as the context does, for a namespace its events inputs do not consume, an
- * event type nobody registers, or a chat input no edge binds.
+ * event type nobody registers, or a chat-in input no edge binds.
  */
 export function react(ctx: PluginContext, reaction: Reaction): () => void {
   const name = reaction.name ?? 'react';

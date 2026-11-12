@@ -6,7 +6,10 @@ MegaBotTron1999 runs plugins in one process and gives each its own store, durabl
 and mode. It routes messages between connectors (IRC, Telegram as a bot, Telegram as a user) and
 parsers on a typed bus, and sends through an outbox that keeps every network's limits. The way the
 plugins are wired is a typed graph of ports, which the web UI draws: each plugin instance is a node,
-each binding an edge, and the edges are the permissions.
+each binding an edge, and the edges are the permissions. Data flows left to right: a connector's
+chats are read on the left of the graph (chat-in edges, to the parsers) and written to on its right
+(chat-out edges, from the plugins that send), so a connector is drawn as two cards, in and out
+([docs/bot-os.md](docs/bot-os.md) D60).
 
 It knows no game. Games, and what plays them, are plugins on top of it.
 
@@ -89,7 +92,9 @@ export const greeter = definePlugin({
     version: '0.1.0',
     kinds: ['actor'],
     description: 'Says hello in a channel',
-    inputs: { channel: { type: 'chat', network: 'irc' } },
+    // It reads the channel (chat-in) and sends to it (chat-out): two ports, one name.
+    inputs: { channel: { type: 'chat-in', network: 'irc' } },
+    outputs: { channel: { type: 'chat-out', network: 'irc' } },
     settings: z.object({ greeting: z.string().default('hello').describe('What it says') }),
   },
   create: (ctx) => ({
@@ -104,9 +109,10 @@ export const greeter = definePlugin({
 ```
 
 - **The manifest** declares its kinds (connector, parser, actor, stats, agent, simulator), its input
-  ports, the event types it registers, its configuration, settings and secrets as zod schemas, and
-  its interface of reads, actions and chat commands. The web UI, the chat commands and the owner's
-  control API are all made from these declarations.
+  ports and the chats it sends through (its `chat-out` outputs), the event types it registers, its
+  configuration, settings and secrets as zod schemas, and its interface of reads, actions and chat
+  commands. The web UI, the chat commands and the owner's control API are all made from these
+  declarations.
 - **The context** gives it a clock, its own store, durable timers, the bus, the event log read back
   (its own namespaces and those it consumes), handles on the connectors its edges bind, an outbox,
   drift reporting, its settings and its mode. A plugin is built from its node's saved config and its

@@ -45,11 +45,12 @@ instance does not start.
 | `description`   | One line, for the UI and the agents                                                                                                                                                                                                                                                                                                   |
 | `archived`      | An archive (bot-os.md D32): built and tested, but refused in every instance's graph; only a run that says `allowArchived` (a test, the dev kit, a manual-test tool) runs it                                                                                                                                                           |
 | `inputs`        | Its input ports, by name (§2.1): what it consumes, each of a port type, with the binding the default graph gives it                                                                                                                                                                                                                   |
+| `outputs`       | Its declared output ports, by name (§2.1): its `chat-out`s, what it sends through a connector's account, with the binding the default graph gives each. Its other outputs are derived                                                                                                                                                 |
 | `requires`      | Shorthand (§2.1): the plugins it needs started first, by id, read as input ports. The load order follows them; a missing one or a cycle fails the start, naming it                                                                                                                                                                    |
 | `games`         | `registers`: the namespaces whose event types it defines (its game's, or its own id); `consumes`: those whose events it reads (P7)                                                                                                                                                                                                    |
 | `events`        | The event types it registers, `<namespace>.<name>` → zod schema of the payload (§4.4)                                                                                                                                                                                                                                                 |
 | `uses`          | Shorthand (§2.1): the other plugins' interfaces it calls, by id and member (`{ dice: ['state.game'] }`): reviewed with both (P6)                                                                                                                                                                                                      |
-| `reach`         | Shorthand (§2.1): what it reads and sends, per connector: `{ connector, reads: chats, sends: chats, commands }`. The outbox refuses a send outside it (§4.6)                                                                                                                                                                          |
+| `reach`         | Shorthand (§2.1): what it reads and sends, per connector: `{ connector, reads: chats, sends: chats, commands }`, read as a chat-in input and a chat-out output. The outbox refuses a send outside it (§4.6)                                                                                                                           |
 | `config`        | A zod object: what is set at deploy. The core validates it at load; a bad value names the plugin and the key. Every default is in the schema, per field (`.default()`, nested ones included), never merged in code after parsing, and each field says what it is (`.describe()`): the editor shows both                               |
 | `settings`      | A zod object: what the owner changes at runtime, each key with its default and its help (`.describe()`). Kept in the plugin's store, offered to every control surface (P11)                                                                                                                                                           |
 | `secrets`       | The secrets it needs, by name (`znc_password`). Only a `connector` may declare any (P9); the manifest of any other kind that does is refused                                                                                                                                                                                          |
@@ -114,14 +115,38 @@ Composition is a typed graph (bot-os.md P17, D27): each plugin instance is a nod
 (what it consumes, drawn on the left) and output ports (what it produces, on the right), each of a
 port type the core defines (`packages/core/src/ports.ts`); an edge binds an input to an output of
 its type. The instance's wiring is that graph, kept as data (`packages/core/src/graph.ts`), and the
-edges are the permissions (P6): a plugin reaches a connector, an outbox, an interface or a
-namespace's events only through an input an edge binds.
+edges are the permissions (P6): a plugin reads a chat, sends through an outbox, uses an interface or
+hears a namespace's events only through a port an edge binds.
 
-| Port type   | Output (derived from the manifest)                                       | Input (declared)                                                                                                              |
-| ----------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `chat`      | `chat`: a connector's account, of its network                            | `{ type: 'chat', network? }`; its edge carries the chats it `reads` and `sends` to, and the `commands` sent                   |
-| `events`    | `events` (`<ns>-events` with more than one): each namespace it registers | `{ type: 'events', namespace }`, bound to any number of instances; it hears only theirs; `namespace` may be `{ config: key }` |
-| `interface` | `interface`: its declared reads and actions (every plugin has one)       | `{ type: 'interface', plugin, members }`; none for a plugin it only needs started first; no `plugin`: a contract              |
+| Port type   | Output                                                                                     | Input                                                                                                                         |
+| ----------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `chat-in`   | `chat`: a connector's account, of its network (derived)                                    | `{ type: 'chat-in', network?, when? }` (declared); its edge carries the chats it `reads`                                      |
+| `chat-out`  | `{ type: 'chat-out', network? }` (declared in `outputs`); its edge carries what it `sends` | `chat`: a connector's account (derived), bound to any number of senders; their edges carry the chats sent to and `commands`   |
+| `events`    | `events` (`<ns>-events` with more than one): each namespace it registers (derived)         | `{ type: 'events', namespace }`, bound to any number of instances; it hears only theirs; `namespace` may be `{ config: key }` |
+| `interface` | `interface`: its declared reads and actions (every plugin has one, derived)                | `{ type: 'interface', plugin, members }`; none for a plugin it only needs started first; no `plugin`: a contract              |
+
+**Chats flow left to right** (bot-os.md D60): only parsers read chats, actors only send, and
+everything else consumes events and interfaces. A chat-in edge runs from a connector's chat-in
+output, `chat`, to a reader's chat-in input, on its left: the chats it hears (`reads`). A chat-out
+edge runs from a sender's chat-out output, on its right, to the connector's chat-out input, `chat`:
+the chats it may send to (`sends`) and the commands it may send there (`commands`, by first word;
+none: any text). A connector has both, as one node (one account, one session); the editor draws it
+as two cards (§4.12). A connector's chat-out input takes any number of senders; a sender's chat-out
+output, one edge, required unless `optional` (the connector starts first, and an unbound required
+one fails the start: `node actor: output port chat (chat-out of irc) is not bound`). A port's
+`network` (`irc`, `telegram`) is matched against the connector's account, as it was for a chat.
+`ctx.connector(port)` hears through a chat-in input, and `ctx.outbox(port)` sends through a chat-out
+output (each also by the connector's id or its account).
+
+A chat-in input may say `when: { config: key }`, a key of its plugin's `config` schema: the node has
+the port only while its config sets that key (the reactor reads a chat only with a `match`),
+resolved as an events input's namespace is (below).
+
+**Module API 1** keeps loading: a manifest's `{ type: 'chat' }` input, and the `requires`/`reach`
+shorthand's chat, are read as a chat-in input and a chat-out output of the same name, the `bind`
+split between them (`reads` to the input; `sends`, `commands` to the output). A chat-out declared in
+`outputs` under that name replaces the old input's half. So a module written before the split runs
+unchanged: its `ctx.connector('channel')` and `ctx.outbox('channel')` name the two halves.
 
 An interface input that names no plugin is a **contract**: any node whose interface declares its
 members binds it (`interface with state.rest, actions.sent`), so each instance of one plugin may use
@@ -152,32 +177,43 @@ while its other end is not running), so that two plugins can each use the other 
 failures together. Every other input is required: it must be bound, the instance it binds starts
 first, and its failure fails this one.
 
-A manifest's `inputs` give each input its `bind`, the edge the default graph makes
-(`{ node, reads, sends, commands }` for a chat; `{ node }` for an interface, by default the node of
-the plugin's id; `{ nodes }` for events, by default every other node registering the namespace). The
-manifest's older fields stay as shorthand, read as inputs: a `requires` that `reach` names is a
-required chat input named after the connector, with the reach's chats and commands as its binding;
-any other `requires`, and each plugin `uses` names, a required interface input named after it;
-`games.consumes` an optional events input, `<namespace>-events`; a `reach` not required, an optional
-chat input. A plugin's code names its inputs: `ctx.connector('channel')`, `ctx.outbox('channel')`,
+A manifest's `inputs` and `outputs` give each port its `bind`, the edge the default graph makes
+(`{ node, reads }` for a chat-in, from the connector `node`; `{ node, sends, commands }` for a
+chat-out, to it; `{ node }` for an interface, by default the node of the plugin's id; `{ nodes }`
+for events, by default every other node registering the namespace). The manifest's older fields stay
+as shorthand, read as ports: a `requires` that `reach` names is a required chat (a chat-in input and
+a chat-out output, as above) named after the connector, with the reach's chats and commands as its
+binding; any other `requires`, and each plugin `uses` names, a required interface input named after
+it; `games.consumes` an optional events input, `<namespace>-events`; a `reach` not required, an
+optional chat. A plugin's code names its ports: `ctx.connector('channel')`, `ctx.outbox('channel')`,
 `ctx.use('game')`.
 
-**The graph** is `{ version: 1, nodes, edges }`:
+```ts
+manifest: {
+  inputs: { channel: { type: 'chat-in', network: 'irc', bind: { node: 'irc', reads: ['#lobby'] } } },
+  outputs: {
+    channel: { type: 'chat-out', network: 'irc', bind: { node: 'irc', sends: ['#lobby'], commands: ['!roll'] } },
+  },
+}
+```
+
+**The graph** is `{ version: 2, nodes, edges }`, the chats left to right:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "nodes": [
     { "id": "irc", "plugin": "irc", "config": { "host": "znc.example.net", "nick": "alice" } },
     { "id": "dice", "plugin": "dice" }
   ],
   "edges": [
+    { "from": "irc.chat", "to": "dice.channel", "type": "chat-in", "reads": ["#lobby"] },
     {
-      "from": "irc.chat",
-      "to": "dice.channel",
-      "type": "chat",
-      "reads": ["#lobby"],
-      "sends": ["#lobby"]
+      "from": "dice.channel",
+      "to": "irc.chat",
+      "type": "chat-out",
+      "sends": ["#lobby"],
+      "commands": ["!roll"]
     }
   ]
 }
@@ -190,13 +226,14 @@ in place of the manifest's (of the same network). It may also give the `settings
 its plugin's `settings`) and the `mode` its instance starts with: they are put in force only while
 the instance keeps none of its own, so the owner's later changes win. An edge goes from `node.port`
 (or `node`, when one of its outputs fits) to `node.port`, with its type and, for a chat, what it
-carries. The core checks it with zod and against the manifests at load, and fails the start naming
-the node and the port: a plugin not in the image, a node twice, an instance named by two nodes or
-kept by another plugin (`node b: its instance tally is of the plugin other, not counter`), a setting
-the plugin does not have or refuses, an edge between ports of two types or to a port that is not
-there, an interface member not declared, a single input bound twice, a connector account held twice,
-a required input unbound (`node actor: input port channel (chat of irc) is not bound`), a cycle of
-required edges.
+carries: a chat-in its `reads`, a chat-out its `sends` and `commands` (each carries only its own).
+The core checks it with zod and against the manifests at load, and fails the start naming the node
+and the port: a plugin not in the image, a node twice, an instance named by two nodes or kept by
+another plugin (`node b: its instance tally is of the plugin other, not counter`), a setting the
+plugin does not have or refuses, an edge between ports of two types or to a port that is not there,
+an interface member not declared, a single input (or a chat-out output) bound twice, a connector
+account held twice, a required input or chat-out output unbound
+(`node actor: input port channel (chat-in of irc) is not bound`), a cycle of required edges.
 
 Each instance has its own id (`ctx.id`), configuration, store, settings, mode, timers and drift; its
 log lines, its records and the owner's controls name the instance (`PluginControl.plugin` names its
@@ -243,7 +280,7 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "nodes": [
     {
       "id": "tg",
@@ -261,12 +298,12 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
     }
   ],
   "edges": [
-    { "from": "tg.chat", "to": "quest.chat", "type": "chat", "reads": ["@QuestBot"], "sends": [] },
+    { "from": "tg.chat", "to": "quest.chat", "type": "chat-in", "reads": ["@QuestBot"] },
+    { "from": "tg.chat", "to": "quest-turns.chat", "type": "chat-in", "reads": ["@QuestBot"] },
     {
-      "from": "tg.chat",
-      "to": "quest-turns.chat",
-      "type": "chat",
-      "reads": ["@QuestBot"],
+      "from": "quest-turns.chat",
+      "to": "tg.chat",
+      "type": "chat-out",
       "sends": ["@QuestBot"],
       "commands": ["/play"]
     },
@@ -274,6 +311,19 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
   ]
 }
 ```
+
+**Version 1** (one `chat` edge for both the reads and the sends, from the connector to the plugin)
+is converted as it is read (`upgradeGraph`, `packages/core/src/graph.ts`, bot-os.md D60), against
+the plugins' manifests and each node's config: each `chat` edge becomes a chat-in edge with its
+`reads`, same ends, if its node has a chat-in input of that port's name; a chat-out edge with its
+`sends` and `commands`, from the node's chat-out output of that name to the connector's `chat`, if
+it has one; both for a node with both (the turn-actor, any plugin of module API 1); and both for a
+node whose plugin is unknown, so nothing is lost. The port names stay the same, so the conversion is
+mechanical: `tg.chat → quest.chat` (a parser) stays one edge, of `chat-in`; `tg.chat → look.chat` (a
+reactor on events) becomes `look.chat → tg.chat`, of `chat-out`. The instance runs a version 1 file
+so converted, `GET /graph/file` shows it so, and `POST /graph/check` and `PUT /graph/file` take
+version 1 too; the file itself is rewritten (as version 2) only by the next save, so
+`graph.previous.json` and a rollback keep working on either version.
 
 **At start** (`packages/core/src/graph-file.ts`, `GraphFile`), the core reads it and checks it as
 any graph (§2.1), against the plugins `core.available()` lists, their configuration and settings
@@ -286,13 +336,13 @@ fail again: it starts with no nodes, the file is kept as it is, and why is print
 **A problem** (`GraphProblem`) is its words as the load says them (`text`) and, where it can be
 told, the `node`, the `edge` (`{ from, to }`), the `port`, and the `config` or `setting` key it is
 about, so that the editor marks it there. An edge between ports of two types is refused with why
-(`node actor: input port score: chat of chat cannot bind interface of scorer (edge chat.chat → actor.score)`).
+(`node actor: input port score: chat-in of chat cannot bind interface of scorer (edge chat.chat → actor.score)`).
 
 **The control API's graph routes** (§4.11), the owner's alone:
 
-- `GET /graph/file`: the saved file (`graph`, as written), whether there is one (`exists`), why it
-  does not read (`error`) or is refused (`problems`), and whether it differs from the graph running
-  (`differs`: a restart would change what runs).
+- `GET /graph/file`: the saved file (`graph`, as written, a version 1 file as version 2), whether
+  there is one (`exists`), why it does not read (`error`) or is refused (`problems`), and whether it
+  differs from the graph running (`differs`: a restart would change what runs).
 - `POST /graph/check`, a graph as the body: checked as the load would, nothing saved: `ok`, its
   `problems`, and its `diff` from the saved file: the nodes `added`, `removed` and `changed` (with
   the fields that changed), and the edges `added`, `removed` and `changed`, by their two ends.
@@ -389,8 +439,8 @@ interface PluginContext<Config, Settings> {
   bus: Bus; // §4.4
   config: Config; // validated (§2)
   settings: { kept(): Partial<Settings>; set(key, value): string | undefined }; // §2
-  connector(port: string): ConnectorHandle; // §4.5, a chat input an edge binds (§2.1)
-  outbox(port: string): Outbox; // §4.6, the account a chat input's edge binds
+  connector(port: string): ConnectorHandle; // §4.5, a chat-in input an edge binds (§2.1)
+  outbox(port: string): Outbox; // §4.6, the account a chat-out output's edge binds
   use<T>(port: string): T; // the interface an input's edge binds (§2.1)
   useOptional<T>(port: string): T | undefined; // an optional input's, while bound and running
   drift: DriftReporter; // §4.7, parsers only
@@ -549,22 +599,24 @@ no plugin holds a way to send that skips it.
 
 As built (`packages/core/src/connector.ts`): a connector plugin's instance offers its `connector`,
 whose account must be the manifest's (or its node's); `ConnectorBase` keeps the listeners and the
-status for the implementations. `ctx.connector(port)` gives a handle only on a connector a chat
+status for the implementations. `ctx.connector(port)` gives a handle only on a connector a chat-in
 input of the plugin is bound to, and the handle hears only the chats that edge `reads` (compared
-without case). The wiring reaches the full connector with `core.connector(id)`. The shell's
-connectors are in §5.
+without case). A connector's node has a chat-in output, `chat`, which the readers' edges leave, and
+a chat-out input, `chat`, which the senders' edges reach (§2.1, bot-os.md D60). The wiring reaches
+the full connector with `core.connector(id)`. The shell's connectors are in §5.
 
 ### 4.6 The outbox
 
 One per account; every send goes through it (bot-os.md §3). A plugin gets its handle with
-`ctx.outbox(port)`, bound to its own id:
+`ctx.outbox(port)`, bound to its own id, through a chat-out output an edge binds to the account's
+connector (§2.1):
 
 - **The mode (P10)** of the sending plugin: `read-only` refuses, `dry-run` logs as if sent, `live`
   sends. Every acting plugin has one, starts `read-only`, is changed only by the owner (a safety
   stop may only lower it), and keeps it across restarts, in the core's store (`_mode.json` in its
   instance's store, §2.2).
-- **The reach:** each edge to the account's connector lets it send to its `sends`, with its
-  `commands`; a send outside them is refused.
+- **The reach:** each chat-out edge from it to the account's connector lets it send to its `sends`,
+  with its `commands`; a send outside them is refused. A chat-in edge sends nothing.
 - **Pacing:** `send` sends now or is refused with why (too soon, the hourly limit), for actors that
   time their sends to the second; `enqueue` queues the send and spaces it within the account's
   limits (`connector.limits`), and the network's waits (Telegram's `FLOOD_WAIT`) hold the account's
@@ -736,11 +788,12 @@ every session; `POST /api/logout` ends its own; expired ones are pruned. `GET /a
 ### 4.12 The graph printed and drawn
 
 `packages/core/src/graph-view.ts`: `graphText` prints the nodes and the edges
-(`irc.chat → dice.channel (chat): reads #lobby; sends #lobby`); `graphMermaid` draws a Mermaid
-flowchart, left to right, a box per node and an arrow per edge, coloured by its port type;
+(`irc.chat → dice.channel (chat-in): reads #lobby`); `graphMermaid` draws a Mermaid flowchart, left
+to right, a box per node (and a second, `<id> · out`, for a connector that chat-out edges reach, so
+that the sends flow left to right too) and an arrow per edge, coloured by its port type;
 `writeGraphFile` writes a graph to `<dir>/graph.json` atomically, the one before kept as
 `graph.previous.json` when it changed. `packages/core/tools/graph.ts [file] [--mermaid]` prints a
-graph file.
+graph file, a version 1 file as version 2.
 
 **The graph editor** (bot-os.md D47, D55) is the web UI's home page (`packages/web/src/ui/graph/`),
 drawn with React Flow. It edits a draft of the saved graph (`GET /graph/file`), each node drawn from
@@ -754,16 +807,23 @@ every problem shown where it is located (§2.3). A node's config starts filled w
 defaults (nested objects within), written to the draft as if typed; a node opened shows the defaults
 of the fields its config leaves unset filled in, unmarked, and writes them with its first change, so
 that merely opening a node changes nothing. A field's description is its help. A node selected shows
-its forms, editable, a key of `configSecrets` as a choice of `GET /secrets`; an edge selected, its
-chats and commands. Each edge has a rhombus at its midpoint in its port type's colour
-(`PortEdge.tsx`, React Flow's `EdgeLabelRenderer`), a button named after the edge
-(`edge irc.chat → dice.channel`) that selects it and opens its panel, by a click or the keyboard.
-Its review shows the diff and two actions: Apply, `PUT /graph/file` then `POST /restart` (none if
-the core refuses the graph, which the review says, nor if the saved graph is what runs already), and
-Revert, the draft back to the saved graph; a banner offers Apply (`POST /restart`) when the saved
-file differs from what runs (`differs`). After a restart the page waits on `GET /session` for the
-new process (another `boot` id), and comes back to the page, still logged in. One or several running
-nodes selected can be killed, each by `POST /plugins/<id>/kill`.
+its forms, editable, a key of `configSecrets` as a choice of `GET /secrets`; an edge selected, what
+it carries: a chat-in edge its `reads` alone, a chat-out edge its `sends` and `commands`. A
+connector is drawn as two cards (`cards.ts`, bot-os.md D60), one node in the graph all the same: its
+**in** card (`telegram-user · in`) at the left, with its chat-in output and its other ports, and its
+**out** card (`telegram-user · out`) in a column of its own at the right, with its chat-out input,
+where the senders' edges end. Each card is placed on its own; selecting either selects the node and
+opens its panel (the other card shows itself selected too); removing it removes both, after a
+confirmation that names them. The split lives in the editor's view alone: the graph file holds one
+node. Each edge has a rhombus at its midpoint in its port type's colour (`PortEdge.tsx`, React
+Flow's `EdgeLabelRenderer`), a button named after the edge (`edge irc.chat → dice.channel`) that
+selects it and opens its panel, by a click or the keyboard. Its review shows the diff and two
+actions: Apply, `PUT /graph/file` then `POST /restart` (none if the core refuses the graph, which
+the review says, nor if the saved graph is what runs already), and Revert, the draft back to the
+saved graph; a banner offers Apply (`POST /restart`) when the saved file differs from what runs
+(`differs`). After a restart the page waits on `GET /session` for the new process (another `boot`
+id), and comes back to the page, still logged in. One or several running nodes selected can be
+killed, each by `POST /plugins/<id>/kill`.
 
 ### 4.13 The standard services
 
@@ -849,7 +909,7 @@ alone (§4) finds each in its context, its config or an edge:
 | a print function                                       | `ctx.log.info` (`warn`, `error`): stdout, prefixed with its node's id                                                   |
 | `now`, timers                                          | `ctx.clock` (`now()`, `setTimeout`), virtual in tests; durable timers in `ctx.scheduler`                                |
 | the account it plays                                   | its config, or `ctx.connector(port).self()`, the connected account's own name                                           |
-| a group or a chat to post in                           | its config names it, and the chat edge carries it in its `reads` and `sends` (the outbox refuses any other)             |
+| a group or a chat to post in                           | its config names it, and its chat-out edge carries it in its `sends` (the outbox refuses any other)                     |
 | an LLM's ask function                                  | an interface input bound to the `anthropic` connector, `ctx.use(port).actions.ask` (§4.13)                              |
 | a drawing function                                     | `ctx.render.svgToPng` (§4.13)                                                                                           |
 | another plugin's object (a game, a ledger, a registry) | that plugin's declared interface (`state`, `actions`), through an interface input an edge binds: `ctx.use(port)` (§2.1) |
@@ -882,7 +942,7 @@ interface Reaction {
   when?: Record<string, unknown>;
   chat: string | ((payload: ReactionPayload) => string | undefined);
   send: string | ((payload: ReactionPayload) => string | undefined);
-  via?: string; // the chat input whose outbox it sends through: `chat` by default
+  via?: string; // the chat-out output whose outbox it sends through: `chat` by default
   record: string; // ctx.record's type for each reaction
   name?: string; // in its records, and the send's origin in `core.send`: `react` by default
   maxAgeMs?: number; // how old an event may be and still be reacted to: 2 minutes by default
@@ -893,7 +953,7 @@ interface Reaction {
   inputs consume or its own (§4.4), heard from the nodes its edges bind. Its payload is the event as
   published, `{ type, t, instance, ...payload }`. An event older than `maxAgeMs` (a parser's replay
   of its history at `ready`) is skipped, and recorded, so that history is not acted on again.
-- **On a message:** `on` is `{ port, chats, match }`: the messages read on the chat input `port`
+- **On a message:** `on` is `{ port, chats, match }`: the messages read on the chat-in input `port`
   (`chat` by default), in `chats` (compared without case; every chat its edge reads without), whose
   text contains `match` (a string) or matches it (a `RegExp`). Messages played back and the
   account's own are never reacted to. Its payload is `{ chat, sender, text, time, id?, replyTo? }`,
@@ -906,15 +966,15 @@ interface Reaction {
   boolean), or a function that makes no text, sends nothing: the reaction is skipped and recorded
   (`reason: "no value at outcome.item"`), never sent half made. Text in braces that is not a path is
   kept as written.
-- **Through the outbox:** each send is `ctx.outbox(via).enqueue(chat, text, { origin: name })`, so
-  the plugin's mode, its edge's reach (the chats it `sends` to, its `commands`), the account's
-  pacing and the `core.send` log all apply (§4.6).
+- **Through the outbox:** each send is `ctx.outbox(via).enqueue(chat, text, { origin: name })`,
+  through its chat-out output `via`, so the plugin's mode, its edge's reach (the chats it `sends`
+  to, its `commands`), the account's pacing and the `core.send` log all apply (§4.6).
 - **Recorded:** each reaction is written with `ctx.record(record, …)`:
   `{ reaction, on, outcome, reason?, chat?, text? }`, its outcome the outbox's (`sent`, `dry-run`,
   `refused`, with why) or `skipped`.
 
 `react` throws, as the context does, for a namespace no events input of the plugin consumes, an
-event type nobody registers, and a message trigger on a chat input no edge binds. `valueAt`,
+event type nobody registers, and a message trigger on a chat-in input no edge binds. `valueAt`,
 `matches` and `fill` (the dotted paths, `when` and the templates) are exported beside it.
 
 ## 5. The shell's own plugins
@@ -972,47 +1032,51 @@ event type nobody registers, and a message trigger on a chat input no edge binds
 - **`turnParserPlugin`** (`packages/turns/src/turn-parser.ts`): one parser plugin per game bot, each
   made from its bot's grammar (`read`), which knows the game. Each reads, on the owner's account
   (`telegram-user`), the private chat with its bot and, when its edge also reads it, the game's
-  group, read only. It knows the owner's turns (a turn command of its configuration, `commands`,
-  bare or addressed to its bot, sent by hand from any device; and those its actor sends, told
-  through its action `sent`, since the account never sees its own sends come back), and which of its
-  bot's messages answer one: a reply to it or, in the private chat, the first message within two
-  minutes of it. What it reads it publishes as `<id>.turn` (`{ chat, outcome }`); a message it
-  claims and cannot read goes to drift (§4.7) and is published as an `unknown` outcome. Its read
-  `rest` says until when the bot rests, from its last answer. The tests play a made-up @QuestBot
-  (`packages/turns/test/quest.ts`).
+  group: a `chat-in` input only, with no way to send. It knows the owner's turns (a turn command of
+  its configuration, `commands`, bare or addressed to its bot, sent by hand from any device; and
+  those its actor sends, told through its action `sent`, since the account never sees its own sends
+  come back), and which of its bot's messages answer one: a reply to it or, in the private chat, the
+  first message within two minutes of it. What it reads it publishes as `<id>.turn`
+  (`{ chat, outcome }`); a message it claims and cannot read goes to drift (§4.7) and is published
+  as an `unknown` outcome. Its read `rest` says until when the bot rests, from its last answer. The
+  tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
 - **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
-  (P3, P17), each with its own id, configuration, store, timer and mode. Its inputs: `chat`, a chat
-  on `telegram`, bound to the private chat with its bot (read and sent to, its command only), and
-  `parser`, a contract (`state.rest`, `actions.sent`) bound to its bot's parser, required, so that
-  drift on the parser pauses it. Its configuration: `chat` (the bot's `@username`), `command` (the
-  bot's turn command; `/play` when unset), `schedule` (the planner's pace, each field with its
-  default in the schema, `DEFAULT_SCHEDULE` of `packages/turns/src/schedule.ts`: 17–20 minutes
-  between turns, some skipped, nights off in its `timeZone`), `nightSalt` (the instances with one
-  salt sleep the same nights) and `seed`. It plans from the owner's last turn with the bot (kept in
-  its store; a turn sent by hand counts too), as the durable timer `turn` (dropped if it came due
-  more than 10 minutes before a start); when it is due, it asks its parser whether the bot rests
-  and, if so, comes back a few minutes after; in `live` it waits for the account to be connected,
-  sends through its outbox and tells its parser the message's id; a failed send is tried again two
-  minutes later. It plays in `dry-run` and `live` only (a new instance starts `dry-run`, D33). It
-  declares no chat command, since two instances would clash: the owner reaches each with
-  `/plugins <id>` and its read `status`. Each step is published as `turn-actor.step`. The image
-  offers it (`src/main.ts`): the editor adds one node per bot, each on its own instance, its `chat`
-  edge to the owner's `telegram-user` node and its `parser` edge to its bot's parser. The turn
-  parsers are not the image's: each is made from a game's grammar, so a game's module offers it.
+  (P3, P17), each with its own id, configuration, store, timer and mode. Its ports: `chat`, a
+  chat-in input on `telegram`, which reads the private chat with its bot (for the turns the owner
+  sends by hand), and `chat`, a chat-out output, which sends there (its command only); and `parser`,
+  a contract (`state.rest`, `actions.sent`) bound to its bot's parser, required, so that drift on
+  the parser pauses it. (Its read is to go, its parser telling it of the turns sent by hand, #21.)
+  Its configuration: `chat` (the bot's `@username`), `command` (the bot's turn command; `/play` when
+  unset), `schedule` (the planner's pace, each field with its default in the schema,
+  `DEFAULT_SCHEDULE` of `packages/turns/src/schedule.ts`: 17–20 minutes between turns, some skipped,
+  nights off in its `timeZone`), `nightSalt` (the instances with one salt sleep the same nights) and
+  `seed`. It plans from the owner's last turn with the bot (kept in its store; a turn sent by hand
+  counts too), as the durable timer `turn` (dropped if it came due more than 10 minutes before a
+  start); when it is due, it asks its parser whether the bot rests and, if so, comes back a few
+  minutes after; in `live` it waits for the account to be connected, sends through its outbox and
+  tells its parser the message's id; a failed send is tried again two minutes later. It plays in
+  `dry-run` and `live` only (a new instance starts `dry-run`, D33). It declares no chat command,
+  since two instances would clash: the owner reaches each with `/plugins <id>` and its read
+  `status`. Each step is published as `turn-actor.step`. The image offers it (`src/main.ts`): the
+  editor adds one node per bot, each on its own instance, its `chat` edges from and to the owner's
+  `telegram-user` node and its `parser` edge to its bot's parser. The turn parsers are not the
+  image's: each is made from a game's grammar, so a game's module offers it.
 - **`reactor`** (`packages/turns/src/reactor.ts`): one reaction (`react`, §4.15) made from its
   node's config, with no code, run as one instance per reaction. An actor: it starts `read-only`,
   and the owner sets its mode. Its configuration (`reactorConfig`): `on`, the event type it reacts
-  to (or a namespace), or `match`, a regular expression the messages read on its chat input must
+  to (or a namespace), or `match`, a regular expression the messages read on its chat-in input must
   match (its named groups in the payload), with `in` (the one chat whose messages it reads; every
   chat its edge reads without) and `ignoreCase`; exactly one of `on` and `match`. Then `when`
   (dotted paths of the payload, each equal to its value), `chat` and `send` (`{path}` templates of
-  the payload), and `maxAgeS` (how old an event may be, 120 seconds by default). Its inputs: `chat`,
-  the account it sends through (on any network), whose edge carries the chat it sends to and its
-  commands, and, for `match`, the chats it reads; and `events`, optional, whose namespace is the one
-  of its `on` (§2.1): bound to the nodes whose events it hears, and not a port at all of a reactor
-  on messages. Each reaction is recorded as `reactor.reaction`, and each send logged as `core.send`
-  with the node's id as its origin. The image offers it (`src/main.ts`); a node that examines what a
-  game's parser reads, in the graph file:
+  the payload), and `maxAgeS` (how old an event may be, 120 seconds by default). Its ports: `chat`,
+  a chat-out output, the account it sends through (on any network), whose edge carries the chat it
+  sends to and its commands; `chat`, a chat-in input there only with `match`
+  (`when: { config: 'match' }`, §2.1), the chats it reads; and `events`, optional, whose namespace
+  is the one of its `on` (§2.1): bound to the nodes whose events it hears, and not a port at all of
+  a reactor on messages. So a reactor on events only sends. Each reaction is recorded as
+  `reactor.reaction`, and each send logged as `core.send` with the node's id as its origin. The
+  image offers it (`src/main.ts`); a node that examines what a game's parser reads, in the graph
+  file:
 
   ```json
   {
@@ -1030,10 +1094,9 @@ event type nobody registers, and a message trigger on a chat input no edge binds
     ],
     "edges": [
       {
-        "from": "tg.chat",
-        "to": "look-gains.chat",
-        "type": "chat",
-        "reads": [],
+        "from": "look-gains.chat",
+        "to": "tg.chat",
+        "type": "chat-out",
         "sends": ["@QuestBot"],
         "commands": ["/look"]
       },
@@ -1131,6 +1194,21 @@ A plugin of a module is built from its saved configuration alone (bot-os.md D50)
 one use to the next is its `config`, read from `ctx.config`, never the arguments of a factory, so
 that the graph's nodes are data the editor can make. Its id is new: one of the image's own (`irc`,
 `anthropic`, …) or of a module loaded before is refused.
+
+**Its chats** (§2.1, bot-os.md D60): a plugin that reads a chat declares a `chat-in` input, one that
+sends a `chat-out` output, and one that does both, both, under one name if it likes:
+
+```ts
+inputs: { channel: { type: 'chat-in', network: 'irc', bind: { node: 'irc', reads: ['#lobby'] } } },
+outputs: { channel: { type: 'chat-out', network: 'irc', bind: { node: 'irc', sends: ['#lobby'] } } },
+```
+
+`ctx.connector('channel')` hears through the first, `ctx.outbox('channel')` sends through the
+second. A module written for the plugin API `"1"` before the split keeps loading unchanged: its
+`{ type: 'chat' }` input (and the `requires`/`reach` shorthand's chat) is read as both, a chat-in
+input and a chat-out output of its name, its `bind`'s `reads` to the first and `sends` and
+`commands` to the second. Its graphs of version 1 are converted as they load (§2.3); code that types
+a graph as `GraphInput` writes `version: 2`, and its chat edges each way.
 
 ### 7.3 Loading
 
@@ -1249,7 +1327,11 @@ git -C vendor/MegaBotTron1999 checkout v0.1.0 && git add vendor/MegaBotTron1999
   one module, for `POST /modules`.
 
 Upgrading the shell is moving the submodule to a newer tag; a module that targets another plugin API
-than the instance's is refused at start, by name.
+than the instance's is refused at start, by name. Moving past the split of chat edges (bot-os.md
+D60, `v0.1.0-alpha.7`) changes no module's plugins (§7.2), but a module's own code or tests that
+write a graph typed as `GraphInput` change it to `version: 2`, each `chat` edge as a `chat-in` edge
+(its `reads`) and a `chat-out` edge from the plugin to the connector's `chat` (its `sends`,
+`commands`); untyped, a version 1 graph still loads, converted.
 
 ## 8. Importing from an older MegaBotTron1999 data directory
 

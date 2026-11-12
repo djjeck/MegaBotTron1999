@@ -67,7 +67,7 @@ const helper = definePlugin({
 
 /** Two games, two actors each on its own game and its own private chat, on one connector. */
 const twoBots = (): GraphInput => ({
-  version: 1,
+  version: 2,
   nodes: [
     { id: 'tg', plugin: 'tg' },
     { id: 'game-a', plugin: 'game', config: { level: 2 } },
@@ -78,10 +78,12 @@ const twoBots = (): GraphInput => ({
   edges: [
     { from: 'game-a', to: 'actor-a.game' },
     { from: 'game-a', to: 'actor-a.scores' },
-    { from: 'tg', to: 'actor-a.chat', reads: ['@a_bot'], sends: ['@a_bot'], commands: ['/a'] },
+    { from: 'tg', to: 'actor-a.chat', reads: ['@a_bot'] },
+    { from: 'actor-a.chat', to: 'tg.chat', sends: ['@a_bot'], commands: ['/a'] },
     { from: 'game-b', to: 'actor-b.game' },
     { from: 'game-b', to: 'actor-b.scores' },
-    { from: 'tg', to: 'actor-b.chat', reads: ['@b_bot'], sends: ['@b_bot'], commands: ['/b'] },
+    { from: 'tg', to: 'actor-b.chat', reads: ['@b_bot'] },
+    { from: 'actor-b.chat', to: 'tg.chat', sends: ['@b_bot'], commands: ['/b'] },
   ],
 });
 
@@ -126,7 +128,7 @@ describe('plugin instances', () => {
       ['actor-b', 'actor', 'read-only'],
     ]);
     expect(core.nodes().map((n) => `${n.id}:${n.manifest.id}`)).toContain('game-b:game');
-    expect(core.graph()?.edges).toHaveLength(6);
+    expect(core.graph()?.edges).toHaveLength(8);
   });
 
   it('hear only the events of the instances their edges bind', async () => {
@@ -194,7 +196,7 @@ describe('plugin instances', () => {
     const core = new Core({
       clock: new VirtualClock(),
       graph: {
-        version: 1,
+        version: 2,
         nodes: [
           { id: 'one', plugin: 'asker' },
           { id: 'two', plugin: 'asker' },
@@ -236,7 +238,7 @@ describe('plugin instances', () => {
       }),
     });
     const base: GraphInput = {
-      version: 1,
+      version: 2,
       nodes: [
         { id: 'lore', plugin: 'lore' },
         { id: 'epic', plugin: 'epic' },
@@ -305,7 +307,7 @@ describe('contracts', () => {
     expect(
       withInstances(
         {
-          version: 1,
+          version: 2,
           nodes: [
             { id: 'a', plugin: 'a' },
             { id: 'turns', plugin: 'turns' },
@@ -315,6 +317,6 @@ describe('contracts', () => {
         'turns',
         []
       )
-    ).toEqual({ version: 1, nodes: [{ id: 'a', plugin: 'a' }], edges: [] });
+    ).toEqual({ version: 2, nodes: [{ id: 'a', plugin: 'a' }], edges: [] });
   });
 });

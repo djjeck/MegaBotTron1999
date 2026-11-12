@@ -14,6 +14,11 @@
  *   its manifest's `bind` says. Any other graph (a file) replaces it as a whole.
  * - A required input left unbound, an edge between ports of two types, an input of one edge bound
  *   twice, an unknown plugin, node or port, and a cycle of required edges fail the start.
+ * - A chat runs left to right (bot-os.md D60): a chat-in edge from a connector's output to a
+ *   reader's input, with its `reads`; a chat-out edge from a sender's output to the connector's
+ *   input, with its `sends` and `commands`. A connector's chat-out input takes any number of edges;
+ *   a sender's chat-out output, one, and a required one left unbound fails the start, as an input
+ *   does. A version 1 file, with one chat edge for both, is converted on load (`upgradeGraph`).
  * - An events input whose namespace its node's config names (`{ config: key }`) is resolved per
  *   node, from the config as its plugin's schema makes it (`resolveInputs`): a required one the
  *   config leaves unresolved fails the start, naming the node.
@@ -34,8 +39,12 @@ import {
   resolveInputs,
 } from './ports.ts';
 
-/** The format of the graph file; a change that old files cannot be read with bumps it. */
-export const GRAPH_VERSION = 1;
+/**
+ * The format of the graph file; a change that old files cannot be read with bumps it. Version 2
+ * splits each chat edge into a chat-in (reads) and a chat-out (sends) edge (bot-os.md D60); a
+ * version 1 file is converted on load (`upgradeGraph`).
+ */
+export const GRAPH_VERSION = 2;
 
 const SEGMENT = '[a-z][a-z0-9]*(?:-[a-z0-9]+)*';
 const FROM = new RegExp(`^${SEGMENT}(?:\\.${SEGMENT})?$`, 'u');
@@ -82,8 +91,9 @@ export const graphSchema = z.strictObject({
         to: z.string().regex(TO, 'expected node.port'),
         /** The ports' type; checked when given, and always written. */
         type: z.enum(PORT_TYPES).optional(),
-        /** A chat's: the chats read, those sent to, and the commands sent (first words). */
+        /** A chat-in's: the chats read. */
         reads: z.array(z.string().min(1)).optional(),
+        /** A chat-out's: the chats sent to, and the commands sent (first words). */
         sends: z.array(z.string().min(1)).optional(),
         commands: z.array(z.string().min(1)).optional(),
       })
@@ -105,13 +115,13 @@ export class GraphError extends Error {
   }
 }
 
-/** One input's other end. */
+/** One port's other end. */
 export interface Binding {
-  /** The node bound, and its output port. */
+  /** The node bound, and its port: an input's output, or a chat-out output's input. */
   node: string;
   port: string;
   type: PortType;
-  /** A chat's reads, sends and commands. */
+  /** A chat-in's reads, or a chat-out's sends and commands. */
   chat?: ChatBinding;
 }
 
@@ -131,6 +141,8 @@ export interface ResolvedNode {
   ports: Record<string, InputPort>;
   /** Each of its input ports, with its other ends (none: unbound). */
   inputs: Map<string, Binding[]>;
+  /** Each of its chat-out output ports, with the connector it sends through (none: unbound). */
+  outputs: Map<string, Binding[]>;
 }
 
 /**
@@ -160,53 +172,64 @@ const fitting = (input: InputPort, manifest: Manifest, loose = false): [string, 
 
 /**
  * The programmatic wiring's graph: a node per plugin, its id the plugin's, with its configuration
- * (`config`, by id), and each input bound as its manifest's `bind` says (an events input, by
+ * (`config`, by id), and each port bound as its manifest's `bind` says (an events input, by
  * default, to every other node registering its namespace; an interface input to the node of its
- * plugin's id). An input whose default other end is not there is left unbound.
+ * plugin's id; a chat-in input from its connector, a chat-out output to it). A port whose default
+ * other end is not there is left unbound.
  */
 export function defaultGraph(
   manifests: readonly Manifest[],
   config: Readonly<Record<string, unknown>> = {}
 ): Graph {
   const byId = new Map(manifests.map((m) => [m.id, m]));
+  const portsOf = (m: Manifest): Record<string, InputPort> =>
+    nodeInputs(m, config[m.id] as Record<string, unknown> | undefined).ports;
   const edges: GraphEdge[] = [];
-  for (const m of manifests)
-    for (const [port, input] of Object.entries(
-      nodeInputs(m, config[m.id] as Record<string, unknown> | undefined).ports
-    )) {
+  for (const m of manifests) {
+    for (const [port, input] of Object.entries(portsOf(m))) {
       const targets =
         input.type === 'events'
           ? (input.bind?.nodes ??
             manifests
               .filter((o) => o.id !== m.id && o.games.registers.includes(input.namespace))
               .map((o) => o.id))
-          : input.type === 'chat'
-            ? input.bind === undefined
-              ? []
-              : [input.bind.node]
-            : [input.bind?.node ?? input.plugin].filter((n) => n !== undefined);
+          : input.type === 'chat-in' || input.type === 'interface'
+            ? [input.bind?.node ?? (input.type === 'interface' ? input.plugin : undefined)].filter(
+                (n) => n !== undefined
+              )
+            : [];
       for (const target of targets) {
         const other = byId.get(target);
         const out = other === undefined ? undefined : fitting(input, other, true)[0];
         if (out === undefined) continue;
-        const chat =
-          input.type === 'chat' && input.bind !== undefined
-            ? {
-                reads: [...input.bind.reads],
-                sends: [...input.bind.sends],
-                ...(input.bind.commands === undefined
-                  ? {}
-                  : { commands: [...input.bind.commands] }),
-              }
-            : {};
         edges.push({
           from: `${target}.${out[0]}`,
           to: `${m.id}.${port}`,
           type: input.type,
-          ...chat,
+          ...(input.type === 'chat-in' && input.bind !== undefined
+            ? { reads: [...input.bind.reads] }
+            : {}),
         });
       }
     }
+    for (const [port, output] of Object.entries(m.outputs)) {
+      if (output.type !== 'chat-out' || output.bind === undefined) continue;
+      const { node, sends, commands } = output.bind;
+      const other = byId.get(node);
+      const into =
+        other === undefined
+          ? undefined
+          : Object.entries(portsOf(other)).find(([, i]) => mismatch(i, output) === undefined);
+      if (into === undefined) continue;
+      edges.push({
+        from: `${m.id}.${port}`,
+        to: `${node}.${into[0]}`,
+        type: 'chat-out',
+        sends: [...sends],
+        ...(commands === undefined ? {} : { commands: [...commands] }),
+      });
+    }
+  }
   return {
     version: GRAPH_VERSION,
     nodes: manifests.map((m) => {
@@ -259,6 +282,85 @@ export function withInstances(
   };
 }
 
+/** An account's network: the part before its colon. */
+const networkOf = (account: string): string => account.slice(0, account.indexOf(':'));
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * A graph of version 1 as version 2 (bot-os.md D60), against the plugins' manifests; any other
+ * graph as it is. Each chat edge of version 1 (its `type` `chat`, or a chat's reads, sends or
+ * commands, or an input of a chat port) becomes, by the ports of its target node (its plugin's
+ * manifest, its config resolving them):
+ *
+ * - a chat-in edge, the same two ends, with its `reads`, if the node has a chat-in input of that
+ *   name (or has neither: the check then says why);
+ * - a chat-out edge from the node's chat-out output of that name to the connector's chat-out input
+ *   (`chat`), with its `sends` and `commands`, if it has one;
+ * - both, for a node with both (a plugin of module API 1, whose old chat input is both), or one
+ *   whose plugin is not known (none given: a tool that prints a file), so that nothing is lost.
+ *
+ * The other edges and the nodes are kept as they are. Nothing is checked: `resolveGraph` does.
+ */
+export function upgradeGraph(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unknown {
+  if (!isRecord(raw) || raw['version'] !== 1) return raw;
+  const known = new Map<string, { manifest: Manifest; ports: Record<string, InputPort> }>();
+  for (const n of Array.isArray(raw['nodes']) ? (raw['nodes'] as unknown[]) : []) {
+    if (!isRecord(n) || typeof n['id'] !== 'string' || typeof n['plugin'] !== 'string') continue;
+    const manifest = plugins.get(n['plugin']);
+    if (manifest === undefined) continue;
+    const config = isRecord(n['config']) ? n['config'] : undefined;
+    known.set(n['id'], { manifest, ports: nodeInputs(manifest, config).ports });
+  }
+  const upgrade = (e: unknown): unknown[] => {
+    if (!isRecord(e) || typeof e['from'] !== 'string' || typeof e['to'] !== 'string') return [e];
+    const { from, to, type, reads, sends, commands, ...rest } = e as Record<string, unknown> & {
+      from: string;
+      to: string;
+    };
+    const [toNode = '', toPort = ''] = to.split('.');
+    const target = known.get(toNode);
+    const readsIt = target?.ports[toPort]?.type === 'chat-in';
+    const sendsIt = target?.manifest.outputs[toPort]?.type === 'chat-out';
+    const chat =
+      type === 'chat' ||
+      (type === undefined &&
+        (reads !== undefined ||
+          sends !== undefined ||
+          commands !== undefined ||
+          readsIt ||
+          sendsIt));
+    if (!chat) return [e];
+    const hasIn = target === undefined || readsIt;
+    const hasOut = target === undefined || sendsIt;
+    const out: unknown[] = [];
+    if (hasIn || !hasOut)
+      out.push({ ...rest, from, to, type: 'chat-in', ...(reads === undefined ? {} : { reads }) });
+    if (hasOut) {
+      const fromNode = from.split('.')[0] as string;
+      const into =
+        Object.entries(known.get(fromNode)?.manifest.inputs ?? {}).find(
+          ([, p]) => p.type === 'chat-out'
+        )?.[0] ?? 'chat';
+      out.push({
+        ...rest,
+        from: to,
+        to: `${fromNode}.${into}`,
+        type: 'chat-out',
+        ...(sends === undefined ? {} : { sends }),
+        ...(commands === undefined ? {} : { commands }),
+      });
+    }
+    return out;
+  };
+  return {
+    ...raw,
+    version: GRAPH_VERSION,
+    ...(Array.isArray(raw['edges']) ? { edges: (raw['edges'] as unknown[]).flatMap(upgrade) } : {}),
+  };
+}
+
 /**
  * Checks a graph against the manifests of the plugins the image has (by plugin id): the graph as
  * the core holds it (each edge's ends and type written out), and its nodes, in the graph's order.
@@ -270,7 +372,7 @@ export function resolveGraph(
   /** The plugin of an instance kept already, by its id; undefined for a fresh one. */
   instanceOf: (instance: string) => string | undefined = () => undefined
 ): { graph: Graph; nodes: ResolvedNode[] } {
-  const parsed = graphSchema.safeParse(raw);
+  const parsed = graphSchema.safeParse(upgradeGraph(raw, plugins));
   if (!parsed.success)
     throw new GraphError(
       parsed.error.issues.map(
@@ -303,10 +405,9 @@ export function resolveGraph(
       );
     const account = n.account ?? manifest.account;
     if (n.account !== undefined) {
-      const network = (a: string): string => a.slice(0, a.indexOf(':'));
       if (manifest.account === undefined)
         problems.push(`node ${n.id}: only a connector has an account`);
-      else if (network(n.account) !== network(manifest.account))
+      else if (networkOf(n.account) !== networkOf(manifest.account))
         problems.push(
           `node ${n.id}: its account ${n.account} is not of ${manifest.account}'s network`
         );
@@ -316,8 +417,18 @@ export function resolveGraph(
       if (other !== undefined) problems.push(`node ${n.id}: the account ${account} is ${other}'s`);
       else accounts.set(account, n.id);
     }
-    const { ports, problems: unresolved } = nodeInputs(manifest, n.config);
+    const { ports: resolved, problems: unresolved } = nodeInputs(manifest, n.config);
     for (const p of unresolved) problems.push(`node ${n.id}: ${p}`);
+    // A connector's chat-out input is of its node's account's network.
+    const ports =
+      account === undefined
+        ? resolved
+        : Object.fromEntries(
+            Object.entries(resolved).map(([k, p]) => [
+              k,
+              p.type === 'chat-out' ? { ...p, network: networkOf(account) } : p,
+            ])
+          );
     nodes.set(n.id, {
       id: n.id,
       instance,
@@ -328,11 +439,17 @@ export function resolveGraph(
       ...(n.settings === undefined ? {} : { settings: n.settings }),
       ...(n.mode === undefined ? {} : { mode: n.mode }),
       inputs: new Map(Object.keys(ports).map((p) => [p, []])),
+      outputs: new Map(
+        Object.entries(manifest.outputs).flatMap(([p, o]) =>
+          o.type === 'chat-out' ? [[p, []] as [string, Binding[]]] : []
+        )
+      ),
     });
   }
   const edges: GraphEdge[] = [];
-  /** The inputs an edge's problem has named already. */
+  /** The inputs, and the chat-out outputs, an edge's problem has named already. */
   const named = new Set<string>();
+  const namedOut = new Set<string>();
   for (const e of parsed.data.edges) {
     const name = `edge ${e.from} → ${e.to}`;
     const [toNode = '', toPort = ''] = e.to.split('.');
@@ -374,10 +491,11 @@ export function resolveGraph(
       problems.push(`node ${fromNode}: no output port ${port}`);
       continue;
     }
-    if (output.type === 'chat' && from.account !== undefined)
-      output = { type: 'chat', network: from.account.slice(0, from.account.indexOf(':')) };
+    if (output.type === 'chat-in' && from.account !== undefined)
+      output = { type: 'chat-in', network: networkOf(from.account) };
     const why = mismatch(input, output);
     named.add(e.to);
+    if (output.type === 'chat-out') namedOut.add(`${fromNode}.${port}`);
     if (why !== undefined) {
       problems.push(`node ${toNode}: input port ${toPort}: ${why} (${name})`);
       continue;
@@ -386,13 +504,16 @@ export function resolveGraph(
       problems.push(`${name}: its type is ${input.type}, not ${e.type}`);
       continue;
     }
-    const specifics = e.reads !== undefined || e.sends !== undefined || e.commands !== undefined;
-    if (specifics && input.type !== 'chat') {
-      problems.push(`${name}: only a chat carries reads, sends and commands`);
+    if (e.reads !== undefined && input.type !== 'chat-in') {
+      problems.push(`${name}: only a chat-in edge carries reads`);
+      continue;
+    }
+    if ((e.sends !== undefined || e.commands !== undefined) && input.type !== 'chat-out') {
+      problems.push(`${name}: only a chat-out edge carries sends and commands`);
       continue;
     }
     const bound = to.inputs.get(toPort) as Binding[];
-    if (input.type !== 'events' && bound.length > 0) {
+    if (input.type !== 'events' && input.type !== 'chat-out' && bound.length > 0) {
       problems.push(`node ${toNode}: input port ${toPort} is bound twice`);
       continue;
     }
@@ -400,34 +521,61 @@ export function resolveGraph(
       problems.push(`${name}: twice in the graph`);
       continue;
     }
+    const sending = from.outputs.get(port);
+    if (sending !== undefined && sending.length > 0) {
+      problems.push(`node ${fromNode}: output port ${port} is bound twice`);
+      continue;
+    }
+    const written =
+      input.type === 'chat-in'
+        ? { reads: e.reads ?? [] }
+        : input.type === 'chat-out'
+          ? { sends: e.sends ?? [], ...(e.commands === undefined ? {} : { commands: e.commands }) }
+          : undefined;
     const chat: ChatBinding | undefined =
-      input.type === 'chat'
-        ? {
-            reads: e.reads ?? [],
-            sends: e.sends ?? [],
-            ...(e.commands === undefined ? {} : { commands: e.commands }),
-          }
-        : undefined;
+      written === undefined ? undefined : { reads: [], sends: [], ...written };
     bound.push({
       node: fromNode,
       port,
       type: input.type,
       ...(chat === undefined ? {} : { chat }),
     });
-    edges.push({ from: `${fromNode}.${port}`, to: e.to, type: input.type, ...(chat ?? {}) });
+    sending?.push({
+      node: toNode,
+      port: toPort,
+      type: input.type,
+      ...(chat === undefined ? {} : { chat }),
+    });
+    edges.push({ from: `${fromNode}.${port}`, to: e.to, type: input.type, ...(written ?? {}) });
   }
   for (const n of nodes.values())
     for (const [port, input] of Object.entries(n.ports)) {
       if (input.optional || named.has(`${n.id}.${port}`) || (n.inputs.get(port)?.length ?? 0) > 0)
         continue;
       const target =
-        input.type === 'chat'
+        input.type === 'chat-in'
           ? input.bind?.node
           : input.type === 'interface'
             ? (input.bind?.node ?? input.plugin)
             : undefined;
       problems.push(
         `node ${n.id}: input port ${port} (${describePort(input)}) is not bound` +
+          (target === undefined || nodes.has(target) ? '' : `: ${target} is not in the graph`)
+      );
+    }
+  for (const n of nodes.values())
+    for (const [port, bound] of n.outputs) {
+      const output = n.manifest.outputs[port];
+      if (
+        output?.type !== 'chat-out' ||
+        output.optional ||
+        bound.length > 0 ||
+        namedOut.has(`${n.id}.${port}`)
+      )
+        continue;
+      const target = output.bind?.node;
+      problems.push(
+        `node ${n.id}: output port ${port} (${describePort(output)}) is not bound` +
           (target === undefined || nodes.has(target) ? '' : `: ${target} is not in the graph`)
       );
     }
@@ -438,12 +586,20 @@ export function resolveGraph(
   };
 }
 
-/** The nodes a node's required inputs bind, in the order of its inputs. */
+/**
+ * The nodes a node's required ports bind, in the order of its inputs, then of its chat-out
+ * outputs (the connectors it sends through, which start first).
+ */
 export function requiredOf(node: ResolvedNode): string[] {
   const out: string[] = [];
   for (const [port, bindings] of node.inputs)
     if (node.ports[port]?.optional !== true)
       for (const b of bindings) if (!out.includes(b.node)) out.push(b.node);
+  for (const [port, bindings] of node.outputs) {
+    const output = node.manifest.outputs[port];
+    if (output?.type === 'chat-out' && !output.optional)
+      for (const b of bindings) if (!out.includes(b.node)) out.push(b.node);
+  }
   return out;
 }
 

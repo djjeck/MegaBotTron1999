@@ -93,6 +93,7 @@ export {
   nodeInputs,
   type ResolvedNode,
   resolveGraph,
+  upgradeGraph,
   withInstances,
 } from './graph.ts';
 export {
@@ -204,14 +205,18 @@ export {
 } from './plugin.ts';
 export {
   type ChatBinding,
+  type ChatOutInput,
   type DeclaredInput,
+  type DeclaredOutput,
   describePort,
   type InputPort,
   type InputPortInput,
+  type ManifestInputPort,
   mismatch,
   namespaceOf,
   type NamespaceSource,
   type OutputPort,
+  type OutputPortInput,
   PORT_TYPE_INFO,
   PORT_TYPES,
   type PortType,

@@ -3,12 +3,13 @@
  * with no code, run as one instance per reaction. When an event of its `on` type is heard (from the
  * nodes its `events` edges bind), or a message read on its `chat` input matches its `match`, and
  * the payload's fields equal its `when`, it sends its `send` to its `chat` through the outbox of its
- * `chat` input: in its mode (an actor, `read-only` until the owner sets one), within its edge's
+ * `chat` output (chat-out, bot-os.md D60): in its mode (an actor, `read-only` until the owner sets one), within its edge's
  * reach, at the account's pace, each attempt logged as `core.send` and each reaction recorded as
  * `reactor.reaction`.
  *
  * Its `events` input takes its namespace from `on` (§2.1): the namespace of the event type it
- * reacts to. A reactor on messages has no such port, and needs only its chat input.
+ * reacts to. A reactor on messages has no such port; one on events has no chat-in input (its
+ * `chat` input is there only with `match`), and only sends.
  */
 import { definePlugin, type Plugin, react } from '@megabottron1999/core';
 import { z } from 'zod';
@@ -94,14 +95,21 @@ export function reactorPlugin(): Plugin {
       config: reactorConfig,
       inputs: {
         chat: {
-          type: 'chat',
-          help: 'The account it sends through: the chat it sends to and its commands; with match, the chats it reads',
+          type: 'chat-in',
+          when: { config: 'match' },
+          help: 'With match: the account whose messages it reads, and the chats',
         },
         events: {
           type: 'events',
           namespace: { config: 'on' },
           optional: true,
           help: 'The nodes whose events of its on type it hears (none for a reactor on messages)',
+        },
+      },
+      outputs: {
+        chat: {
+          type: 'chat-out',
+          help: 'The account it sends through: the chat it sends to, and its commands',
         },
       },
     },

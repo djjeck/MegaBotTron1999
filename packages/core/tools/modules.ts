@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Core, loadModules, MODULE_FILE, wallClock } from '#src/index.ts';
+import { Core, GRAPH_VERSION, loadModules, MODULE_FILE, wallClock } from '#src/index.ts';
 
 const args = process.argv.slice(2);
 let dir: string;
@@ -31,7 +31,10 @@ else {
   }
 }
 const loaded = await loadModules({ dir, host: import.meta.url });
-const core = new Core({ clock: wallClock(), graph: { version: 1, nodes: [], edges: [] } });
+const core = new Core({
+  clock: wallClock(),
+  graph: { version: GRAPH_VERSION, nodes: [], edges: [] },
+});
 for (const m of loaded.modules)
   core.registerModule(
     m.id,

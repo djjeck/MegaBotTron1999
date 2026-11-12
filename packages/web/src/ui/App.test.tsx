@@ -108,7 +108,7 @@ describe('App', () => {
 
   it('comes back to the page after a restart, still logged in, and says so', async () => {
     const core = fakeCore();
-    core.running = { version: 1, nodes: [], edges: [] };
+    core.running = { version: 2, nodes: [], edges: [] };
     render(<App />);
     fireEvent.click(
       await screen.findByRole('button', { name: 'Apply (restart)' }, { timeout: 5000 })

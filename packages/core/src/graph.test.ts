@@ -7,7 +7,9 @@ import {
   type GraphInput,
   loadOrder,
   requiredOf,
+  type ResolvedNode,
   resolveGraph,
+  upgradeGraph,
 } from './graph.ts';
 import { type Manifest, type ManifestInput, parseManifest } from './manifest.ts';
 import { describePort, type InputPort, mismatch, PORT_TYPE_INFO, PORT_TYPES } from './ports.ts';
@@ -24,16 +26,19 @@ const image = (): Map<string, Manifest> =>
         kinds: ['parser'],
         games: { registers: ['game'] },
         interface: { state: { score: { help: 'the score', output: z.number() } } },
-        inputs: { channel: { type: 'chat', network: 'irc', bind: { node: 'irc', reads: ['#a'] } } },
+        inputs: {
+          channel: { type: 'chat-in', network: 'irc', bind: { node: 'irc', reads: ['#a'] } },
+        },
       }),
       m('actor', {
         kinds: ['actor'],
         inputs: {
           game: { type: 'interface', plugin: 'game', members: ['state.score'] },
-          channel: { type: 'chat', network: 'irc' },
+          channel: { type: 'chat-in', network: 'irc' },
           notices: { type: 'events', namespace: 'game' },
           map: { type: 'interface', plugin: 'game', optional: true },
         },
+        outputs: { channel: { type: 'chat-out', network: 'irc' } },
       }),
     ].map((x) => [x.id, x])
   );
@@ -49,7 +54,7 @@ const problems = (raw: unknown, plugins = image()): string[] => {
 };
 
 const graph = (more: Partial<GraphInput> = {}): GraphInput => ({
-  version: 1,
+  version: 2,
   nodes: [
     { id: 'irc', plugin: 'irc' },
     { id: 'game', plugin: 'game' },
@@ -58,7 +63,8 @@ const graph = (more: Partial<GraphInput> = {}): GraphInput => ({
   edges: [
     { from: 'irc', to: 'game.channel', reads: ['#a'] },
     { from: 'game', to: 'actor.game' },
-    { from: 'irc.chat', to: 'actor.channel', reads: ['#a'], sends: ['#a'], commands: ['!go'] },
+    { from: 'irc.chat', to: 'actor.channel', reads: ['#a'] },
+    { from: 'actor.channel', to: 'irc.chat', sends: ['#a'], commands: ['!go'] },
     { from: 'game.events', to: 'actor.notices', type: 'events' },
   ],
   ...more,
@@ -70,25 +76,42 @@ describe('port types', () => {
       expect(PORT_TYPE_INFO[t].id).toBe(t);
       expect(PORT_TYPE_INFO[t].description.length).toBeGreaterThan(10);
     }
-    expect(describePort({ type: 'chat', optional: false })).toBe('chat of any network');
+    expect(describePort({ type: 'chat-in', optional: false })).toBe('chat-in of any network');
+    expect(describePort({ type: 'chat-out', network: 'irc', optional: false })).toBe(
+      'chat-out of irc'
+    );
+    // In and out, related: the same shape, two colours.
+    expect(PORT_TYPE_INFO['chat-in'].shape).toBe(PORT_TYPE_INFO['chat-out'].shape);
+    expect(PORT_TYPE_INFO['chat-in'].colour).not.toBe(PORT_TYPE_INFO['chat-out'].colour);
     expect(describePort({ type: 'events', namespace: 'x' })).toBe('events of x');
   });
 
   it('match an input to an output of its type, network, namespace and plugin', () => {
-    const chat = { type: 'chat', network: 'irc', optional: false } as const;
-    expect(mismatch(chat, { type: 'chat', network: 'irc' })).toBeUndefined();
-    expect(mismatch(chat, { type: 'chat', network: 'telegram' })).toBe(
-      'chat of telegram cannot bind chat of irc'
+    const chat = { type: 'chat-in', network: 'irc', optional: false } as const;
+    expect(mismatch(chat, { type: 'chat-in', network: 'irc' })).toBeUndefined();
+    expect(mismatch(chat, { type: 'chat-in', network: 'telegram' })).toBe(
+      'chat-in of telegram cannot bind chat-in of irc'
     );
-    expect(mismatch({ ...chat, network: undefined }, { type: 'chat', network: 'x' })).toBe(
+    expect(mismatch({ type: 'chat-in', optional: false }, { type: 'chat-in', network: 'x' })).toBe(
       undefined
+    );
+    // A connector's chat-out input takes a sender's output of its network, or of any.
+    const into = { type: 'chat-out', network: 'irc', optional: true } as const;
+    const out = { type: 'chat-out', optional: false } as const;
+    expect(mismatch(into, out)).toBeUndefined();
+    expect(mismatch(into, { ...out, network: 'irc' })).toBeUndefined();
+    expect(mismatch(into, { ...out, network: 'telegram' })).toBe(
+      'chat-out of telegram cannot bind chat-out of irc'
+    );
+    expect(mismatch(into, { type: 'chat-in', network: 'irc' })).toBe(
+      'chat-in of irc cannot bind chat-out of irc'
     );
     const events = { type: 'events', namespace: 'a', optional: false } as const;
     expect(mismatch(events, { type: 'events', namespace: 'b' })).toBe(
       'events of b cannot bind events of a'
     );
-    expect(mismatch(events, { type: 'chat', network: 'a' })).toBe(
-      'chat of a cannot bind events of a'
+    expect(mismatch(events, { type: 'chat-in', network: 'a' })).toBe(
+      'chat-in of a cannot bind events of a'
     );
     const iface: InputPort = {
       type: 'interface',
@@ -112,13 +135,13 @@ describe('the graph', () => {
   it('is checked, every edge written out with its ports and type', () => {
     const { graph: g, nodes } = resolveGraph(graph(), image());
     expect(g.edges).toEqual([
-      { from: 'irc.chat', to: 'game.channel', type: 'chat', reads: ['#a'], sends: [] },
+      { from: 'irc.chat', to: 'game.channel', type: 'chat-in', reads: ['#a'] },
       { from: 'game.interface', to: 'actor.game', type: 'interface' },
+      { from: 'irc.chat', to: 'actor.channel', type: 'chat-in', reads: ['#a'] },
       {
-        from: 'irc.chat',
-        to: 'actor.channel',
-        type: 'chat',
-        reads: ['#a'],
+        from: 'actor.channel',
+        to: 'irc.chat',
+        type: 'chat-out',
         sends: ['#a'],
         commands: ['!go'],
       },
@@ -127,7 +150,24 @@ describe('the graph', () => {
     const actor = nodes.find((n) => n.id === 'actor');
     expect(actor?.config).toEqual({ x: 1 });
     expect(actor?.inputs.get('map')).toEqual([]);
+    expect(actor?.outputs.get('channel')).toEqual([
+      {
+        node: 'irc',
+        port: 'chat',
+        type: 'chat-out',
+        chat: { reads: [], sends: ['#a'], commands: ['!go'] },
+      },
+    ]);
     expect(requiredOf(actor as never)).toEqual(['game', 'irc']);
+    // The connector takes every sender's edge on its one chat-out input.
+    expect(nodes.find((n) => n.id === 'irc')?.inputs.get('chat')).toEqual([
+      {
+        node: 'actor',
+        port: 'channel',
+        type: 'chat-out',
+        chat: { reads: [], sends: ['#a'], commands: ['!go'] },
+      },
+    ]);
     expect(nodes.find((n) => n.id === 'irc')?.account).toBe('irc:me');
   });
 
@@ -146,12 +186,15 @@ describe('the graph', () => {
       'game.events → actor.notices',
       'game.interface → actor.map',
     ]);
-    expect(problems(g)).toEqual(['node actor: input port channel (chat of irc) is not bound']);
+    expect(problems(g)).toEqual([
+      'node actor: input port channel (chat-in of irc) is not bound',
+      'node actor: output port channel (chat-out of irc) is not bound',
+    ]);
   });
 
   it('names the node and the port of every problem', () => {
-    expect(problems({ version: 2, nodes: [] })).toEqual([
-      'graph: version: Invalid input: expected 1',
+    expect(problems({ version: 3, nodes: [] })).toEqual([
+      'graph: version: Invalid input: expected 2',
     ]);
     expect(
       problems(
@@ -173,8 +216,9 @@ describe('the graph', () => {
             { from: 'game', to: 'actor.nothing' },
             { from: 'game.nothing', to: 'actor.game' },
             { from: 'irc', to: 'actor.game' },
-            { from: 'game', to: 'actor.notices', type: 'chat' },
+            { from: 'game', to: 'actor.notices', type: 'chat-in' },
             { from: 'game', to: 'actor.map', sends: ['#a'] },
+            { from: 'game', to: 'actor.map', reads: ['#a'] },
             { from: 'game.events', to: 'actor.notices' },
             { from: 'game.events', to: 'actor.notices' },
           ],
@@ -185,16 +229,18 @@ describe('the graph', () => {
       'node ghost: its plugin nowhere is not in the image',
       "node irc2: the account irc:me is irc's",
       'node game: input port channel is bound twice',
-      'node actor: input port channel: events of game cannot bind chat of irc (edge game.events → actor.channel)',
+      'node actor: input port channel: events of game cannot bind chat-in of irc (edge game.events → actor.channel)',
       'edge game → game.channel: a node cannot feed itself',
       'edge nobody → actor.game: no node nobody',
       'node actor: no input port nothing',
       'node game: no output port nothing',
       'edge irc → actor.game: no output of irc fits interface of game; name it',
-      'edge game → actor.notices: its type is events, not chat',
-      'edge game → actor.map: only a chat carries reads, sends and commands',
+      'edge game → actor.notices: its type is events, not chat-in',
+      'edge game → actor.map: only a chat-out edge carries sends and commands',
+      'edge game → actor.map: only a chat-in edge carries reads',
       'edge game.events → actor.notices: twice in the graph',
       'node actor: input port game (interface of game) is not bound',
+      'node actor: output port channel (chat-out of irc) is not bound',
     ]);
   });
 
@@ -222,8 +268,9 @@ describe('the graph', () => {
     ).toEqual([
       "node irc: its account telegram:me is not of irc:me's network",
       'node game: only a connector has an account',
-      'node game: input port channel: chat of telegram cannot bind chat of irc (edge irc → game.channel)',
-      'node actor: input port channel: chat of telegram cannot bind chat of irc (edge irc.chat → actor.channel)',
+      'node game: input port channel: chat-in of telegram cannot bind chat-in of irc (edge irc → game.channel)',
+      'node actor: input port channel: chat-in of telegram cannot bind chat-in of irc (edge irc.chat → actor.channel)',
+      'node irc: input port chat: chat-out of irc cannot bind chat-out of telegram (edge actor.channel → irc.chat)',
     ]);
   });
 
@@ -281,5 +328,233 @@ describe('the graph', () => {
       { node: 'p', port: 'events', type: 'events' },
       { node: 'q', port: 'events', type: 'events' },
     ]);
+  });
+});
+
+describe('chat-in and chat-out', () => {
+  /** A connector; a reader; a sender; one that reads only with a config's `match`. */
+  const plugins = new Map(
+    [
+      m('tg', { kinds: ['connector'], account: 'telegram:alice' }),
+      m('reader', { kinds: ['parser'], inputs: { chat: { type: 'chat-in' } } }),
+      m('sender', {
+        kinds: ['actor'],
+        outputs: { chat: { type: 'chat-out', bind: { node: 'tg', sends: ['@QuestBot'] } } },
+      }),
+      m('both', {
+        kinds: ['actor'],
+        config: z.object({ match: z.string().optional() }),
+        inputs: { chat: { type: 'chat-in', when: { config: 'match' } } },
+        outputs: { chat: { type: 'chat-out', optional: true } },
+      }),
+      // Module API 1: its old chat input is both.
+      m('old', { kinds: ['actor'], inputs: { line: { type: 'chat' } } }),
+    ].map((x) => [x.id, x])
+  );
+
+  it('binds a sender to the connector, the connector taking any number of them', () => {
+    const g = defaultGraph([...plugins.values()].filter((p) => p.id !== 'old'));
+    expect(g.edges).toEqual([
+      {
+        from: 'sender.chat',
+        to: 'tg.chat',
+        type: 'chat-out',
+        sends: ['@QuestBot'],
+      },
+    ]);
+    const { nodes } = resolveGraph(
+      {
+        ...g,
+        edges: [
+          ...g.edges,
+          { from: 'tg', to: 'reader.chat', reads: ['@QuestBot'] },
+          { from: 'both.chat', to: 'tg.chat', commands: ['/look'] },
+        ],
+      },
+      plugins
+    );
+    expect(
+      nodes
+        .find((n) => n.id === 'tg')
+        ?.inputs.get('chat')
+        ?.map((b) => b.node)
+    ).toEqual(['sender', 'both']);
+    // The sender needs the connector first; an optional chat-out imposes no order.
+    const sender = nodes.find((n) => n.id === 'sender');
+    expect(requiredOf(sender as ResolvedNode)).toEqual(['tg']);
+    expect(requiredOf(nodes.find((n) => n.id === 'both') as ResolvedNode)).toEqual([]);
+    // Without match, the reactor-like node has no chat-in port; with it, it has.
+    expect(Object.keys(nodes.find((n) => n.id === 'both')?.ports ?? {})).toEqual([]);
+    const matching = resolveGraph(
+      {
+        version: 2,
+        nodes: [
+          { id: 'tg', plugin: 'tg' },
+          { id: 'both', plugin: 'both', config: { match: 'x' } },
+        ],
+        edges: [{ from: 'tg', to: 'both.chat' }],
+      },
+      plugins
+    );
+    expect(matching.graph.edges).toEqual([
+      { from: 'tg.chat', to: 'both.chat', type: 'chat-in', reads: [] },
+    ]);
+  });
+
+  it('refuses a chat-out bound twice, unbound, or the wrong way round', () => {
+    const base = {
+      version: 2,
+      nodes: [
+        { id: 'tg', plugin: 'tg' },
+        { id: 'tg-2', plugin: 'tg', account: 'telegram:bob' },
+        { id: 'sender', plugin: 'sender' },
+        { id: 'reader', plugin: 'reader' },
+      ],
+    };
+    expect(
+      problems(
+        {
+          ...base,
+          edges: [
+            { from: 'tg', to: 'reader.chat' },
+            { from: 'sender.chat', to: 'tg.chat' },
+            { from: 'sender.chat', to: 'tg-2.chat' },
+            { from: 'sender.chat', to: 'tg.chat' },
+            { from: 'tg.chat', to: 'sender.chat' },
+            { from: 'reader.chat', to: 'tg.chat' },
+          ],
+        },
+        plugins
+      )
+    ).toEqual([
+      'node sender: output port chat is bound twice',
+      'edge sender.chat → tg.chat: twice in the graph',
+      'node sender: no input port chat',
+      'node reader: no output port chat',
+    ]);
+    expect(
+      problems(
+        {
+          version: 2,
+          nodes: [
+            { id: 'reader', plugin: 'reader' },
+            { id: 'sender', plugin: 'sender' },
+          ],
+        },
+        plugins
+      )
+    ).toEqual([
+      'node reader: input port chat (chat-in of any network) is not bound',
+      'node sender: output port chat (chat-out of any network) is not bound: tg is not in the graph',
+    ]);
+  });
+
+  it('converts a version 1 graph, each chat edge by the ports of its node', () => {
+    // The shape of a graph saved before the split: a connector's chat edges, all empty, to a
+    // parser (it reads), a turn-actor (it reads and sends) and a reactor on events (it sends).
+    const shell = new Map(
+      [
+        m('telegram-user', { kinds: ['connector'], account: 'telegram:alice' }),
+        m('parser', {
+          kinds: ['parser'],
+          games: { registers: ['questbot'] },
+          interface: { state: { rest: { help: 'its rest', output: z.number() } } },
+          inputs: { chat: { type: 'chat-in', network: 'telegram' } },
+        }),
+        m('turn-actor', {
+          kinds: ['actor'],
+          inputs: {
+            chat: { type: 'chat-in', network: 'telegram' },
+            parser: { type: 'interface', members: ['state.rest'] },
+          },
+          outputs: { chat: { type: 'chat-out', network: 'telegram' } },
+        }),
+        m('reactor', {
+          kinds: ['actor'],
+          config: z.object({ on: z.string().optional(), match: z.string().optional() }),
+          inputs: {
+            chat: { type: 'chat-in', when: { config: 'match' } },
+            events: { type: 'events', namespace: { config: 'on' }, optional: true },
+          },
+          outputs: { chat: { type: 'chat-out' } },
+        }),
+      ].map((x) => [x.id, x])
+    );
+    const v1 = {
+      version: 1,
+      nodes: [
+        { id: 'telegram-user', plugin: 'telegram-user' },
+        { id: 'questbot', plugin: 'parser' },
+        { id: 'questbot-turns', plugin: 'turn-actor' },
+        { id: 'look', plugin: 'reactor', config: { on: 'questbot.turn' } },
+      ],
+      edges: [
+        { from: 'telegram-user.chat', to: 'questbot.chat', type: 'chat', reads: [], sends: [] },
+        {
+          from: 'telegram-user.chat',
+          to: 'questbot-turns.chat',
+          type: 'chat',
+          reads: [],
+          sends: [],
+        },
+        { from: 'telegram-user.chat', to: 'look.chat', type: 'chat', reads: [], sends: [] },
+        { from: 'questbot.interface', to: 'questbot-turns.parser', type: 'interface' },
+        { from: 'questbot.events', to: 'look.events', type: 'events' },
+      ],
+    };
+    const converted = [
+      { from: 'telegram-user.chat', to: 'questbot.chat', type: 'chat-in', reads: [] },
+      { from: 'telegram-user.chat', to: 'questbot-turns.chat', type: 'chat-in', reads: [] },
+      { from: 'questbot-turns.chat', to: 'telegram-user.chat', type: 'chat-out', sends: [] },
+      { from: 'look.chat', to: 'telegram-user.chat', type: 'chat-out', sends: [] },
+      { from: 'questbot.interface', to: 'questbot-turns.parser', type: 'interface' },
+      { from: 'questbot.events', to: 'look.events', type: 'events' },
+    ];
+    expect(upgradeGraph(v1, shell)).toEqual({ ...v1, version: 2, edges: converted });
+    const { graph: g, nodes } = resolveGraph(v1, shell);
+    expect(g).toEqual({ version: 2, nodes: v1.nodes, edges: converted });
+    expect(loadOrder(nodes).map((n) => n.id)).toEqual([
+      'telegram-user',
+      'questbot',
+      'questbot-turns',
+      'look',
+    ]);
+    // A version 2 graph, and what is not a graph, are left as they are.
+    expect(upgradeGraph(g, shell)).toBe(g);
+    expect(upgradeGraph('x', shell)).toBe('x');
+  });
+
+  it('converts what it can of an odd version 1 graph, and leaves the check to say the rest', () => {
+    const v1 = {
+      version: 1,
+      nodes: [{ id: 'tg', plugin: 'tg' }, { id: 'old', plugin: 'old' }, { id: 'reader' }, 7],
+      edges: [
+        // Untyped, it is a chat edge by what it carries, or by its target's port.
+        { from: 'tg', to: 'old.line', reads: ['#a'], sends: ['#b'], commands: ['!go'] },
+        { from: 'tg', to: 'reader.chat', sends: ['#b'] },
+        { from: 'ghost', to: 'nobody.chat', type: 'chat', reads: ['#a'] },
+        { from: 'tg', to: 'old.nothing', type: 'chat' },
+        { from: 'tg', to: 'old.other' },
+        'junk',
+      ],
+    };
+    expect(upgradeGraph(v1, plugins)).toEqual({
+      ...v1,
+      version: 2,
+      edges: [
+        { from: 'tg', to: 'old.line', type: 'chat-in', reads: ['#a'] },
+        { from: 'old.line', to: 'tg.chat', type: 'chat-out', sends: ['#b'], commands: ['!go'] },
+        // Of a node with no plugin known, both halves, nothing lost.
+        { from: 'tg', to: 'reader.chat', type: 'chat-in' },
+        { from: 'reader.chat', to: 'tg.chat', type: 'chat-out', sends: ['#b'] },
+        { from: 'ghost', to: 'nobody.chat', type: 'chat-in', reads: ['#a'] },
+        { from: 'nobody.chat', to: 'ghost.chat', type: 'chat-out' },
+        // Of a known node with no such port, the input's half, for the check to refuse.
+        { from: 'tg', to: 'old.nothing', type: 'chat-in' },
+        { from: 'tg', to: 'old.other' },
+        'junk',
+      ],
+    });
+    expect(upgradeGraph({ version: 1 }, plugins)).toEqual({ version: 2 });
   });
 });

@@ -42,15 +42,15 @@ export interface PluginContext {
   /** Publishes the event types it registers, and hears those of the namespaces it consumes (§4.4). */
   readonly bus: BusHandle;
   /**
-   * A handle on the connector its chat input `port` is bound to (§2.1, §4.5): it reads the chats
-   * the edge reads and tells the status, it cannot send. `port` may also name the connector
+   * A handle on the connector its chat-in input `port` is bound to (§2.1, §4.5): it reads the
+   * chats the edge reads and tells the status, it cannot send. `port` may also name the connector
    * instance the edge binds. Refused if no edge binds one.
    */
   connector(port: string): ConnectorHandle;
   /**
-   * Its way out through the outbox of the account its chat input `port` is bound to (§4.6): within
-   * what the edge sends to, in its mode. `port` may also name the account. Refused if no edge binds
-   * one.
+   * Its way out through the outbox of the account its chat-out output `port` is bound to (§4.6):
+   * within what the edge sends to and the commands it allows, in its mode. `port` may also name
+   * the connector instance or the account. Refused if no edge binds one.
    */
   outbox(port: string): OutboxHandle;
   /**

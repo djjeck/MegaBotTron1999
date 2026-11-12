@@ -13,9 +13,9 @@ import { z } from 'zod';
 import { type Graph, type GraphEdge, nodeInputs } from './graph.ts';
 import { type Manifest } from './manifest.ts';
 import {
-  type DeclaredInput,
   describePort,
   type InputPort,
+  type ManifestInputPort,
   type OutputPort,
   PORT_TYPE_INFO,
 } from './ports.ts';
@@ -61,7 +61,8 @@ const label = (text: string): string => `"${text.replaceAll('"', '#quot;')}"`;
 /**
  * The graph as a Mermaid flowchart, left to right: a box per node (its id, and its plugin when
  * another's), an arrow per edge from its output to its input, named by the two ports and coloured
- * by its port type (`PORT_TYPE_INFO`).
+ * by its port type (`PORT_TYPE_INFO`). A connector that chat-out edges send through has a second
+ * box, `<id> · out`, so that the sends flow left to right too (bot-os.md D60).
  */
 export function graphMermaid(graph: Graph): string {
   const lines = ['flowchart LR'];
@@ -69,12 +70,19 @@ export function graphMermaid(graph: Graph): string {
     lines.push(
       `  ${mermaidId(n.id)}[${label(n.plugin === n.id ? n.id : `${n.id}<br/><i>${n.plugin}</i>`)}]`
     );
+  const outs = [
+    ...new Set(
+      graph.edges.flatMap((e) => (e.type === 'chat-out' ? [e.to.split('.')[0] ?? ''] : []))
+    ),
+  ];
+  for (const id of outs) lines.push(`  ${mermaidId(id)}_out[${label(`${id} · out`)}]`);
   graph.edges.forEach((e) => {
     const [from = '', out = ''] = e.from.split('.');
     const [to = '', input = ''] = e.to.split('.');
     const what = carried(e);
     const text = `${out} → ${input}${what === '' ? '' : `<br/>${what}`}`;
-    lines.push(`  ${mermaidId(from)} -- ${label(text)} --> ${mermaidId(to)}`);
+    const target = `${mermaidId(to)}${e.type === 'chat-out' ? '_out' : ''}`;
+    lines.push(`  ${mermaidId(from)} -- ${label(text)} --> ${target}`);
   });
   graph.edges.forEach((e, i) => {
     if (e.type !== undefined)
@@ -114,7 +122,12 @@ export type JsonSchema = Record<string, unknown>;
 
 /** A port as the graph view draws it: its type, what it carries, and its words. */
 export type PortView = (
-  | { type: 'chat'; network?: string }
+  | {
+      type: 'chat-in' | 'chat-out';
+      network?: string;
+      /** A chat-in's: the key of its node's config that, set, gives the node this port. */
+      when?: string;
+    }
   | {
       type: 'events';
       /** Its namespace: the manifest's, or as its node's config names it; none while unresolved. */
@@ -126,7 +139,10 @@ export type PortView = (
 ) & {
   /** The port in words (`describePort`). */
   label: string;
-  /** An input left unbound fails nothing (`ctx.useOptional`); an output's is false. */
+  /**
+   * An input left unbound fails nothing (`ctx.useOptional`), nor does a chat-out output; another
+   * output's is false.
+   */
   optional: boolean;
   help?: string;
 };
@@ -175,16 +191,21 @@ export const jsonSchema = (schema: z.ZodType): JsonSchema =>
   z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }) as JsonSchema;
 
 function inputView(
-  p: DeclaredInput | InputPort,
-  declared: DeclaredInput = p as DeclaredInput
+  p: ManifestInputPort | InputPort,
+  declared: ManifestInputPort = p as ManifestInputPort
 ): PortView {
   const base = {
     label: describePort(p),
     optional: p.optional,
     ...(p.help === undefined ? {} : { help: p.help }),
   };
-  if (p.type === 'chat')
-    return { type: 'chat', ...(p.network === undefined ? {} : { network: p.network }), ...base };
+  if (p.type === 'chat-in' || p.type === 'chat-out')
+    return {
+      type: p.type,
+      ...(p.network === undefined ? {} : { network: p.network }),
+      ...(p.type === 'chat-in' && p.when !== undefined ? { when: p.when.config } : {}),
+      ...base,
+    };
   if (p.type === 'events') {
     const from = declared.type === 'events' ? declared.namespace : undefined;
     return {
@@ -202,11 +223,17 @@ function inputView(
   };
 }
 
-const outputView = (p: OutputPort): PortView => ({
-  ...structuredClone(p),
-  label: describePort(p),
-  optional: false,
-});
+function outputView(p: OutputPort): PortView {
+  if (p.type !== 'chat-out')
+    return { ...structuredClone(p), label: describePort(p), optional: false };
+  return {
+    type: 'chat-out',
+    ...(p.network === undefined ? {} : { network: p.network }),
+    label: describePort(p),
+    optional: p.optional,
+    ...(p.help === undefined ? {} : { help: p.help }),
+  };
+}
 
 /**
  * A plugin as the editor shows it: its manifest's ports, interface, secrets and event types, and

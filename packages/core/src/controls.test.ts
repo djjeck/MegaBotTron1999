@@ -520,18 +520,34 @@ describe('controlServer', () => {
       { id: 'chat', plugin: 'chat', used: true },
     ]);
     expect((await call('/graph'))[1]).toMatchObject({
-      version: 1,
+      version: 2,
       nodes: [{ id: 'chat' }, { id: 'actor' }, { id: 'broken' }],
     });
     const [, view] = await call('/graph/view');
     expect(view).toMatchObject({
-      graph: { version: 1, edges: [{ from: 'chat.chat', to: 'actor.chat', type: 'chat' }] },
-      portTypes: { chat: { shape: 'circle' }, events: { shape: 'diamond' } },
+      // The shorthand's reach: the actor sends only, through its chat-out (bot-os.md D60).
+      graph: {
+        version: 2,
+        edges: [
+          { from: 'chat.chat', to: 'actor.chat', type: 'chat-in', reads: [] },
+          { from: 'actor.chat', to: 'chat.chat', type: 'chat-out', sends: ['#chat'] },
+        ],
+      },
+      portTypes: {
+        'chat-in': { shape: 'circle' },
+        'chat-out': { shape: 'circle' },
+        events: { shape: 'diamond' },
+      },
       nodes: [
-        { id: 'chat', outputs: { chat: { type: 'chat', network: 'chat' } } },
+        {
+          id: 'chat',
+          inputs: { chat: { type: 'chat-out', network: 'chat', optional: true } },
+          outputs: { chat: { type: 'chat-in', network: 'chat' } },
+        },
         {
           id: 'actor',
-          inputs: { chat: { type: 'chat', optional: false } },
+          inputs: { chat: { type: 'chat-in', optional: false } },
+          outputs: { chat: { type: 'chat-out', optional: false } },
           settingsSchema: { type: 'object' },
           interface: { actions: [{ name: 'bump' }, { name: 'refuse' }] },
         },

@@ -161,14 +161,21 @@ export function turnActorPlugin(): Plugin {
       events: { [`${TURN_ACTOR}.step`]: stepSchema },
       inputs: {
         chat: {
-          type: 'chat',
+          type: 'chat-in',
           network: 'telegram',
-          help: "the owner's own account: the private chat with its bot, and its turn command only",
+          help: "the owner's own account: its bot's private chat, where it sees the turns the owner sends by hand",
         },
         parser: {
           type: 'interface',
           members: TURN_PARSER_MEMBERS,
           help: "Its bot's parser: the bot's rest, and the turns it sent",
+        },
+      },
+      outputs: {
+        chat: {
+          type: 'chat-out',
+          network: 'telegram',
+          help: "the owner's own account: the private chat with its bot, and its turn command only",
         },
       },
       interface: {
