@@ -143,6 +143,7 @@ export {
   describeNodes,
   describePlugin,
   type DiffLine,
+  type EventTypeView,
   GRAPH_FILE,
   graphMermaid,
   graphText,

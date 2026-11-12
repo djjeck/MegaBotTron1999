@@ -153,6 +153,30 @@ describe('GraphPage', () => {
     expect(within(off).getByText('disabled until the next Apply')).toBeDefined();
   });
 
+  it('lists what a node’s outputs carry: its event types, and its members folded', async () => {
+    fakeCore();
+    render(<GraphPage loggedOut={loggedOut} checkAfterMs={0} />);
+    fireEvent.click(await screen.findByLabelText('node parser', {}, slow));
+    const details = await screen.findByLabelText('details of parser');
+    // The port's type is the graph's to show: the panel says what is published.
+    expect(within(details).queryByText('events of game')).toBeNull();
+    expect(within(details).queryByText('interface of parser')).toBeNull();
+    const types = within(details).getByRole('list', { name: 'event types' });
+    expect(types.textContent).toBe('game.message — a line of the gamegame.win');
+    const members = within(details).getByText('state.board, actions.reset');
+    const folded = members.closest('details');
+    expect(folded?.open).toBe(false);
+    fireEvent.click(members);
+    expect(folded?.open).toBe(true);
+    expect(within(details).getByText('state.board() → string[]')).toBeDefined();
+    expect(within(details).getByText('actions.reset({ to?: string })')).toBeDefined();
+    expect(within(details).getByText('— starts over')).toBeDefined();
+    // The connector's chat-in output is still said in words.
+    fireEvent.click(screen.getByLabelText('node chat · in'));
+    const chat = await screen.findByLabelText('details of chat');
+    expect(within(chat).getByText('chat-in of chat')).toBeDefined();
+  });
+
   it('shows a node’s details: its instance, forms, and interface', async () => {
     fakeCore({
       instances: [

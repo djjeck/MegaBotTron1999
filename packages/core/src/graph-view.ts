@@ -212,6 +212,11 @@ export type PortView = (
       namespace?: string;
       /** The key of its node's config that names its namespace, when the manifest says so. */
       config?: string;
+      /**
+       * An output's: the event types its plugin registers in its namespace, each with its schema's
+       * description (`.describe()`) if it has one (bot-os.md D71).
+       */
+      types?: EventTypeView[];
     }
   | { type: 'interface'; plugin?: string; members: string[] }
 ) & {
@@ -224,6 +229,12 @@ export type PortView = (
   optional: boolean;
   help?: string;
 };
+
+/** An event type a plugin registers (§4.4), with its schema's description, if any. */
+export interface EventTypeView {
+  type: string;
+  help?: string;
+}
 
 /** A member of a node's declared interface (§2 `interface`), with its schemas. */
 export interface MemberView {
@@ -301,7 +312,25 @@ function inputView(
   };
 }
 
-function outputView(p: OutputPort): PortView {
+/** The event types of `events` in `namespace`, in order, each with its description. */
+function typesOf(events: Manifest['events'], namespace: string): EventTypeView[] {
+  return Object.keys(events)
+    .filter((type) => type.startsWith(`${namespace}.`))
+    .sort()
+    .map((type) => {
+      const help = events[type]?.description;
+      return help === undefined || help === '' ? { type } : { type, help };
+    });
+}
+
+function outputView(p: OutputPort, events: Manifest['events']): PortView {
+  if (p.type === 'events')
+    return {
+      ...structuredClone(p),
+      types: typesOf(events, p.namespace),
+      label: describePort(p),
+      optional: false,
+    };
   if (p.type !== 'chat-out')
     return { ...structuredClone(p), label: describePort(p), optional: false };
   return {
@@ -328,7 +357,9 @@ export function describePlugin(m: Manifest): PluginView {
     ...(m.config === undefined ? {} : { configSchema: jsonSchema(m.config) }),
     ...(m.settings === undefined ? {} : { settingsSchema: jsonSchema(m.settings) }),
     inputs: Object.fromEntries(Object.entries(m.inputs).map(([k, p]) => [k, inputView(p)])),
-    outputs: Object.fromEntries(Object.entries(m.outputs).map(([k, p]) => [k, outputView(p)])),
+    outputs: Object.fromEntries(
+      Object.entries(m.outputs).map(([k, p]) => [k, outputView(p, m.events)])
+    ),
     interface: {
       reads: Object.entries(i.state ?? {}).map(([name, r]) => ({
         name,

@@ -619,6 +619,22 @@ main.wide > .page {
   margin: 0;
 }
 
+/* An output's event types and interface members (D71), under its name. */
+.details ul.outputs > li {
+  margin-bottom: 0.3rem;
+  overflow-wrap: anywhere;
+}
+
+.details ul.outputs ul {
+  font-size: 0.85rem;
+}
+
+.details details.members summary {
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+
 .plugin-node {
   position: relative;
   width: 220px;

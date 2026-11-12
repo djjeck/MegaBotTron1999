@@ -83,18 +83,36 @@ export const VIEW: GraphViewData = {
       kinds: ['parser'],
       inputs: {},
       outputs: {
-        events: { type: 'events', namespace: 'game', label: 'events of game', optional: false },
+        events: {
+          type: 'events',
+          namespace: 'game',
+          types: [{ type: 'game.message', help: 'a line of the game' }, { type: 'game.win' }],
+          label: 'events of game',
+          optional: false,
+        },
         interface: {
           type: 'interface',
           plugin: 'parser',
-          members: ['state.board'],
+          members: ['state.board', 'actions.reset'],
           label: 'interface of parser',
           optional: false,
         },
       },
       interface: {
-        reads: [{ name: 'board', help: 'the board', output: { type: 'array' } }],
-        actions: [],
+        reads: [
+          {
+            name: 'board',
+            help: 'the board',
+            output: { type: 'array', items: { type: 'string' } },
+          },
+        ],
+        actions: [
+          {
+            name: 'reset',
+            help: 'starts over',
+            input: { type: 'object', properties: { to: { type: 'string' } } },
+          },
+        ],
         commands: [],
       },
       ...declares,

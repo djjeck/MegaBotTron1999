@@ -160,7 +160,11 @@ export function turnActorPlugin(): Plugin {
         "A game bot's turn, from the owner's account, in its private chat, at a person's pace",
       config: turnActorConfig,
       games: { registers: [TURN_ACTOR] },
-      events: { [`${TURN_ACTOR}.step`]: stepSchema },
+      events: {
+        [`${TURN_ACTOR}.step`]: stepSchema.describe(
+          'A step of its plan: a turn planned, sent, seen sent by hand, a rest, a wait, a failure or its stop'
+        ),
+      },
       inputs: {
         chat: {
           type: 'chat-in',

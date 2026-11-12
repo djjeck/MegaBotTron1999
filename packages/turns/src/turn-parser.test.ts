@@ -137,7 +137,12 @@ describe('a turn parser', () => {
 
 describe('its turn commands, its game’s (bot-os.md D70)', () => {
   it('come from its spec, and it has no config', () => {
-    expect(questPlugin(['/quest']).manifest.config).toBeUndefined();
+    const { manifest } = questPlugin(['/quest']);
+    expect(manifest.config).toBeUndefined();
+    // Its event type says what it is, for the editor's list of what it publishes (D71).
+    expect(manifest.events?.['quest.turn']?.description).toBe(
+      "What @QuestBot answered to a turn of the owner's, as its grammar reads it"
+    );
     const spec = { id: 'x', bot: 'XBot', description: 'x', read: () => undefined };
     expect(() => turnParserPlugin({ ...spec, turnCommands: [] })).toThrow(
       'turn parser x: expected its turn commands, as /play, not []'

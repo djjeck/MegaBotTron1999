@@ -133,7 +133,9 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       description: spec.description,
       games: { registers: [spec.id] },
       events: {
-        [`${spec.id}.turn`]: z.object({ chat: z.string(), outcome: outcomeSchema }),
+        [`${spec.id}.turn`]: z
+          .object({ chat: z.string(), outcome: outcomeSchema })
+          .describe(`What @${spec.bot} answered to a turn of the owner's, as its grammar reads it`),
       },
       inputs: {
         chat: {

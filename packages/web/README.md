@@ -37,25 +37,27 @@ the server that guards them.
   config, settings and account are forms made from its schemas, each field's description as its
   help; a new node's config starts filled with its schema's defaults, and an opened node shows its
   unset ones filled in, written with its first change (`defaults.ts`) (`SchemaForm.tsx`,
-  `NodeDetails.tsx`), a config key that names a secret a choice of the secrets' names. Every change
-  is checked by the core, and each refusal shown on its edge, port, node or field (`draft.ts`, the
-  draft's pure changes). **Review changes** opens a dialog with the diff and two actions
-  (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`) and restarts the instance on it,
-  waiting for it and coming back to the page, still logged in (`src/ui/Restart.tsx`), or says why
-  the core refused it and restarts nothing; **Revert** drops the draft, back to the graph saved,
-  once confirmed. Its × (or Escape) only closes it, the draft kept. When the saved graph is not what
-  runs (changed through the API, rolled back, or a restart that did not happen), a banner offers
-  **Apply (restart)**; a saved graph refused at the last start is shown first. The **Text** tab, on
-  the page's right edge, opens a side sheet from the right (sliding, unless the browser asks for
-  reduced motion) with the draft printed (`graphText`), read-only, with a copy button
-  (`GraphText.tsx`); the tab rides on the sheet's edge and closes it; the rollback is Admin's, with
-  the history. Select one node or several (Shift, Ctrl or Cmd with a click; Shift and drag for a
-  box) and **Kill selected** kills each: its plugin's own safety stop, then stopped, kept across
-  restarts; a stopped node's panel has **Clear stop**, a change of the draft that Review lists and
-  Apply makes (`clear-stop`, then the restart), and its forms stay editable. Nodes start in columns
-  (`layout.ts`) and can be moved. **Swimlanes** (docs/bot-os.md D69): a node's panel sets its
-  **Group** (none, one of the draft's, or **new group…**, named and set), a change of the draft like
-  any other; a draft with groups is drawn in lanes (`layout.ts`'s `swimlanes`, `lanes.ts`,
+  `NodeDetails.tsx`), a config key that names a secret a choice of the secrets' names. Its outputs
+  say what they carry (docs/bot-os.md D71): an events output its event types, each with its
+  description; an interface output its members, folded, each with its signature (`signature.ts`) and
+  help when opened. Every change is checked by the core, and each refusal shown on its edge, port,
+  node or field (`draft.ts`, the draft's pure changes). **Review changes** opens a dialog with the
+  diff and two actions (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`) and restarts
+  the instance on it, waiting for it and coming back to the page, still logged in
+  (`src/ui/Restart.tsx`), or says why the core refused it and restarts nothing; **Revert** drops the
+  draft, back to the graph saved, once confirmed. Its × (or Escape) only closes it, the draft kept.
+  When the saved graph is not what runs (changed through the API, rolled back, or a restart that did
+  not happen), a banner offers **Apply (restart)**; a saved graph refused at the last start is shown
+  first. The **Text** tab, on the page's right edge, opens a side sheet from the right (sliding,
+  unless the browser asks for reduced motion) with the draft printed (`graphText`), read-only, with
+  a copy button (`GraphText.tsx`); the tab rides on the sheet's edge and closes it; the rollback is
+  Admin's, with the history. Select one node or several (Shift, Ctrl or Cmd with a click; Shift and
+  drag for a box) and **Kill selected** kills each: its plugin's own safety stop, then stopped, kept
+  across restarts; a stopped node's panel has **Clear stop**, a change of the draft that Review
+  lists and Apply makes (`clear-stop`, then the restart), and its forms stay editable. Nodes start
+  in columns (`layout.ts`) and can be moved. **Swimlanes** (docs/bot-os.md D69): a node's panel sets
+  its **Group** (none, one of the draft's, or **new group…**, named and set), a change of the draft
+  like any other; a draft with groups is drawn in lanes (`layout.ts`'s `swimlanes`, `lanes.ts`,
   `LaneNode.tsx`): the same global columns, each group a tinted band with its name at its top left,
   in the order of its first node, the ungrouped nodes in an unlabelled band last, and the
   connectors' in and out cards outside every band, at the left and the right (a connector's group is

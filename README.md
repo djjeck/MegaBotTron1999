@@ -122,10 +122,10 @@ export const greeter = definePlugin({
 ```
 
 - **The manifest** declares its kinds (connector, parser, actor, stats, agent, simulator), its input
-  ports and the chats it sends through (its `chat-out` outputs), the event types it registers, its
-  configuration, settings and secrets as zod schemas, and its interface of reads, actions and chat
-  commands. The web UI, the chat commands and the owner's control API are all made from these
-  declarations.
+  ports and the chats it sends through (its `chat-out` outputs), the event types it registers (each
+  schema's `.describe()` saying what it is), its configuration, settings and secrets as zod schemas,
+  and its interface of reads, actions and chat commands. The web UI, the chat commands and the
+  owner's control API are all made from these declarations.
 - **The context** gives it a clock, its own store, durable timers, the bus, the event log read back
   (its own namespaces and those it consumes), handles on the connectors its edges bind, an outbox,
   drift reporting, its settings, and its own safety stop (`ctx.stop`). A plugin is built from its

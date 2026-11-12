@@ -186,7 +186,7 @@ describe('the nodes as the graph view shows them', () => {
     kinds: ['parser'],
     description: 'reads the game',
     games: { registers: ['game'] },
-    events: { 'game.win': z.object({}), 'game.move': z.object({}) },
+    events: { 'game.win': z.object({}).describe('Someone won'), 'game.move': z.object({}) },
     interface: { state: { board: { help: 'the board', output: z.array(z.string()) } } },
   });
 
@@ -235,7 +235,12 @@ describe('the nodes as the graph view shows them', () => {
     expect(describePlugin(actor)).not.toHaveProperty('account');
     expect(describePlugin(irc)).toMatchObject({ plugin: 'irc', account: 'irc:me' });
     expect(views[1]?.outputs).toMatchObject({
-      events: { type: 'events', namespace: 'game' },
+      // An events output lists its plugin's types there, with their descriptions (D71).
+      events: {
+        type: 'events',
+        namespace: 'game',
+        types: [{ type: 'game.move' }, { type: 'game.win', help: 'Someone won' }],
+      },
       interface: { type: 'interface', plugin: 'game', members: ['state.board'] },
     });
     const b = views[2];

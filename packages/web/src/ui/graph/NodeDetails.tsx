@@ -7,11 +7,13 @@
  * interface it declares (P11) and its removal, which keeps its instance. A stopped node (D64)
  * says why, when and by what, with **Clear stop**, a change of the draft that Apply makes; a
  * running one can be killed (D44). Its forms stay editable whatever its state. Its group (D69),
- * the lane it is drawn in, is picked among the draft's, or named anew.
+ * the lane it is drawn in, is picked among the draft's, or named anew. Its outputs say what they
+ * carry (D71): an events output its event types, an interface output its members.
  */
 import { useState } from 'react';
 import type {
   DriftCounts,
+  EventTypeView,
   GraphNode,
   InstanceInfo,
   JsonSchema,
@@ -24,6 +26,7 @@ import { isSplit } from './cards.ts';
 import { withDefaults } from './defaults.ts';
 import { instanceOf } from './draft.ts';
 import { SchemaForm } from './SchemaForm.tsx';
+import { signature } from './signature.ts';
 import { CHATS_KEY, MonitoredChats } from './Surfaces.tsx';
 
 /** A config schema without its `chats` list, which the picker shows; undefined: it has none. */
@@ -50,6 +53,78 @@ function Ports(props: { title: string; ports: Record<string, PortView> }) {
         ))}
       </ul>
     </>
+  );
+}
+
+/**
+ * Its outputs (bot-os.md D71), each by what it carries rather than its type, which the graph draws:
+ * an events output, the event types its plugin publishes there, each with its description; an
+ * interface output, its members' names, in a disclosure that opens on each one's signature and
+ * help; any other, its port in words.
+ */
+function Outputs(props: { ports: Record<string, PortView>; view: NodeView }) {
+  const entries = Object.entries(props.ports);
+  if (entries.length === 0) return null;
+  const members = new Map<string, MemberView>([
+    ...props.view.interface.reads.map((m): [string, MemberView] => [`state.${m.name}`, m]),
+    ...props.view.interface.actions.map((m): [string, MemberView] => [`actions.${m.name}`, m]),
+  ]);
+  return (
+    <>
+      <h4>Outputs</h4>
+      <ul className="outputs">
+        {entries.map(([name, p]) => (
+          <li key={name}>
+            <code>{name}</code>{' '}
+            {p.type === 'events' ? (
+              <EventTypes types={p.types ?? []} />
+            ) : p.type === 'interface' ? (
+              <InterfaceMembers names={p.members} members={members} />
+            ) : (
+              <>
+                {p.label}
+                {p.optional ? <span className="muted"> (optional)</span> : null}
+                {p.help === undefined ? null : <span className="muted"> — {p.help}</span>}
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+function EventTypes(props: { types: readonly EventTypeView[] }) {
+  if (props.types.length === 0) return <span className="muted">publishes no event type</span>;
+  return (
+    <ul aria-label="event types">
+      {props.types.map((t) => (
+        <li key={t.type}>
+          <code>{t.type}</code>
+          {t.help === undefined ? null : <span className="muted"> — {t.help}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function InterfaceMembers(props: { names: readonly string[]; members: Map<string, MemberView> }) {
+  if (props.names.length === 0) return <span className="muted">no reads or actions</span>;
+  return (
+    <details className="members">
+      <summary>{props.names.join(', ')}</summary>
+      <ul>
+        {props.names.map((n) => {
+          const m = props.members.get(n);
+          return (
+            <li key={n}>
+              <code>{m === undefined ? n : signature(n, m)}</code>
+              {m === undefined || m.help === '' ? null : <span className="muted"> — {m.help}</span>}
+            </li>
+          );
+        })}
+      </ul>
+    </details>
   );
 }
 
@@ -360,7 +435,7 @@ export function NodeDetails(props: {
       <section>
         <h3>Interface</h3>
         <Ports title="Inputs" ports={view.inputs} />
-        <Ports title="Outputs" ports={view.outputs} />
+        <Outputs ports={view.outputs} view={view} />
         <Members title="Reads" members={i.reads} />
         <Members title="Actions" members={i.actions} />
         <Members title="Commands" members={i.commands} />
