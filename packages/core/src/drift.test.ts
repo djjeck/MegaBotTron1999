@@ -115,7 +115,9 @@ describe('drift in the core', () => {
       plugin('direct', ['actor'], ['parser'], got, seen),
       plugin('stats', ['stats'], ['parser'], got, seen),
       plugin('indirect', ['actor'], ['stats'], got, seen),
-      plugin('apart', ['actor'], [], got, seen)
+      plugin('apart', ['actor'], [], got, seen),
+      plugin('chained', ['actor'], ['direct'], got, seen),
+      plugin('watcher', ['stats'], ['direct'], got, seen)
     );
     await core.start();
     const drift = got['parser']?.drift;
@@ -125,8 +127,15 @@ describe('drift in the core', () => {
     expect(seen).toEqual([
       'direct paused: drift: parser could not read 2 messages in 5 minutes',
       'indirect paused: drift: parser could not read 2 messages in 5 minutes',
+      'chained paused: drift: parser could not read 2 messages in 5 minutes',
     ]);
     expect(core.state('direct')).toMatchObject({ state: 'stopped', stop: { source: 'drift' } });
+    // Each actor keeps its own stop; what requires one is inactive at once (#29).
+    expect(core.state('chained')).toMatchObject({ state: 'stopped', stop: { source: 'drift' } });
+    expect(core.state('watcher')).toMatchObject({
+      state: 'inactive',
+      reason: 'needs direct (stopped)',
+    });
     expect(core.state('stats')?.state).toBe('running');
     expect(core.state('apart')?.state).toBe('running');
     expect(core.drift()).toEqual([

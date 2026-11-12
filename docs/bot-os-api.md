@@ -272,14 +272,18 @@ its edges bind; two whose commands share a name fail the load.
   it is there. The owner clears it in the editor, a change of the draft that Apply makes
   (`POST /plugins/<id>/clear-stop`, then the restart). A stop made while the node runs takes effect
   at once: its outbox refuses its sends (`stopped: <reason>`), its `pause` hook is called, and
-  module API 1's `ctx.mode` listeners hear `read-only`; the nodes that require it go on until the
-  next start.
+  module API 1's `ctx.mode` listeners hear `read-only`; and every node it makes inactive (below) is
+  shut down at once (bot-os.md D65).
 - **Inactive**, derived at the load, never stored: a node a **required** port of which (an input, or
   a chat-out output) binds a node disabled, stopped or inactive, transitively, is not started, and
-  says why (`GET /status`: `state: "inactive"`, `reason: "needs tg (disabled)"`). An **optional**
-  port bound to such a node counts as unbound: its node runs, and `ctx.useOptional` gives undefined.
-  A connector is one node: disabled, every node reading from it or sending to it through a required
-  port is inactive.
+  says why (`GET /status`: `state: "inactive"`, `reason: "needs tg (disabled)"`). A stop made at
+  runtime applies the same rule at once (D65): each node it makes inactive, running or not started
+  yet, is so from then on, with the same reason (`needs actor (stopped)`), dependents shut down
+  first, as the instance's stop does: its messages, events and timers cut at once, its `serialise`
+  kept, then its `stop` called. Its outbox refuses its sends (`not running (inactive)`). Clearing
+  the stop brings them back with it, at the restart. An **optional** port bound to such a node
+  counts as unbound: its node runs, and `ctx.useOptional` gives undefined. A connector is one node:
+  disabled, every node reading from it or sending to it through a required port is inactive.
 
 A plugin that fails (§3) is `failed`, with why, as before, and is not kept so across restarts. Every
 change of a state (enable, disable, a stop cleared, an edge's dry run) is the editor's, a change of
@@ -511,8 +515,10 @@ and the reason.
   stop, by drift (§4.7) or by the owner. Its sends are refused by the outbox from then on; its
   `pause` hook is called so that it can stop planning, and its stop is kept in its instance, so the
   next start does not start it. Only the owner clears it, in the editor, applied with a restart; the
-  `resume` hook is never called (module API 1 keeps it, unused).
-- **Disabled** and **inactive** nodes are never started (§2.1): their state is the load's.
+  `resume` hook is never called (module API 1 keeps it, unused). The nodes the stop makes inactive
+  are shut down at once (§2.1, Node states; bot-os.md D65).
+- **Disabled** and **inactive** nodes are never started (§2.1): their state is the load's, or, for a
+  node made inactive by a runtime stop, the stop's.
 - **Serialise and restore** (P8): a plugin writes what must survive through its store as it changes,
   which survives a crash too. For state cheap to lose but costly to rebuild, its `serialise` hook is
   called at stop, and what it returned is handed back to the next `create` as `ctx.restored`.
@@ -845,7 +851,9 @@ tells the owner.
 threshold each parser's manifest may change (`drift`: `unreadAt`, `windowMin`). Then the core stops
 every running plugin of kind `actor` that requires that parser, directly or through other plugins
 (`source` `drift`, kept in its instance: §2.1, Node states), until the owner clears its stop in the
-editor; the other plugins keep running and reporting.
+editor, and the nodes those stops make inactive are shut down at once (D65); the other plugins keep
+running and reporting. Nothing stops before the threshold is passed: the unread messages under it
+are only reported.
 
 As built (`packages/core/src/drift.ts`): a parser reports through `ctx.drift` (`read`, `unread` with
 the text and the lines it did not know); the contract's type is `Reading`. Each unread message is
@@ -947,10 +955,10 @@ control API, the web UI and later the agents, whose grants will be subsets of it
 - **A node's kill** (`killNode(id, reason = KILLED)`, D44, D48, D64), the graph view's, and its stop
   from Telegram's `/plugins` (the reason `stopped by the owner`, `STOPPED`): that plugin's own
   `kill`, then the core stops it (`source` `owner`), kept in its instance, so that its outbox
-  refuses its sends and the next start does not start it. Nothing else is stopped with it until the
-  next start, when the nodes that require it are inactive. The owner clears the stop in the editor
-  (Clear stop, applied with Apply: `POST /plugins/<id>/clear-stop`, then the restart). Refused for a
-  node that is not up (running, or stopped since it started).
+  refuses its sends and the next start does not start it. The nodes that require it, through
+  required ports, are inactive and shut down at once (§2.1, Node states; bot-os.md D65). The owner
+  clears the stop in the editor (Clear stop, applied with Apply: `POST /plugins/<id>/clear-stop`,
+  then the restart). Refused for a node that is not up (running, or stopped since it started).
 
 **The core's commands** (`packages/core/src/owner-commands.ts`), the owner's, answered by the chat
 surface after the plugins': `/plugins` (the instance on or off and each plugin's state, with

@@ -13,7 +13,8 @@
  * - A node's state (bot-os.md D64): a node `disabled` in the graph, or `stopped` (a safety stop, a
  *   drift pause, the owner's kill or stop, kept in its instance as `_stop.json` across restarts),
  *   is not started, nor is one whose required ports bind a node down (`inactive`, derived at the
- *   load). A stop made while it runs holds it until the owner clears it in the editor and applies.
+ *   load). A stop made while it runs holds it until the owner clears it in the editor and applies,
+ *   and shuts down at once every node it makes inactive by that same rule (#29).
  */
 import path from 'node:path';
 import { type z } from 'zod';
@@ -268,6 +269,8 @@ export class Core {
   /** The instances, apart from the nodes (§2.2). */
   private readonly registry: InstanceRegistry;
   private sweepTimer?: ReturnType<Clock['setTimeout']>;
+  /** The shutdowns a runtime stop's cascade started (D64, #29): `stop` waits for them. */
+  private shutting: Promise<void> = Promise.resolve();
 
   constructor(given: CoreOptions) {
     const secrets = given.secrets;
@@ -565,18 +568,21 @@ export class Core {
 
   /**
    * Stops every running plugin that acts and requires `parser` (a required edge), directly or
-   * through another plugin, for drift (P5, D64); the others go on. The plugins stopped.
+   * through another plugin, for drift (P5, D64); the others go on, but for those the stops make
+   * inactive (#29). Each is stopped before the cascade, so that each keeps its own stop. The
+   * plugins stopped.
    */
   private stopActorsOf(parser: string, reason: string): string[] {
-    const stopped: string[] = [];
-    for (const { id, manifest, status } of this.entries.values())
-      if (
-        manifest.kinds.includes('actor') &&
-        status.state === 'running' &&
-        this.requires(id, parser) &&
-        this.stopNode(id, reason, 'drift')
+    const stopped = [...this.entries.values()]
+      .filter(
+        ({ id, manifest, status }) =>
+          manifest.kinds.includes('actor') &&
+          status.state === 'running' &&
+          this.requires(id, parser)
       )
-        stopped.push(id);
+      .filter(({ id }) => this.stopOne(id, reason, 'drift'))
+      .map(({ id }) => id);
+    this.cascade();
     return stopped;
   }
 
@@ -768,6 +774,7 @@ export class Core {
    */
   async stop(): Promise<void> {
     this.o.clock.clearTimeout(this.sweepTimer);
+    await this.shutting;
     for (const entry of [...this.entries.values()].reverse()) {
       const { instance } = entry;
       if (instance === undefined || entry.up !== true) continue;
@@ -791,9 +798,17 @@ export class Core {
    * Kept in its instance (`_stop.json`: why, when, who), so that it is not started again until the
    * owner clears it (`clearStop`) and the instance restarts; while it runs, its outbox refuses its
    * sends, it hears `pause` and its `ctx.mode` listeners `read-only`. A node stopped again keeps
-   * the latest stop. False for a node that is not up.
+   * the latest stop. Every node the stop makes inactive is shut down at once (`cascade`). False
+   * for a node that is not up.
    */
   stopNode(id: string, reason: string, source: StopSource): boolean {
+    const stopped = this.stopOne(id, reason, source);
+    if (stopped) this.cascade();
+    return stopped;
+  }
+
+  /** A node's stop, as `stopNode` makes it, without its cascade. */
+  private stopOne(id: string, reason: string, source: StopSource): boolean {
     const entry = this.entries.get(id);
     if (entry?.up !== true) return false;
     const stop: StopRecord = { reason, time: new Date(this.o.clock.now()).toISOString(), source };
@@ -814,6 +829,54 @@ export class Core {
         this.logger(id).error(`mode listener: ${message(e)}`);
       }
     return true;
+  }
+
+  /**
+   * A runtime stop's cascade (D64, #29): the nodes inactive by the load's rule (`nodeStates`, a
+   * required port bound to a node disabled, stopped or inactive, transitively), with the stops as
+   * they are now, are inactive at once, with the load's reason: those up shut down, dependents
+   * first, as the instance's stop does (their timers, events and messages cut at once, their
+   * `serialise` kept, their `stop` called); those not started yet are not started.
+   */
+  private cascade(): void {
+    const down = nodeStates(
+      [...this.entries.values()].map((e) => e.node),
+      (n) => {
+        const { status } = this.entries.get(n.id) as Entry;
+        return status.state === 'stopped' && status.stop !== undefined;
+      }
+    );
+    const shut: Entry[] = [];
+    for (const entry of [...this.entries.values()].reverse()) {
+      const d = down.get(entry.id);
+      if (d?.state !== 'inactive' || entry.status.state === 'inactive') continue;
+      const { state } = entry.status;
+      if (entry.up !== true && state !== 'registered') continue;
+      const reason = downText(d).slice('inactive: '.length);
+      if (entry.up === true) {
+        entry.up = false;
+        entry.scheduler?.disarm();
+        this.bus.drop(entry.id);
+        this.logger(entry.id).warn(`inactive: ${reason}`);
+        shut.push(entry);
+      }
+      this.set(entry, 'inactive', reason);
+    }
+    if (shut.length > 0) this.shutting = this.shutting.then(() => this.shutDown(shut));
+  }
+
+  /** The nodes a cascade made inactive, shut down in order, keeping what they serialise. */
+  private async shutDown(entries: readonly Entry[]): Promise<void> {
+    for (const entry of entries) {
+      const { instance } = entry;
+      try {
+        if (instance?.serialise !== undefined)
+          this.stores.internal(entry.node.instance).put(RESTORE, instance.serialise());
+        await this.withTimeout(() => instance?.stop?.(), entry.id);
+      } catch (e) {
+        this.logger(entry.id).error(`stop failed: ${message(e)}`);
+      }
+    }
   }
 
   /**
@@ -1194,8 +1257,16 @@ export class Core {
           throw new Error(`${id} has no reach on ${key}: no edge binds a chat-in input of it`);
         const c = this.connector(bound[1].node);
         if (c === undefined) throw new Error(`${bound[1].node} is not a running connector`);
-        // It hears only the chats and the senders its edge reads (P6, D62).
-        return handleOf(c, readFilter(bound[1]));
+        // It hears only the chats and the senders its edge reads (P6, D62), and nothing once it
+        // is shut down (a cascade's, #29).
+        const handle = handleOf(c, readFilter(bound[1]));
+        return {
+          ...handle,
+          onMessage: (h) =>
+            handle.onMessage((m) => {
+              if (entry.up === true) h(m);
+            }),
+        };
       },
       use: <T>(key: string): T => {
         const used = this.interfaceOf(entry, key);

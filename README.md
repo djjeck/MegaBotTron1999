@@ -132,12 +132,13 @@ export const greeter = definePlugin({
 - **States and dry runs** (D64): a node is **enabled**, **disabled** by the owner (in the graph:
   never started, still checked), **stopped** by exception (a safety stop, drift, the owner's kill or
   Telegram's stop; kept in its instance across restarts until the owner clears it), or **inactive**
-  while a node its required ports bind is down. A chat-out edge that is a **dry run** logs what it
-  would send, as sent, and sends nothing. New nodes start disabled and new chat-out edges dry runs;
-  every state is raised only in the editor, applied with a restart. The modes of before
-  (`read-only`, `dry-run`, `live`) were migrated into them at the first start.
+  while a node its required ports bind is down, at once when that node is stopped at runtime (D65).
+  A chat-out edge that is a **dry run** logs what it would send, as sent, and sends nothing. New
+  nodes start disabled and new chat-out edges dry runs; every state is raised only in the editor,
+  applied with a restart. The modes of before (`read-only`, `dry-run`, `live`) were migrated into
+  them at the first start.
 - **Drift:** a parser reports every message it claims but cannot read; past a threshold, the core
-  stops the actors that depend on it until the owner looks.
+  stops the actors that depend on it, and what requires them goes inactive, until the owner looks.
 - **The dev kit** (`DevKit`, `FakeConnector`, `VirtualClock`) runs plugins on a virtual clock with
   fake connectors, for tests and simulators.
 

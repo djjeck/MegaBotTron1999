@@ -324,6 +324,200 @@ describe('a stop (D64)', () => {
   });
 });
 
+describe('a runtime stop’s cascade (#29)', () => {
+  /** A reader of `#lobby` that needs the actor, and logs what it hears, its stop and its keep. */
+  function reader(id: string, needs: string, heard: string[]) {
+    return definePlugin({
+      manifest: {
+        id,
+        version: '0.1.0',
+        kinds: ['stats'],
+        description: 'reads and watches',
+        inputs: {
+          chat: { type: 'chat-in' },
+          needs: { type: 'interface', plugin: needs, members: [] },
+        },
+      },
+      create: (ctx) => {
+        ctx.connector('chat').onMessage((m) => heard.push(`${id} heard ${m.text}`));
+        ctx.scheduler.at('tick', 60_000);
+        return {
+          serialise: () => ({ kept: id }),
+          stop: () => {
+            heard.push(`${id} stop`);
+          },
+          onTimer: () => heard.push(`${id} tick`),
+        };
+      },
+    });
+  }
+
+  function cascading(o: { dataDir?: string } = {}) {
+    const heard: string[] = [];
+    const tg = new FakeConnector({ account: 'tg:me' });
+    const seen: PluginContext[] = [];
+    const clock = new VirtualClock(Date.UTC(2026, 10, 12));
+    const g = {
+      version: 2,
+      nodes: [
+        { id: 'tg', plugin: 'tg' },
+        { id: 'parser', plugin: 'parser' },
+        { id: 'actor', plugin: 'actor' },
+        { id: 'near', plugin: 'near' },
+        { id: 'far', plugin: 'far' },
+        { id: 'apart', plugin: 'apart' },
+      ],
+      edges: [
+        { from: 'tg.chat', to: 'parser.chat', type: 'chat-in', reads: ['#lobby'] },
+        { from: 'parser.interface', to: 'actor.parser' },
+        { from: 'actor.quiet', to: 'tg.chat', type: 'chat-out', sends: ['#lobby'] },
+        { from: 'tg.chat', to: 'near.chat', type: 'chat-in', reads: ['#lobby'] },
+        { from: 'actor.interface', to: 'near.needs' },
+        { from: 'tg.chat', to: 'far.chat', type: 'chat-in', reads: ['#lobby'] },
+        { from: 'near.interface', to: 'far.needs' },
+        { from: 'tg.chat', to: 'apart.chat', type: 'chat-in', reads: ['#lobby'] },
+        { from: 'parser.interface', to: 'apart.needs' },
+      ],
+    } as GraphInput;
+    const core = new Core({ clock, graph: g, ...o });
+    core.register(
+      fakeConnectorPlugin('tg', tg),
+      parser,
+      actor(seen),
+      reader('near', 'actor', heard),
+      reader('far', 'near', heard),
+      reader('apart', 'parser', heard)
+    );
+    const states = () =>
+      core.status().map((s) => `${s.id} ${s.state}${s.reason ? `: ${s.reason}` : ''}`);
+    return { core, tg, seen, heard, clock, states };
+  }
+
+  it('shuts down at once, dependents first, every node the stop makes inactive', async () => {
+    const { core, tg, seen, heard, clock, states } = cascading({ dataDir: dir });
+    await core.start();
+    tg.hear({ chat: '#lobby', sender: 'alice', text: 'one', time: 1 });
+    expect(heard).toEqual(['near heard one', 'far heard one', 'apart heard one']);
+    heard.length = 0;
+    (seen[0] as PluginContext).stop('out of 🧊');
+    expect(states()).toEqual([
+      'tg running',
+      'parser running',
+      'actor stopped: out of 🧊',
+      'near inactive: needs actor (stopped)',
+      'far inactive: needs near (inactive)',
+      'apart running',
+    ]);
+    // Its messages, its timers and its interface end at once; its stop runs, its keep is kept.
+    tg.hear({ chat: '#lobby', sender: 'alice', text: 'two', time: 2 });
+    clock.advance(60_000);
+    await core.stop();
+    // Their own stops run as the instance's do, a moment later, dependents first.
+    expect(heard).toEqual(['apart heard two', 'apart tick', 'far stop', 'near stop', 'apart stop']);
+    expect(
+      JSON.parse(fs.readFileSync(path.join(dir, 'instances', 'near', '_restore.json'), 'utf8'))
+    ).toEqual({ kept: 'near' });
+  });
+
+  it('is derived again at the next start, and undone once the stop is cleared', async () => {
+    const first = cascading({ dataDir: dir });
+    await first.core.start();
+    expect(first.core.stopNode('actor', 'enough', 'owner')).toBe(true);
+    // A stop made again cascades nothing more.
+    expect(first.core.stopNode('actor', 'enough again', 'owner')).toBe(true);
+    await first.core.stop();
+    const second = cascading({ dataDir: dir });
+    await second.core.start();
+    expect(second.states().slice(2, 5)).toEqual([
+      'actor stopped: enough again',
+      'near inactive: needs actor (stopped)',
+      'far inactive: needs near (inactive)',
+    ]);
+    expect(second.core.clearStop('actor')).toBe(true);
+    await second.core.stop();
+    const third = cascading({ dataDir: dir });
+    await third.core.start();
+    expect(third.states().slice(2, 5)).toEqual(['actor running', 'near running', 'far running']);
+    await third.core.stop();
+  });
+
+  it('of a connector, takes down every node reading from it or sending through it', async () => {
+    const { core, tg, heard, states } = cascading();
+    await core.start();
+    expect(core.stopNode('tg', 'by the owner', 'owner')).toBe(true);
+    expect(states()).toEqual([
+      'tg stopped: by the owner',
+      'parser inactive: needs tg (stopped)',
+      'actor inactive: needs parser (inactive)',
+      'near inactive: needs tg (stopped)',
+      'far inactive: needs tg (stopped)',
+      'apart inactive: needs tg (stopped)',
+    ]);
+    tg.hear({ chat: '#lobby', sender: 'alice', text: 'late', time: 1 });
+    await core.stop();
+    expect(heard).toEqual(['apart stop', 'far stop', 'near stop']);
+  });
+
+  it('made as a node starts, keeps those after it from starting', async () => {
+    const early = definePlugin({
+      manifest: { id: 'early', version: '0.1.0', kinds: ['actor'], description: 'stops' },
+      create: (ctx) => ({ start: () => ctx.stop('nothing to do'), interface: {} }),
+    });
+    const later = definePlugin({
+      manifest: {
+        id: 'later',
+        version: '0.1.0',
+        kinds: ['stats'],
+        description: 'needs early',
+        requires: ['early'],
+      },
+      create: () => {
+        throw new Error('never made');
+      },
+    });
+    const core = new Core({ clock: new VirtualClock() });
+    core.register(early, later);
+    await core.start();
+    expect(core.state('later')).toMatchObject({
+      state: 'inactive',
+      reason: 'needs early (stopped)',
+    });
+    await core.stop();
+  });
+
+  it('logs a shutdown that fails, and goes on', async () => {
+    const lines: string[] = [];
+    const fragile = definePlugin({
+      manifest: {
+        id: 'fragile',
+        version: '0.1.0',
+        kinds: ['stats'],
+        description: 'fails to stop',
+        requires: ['base'],
+      },
+      create: () => ({
+        stop: () => {
+          throw new Error('stuck');
+        },
+      }),
+    });
+    const base = definePlugin({
+      manifest: { id: 'base', version: '0.1.0', kinds: ['actor'], description: 'base' },
+      create: () => ({}),
+    });
+    const core = new Core({ clock: new VirtualClock(), print: (l) => lines.push(l) });
+    core.register(base, fragile);
+    await core.start();
+    core.stopNode('base', 'halt', 'safety');
+    await core.stop();
+    expect(lines).toEqual([
+      'base: warning: stopped (safety): halt',
+      'fragile: warning: inactive: needs base (stopped)',
+      'fragile: error: stop failed: stuck',
+    ]);
+  });
+});
+
 /**
  * A plugin of module API 1 that keeps its commands' mode through `ctx.mode`, as a module's tactics
  * do: its owner commands set it (`owner`), its safety stops lower it (`safety`), through a `Modes`
