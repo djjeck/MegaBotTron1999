@@ -80,6 +80,8 @@ describe('App', () => {
         .getAllByRole('link')
         .map((l) => l.textContent)
     ).toEqual(['Graph', 'Modules', 'Import', 'Admin', 'Drift', 'Events']);
+    // The bottom bar, for small print, stays on every page.
+    expect(screen.getByRole('contentinfo')).toBeDefined();
     for (const page of PAGES) {
       window.location.hash = `#/${page.route}`;
       window.dispatchEvent(new HashChangeEvent('hashchange'));

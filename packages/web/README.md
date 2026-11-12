@@ -4,13 +4,19 @@ The shell's web UI, the owner's console: the instance's graph, its home page, th
 the server that guards them.
 
 - `src/ui/`: a React app, built by Vite (`npm run build`, `vite.config.ts`, `index.html`) into
-  `dist/`, the only build step of the shell. Its pages are reached by the URL's hash. The home page
-  is the **Graph** (`#/graph`, `src/ui/graph/`), the graph editor (docs/bot-os.md D55), drawn with
-  React Flow (`@xyflow/react`): a draft of the saved graph, each plugin instance a node with its
-  input ports on the left and its output ports on the right, each port type in its own shape and
-  colour, each binding an edge in its type's colour, dashed when the input is optional, and on each
-  node its state and drift (docs/bot-os.md D64): disabled, greyed; stopped, in red tones with a
-  warning icon and its reason; inactive, greyed with the node it needs. Chats flow left to right
+  `dist/`, the only build step of the shell. Its pages are reached by the URL's hash, as tabs across
+  a top bar, the tab selected being the page's title; a bottom bar holds small print, such as
+  diagnostics (its slot is empty for now); both bars stay, and only the page between them scrolls.
+  The home page is the **Graph** (`#/graph`, `src/ui/graph/`), the graph editor (docs/bot-os.md
+  D55), drawn with React Flow (`@xyflow/react`): a draft of the saved graph, each plugin instance a
+  node with its input ports on the left and its output ports on the right, each port type in its own
+  shape and colour, each binding an edge in its type's colour, dashed when the input is optional,
+  and on each node its state and drift (docs/bot-os.md D64): disabled, greyed; stopped, in red tones
+  with a warning icon and its reason; inactive, greyed with the node it needs. The page is the map,
+  filling the area between the bars: its minimap at the top right; what the draft needs (**Review
+  changes**, the problems, the selection and **Kill selected**) at the top left; the zoom controls
+  and the legend at the bottom left; and **Add a node**, a floating "+" button, at the bottom right.
+  The panel of what is selected opens beside the map (below it on a phone). Chats flow left to right
   (docs/bot-os.md D60): a connector is drawn as two cards (`cards.ts`), its **in** card
   (`telegram-user · in`) at the left, whose chat-in output feeds the readers, and its **out** card
   (`telegram-user · out`) in a column of its own at the right, whose chat-out input takes the
@@ -39,17 +45,19 @@ the server that guards them.
   the core refused it and restarts nothing; **Revert** drops the draft, back to the graph saved,
   once confirmed. Its × (or Escape) only closes it, the draft kept. When the saved graph is not what
   runs (changed through the API, rolled back, or a restart that did not happen), a banner offers
-  **Apply (restart)**; a saved graph refused at the last start is shown first. **Text** shows the
-  draft printed (`graphText`), read-only, with a copy button (`GraphText.tsx`); the rollback is
-  Admin's, with the history. Select one node or several (Shift, Ctrl or Cmd with a click; Shift and
-  drag for a box) and **Kill selected** kills each: its plugin's own safety stop, then stopped, kept
-  across restarts; a stopped node's panel has **Clear stop**, a change of the draft that Review
-  lists and Apply makes (`clear-stop`, then the restart), and its forms stay editable. Nodes start
-  in columns (`layout.ts`) and can be moved. **Modules** (`#/modules`) lists the modules installed,
-  installs one from its folder, chosen (**Choose folder**) or dropped on the page, after showing the
-  id, version and description its `module.json` gives (`src/ui/module-folder.ts`), or from a
-  `.tar.gz`, and rolls one back; **Import** (`#/import`) shows an older data directory and imports
-  its event log with a table of type renames. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`,
+  **Apply (restart)**; a saved graph refused at the last start is shown first. The **Text** tab, on
+  the page's right edge, opens a side sheet from the right (sliding, unless the browser asks for
+  reduced motion) with the draft printed (`graphText`), read-only, with a copy button
+  (`GraphText.tsx`); the tab rides on the sheet's edge and closes it; the rollback is Admin's, with
+  the history. Select one node or several (Shift, Ctrl or Cmd with a click; Shift and drag for a
+  box) and **Kill selected** kills each: its plugin's own safety stop, then stopped, kept across
+  restarts; a stopped node's panel has **Clear stop**, a change of the draft that Review lists and
+  Apply makes (`clear-stop`, then the restart), and its forms stay editable. Nodes start in columns
+  (`layout.ts`) and can be moved. **Modules** (`#/modules`) lists the modules installed, installs
+  one from its folder, chosen (**Choose folder**) or dropped on the page, after showing the id,
+  version and description its `module.json` gives (`src/ui/module-folder.ts`), or from a `.tar.gz`,
+  and rolls one back; **Import** (`#/import`) shows an older data directory and imports its event
+  log with a table of type renames. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`,
   docs/bot-os.md D59) has one section per area, each reached by its route (`#/instance`,
   `#/graph-history`, `#/graph-text`, `#/accounts`, `#/plugins`), which opens the page scrolled to
   it: **Instance** (on or off with its switch, uptime, memory, the plugins and accounts by state,

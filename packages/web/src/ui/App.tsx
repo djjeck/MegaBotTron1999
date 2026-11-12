@@ -3,6 +3,10 @@
  * page and the main UI, beside the modules, the import from an older data directory, the admin
  * page (D59: the instance, its accounts and its plugins), drift and events; the other pages'
  * features move into the editor over time. The whole app is the owner's console, in one menu.
+ *
+ * Its shell: a top bar whose tabs are the pages (the tab selected is the page's title), the page
+ * between, which alone scrolls, and a bottom bar for small print, such as diagnostics. The bars
+ * stay where they are.
  * Every page is reached by the URL's hash (`#/admin`); a page added here is a line of `PAGES`, as
  * the widgets will be. The admin page's sections keep their old routes (`#/plugins`), which lead to
  * it, scrolled to the section.
@@ -30,17 +34,21 @@ export interface PageProps {
   section?: string | undefined;
 }
 
-/** A page: its route, its title, and whether it takes the window's whole width. */
+/**
+ * A page: its route, its title, whether it takes the window's whole width, and whether it fills the
+ * area between the bars, edge to edge, with no scroll of its own (the graph's map).
+ */
 export interface Page {
   route: string;
   title: string;
   wide: boolean;
+  fill?: boolean;
   page: (p: PageProps) => ReactNode;
 }
 
 /** The pages, in the menus' order; the first is the home page. */
 export const PAGES: Page[] = [
-  { route: 'graph', title: 'Graph', wide: true, page: (p) => <GraphPage {...p} /> },
+  { route: 'graph', title: 'Graph', wide: true, fill: true, page: (p) => <GraphPage {...p} /> },
   { route: 'modules', title: 'Modules', wide: true, page: (p) => <ModulesPage {...p} /> },
   { route: 'import', title: 'Import', wide: true, page: (p) => <ImportPage {...p} /> },
   { route: 'admin', title: 'Admin', wide: false, page: (p) => <AdminPage {...p} /> },
@@ -100,16 +108,22 @@ export function App() {
     api('/logout', {}).finally(() => loggedOut());
   };
   return (
-    <>
+    <div className="shell">
       <header>
-        <strong>MegaBotTron1999</strong>
+        <strong className="brand">MegaBotTron1999</strong>
         <nav aria-label="main">{PAGES.map(link)}</nav>
         <button type="button" onClick={logout}>
           Log out
         </button>
       </header>
-      <main className={current.wide ? 'wide' : undefined}>
-        <h1>{current.title}</h1>
+      <main
+        className={
+          [current.wide ? 'wide' : '', current.fill === true ? 'fill' : ''].join(' ').trim() ||
+          undefined
+        }
+      >
+        {/* The tab selected is the page's title on screen; this heading names it to a screen reader. */}
+        <h1 className="visually-hidden">{current.title}</h1>
         {notice === undefined ? null : (
           <p role="status" className="banner good">
             {notice}{' '}
@@ -118,8 +132,14 @@ export function App() {
             </button>
           </p>
         )}
-        <Fragment key={generation}>{current.page({ loggedOut, restarted, section })}</Fragment>
+        <div className="page">
+          <Fragment key={generation}>{current.page({ loggedOut, restarted, section })}</Fragment>
+        </div>
       </main>
-    </>
+      {/* The bottom bar: small print, such as diagnostics (the version, to come), in its slot. */}
+      <footer className="status-bar">
+        <div className="status-bar-slot" />
+      </footer>
+    </div>
   );
 }

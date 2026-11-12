@@ -30,40 +30,166 @@ body {
   background: var(--bg);
 }
 
-header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  align-items: center;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--line);
+/* The app's shell (App.tsx): the top bar and the bottom bar stay; only the page between scrolls. */
+html,
+body,
+#root {
+  height: 100%;
 }
 
+.shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.shell > header {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  padding: 0 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.shell > header .brand,
+.shell > header > button {
+  align-self: center;
+  padding: 0.5rem 0;
+}
+
+.shell > header > button {
+  padding: 0.25rem 0.6rem;
+}
+
+/* The pages, as tabs: the one selected is the page's title. */
 nav {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.25rem;
   flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 nav a {
-  color: var(--accent);
+  padding: 0.75rem 0.9rem 0.6rem;
+  border-bottom: 3px solid transparent;
+  color: var(--muted);
   text-decoration: none;
+  white-space: nowrap;
+}
+
+nav a:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+
+nav a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 nav a[aria-current='page'] {
+  color: var(--accent);
   font-weight: bold;
-  text-decoration: underline;
+  border-bottom-color: var(--accent);
 }
 
-main {
-  padding: 1rem;
+.shell > main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+.shell > main > .page {
+  box-sizing: border-box;
+  width: 100%;
   max-width: 72rem;
+  padding: 0 1rem 1rem;
+}
+
+.shell > main > .banner {
+  margin: 0.5rem 1rem 0;
+}
+
+/* A page that fills the area between the bars, edge to edge (the graph's map): no scroll of its own. */
+.shell > main.fill {
+  overflow: hidden;
+}
+
+.shell > main.fill > .page {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+}
+
+/* The bottom bar: small print, such as diagnostics, in its slot. */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 1.6rem;
+  padding: 0 1rem;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--fg) 3%, var(--bg));
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.6rem;
+}
+
+.status-bar-slot {
+  display: flex;
+  gap: 1rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* On a phone the tabs take a row of their own, under the name and Log out. */
+@media (max-width: 640px) {
+  .shell > header {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .shell > header .brand {
+    flex: 1;
+  }
+
+  nav {
+    order: 3;
+    flex-basis: 100%;
+    margin: 0 -1rem;
+    padding: 0 0.5rem;
+  }
+
+  nav a {
+    padding: 0.6rem 0.7rem 0.5rem;
+  }
 }
 
 main.login {
   max-width: 20rem;
   margin: 4rem auto;
+  padding: 1rem;
 }
 
 h1 {
@@ -204,23 +330,202 @@ ul.log time {
   margin: 0.25rem 0;
 }
 
-main.wide {
+main.wide > .page {
   max-width: none;
 }
 
-/* The graph view (#65). */
+/* The graph view (#65): the map, filling the page, with what sits on it. */
 
-.graph-page .toolbar {
+/* React Flow's own controls and minimap, in the page's colours, in either theme. */
+.react-flow {
+  --xy-controls-button-background-color: var(--bg);
+  --xy-controls-button-background-color-hover: color-mix(in srgb, var(--fg) 8%, var(--bg));
+  --xy-controls-button-color: var(--fg);
+  --xy-controls-button-color-hover: var(--fg);
+  --xy-controls-button-border-color: var(--line);
+  --xy-controls-box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+  --xy-minimap-background-color: var(--bg);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--fg) 8%, transparent);
+  --xy-minimap-node-background-color: color-mix(in srgb, var(--fg) 22%, var(--bg));
+  --xy-attribution-background-color: transparent;
+}
+
+.react-flow__minimap {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+}
+
+.graph-page {
+  --sheet-tab-width: 2rem;
+  --sheet-tab-top: 12rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.graph-notes {
+  flex: none;
+  max-height: 40%;
+  overflow: auto;
+  padding: 0 1rem;
+}
+
+.graph-notes:empty {
+  display: none;
+}
+
+.graph-notes .said {
+  margin: 0.5rem 0;
+}
+
+/* What the draft needs, at the map's top left, clear of the minimap at its top right. */
+.react-flow__panel.map-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 0.4rem 0.75rem;
   align-items: center;
-  margin-bottom: 0.5rem;
+  max-width: calc(100% - 200px - 4rem);
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+  font-size: 0.9rem;
+}
+
+/* The zoom controls, then the legend under them, at the map's bottom left. */
+.react-flow__panel.map-corner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  max-width: calc(100% - 56px - 4rem);
 }
 
 .legend {
   display: flex;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 0.8rem;
+}
+
+/* Add a node: a floating action button at the map's bottom right. */
+.fab {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 16px;
+  background: var(--accent);
+  color: var(--bg);
+  box-shadow:
+    0 3px 6px rgb(0 0 0 / 20%),
+    0 1px 2px rgb(0 0 0 / 15%);
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+}
+
+.fab:hover {
+  box-shadow:
+    0 6px 12px rgb(0 0 0 / 25%),
+    0 2px 4px rgb(0 0 0 / 15%);
+}
+
+.fab:focus-visible {
+  outline: 3px solid var(--fg);
+  outline-offset: 2px;
+}
+
+.fab[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--accent) 80%, var(--fg));
+}
+
+/* The draft as text: a side sheet from the page's right edge, its tab riding on its edge. Its
+   motion is Material's for side sheets: in, emphasized decelerate; out, emphasized accelerate. */
+.side-sheet {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  width: min(30rem, calc(100% - var(--sheet-tab-width) - 1rem));
+  transform: translateX(100%);
+  transition: transform 200ms cubic-bezier(0.3, 0, 0.8, 0.15);
+}
+
+.side-sheet.open {
+  transform: none;
+  transition: transform 250ms cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+
+.side-sheet > .details {
+  box-sizing: border-box;
+  height: 100%;
+  overflow: auto;
+  padding: 0.75rem 1rem;
+  border-left: 1px solid var(--line);
+  background: var(--bg);
+  box-shadow: -4px 0 16px rgb(0 0 0 / 18%);
+  visibility: hidden;
+  transition: visibility 0s linear 200ms;
+}
+
+.side-sheet.open > .details {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.sheet-tab {
+  position: absolute;
+  top: var(--sheet-tab-top);
+  right: 100%;
+  width: var(--sheet-tab-width);
+  margin: 0;
+  padding: 0.9rem 0;
+  border: 1px solid var(--line);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  background: var(--bg);
+  color: var(--accent);
+  box-shadow: -2px 1px 6px rgb(0 0 0 / 14%);
+  font-weight: bold;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  cursor: pointer;
+}
+
+.sheet-tab:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+}
+
+.sheet-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.side-sheet.open > .sheet-tab {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .side-sheet,
+  .side-sheet.open,
+  .side-sheet > .details {
+    transition: none;
+  }
 }
 
 .legend-item {
@@ -251,22 +556,53 @@ main.wide {
 
 .graph-body {
   display: flex;
-  gap: 1rem;
-  align-items: flex-start;
+  flex: 1;
+  min-height: 0;
 }
 
 .graph-canvas {
   position: relative;
   flex: 1;
-  height: 75vh;
   min-width: 0;
-  border: 1px solid var(--line);
+  min-height: 0;
 }
 
-.graph-body .details {
+/* The panel of what is selected, beside the map; its right edge clear of the Text tab. */
+.graph-body > .details {
+  box-sizing: border-box;
   width: 26rem;
-  max-height: 75vh;
+  flex: none;
   overflow: auto;
+  padding: 0.5rem calc(var(--sheet-tab-width) + 0.75rem) 0.5rem 1rem;
+  border-left: 1px solid var(--line);
+}
+
+/* On a phone: a smaller minimap, the panel under the map, and every control still in reach. */
+@media (max-width: 640px) {
+  .graph-page {
+    --sheet-tab-top: 7.5rem;
+  }
+
+  .graph-body {
+    flex-direction: column;
+  }
+
+  .graph-body > .details {
+    width: auto;
+    max-height: 45%;
+    padding-right: 1rem;
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
+
+  .react-flow__minimap svg {
+    width: 120px;
+    height: 80px;
+  }
+
+  .react-flow__panel.map-bar {
+    max-width: calc(100% - 120px - 4rem);
+  }
 }
 
 .details h2 {
@@ -629,7 +965,7 @@ button.plugin:hover {
 
 .empty-state {
   position: absolute;
-  top: 2rem;
+  top: 4rem;
   left: 50%;
   transform: translateX(-50%);
   width: min(28rem, 90%);

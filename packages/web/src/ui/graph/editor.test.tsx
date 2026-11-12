@@ -482,10 +482,10 @@ describe('the graph editor', () => {
     render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
     await screen.findByLabelText('node actor-a', {}, slow);
     const toggle = screen.getByRole('button', { name: 'Text' });
-    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(toggle);
     const panel = await screen.findByRole('complementary', { name: 'the draft as text' });
-    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
     const text = within(panel).getByLabelText('the draft as text');
     await waitFor(() => expect(text.textContent).toContain('  actor-a (actor)'));
     expect(within(panel).queryByText(/changes not applied included/u)).toBeNull();

@@ -22,8 +22,13 @@
  *   graph that differs from what runs (changed through the API, a rollback, or its restart failed)
  *   has its own banner with Apply. The versions before, and their rollback, are on the admin page
  *   (Admin → Graph history, D61).
- * - **Read it as text**: the Text toggle shows the draft printed (`POST /graph/check`'s `text`),
- *   read-only, with a copy button.
+ * - **Read it as text**: the Text tab, on the page's right edge, opens a side sheet with the draft
+ *   printed (`POST /graph/check`'s `text`), read-only, with a copy button.
+ *
+ * The page is the map, filling the area between the app's bars: its minimap at the top right, what
+ * the draft needs (its review, its problems, the selection and its kill) at the top left, the zoom
+ * controls and the legend at the bottom left, and Add a node, a floating button, at the bottom
+ * right. The panel of what is selected opens beside it (below it on a phone).
  *
  * A saved graph refused at the last start (`GET /status`, `graph.refused`) runs no node: it is
  * shown first, for the owner to fix. One or several running nodes selected can be killed (D44):
@@ -38,6 +43,7 @@ import {
   Background,
   Controls,
   MiniMap,
+  Panel,
   ReactFlow,
   useEdgesState,
   useNodesState,
@@ -424,8 +430,10 @@ export function GraphPage({
   const killable = selected.nodes.filter((id) => live.get(id)?.state === 'running');
   const connectors = (available.data ?? []).filter((p) => p.kinds.includes('connector'));
 
+  const textOpen = panel === 'text';
   let side = null;
-  if (restarting) side = null;
+  // The draft as text is a side sheet of its own, below.
+  if (restarting || textOpen) side = null;
   else if (panel === 'palette')
     side = (
       <Palette
@@ -433,22 +441,6 @@ export function GraphPage({
         pick={(p) => setPanel(p)}
         close={() => setPanel(undefined)}
       />
-    );
-  else if (panel === 'text')
-    side = (
-      <aside className="details text" aria-label="the draft as text">
-        <h2>
-          As text{' '}
-          <button type="button" className="link" onClick={() => setPanel(undefined)}>
-            close
-          </button>
-        </h2>
-        <p className="muted small">
-          The draft printed{dirty ? ', changes not applied included' : ''}: a node per line, then a
-          line per value of its config, then an edge per line.
-        </p>
-        <TextView text={check?.text} label="the draft as text" />
-      </aside>
     );
   else if (panel === 'review')
     side = (
@@ -537,100 +529,56 @@ export function GraphPage({
       />
     );
 
+  const selection = [...selected.nodes, ...selected.edges];
+  const needs =
+    dirty ||
+    (check !== undefined && !check.ok) ||
+    status.data?.off === true ||
+    selection.length > 0;
+
   return (
     <div className="graph-page">
-      {refused.length === 0 ? null : (
-        <div role="alert" className="banner bad">
-          <strong>The saved graph was refused at the last start: no node runs.</strong> Fix it here,
-          then review and apply it; or roll back to a version that ran, in{' '}
-          <a href="#/graph-history">Admin → Graph history</a>.
-          <ul>
-            {refused.map((p) => (
-              <li key={p.text}>{p.text}</li>
+      <div className="graph-notes">
+        {refused.length === 0 ? null : (
+          <div role="alert" className="banner bad">
+            <strong>The saved graph was refused at the last start: no node runs.</strong> Fix it
+            here, then review and apply it; or roll back to a version that ran, in{' '}
+            <a href="#/graph-history">Admin → Graph history</a>.
+            <ul>
+              {refused.map((p) => (
+                <li key={p.text}>{p.text}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {fileGraph?.error === undefined ? null : (
+          <div role="alert" className="banner bad">
+            {fileGraph.error}. Applying a graph here replaces it.
+          </div>
+        )}
+        {dirty || fileGraph?.differs !== true || fileGraph.problems !== undefined ? null : (
+          <div role="region" aria-label="not applied" className="banner warn">
+            <strong>The saved graph is not what runs.</strong> It was changed outside this page (the
+            API, a rollback), or the restart of the last Apply did not happen.{' '}
+            <button type="button" className="primary" onClick={() => setRestarting(true)}>
+              Apply (restart)
+            </button>
+          </div>
+        )}
+        {said === undefined ? null : (
+          <p role="status" className="said">
+            {said}
+          </p>
+        )}
+        {status.error === undefined ? null : <p role="alert">{status.error}</p>}
+        {placed.other.length === 0 ? null : (
+          <ul className="problems" aria-label="other problems">
+            {placed.other.map((p) => (
+              <li key={p}>{p}</li>
             ))}
           </ul>
-        </div>
-      )}
-      {fileGraph?.error === undefined ? null : (
-        <div role="alert" className="banner bad">
-          {fileGraph.error}. Applying a graph here replaces it.
-        </div>
-      )}
-      {dirty || fileGraph?.differs !== true || fileGraph.problems !== undefined ? null : (
-        <div role="region" aria-label="not applied" className="banner warn">
-          <strong>The saved graph is not what runs.</strong> It was changed outside this page (the
-          API, a rollback), or the restart of the last Apply did not happen.{' '}
-          <button type="button" className="primary" onClick={() => setRestarting(true)}>
-            Apply (restart)
-          </button>
-        </div>
-      )}
-      <div className="toolbar">
-        <button type="button" onClick={() => setPanel(panel === 'palette' ? undefined : 'palette')}>
-          Add a node
-        </button>
-        {dirty ? (
-          <>
-            <strong className="warn">Changes not applied</strong>
-            <button type="button" className="primary" onClick={() => setPanel('review')}>
-              Review changes
-            </button>
-          </>
-        ) : null}
-        {check === undefined || check.ok ? null : (
-          <span className="error">
-            {check.problems.length} problem{check.problems.length === 1 ? '' : 's'}
-          </span>
-        )}
-        <button
-          type="button"
-          aria-pressed={panel === 'text'}
-          onClick={() => setPanel(panel === 'text' ? undefined : 'text')}
-        >
-          Text
-        </button>
-        {status.data?.off === true ? <span className="badge off">instance off</span> : null}
-        <span className="muted">
-          {selected.nodes.length + selected.edges.length === 0
-            ? 'Select a node or an edge for its details; drag from an output to an input to wire them.'
-            : `Selected: ${[...selected.nodes, ...selected.edges].join(', ')}`}
-        </span>
-        {killable.length === 0 ? null : (
-          <button type="button" className="danger" onClick={() => kill(killable)}>
-            Kill selected ({killable.length})
-          </button>
         )}
       </div>
-      <div className="toolbar legend">
-        {Object.values(portTypes).map((t) => (
-          <span key={t.id} className="legend-item" title={t.description}>
-            <span className={`port-sample ${t.shape}`} style={{ background: t.colour }} />
-            {t.id}
-          </span>
-        ))}
-        <span className="legend-item">
-          <span className="edge-sample optional" /> optional port
-        </span>
-        <span
-          className="legend-item"
-          title="a chat-out edge that logs what it would send, and sends nothing"
-        >
-          <span className="rhombus-sample hollow" /> dry run
-        </span>
-      </div>
-      {said === undefined ? null : (
-        <p role="status" className="said">
-          {said}
-        </p>
-      )}
-      {status.error === undefined ? null : <p role="alert">{status.error}</p>}
-      {placed.other.length === 0 ? null : (
-        <ul className="problems" aria-label="other problems">
-          {placed.other.map((p) => (
-            <li key={p}>{p}</li>
-          ))}
-        </ul>
-      )}
       <div className="graph-body">
         <div className="graph-canvas">
           <ReactFlow
@@ -651,8 +599,72 @@ export function GraphPage({
             minZoom={0.2}
           >
             <Background />
-            <Controls showInteractive={false} />
-            <MiniMap pannable zoomable />
+            <MiniMap pannable zoomable position="top-right" />
+            {needs ? (
+              <Panel position="top-left" className="map-bar">
+                {dirty ? (
+                  <>
+                    <strong className="warn">Changes not applied</strong>
+                    <button type="button" className="primary" onClick={() => setPanel('review')}>
+                      Review changes
+                    </button>
+                  </>
+                ) : null}
+                {check === undefined || check.ok ? null : (
+                  <span className="error">
+                    {check.problems.length} problem{check.problems.length === 1 ? '' : 's'}
+                  </span>
+                )}
+                {status.data?.off === true ? <span className="badge off">instance off</span> : null}
+                {selection.length === 0 ? null : (
+                  <span className="muted">Selected: {selection.join(', ')}</span>
+                )}
+                {killable.length === 0 ? null : (
+                  <button type="button" className="danger" onClick={() => kill(killable)}>
+                    Kill selected ({killable.length})
+                  </button>
+                )}
+              </Panel>
+            ) : null}
+            {/* The zoom controls above the legend, both at the bottom left, clear of each other. */}
+            <Panel position="bottom-left" className="map-corner">
+              <Controls
+                showInteractive={false}
+                orientation="horizontal"
+                style={{ position: 'static', margin: 0 }}
+              />
+              <div className="legend" role="group" aria-label="legend">
+                {Object.values(portTypes).map((t) => (
+                  <span key={t.id} className="legend-item" title={t.description}>
+                    <span className={`port-sample ${t.shape}`} style={{ background: t.colour }} />
+                    {t.id}
+                  </span>
+                ))}
+                <span className="legend-item">
+                  <span className="edge-sample optional" /> optional port
+                </span>
+                <span
+                  className="legend-item"
+                  title="a chat-out edge that logs what it would send, and sends nothing"
+                >
+                  <span className="rhombus-sample hollow" /> dry run
+                </span>
+              </div>
+            </Panel>
+            <Panel position="bottom-right">
+              <button
+                type="button"
+                className="fab"
+                aria-label="Add a node"
+                title="Add a node"
+                aria-expanded={panel === 'palette'}
+                onClick={() => setPanel(panel === 'palette' ? undefined : 'palette')}
+              >
+                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                  <path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" fill="currentColor" />
+                </svg>
+              </button>
+            </Panel>
           </ReactFlow>
           {draft.nodes.length === 0 && panel === undefined ? (
             <div className="empty-state" role="region" aria-label="first step">
@@ -679,6 +691,38 @@ export function GraphPage({
           ) : null}
         </div>
         {side}
+      </div>
+      {/* The draft as text: a side sheet from the right, its tab riding on its edge (styles.css). */}
+      <div className={textOpen ? 'side-sheet open' : 'side-sheet'}>
+        <button
+          type="button"
+          className="sheet-tab"
+          aria-expanded={textOpen}
+          aria-controls="graph-text-sheet"
+          title={textOpen ? 'Close the draft as text' : 'The draft as text'}
+          onClick={() => setPanel(textOpen ? undefined : 'text')}
+        >
+          Text
+        </button>
+        <aside
+          id="graph-text-sheet"
+          className="details text"
+          aria-label="the draft as text"
+          aria-hidden={!textOpen}
+          inert={!textOpen}
+        >
+          <h2>
+            As text{' '}
+            <button type="button" className="link" onClick={() => setPanel(undefined)}>
+              close
+            </button>
+          </h2>
+          <p className="muted small">
+            The draft printed{dirty ? ', changes not applied included' : ''}: a node per line, then
+            a line per value of its config, then an edge per line.
+          </p>
+          <TextView text={check?.text} label="the draft as text" />
+        </aside>
       </div>
       {restarting ? (
         <Restart
