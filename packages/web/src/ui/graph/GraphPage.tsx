@@ -3,18 +3,22 @@
  * (`GET /graph/file`) as a draft, drawn with React Flow, each plugin instance a node with its
  * ports, each binding an edge in its port type's colour (dashed when the input is optional), with a
  * rhombus at its midpoint that opens its panel (`PortEdge.tsx`), and on
- * each node its live state, mode and drift (`GET /status`, `GET /drift`).
+ * each node its state (D64) and drift (`GET /status`, `GET /drift`).
  *
  * - **Add a node** from the plugins the instance offers (`GET /available`), choosing its id and its
- *   instance: fresh, kept already, or imported from an older data directory.
+ *   instance: fresh, kept already, or imported from an older data directory. It starts disabled,
+ *   for the owner to set it up first (D64).
  * - **Wire it**: an edge dragged from an output to an input; a chat-in edge's chats, or a chat-out
- *   edge's chats and commands, set in its panel. Every change is checked by the core as the load would (`POST /graph/check`), and
- *   each refusal shown where it is: on the edge, the port, the node or the field.
- * - **Configure it**: its config, settings, mode and account in forms made from its schemas; a
- *   config key that names a secret is a choice of the secrets' names (`GET /secrets`).
+ *   edge's chats and commands, set in its panel; a new chat-out edge is a dry run until the owner
+ *   sends for real (D64). Every change is checked by the core as the load would
+ *   (`POST /graph/check`), and each refusal shown where it is: on the edge, the port, the node or
+ *   the field.
+ * - **Configure it**: enabled or disabled, its config, settings and account in forms made from its
+ *   schemas; a config key that names a secret is a choice of the secrets' names (`GET /secrets`).
+ * - **Clear a stop** (D64): a stopped node's stop, cleared at the next Apply.
  * - **Remove it**: its instance is kept, and deleted after 7 days if no node uses it.
- * - **Review and apply**: the diff from the saved file, then Apply (`PUT /graph/file`, then a
- *   restart, which the UI waits through) or Revert (the draft back to the saved graph). A saved
+ * - **Review and apply**: the diff from the saved file and the stops cleared, then Apply
+ *   (`PUT /graph/file`, each stop cleared, then a restart, which the UI waits through) or Revert (the draft back to the saved graph). A saved
  *   graph that differs from what runs (changed through the API, a rollback, or its restart failed)
  *   has its own banner with Apply. The versions before, and their rollback, are on the admin page
  *   (Admin → Graph history, D61).
@@ -22,7 +26,8 @@
  *   read-only, with a copy button.
  *
  * A saved graph refused at the last start (`GET /status`, `graph.refused`) runs no node: it is
- * shown first, for the owner to fix. One or several running nodes selected can be killed (D44).
+ * shown first, for the owner to fix. One or several running nodes selected can be killed (D44):
+ * each is stopped (D64) until its stop is cleared here.
  *
  * Chats flow left to right (D60): a connector is drawn as two cards (`cards.ts`), its in card at
  * the left, whose chat-in output feeds the readers, and its out card at the right, whose chat-out
@@ -116,6 +121,8 @@ export function GraphPage({
   /** The saved file's graph, as the draft last started from it. */
   const [saved, setSaved] = useState<Graph>();
   const [draft, setDraft] = useState<Graph>();
+  /** The nodes whose stop the draft clears, at the next Apply (D64). */
+  const [clears, setClears] = useState<ReadonlySet<string>>(new Set());
   const [check, setCheck] = useState<GraphCheckView>();
   const [panel, setPanel] = useState<'palette' | 'review' | 'text' | AvailablePlugin>();
   const [busy, setBusy] = useState(false);
@@ -179,21 +186,14 @@ export function GraphPage({
     [instances.data]
   );
 
-  const reinstate = useCallback(
-    (id: string): void => {
-      api(`/plugins/${seg(id)}/resume`, {})
-        .then(
-          () => setSaid(`${id} reinstated`),
-          (e: unknown) => setSaid(`${id}: ${message(e)}`)
-        )
-        .finally(status.reload);
-    },
-    [status.reload]
-  );
-
   const kill = (ids: string[]): void => {
     if (ids.length === 0) return;
-    if (!window.confirm(`Kill ${ids.join(', ')}: run each one's safety stop?`)) return;
+    if (
+      !window.confirm(
+        `Kill ${ids.join(', ')}: run each one's safety stop, then stop it until its stop is cleared here?`
+      )
+    )
+      return;
     void (async () => {
       const results: string[] = [];
       for (const id of ids)
@@ -231,6 +231,7 @@ export function GraphPage({
     const chosen = new Set(selectedNodes.split('\n'));
     setNodes((before) => {
       const was = new Map(before.map((n) => [n.id, n]));
+      const draftNodes = new Map(draft.nodes.map((n) => [n.id, n]));
       return cards.map((c) => {
         const portProblems: Record<string, string[]> = {};
         for (const [key, texts] of placed.ports)
@@ -249,7 +250,8 @@ export function GraphPage({
             live: live.get(c.node),
             drift: drifts.get(c.node),
             portTypes,
-            reinstate,
+            disabled: draftNodes.get(c.node)?.disabled === true,
+            cleared: clears.has(c.node),
             problems: placed.nodes.get(c.node) ?? [],
             portProblems,
             side: c.side,
@@ -266,7 +268,7 @@ export function GraphPage({
     drifts,
     placed,
     portTypes,
-    reinstate,
+    clears,
     setNodes,
     selectedNodes,
     pluginsKnown,
@@ -302,7 +304,13 @@ export function GraphPage({
         ...(to.port === undefined ? {} : { targetHandle: to.port }),
         className: `${e.type ?? ''}${optional ? ' optional' : ''}${problems.length > 0 ? ' refused' : ''}`,
         style: { stroke: colour, strokeWidth: 2, ...(optional ? { strokeDasharray: '6 4' } : {}) },
-        data: { name: edgeKey(e), colour, type: e.type, problem: problems[0] },
+        data: {
+          name: edgeKey(e),
+          colour,
+          type: e.type,
+          problem: problems[0],
+          dryRun: e.type === 'chat-out' && e.dryRun === true,
+        },
         // The rhombus at its midpoint is the edge's handle for the keyboard and the screen reader
         // (`PortEdge.tsx`); the line stays clickable.
         focusable: false,
@@ -337,42 +345,54 @@ export function GraphPage({
   const onConnect = (c: Connection): void => change((g) => connect(g, edgeOf(c, plugins, g)));
 
   const added = (n: NewNode): void => {
-    // Its config starts filled with its defaults, written as if the owner had typed them.
+    // Its config starts filled with its defaults, written as if the owner had typed them; the node
+    // starts disabled, for the owner to set it up first (D64).
     const config = withDefaults(plugins.get(n.plugin)?.configSchema, undefined);
-    change((g) => addNode(g, Object.keys(config).length === 0 ? n : { ...n, config }));
+    const node = { ...n, disabled: true };
+    change((g) => addNode(g, Object.keys(config).length === 0 ? node : { ...node, config }));
     setPanel(undefined);
     setSaid(
-      `${n.id} added on the instance ${n.instance}: wire it, set it up, then review and apply`
+      `${n.id} added, disabled, on the instance ${n.instance}: wire it, set it up, enable it, then review and apply`
     );
     instances.reload();
   };
 
-  /** Apply: the draft saved, then the instance restarted on it, unless it runs already. */
+  /**
+   * Apply: the draft saved, each stop it clears cleared, then the instance restarted on it, unless
+   * it runs already and no stop was cleared.
+   */
   const apply = (): void => {
     if (draft === undefined) return;
     setBusy(true);
     setRefusedApply(undefined);
-    api<{ saved: boolean; restart: boolean }>('/graph/file', draft, 'PUT').then(
-      (r) => {
-        setBusy(false);
-        savedRef.current = draft;
-        setSaved(draft);
-        setPanel(undefined);
-        if (r.restart) setRestarting(true);
-        else {
-          setSaid('Saved: it is what runs already, so no restart is needed.');
-          file.reload();
+    const cleared = [...clears];
+    api<{ saved: boolean; restart: boolean }>('/graph/file', draft, 'PUT')
+      .then(async (r) => {
+        for (const id of cleared) await api(`/plugins/${seg(id)}/clear-stop`, {});
+        return r;
+      })
+      .then(
+        (r) => {
+          setBusy(false);
+          savedRef.current = draft;
+          setSaved(draft);
+          setClears(new Set());
+          setPanel(undefined);
+          if (r.restart || cleared.length > 0) setRestarting(true);
+          else {
+            setSaid('Saved: it is what runs already, so no restart is needed.');
+            file.reload();
+          }
+          instances.reload();
+        },
+        (e: unknown) => {
+          setBusy(false);
+          setRefusedApply({
+            error: message(e),
+            problems: e instanceof ApiError ? e.problems : [],
+          });
         }
-        instances.reload();
-      },
-      (e: unknown) => {
-        setBusy(false);
-        setRefusedApply({
-          error: message(e),
-          problems: e instanceof ApiError ? e.problems : [],
-        });
-      }
-    );
+      );
   };
 
   /** Revert: the draft back to the saved graph, once confirmed if it has changes. */
@@ -380,6 +400,7 @@ export function GraphPage({
     if (dirty && !window.confirm('Revert: drop every change made here, back to the graph saved?'))
       return;
     if (saved !== undefined) setDraft(saved);
+    setClears(new Set());
     setRefusedApply(undefined);
     setPanel(undefined);
     setSelected({ nodes: [], edges: [] });
@@ -389,7 +410,7 @@ export function GraphPage({
   const closeReview = useCallback(() => setPanel(undefined), []);
 
   if (draft === undefined) return <p className="muted">{file.error ?? 'Loading…'}</p>;
-  const dirty = saved === undefined || !sameGraph(draft, saved);
+  const dirty = saved === undefined || !sameGraph(draft, saved) || clears.size > 0;
   const refused = status.data?.graph?.refused ?? [];
   const ids = new Set(draft.nodes.map((n) => n.id));
   const usedInstances = new Set(draft.nodes.map(instanceOf));
@@ -400,7 +421,7 @@ export function GraphPage({
     selected.nodes.length === 0 && selected.edges.length === 1
       ? draft.edges.find((e) => edgeKey(e) === selected.edges[0])
       : undefined;
-  const killable = selected.nodes.filter((id) => live.has(id) && live.get(id)?.killed !== true);
+  const killable = selected.nodes.filter((id) => live.get(id)?.state === 'running');
   const connectors = (available.data ?? []).filter((p) => p.kinds.includes('connector'));
 
   let side = null;
@@ -434,6 +455,7 @@ export function GraphPage({
       <Review
         check={check}
         dirty={dirty}
+        clears={[...clears]}
         busy={busy}
         refused={refusedApply}
         apply={apply}
@@ -485,7 +507,16 @@ export function GraphPage({
           setSelected({ nodes: [], edges: [] });
         }}
         kill={kill}
-        reinstate={reinstate}
+        cleared={clears.has(shownNode.id)}
+        clearStop={(clear) => {
+          setRefusedApply(undefined);
+          setClears((was) => {
+            const next = new Set(was);
+            if (clear) next.add(shownNode.id);
+            else next.delete(shownNode.id);
+            return next;
+          });
+        }}
       />
     );
   } else if (shownEdge !== undefined)
@@ -579,6 +610,12 @@ export function GraphPage({
         ))}
         <span className="legend-item">
           <span className="edge-sample optional" /> optional port
+        </span>
+        <span
+          className="legend-item"
+          title="a chat-out edge that logs what it would send, and sends nothing"
+        >
+          <span className="rhombus-sample hollow" /> dry run
         </span>
       </div>
       {said === undefined ? null : (

@@ -4,14 +4,19 @@
  * with its reason:
  *
  * 1. the caller's own refusal, if it gives one (a game's grammar: not one of its commands);
- * 2. the sender's reach: the chats its manifest sends to, and the commands, by their first word;
- * 3. the sender's mode (P10): `read-only` refuses, `dry-run` stops before the network, `live`
- *    sends;
- * 4. a pause of the sender by the core (drift, or the owner);
- * 5. a flood wait the network asked for (Telegram's `FLOOD_WAIT`), which holds the account;
- * 6. the account's rate: at least `minIntervalMs` between two sends and at most `maxPerHour` in
- *    any hour, `dry-run` ones counted;
- * 7. the connector, which may not be connected.
+ * 2. the sender's reach: the chats its chat-out edges send to, and the commands, by their first
+ *    word; an edge that is `dryRun` (bot-os.md D64) lets the send through as a dry run, which stops
+ *    before the network and is logged as sent;
+ * 3. why the sender cannot send now: stopped by the core (a safety stop, drift, the owner), or not
+ *    running;
+ * 4. a flood wait the network asked for (Telegram's `FLOOD_WAIT`), which holds the account;
+ * 5. the account's rate: at least `minIntervalMs` between two sends and at most `maxPerHour` in
+ *    any hour, dry runs counted;
+ * 6. the connector, which may not be connected.
+ *
+ * An outbox made outside the core (a module's own, for a game of its own) may still keep its
+ * senders' modes (`modes`, module API 1, deprecated): `read-only` refuses, `dry-run` stops before
+ * the network, `live` sends.
  *
  * Every attempt is logged (`core.send`), with its outcome. `send` sends now or refuses, for actors
  * that time their sends to the second; `enqueue` waits its turn within the limits; `deliver` sends
@@ -22,6 +27,11 @@ import { type Clock, type TimerHandle } from './clock.ts';
 import { type Connector } from './connector.ts';
 import { type Store } from './store.ts';
 
+/**
+ * The modes of module API 1 (deprecated, bot-os.md D64): a node's state and its chat-out edges'
+ * `dryRun` replaced them. A plugin's `ctx.mode` gives one, derived (`dry-run` or `live`); an outbox
+ * made outside the core may still keep them (`Modes`).
+ */
 export const MODES = ['read-only', 'dry-run', 'live'] as const;
 export type Mode = (typeof MODES)[number];
 export const isMode = (m: unknown): m is Mode => MODES.includes(m as Mode);
@@ -68,31 +78,38 @@ export class FloodWait extends Error {
   }
 }
 
-/** What one edge lets a sender send: its chats, and its commands by first word (none: any text). */
+/**
+ * What one edge lets a sender send: its chats, and its commands by first word (none: any text);
+ * `dryRun`, logged as sent and never sent (bot-os.md D64).
+ */
 export interface Reach {
   sends: readonly string[];
   commands?: readonly string[] | undefined;
+  dryRun?: boolean | undefined;
 }
 
-/** What the outbox knows of a sender: its reach on this account's connector, and a pause. */
+/** What the outbox knows of a sender: its reach on this account's connector, and a stop. */
 export interface SenderPolicy {
   /**
    * The chats it may send to, and the commands (by first word), of each edge that binds it to this
-   * account (§2.1); undefined: anything.
+   * account (§2.1); undefined: anything, for real.
    */
   reach?: Reach | readonly Reach[] | undefined;
-  /** Why it is paused, if it is. */
-  paused?: string | undefined;
+  /** Why it cannot send now (`stopped: …`, `not running (…)`), if it cannot. */
+  held?: string | undefined;
 }
 
-/** Where the modes are kept, plugin by plugin (the core: in each instance's own store). */
+/**
+ * Where the modes of module API 1 are kept, plugin by plugin (deprecated, bot-os.md D64): for an
+ * outbox made outside the core.
+ */
 export interface ModeBackend {
   /** A plugin's kept mode, if any. */
   load(plugin: string): unknown;
   save(plugin: string, mode: Mode): void;
 }
 
-/** Every plugin's mode in one document, `modes`, of a store: for a wiring or a test of its own. */
+/** Every plugin's mode in one document, `modes`, of a store (deprecated, bot-os.md D64). */
 export function modesIn(store: Pick<Store, 'read' | 'write'>): ModeBackend {
   return {
     load: (plugin) => store.read<Record<string, unknown>>('modes')?.[plugin],
@@ -101,7 +118,11 @@ export function modesIn(store: Pick<Store, 'read' | 'write'>): ModeBackend {
   };
 }
 
-/** The modes of the acting plugins, kept; `read-only` until one is set (P10). */
+/**
+ * The modes of an outbox's senders, kept; `read-only` until one is set (module API 1, deprecated,
+ * bot-os.md D64): an outbox made outside the core may keep them (`OutboxOptions.modes`); the core's
+ * own outboxes have none, their senders' dry runs being their edges'.
+ */
 export class Modes {
   private readonly backend: ModeBackend | undefined;
   private readonly modes = new Map<string, Mode>();
@@ -153,9 +174,13 @@ export interface OutboxOptions {
   /** The account's limits; none: no rate limit. */
   limits?: () => Limits | undefined;
   clock: Clock;
-  modes: Modes;
-  /** What the outbox knows of a sender, at each send. */
-  policy?: (plugin: string) => SenderPolicy;
+  /**
+   * Its senders' modes (module API 1, deprecated, bot-os.md D64), for an outbox made outside the
+   * core; none: a send is a dry run only through a `dryRun` edge (`policy`).
+   */
+  modes?: Modes;
+  /** What the outbox knows of a sender, at each send: through its output `port`, if one is named. */
+  policy?: (plugin: string, port?: string) => SenderPolicy;
   /** Where every attempt goes: the event log. */
   record?: (r: SendRecord) => void;
 }
@@ -170,6 +195,11 @@ export interface SendOptions {
    * as HTML), any other as written.
    */
   format?: TextFormat;
+  /**
+   * The chat-out output it goes through (the core's handles set it, `ctx.outbox(port)`): only that
+   * output's edge reaches, and makes it a dry run or not; none: every edge to this account.
+   */
+  port?: string;
 }
 
 /** How a text is written: Markdown, or plain when not said. */
@@ -179,7 +209,10 @@ export type TextFormat = 'markdown';
 export interface OutboxHandle {
   readonly account: string;
   readonly plugin: string;
-  /** Its mode now. */
+  /**
+   * How it sends now: `dry-run` when every edge that binds it to this account is a dry run, `live`
+   * otherwise (an outbox with `modes`: its mode, `read-only` among them).
+   */
   mode(): Mode;
   /** Sends now, or refuses with why. */
   send(chat: string, text: string, options?: SendOptions): SendResult;
@@ -214,15 +247,16 @@ export class Outbox {
     this.o = options;
   }
 
-  /** The way out for one plugin. */
-  as(plugin: string): OutboxHandle {
+  /** The way out for one plugin, through its output `port` if named (every edge otherwise). */
+  as(plugin: string, port?: string): OutboxHandle {
+    const via = (o: SendOptions): SendOptions => (port === undefined ? o : { ...o, port });
     return {
       account: this.account,
       plugin,
-      mode: () => this.o.modes.get(plugin),
-      send: (chat, text, options = {}) => this.send(plugin, chat, text, options),
-      enqueue: (chat, text, options = {}) => this.enqueue(plugin, chat, text, options),
-      deliver: (chat, text, options = {}) => this.deliver(plugin, chat, text, options),
+      mode: () => this.modeOf(plugin, port),
+      send: (chat, text, options = {}) => this.send(plugin, chat, text, via(options)),
+      enqueue: (chat, text, options = {}) => this.enqueue(plugin, chat, text, via(options)),
+      deliver: (chat, text, options = {}) => this.deliver(plugin, chat, text, via(options)),
     };
   }
 
@@ -232,9 +266,26 @@ export class Outbox {
   }
 
   send(plugin: string, chat: string, text: string, options: SendOptions = {}): SendResult {
-    const result = this.check(plugin, chat, text, options) ?? this.attempt(plugin, chat, text);
-    this.log(plugin, chat, options, result);
+    const v = this.check(plugin, chat, text, options);
+    const result = 'refused' in v ? v.refused : this.attempt(chat, text, v.dryRun);
+    this.log(plugin, chat, options, result, v.mode);
     return result;
+  }
+
+  /** How a sender sends now (`OutboxHandle.mode`). */
+  private modeOf(plugin: string, port?: string): Mode {
+    if (this.o.modes !== undefined) return this.o.modes.get(plugin);
+    const reaches = this.reachesOf(this.o.policy?.(plugin, port));
+    return reaches !== undefined && reaches.length > 0 && reaches.every((r) => r.dryRun === true)
+      ? 'dry-run'
+      : 'live';
+  }
+
+  /** A sender's reaches on this account, as its policy gives them; undefined: anything. */
+  private reachesOf(policy: SenderPolicy | undefined): readonly Reach[] | undefined {
+    const reach = policy?.reach;
+    if (reach === undefined) return undefined;
+    return Array.isArray(reach) ? reach : [reach as Reach];
   }
 
   /**
@@ -249,12 +300,13 @@ export class Outbox {
     text: string,
     options: SendOptions = {}
   ): Promise<DeliverResult> {
-    let result: DeliverResult = this.check(plugin, chat, text, options) ??
-      this.admit(plugin, text) ?? { text, outcome: 'sent' };
+    const v = this.check(plugin, chat, text, options);
+    let result: DeliverResult =
+      'refused' in v ? v.refused : (this.admit(text, v.dryRun) ?? { text, outcome: 'sent' });
     if (result.outcome === 'sent') {
       const connector = this.o.connector();
       const now = this.o.clock.now();
-      if (connector?.deliver === undefined) result = this.attempt(plugin, chat, text);
+      if (connector?.deliver === undefined) result = this.attempt(chat, text, false);
       else if (connector.status().state !== 'connected')
         result = { text, outcome: 'refused', reason: 'not connected' };
       else {
@@ -279,7 +331,7 @@ export class Outbox {
         }
       }
     }
-    this.log(plugin, chat, options, result);
+    this.log(plugin, chat, options, result, v.mode);
     return result;
   }
 
@@ -290,10 +342,10 @@ export class Outbox {
     options: SendOptions = {}
   ): Promise<SendResult> {
     // What can never go now waits for nothing: refused at once.
-    const refused = this.check(plugin, chat, text, options);
-    if (refused !== undefined) {
-      this.log(plugin, chat, options, refused);
-      return Promise.resolve(refused);
+    const v = this.check(plugin, chat, text, options);
+    if ('refused' in v) {
+      this.log(plugin, chat, options, v.refused, v.mode);
+      return Promise.resolve(v.refused);
     }
     return new Promise((done) => {
       this.queue.push({ plugin, chat, text, options, done });
@@ -334,36 +386,49 @@ export class Outbox {
     );
   }
 
-  /** Why a send cannot go whatever the clock (the caller, the reach, the mode, a pause). */
+  /**
+   * Why a send cannot go whatever the clock (the caller, the reach, the mode, a stop); or, when it
+   * may, whether it is a dry run. With the mode it is logged in.
+   */
   private check(
     plugin: string,
     chat: string,
     text: string,
     options: SendOptions
-  ): SendResult | undefined {
-    const refuse = (reason: string): SendResult => ({ text, outcome: 'refused', reason });
+  ): ({ refused: SendResult } | { dryRun: boolean }) & { mode: Mode } {
+    const policy = this.o.policy?.(plugin, options.port) ?? {};
+    const reaches = this.reachesOf(policy);
+    const word = text.split(/\s/u, 1)[0] ?? '';
+    // The edges that let it send this: through a live one, it goes for real (D64).
+    const through = reaches?.filter(
+      (r) => r.sends.includes(chat) && (r.commands === undefined || r.commands.includes(word))
+    );
+    const dryRun =
+      this.o.modes === undefined
+        ? through !== undefined && through.length > 0 && through.every((r) => r.dryRun === true)
+        : this.o.modes.get(plugin) === 'dry-run';
+    const mode: Mode =
+      this.o.modes === undefined ? (dryRun ? 'dry-run' : 'live') : this.o.modes.get(plugin);
+    const refuse = (reason: string) => ({
+      refused: { text, outcome: 'refused' as const, reason },
+      mode,
+    });
     if (options.refuse !== undefined) return refuse(options.refuse);
-    const policy = this.o.policy?.(plugin) ?? {};
-    if (policy.reach !== undefined) {
-      const reaches: readonly Reach[] = Array.isArray(policy.reach)
-        ? policy.reach
-        : [policy.reach as Reach];
-      const to = reaches.filter((r) => r.sends.includes(chat));
-      if (to.length === 0) return refuse(`${plugin} does not send to ${chat}`);
-      const word = text.split(/\s/u, 1)[0] ?? '';
-      if (to.every((r) => r.commands !== undefined && !r.commands.includes(word)))
-        return refuse(`${word} is not among ${plugin}'s commands`);
+    if (reaches !== undefined) {
+      if (!reaches.some((r) => r.sends.includes(chat)))
+        return refuse(`${plugin} does not send to ${chat}`);
+      if (through?.length === 0) return refuse(`${word} is not among ${plugin}'s commands`);
     }
-    if (this.o.modes.get(plugin) === 'read-only') return refuse('read-only');
-    if (policy.paused !== undefined) return refuse(`paused: ${policy.paused}`);
-    return undefined;
+    if (mode === 'read-only') return refuse('read-only');
+    if (policy.held !== undefined) return refuse(policy.held);
+    return { dryRun, mode };
   }
 
   /**
    * The checks against the clock: a flood wait, the rate, and a dry run (counted, and not sent).
    * The refusal or the dry run; undefined to send.
    */
-  private admit(plugin: string, text: string): SendResult | undefined {
+  private admit(text: string, dryRun: boolean): SendResult | undefined {
     const refuse = (reason: string): SendResult => ({ text, outcome: 'refused', reason });
     const now = this.o.clock.now();
     if (now < this.heldUntil)
@@ -375,7 +440,7 @@ export class Outbox {
       if (last !== undefined && now - last < limits.minIntervalMs) return refuse('too soon');
       if (this.recent.length >= limits.maxPerHour) return refuse('hourly limit');
     }
-    if (this.o.modes.get(plugin) === 'dry-run') {
+    if (dryRun) {
       this.recent.push(now);
       return { text, outcome: 'dry-run' };
     }
@@ -383,9 +448,9 @@ export class Outbox {
   }
 
   /** A send the checks allow, against the clock and the network. */
-  private attempt(plugin: string, chat: string, text: string): SendResult {
+  private attempt(chat: string, text: string, dryRun: boolean): SendResult {
     const refuse = (reason: string): SendResult => ({ text, outcome: 'refused', reason });
-    const admitted = this.admit(plugin, text);
+    const admitted = this.admit(text, dryRun);
     if (admitted !== undefined) return admitted;
     const now = this.o.clock.now();
     const connector = this.o.connector();
@@ -402,7 +467,13 @@ export class Outbox {
     return { text, outcome: 'sent' };
   }
 
-  private log(plugin: string, chat: string, options: SendOptions, result: DeliverResult): void {
+  private log(
+    plugin: string,
+    chat: string,
+    options: SendOptions,
+    result: DeliverResult,
+    mode: Mode
+  ): void {
     this.o.record?.({
       type: 'core.send',
       t: this.o.clock.now(),
@@ -410,7 +481,7 @@ export class Outbox {
       account: this.account,
       chat,
       origin: options.origin ?? plugin,
-      mode: this.o.modes.get(plugin),
+      mode,
       ...result,
     });
   }

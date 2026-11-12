@@ -3,7 +3,7 @@
 A plugin-based bot shell for chat networks, with a node-graph web UI.
 
 MegaBotTron1999 runs plugins in one process and gives each its own store, durable timers, settings
-and mode. It routes messages between connectors (IRC, Telegram as a bot, Telegram as a user) and
+and state. It routes messages between connectors (IRC, Telegram as a bot, Telegram as a user) and
 parsers on a typed bus, and sends through an outbox that keeps every network's limits. The way the
 plugins are wired is a typed graph of ports, which the web UI draws: each plugin instance is a node,
 each binding an edge, and the edges are the permissions. Data flows left to right: a connector's
@@ -11,7 +11,9 @@ chats are read on the left of the graph (chat-in edges, to the parsers) and writ
 (chat-out edges, from the plugins that send), so a connector is drawn as two cards, in and out
 ([docs/bot-os.md](docs/bot-os.md) D60). A chat-in edge reads some chats, or any its connector
 monitors, from some senders, or anyone (D62); the chats are picked from the lists the connectors
-give (D63).
+give (D63). A node is enabled, disabled by the owner, stopped by exception (a safety stop, drift,
+the owner's kill), or inactive while a node it needs is down; a chat-out edge sends for real or as a
+dry run, logged as sent (D64).
 
 It knows no game. Games, and what plays them, are plugins on top of it.
 
@@ -54,7 +56,7 @@ back to its previous version; the Import page brings in an older data directory'
 ([docs/bot-os.md](docs/bot-os.md) D55); the Admin page shows the instance (with its off and kill
 switches), the graph's history (each version applied in the last 7 days, what changed, whether the
 instance started on it, and a rollback to it) and the graph as text, its accounts and their
-connections, and its plugins with their modes (D59, D61). In a real deployment, use Docker or
+connections, and its plugins with their states (D59, D61, D64). In a real deployment, use Docker or
 Compose secrets, and put the UI behind a reverse proxy with HTTPS rather than publishing the port.
 
 - **`/data`** is the instance's state: the graph (`graph.json`, and its versions in
@@ -118,8 +120,8 @@ export const greeter = definePlugin({
   declarations.
 - **The context** gives it a clock, its own store, durable timers, the bus, the event log read back
   (its own namespaces and those it consumes), handles on the connectors its edges bind, an outbox,
-  drift reporting, its settings and its mode. A plugin is built from its node's saved config and its
-  context alone. It never holds a credential: connectors do.
+  drift reporting, its settings, and its own safety stop (`ctx.stop`). A plugin is built from its
+  node's saved config and its context alone. It never holds a credential: connectors do.
 - **The image offers** the connectors (`irc`, `telegram-bot`, `telegram-user`, `anthropic`) and the
   `turn-actor`, one node per game bot, and the `reactor`, one node per reaction ("when this event is
   heard, or a message matches, send this command", from its config alone, on `react()`, which any
@@ -127,10 +129,15 @@ export const greeter = definePlugin({
 - **Standard services,** implemented once by the shell (D52): SVG to PNG in every plugin's context
   (`ctx.render.svgToPng`), and asking an LLM through the `anthropic` connector (`ask`, with
   structured output), for the plugins an edge binds to it.
-- **Modes:** every plugin that sends has a mode, `read-only`, `dry-run` or `live`, enforced by the
-  outbox, starting `read-only` and changed only by the owner.
+- **States and dry runs** (D64): a node is **enabled**, **disabled** by the owner (in the graph:
+  never started, still checked), **stopped** by exception (a safety stop, drift, the owner's kill or
+  Telegram's stop; kept in its instance across restarts until the owner clears it), or **inactive**
+  while a node its required ports bind is down. A chat-out edge that is a **dry run** logs what it
+  would send, as sent, and sends nothing. New nodes start disabled and new chat-out edges dry runs;
+  every state is raised only in the editor, applied with a restart. The modes of before
+  (`read-only`, `dry-run`, `live`) were migrated into them at the first start.
 - **Drift:** a parser reports every message it claims but cannot read; past a threshold, the core
-  pauses the actors that depend on it until the owner looks.
+  stops the actors that depend on it until the owner looks.
 - **The dev kit** (`DevKit`, `FakeConnector`, `VirtualClock`) runs plugins on a virtual clock with
   fake connectors, for tests and simulators.
 

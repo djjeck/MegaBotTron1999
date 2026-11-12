@@ -163,7 +163,6 @@ const ACTOR = {
   description: 'acts',
   kinds: ['actor'],
   state: 'running',
-  mode: 'read-only',
   settings: { level: 1, name: 'x' },
   reads: ['status'],
   actions: ['bump'],
@@ -174,34 +173,35 @@ const PARSER = {
   plugin: 'parser',
   description: 'reads',
   kinds: ['parser'],
-  state: 'paused',
-  reason: 'drift',
+  state: 'stopped',
+  reason: 'drift on parser',
+  stop: { reason: 'drift on parser', time: '2026-11-12T10:00:00.000Z', source: 'drift' },
   settings: {},
   reads: [],
   actions: [],
 };
 
 describe('PluginsPage', () => {
-  it('lists the plugins with their state and mode, and changes a mode', async () => {
-    let mode = 'read-only';
-    const api = fakeApi({
-      'GET /status': () => [200, { off: false, plugins: [{ ...ACTOR, mode }, PARSER] }],
-      'POST /plugins/actor-a/mode': (b) => {
-        mode = (b as { mode: string }).mode;
-        return [200, { mode }];
-      },
-      'POST /plugins/parser/resume': [409, { error: 'the bot is off' }],
+  it('lists the plugins with their states, read-only: they change in the graph', async () => {
+    const INACTIVE = {
+      ...ACTOR,
+      id: 'actor-b',
+      state: 'inactive',
+      reason: 'needs parser (stopped)',
+    };
+    fakeApi({
+      'GET /status': () => [200, { off: false, plugins: [ACTOR, PARSER, INACTIVE] }],
     });
     render(<PluginsPage loggedOut={loggedOut} />);
-    const select = await screen.findByLabelText('actor-a mode');
-    expect(screen.getByText('(actor)')).toBeDefined();
-    expect(screen.getByText('sends nothing')).toBeDefined();
-    expect(screen.getByText('drift')).toBeDefined();
-    fireEvent.change(select, { target: { value: 'live' } });
-    await waitFor(() => expect((select as HTMLSelectElement).value).toBe('live'));
-    expect(api.calls).toContain('POST /plugins/actor-a/mode {"mode":"live"}');
-    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
-    expect(await screen.findByText(/the bot is off/u)).toBeDefined();
+    expect(await screen.findByText('running')).toBeDefined();
+    expect(screen.getAllByText('(actor)')).toHaveLength(2);
+    expect(screen.getByText('drift on parser')).toBeDefined();
+    expect(screen.getByText(/\(drift, 2026-11-12 10:00 UTC\)/u)).toBeDefined();
+    expect(screen.getByRole('img', { name: 'warning' })).toBeDefined();
+    expect(screen.getByText('needs parser (stopped)')).toBeDefined();
+    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'graph' }).getAttribute('href')).toBe('#/graph');
   });
 
   it('opens a plugin: its status, settings, reads and actions', async () => {
@@ -254,7 +254,7 @@ describe('PluginsPage', () => {
     expect(await screen.findByText('status: not found')).toBeDefined();
   });
 
-  it('turns the instance on, the modes locked while off', async () => {
+  it('turns the instance on', async () => {
     let off = true;
     fakeApi({
       'GET /status': () => [200, { off, plugins: [ACTOR] }],
@@ -264,11 +264,8 @@ describe('PluginsPage', () => {
       },
     });
     render(<PluginsPage loggedOut={loggedOut} />);
-    expect((await screen.findByLabelText('actor-a mode')).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText(/modes change only while on/u)).toBeDefined();
-    fireEvent.click(screen.getByRole('button', { name: 'Turn on' }));
-    await screen.findByRole('button', { name: 'Turn off' });
-    expect(screen.getByLabelText('actor-a mode').hasAttribute('disabled')).toBe(false);
+    fireEvent.click(await screen.findByRole('button', { name: 'Turn on' }));
+    expect(await screen.findByRole('button', { name: 'Turn off' })).toBeDefined();
   });
 
   it('says why the plugins cannot be read', async () => {

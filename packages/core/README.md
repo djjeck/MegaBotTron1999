@@ -4,11 +4,12 @@ The shell's core. A plugin is a manifest (its kinds, its ports, its configuratio
 secrets, its interface of reads, actions and chat commands, its state's migrations) and a `create`
 that gets a context: its clock, store, scheduler, bus, connectors through their handles, outbox,
 drift, settings, owner, log and the render service (SVG to PNG, on resvg: `src/render.ts`). The core
-loads the plugins of a graph, starts them in order, enforces each acting plugin's mode (`read-only`,
-`dry-run`, `live`) on its sends, pauses one whose parser drifts, and keeps everything across a
-restart. The owner's controls (`src/controls.ts`) and their HTTP API (`src/control-server.ts`) offer
-each plugin's state, mode, settings, reads and actions, the instance's off and kill switches, a
-single node's kill, and what the web UI's graph editor draws and forms each plugin and node with
+loads the plugins of a graph, starts them in order (none disabled, stopped or inactive:
+docs/bot-os.md D64), sends each chat-out edge's sends for real or as dry runs, stops one whose
+parser drifts, keeps each stop in its instance, and keeps everything across a restart. The owner's
+controls (`src/controls.ts`) and their HTTP API (`src/control-server.ts`) offer each plugin's state,
+settings, reads and actions, the instance's off and kill switches, a single node's kill, its stop
+cleared, and what the web UI's graph editor draws and forms each plugin and node with
 (`src/graph-view.ts`: its ports, its interface, its secrets and event types, and its config's and
 settings' JSON Schemas), with the names of the secrets provided, never their values.
 

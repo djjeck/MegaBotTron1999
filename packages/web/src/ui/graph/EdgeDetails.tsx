@@ -3,9 +3,10 @@
  * and, for a chat, what it carries (bot-os-api.md §2.1, D60–D63), picked from its connector's
  * monitored chats (`Surfaces.tsx`): a chat-in edge, the chats it `reads` (or all of them, `'*'`)
  * and the `senders` it hears (anyone, or a list with `me`), any chat from anyone flagged as broad;
- * a chat-out edge, those it `sends` to and the `commands` sent (their first words), as rows. Then
- * its removal. The edges are the permissions (P6): a plugin reads and sends only what its edge
- * says.
+ * a chat-out edge, those it `sends` to and the `commands` sent (their first words), as rows, and
+ * whether it is a dry run (D64): **Dry-run** logs what it would send, as sent, and sends nothing;
+ * **Send for real** sends. Then its removal. The edges are the permissions (P6): a plugin reads and
+ * sends only what its edge says.
  */
 import type { GraphEdge, GraphNode } from '#src/ui/api.ts';
 import type { EdgeChange } from './draft.ts';
@@ -69,6 +70,33 @@ export function EdgeDetails(props: {
         </section>
       ) : sends ? (
         <section>
+          <h3>How it sends</h3>
+          <div className="toggle" role="radiogroup" aria-label="how it sends">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={edge.dryRun === true}
+              className={edge.dryRun === true ? 'on' : ''}
+              onClick={() => props.change({ dryRun: true })}
+            >
+              Dry-run
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={edge.dryRun !== true}
+              className={edge.dryRun === true ? '' : 'on danger'}
+              onClick={() => props.change({ dryRun: undefined })}
+            >
+              Send for real
+            </button>
+          </div>
+          <p className="muted small">
+            {edge.dryRun === true
+              ? 'A dry run: what the plugin sends here is logged as sent, and nothing goes out.'
+              : 'It sends for real, within the chats and commands below.'}{' '}
+            Applied with Apply.
+          </p>
           <h3>What it sends</h3>
           <EdgeChats
             name="sends"

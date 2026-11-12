@@ -6,7 +6,7 @@
  *   messages are said by the test or the simulator (`hear`) and whose sends go to it (`onSend`),
  *   with the account's limits, so that the plugins read and send through it as they do live.
  * - `DevKit`: a core on a virtual clock (packages/core/src/clock.ts), its stores in memory,
- *   with the plugins given, their configuration, the owner's kept settings and modes, and the
+ *   with the plugins given, their configuration, the owner's kept settings, and the
  *   documents their stores start with: the state of a run, set before it starts.
  * - `defineSimulator`: a simulator plugin, a model of a game that runs other plugins on the kit
  *   (bot-os.md D13). It is not registered in an instance: its manifest says what it is and what it
@@ -26,7 +26,7 @@ import {
 import { Core, type CoreOptions } from './core.ts';
 import { type LogEntry, MemoryEventLog } from './event-log.ts';
 import { type Manifest, ManifestError, type ManifestInput, parseManifest } from './manifest.ts';
-import { type Limits, type Mode } from './outbox.ts';
+import { type Limits } from './outbox.ts';
 import { definePlugin, type Plugin } from './plugin.ts';
 
 export interface FakeConnectorOptions {
@@ -123,7 +123,7 @@ export interface DevKitOptions {
   start?: number;
   /**
    * The plugins of the run, connectors included, in registration order; or registered on `core`
-   * before `start`, for plugins made with the kit's core in hand (its modes).
+   * before `start`, for plugins made with the kit's core in hand.
    */
   plugins?: readonly Plugin[];
   /**
@@ -138,8 +138,6 @@ export interface DevKitOptions {
    * value.
    */
   settings?: Record<string, Record<string, unknown>>;
-  /** The acting instances' modes, set by the owner before the start; `read-only` otherwise (P10). */
-  modes?: Record<string, Mode>;
   /** The documents each plugin instance's store starts with, by instance id and name. */
   documents?: Record<string, Record<string, unknown>>;
   /** Where the core's records and every event published go, beside the kit's own log (`log`). */
@@ -191,7 +189,7 @@ export class DevKit {
   }
 
   /**
-   * Keeps the settings and the modes given, as the owner's, and starts every plugin. Throws for a
+   * Keeps the settings given, as the owner's, and starts every plugin. Throws for a
    * setting refused, and for a plugin that failed: a run without one of its plugins is no run.
    */
   async start(): Promise<void> {
@@ -201,8 +199,6 @@ export class DevKit {
         const why = this.core.settings.set(`${plugin}.${key}`, value);
         if (why !== undefined) throw new Error(`dev kit: setting ${plugin}.${key}: ${why}`);
       }
-    for (const [plugin, mode] of Object.entries(this.o.modes ?? {}))
-      this.core.modes.set(plugin, mode);
     await this.core.start();
     const failed = this.core.status().filter((s) => s.state === 'failed');
     if (failed.length > 0)

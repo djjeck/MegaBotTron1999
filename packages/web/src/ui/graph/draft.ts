@@ -87,6 +87,7 @@ export function idProblem(id: string, taken: ReadonlySet<string>): string | unde
 /** The instance a node runs on: its own, or its id. */
 export const instanceOf = (n: GraphNode): string => n.instance ?? n.id;
 
+/** A node added, as given (the editor adds a new one disabled, D64). */
 export function addNode(g: Graph, node: GraphNode): Graph {
   const { instance, ...rest } = node;
   return {
@@ -129,7 +130,8 @@ export function connect(g: Graph, edge: GraphEdge): Graph {
 /**
  * The edge an output dragged to an input makes: its two ends, and the type of the output, which
  * the check compares with the input's (`connection` as React Flow gives it; a connector's out
- * card stands for its node, `cards.ts`).
+ * card stands for its node, `cards.ts`). A chat-out edge starts a dry run (D64): it sends for
+ * real only once the owner says so.
  */
 export function edgeOf(
   c: { source: string; sourceHandle?: string | null; target: string; targetHandle?: string | null },
@@ -145,13 +147,16 @@ export function edgeOf(
     from: c.sourceHandle == null ? c.source : `${c.source}.${c.sourceHandle}`,
     to: `${c.target.endsWith('::out') ? c.target.slice(0, -'::out'.length) : c.target}.${c.targetHandle ?? ''}`,
     ...(type === undefined ? {} : { type }),
+    ...(type === 'chat-out' ? { dryRun: true } : {}),
   };
 }
 
-/** An edge's chats and commands changed (an empty list taken away). */
-/** What an edge's panel changes: what it carries; a key set to undefined is taken away. */
+/**
+ * What an edge's panel changes: what it carries, and a chat-out's dry run (D64); a key set to
+ * undefined is taken away.
+ */
 export type EdgeChange = {
-  [K in 'reads' | 'senders' | 'sends' | 'commands']?: GraphEdge[K] | undefined;
+  [K in 'reads' | 'senders' | 'sends' | 'commands' | 'dryRun']?: GraphEdge[K] | undefined;
 };
 
 export function updateEdge(g: Graph, key: string, change: EdgeChange): Graph {

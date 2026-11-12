@@ -14,14 +14,16 @@
  *   out, coming back a few minutes after;
  * - its next send is the durable timer `turn`, kept across restarts; one that came due while the
  *   client was down for more than `PLAN_GRACE_MS` is dropped, and it plans afresh;
- * - it plays only in `dry-run` (logged, nothing sent) or `live`, and not while paused (drift on
- *   its parser, which it requires), off, or killed (its safety stop: `read-only`);
- * - in `live`, it waits for the account to be connected, and tells its parser each turn sent, so
- *   the parser matches the bot's reply to it;
+ * - it plays while its node runs and the bot is on; stopped (bot-os.md D64: drift on its parser,
+ *   which it requires, the owner's kill or stop, or its own safety stop, `kill`), it drops its plan
+ *   and plays no more until the owner clears the stop in the editor;
+ * - through a dry-run chat-out edge (D64) its turns are logged, nothing sent; through a live one,
+ *   it waits for the account to be connected, and tells its parser each turn sent, so the parser
+ *   matches the bot's reply to it;
  * - a failed send is planned again two minutes later.
  *
  * It declares no chat command (two instances would clash on its name): the owner's `/plugins <id>`
- * gives each its state and mode, and its read `status` its last and next send. It keeps nothing in
+ * gives each its state, and its read `status` its last and next send. It keeps nothing in
  * its factory's closure: everything hangs off its instance (§2.1). Each step is published as
  * `turn-actor.step`, with the instance's id, and printed.
  */
@@ -138,13 +140,13 @@ export type TurnStep = z.infer<typeof stepSchema>;
 
 const clock = (t: number) => new Date(t).toISOString().slice(11, 16);
 
-/** An instance's line in the owner's summary: its bot, its mode, its last and next turn. */
-export function turnSummary(id: string, mode: string, s: TurnStatus | undefined): string {
+/** An instance's line in the owner's summary: its bot, its state, its last and next turn. */
+export function turnSummary(id: string, state: string, s: TurnStatus | undefined): string {
   const parts = [
     ...(s?.last === undefined ? [] : [`last ${clock(s.last)}`]),
     ...(s?.next === undefined ? [] : [`next ${clock(s.next)}`]),
   ];
-  return `${s?.chat ?? id}: ${mode}${parts.length > 0 ? `, ${parts.join(', ')} UTC` : ''}`;
+  return `${s?.chat ?? id}: ${state}${parts.length > 0 ? `, ${parts.join(', ')} UTC` : ''}`;
 }
 
 /** The turn-actor plugin, of which the wiring makes one instance per bot (`withInstances`). */
@@ -203,7 +205,8 @@ class TurnActor {
   private readonly planner: Planner;
   private last: number | undefined;
   private plan: Plan | undefined;
-  private paused = false;
+  /** Its node was stopped (D64): it plays no more until a restart after the owner clears it. */
+  private stopped = false;
   private sending = false;
   /** Told once while it waits for the account. */
   private waiting = false;
@@ -229,19 +232,15 @@ class TurnActor {
       this.step('seen', `sent by hand at ${clock(m.time)}`);
       if (this.plan !== undefined) this.replan();
     });
-    this.ctx.mode.onChange(() => this.settle());
     return {
       start: () => this.settle(),
       onTimer: (name: string) => {
         if (name === TURN_TIMER) void this.due();
       },
-      pause: () => {
-        this.paused = true;
-        this.drop('paused');
-      },
-      resume: () => {
-        this.paused = false;
-        this.settle();
+      // Its node stopped, whatever stopped it.
+      pause: (reason: string) => {
+        this.stopped = true;
+        this.drop(`stopped: ${reason}`);
       },
       off: () => this.drop('the bot is off'),
       on: () => {
@@ -250,10 +249,10 @@ class TurnActor {
           ? undefined
           : `${this.c.chat}: next ${clock(this.plan.at)} UTC`;
       },
-      // Its safety stop: nothing more goes out until the owner sets a mode again.
+      // Its safety stop: its node stopped, until the owner clears it in the editor.
       kill: () => {
-        this.ctx.mode.set('read-only', 'safety');
-        return `${this.c.chat}: read-only`;
+        this.ctx.stop('safety stop');
+        return `${this.c.chat}: stopped`;
       },
       interface: { state: { status: () => this.status() } },
     };
@@ -268,14 +267,14 @@ class TurnActor {
     };
   }
 
-  /** Whether it plays now: a mode that sends, not paused, the bot not off. */
+  /** Whether it plays now: its node not stopped, the bot not off. */
   private playing(): boolean {
-    return this.ctx.mode.get() !== 'read-only' && !this.paused && !this.ctx.off();
+    return !this.stopped && !this.ctx.off();
   }
 
   /** Plans if it plays and has no plan; drops the plan if it does not play. */
   private settle(): void {
-    if (!this.playing()) this.drop(this.ctx.mode.get() === 'read-only' ? 'read-only' : 'stopped');
+    if (!this.playing()) this.drop('stopped');
     else if (this.plan === undefined) this.replan();
   }
 
@@ -322,7 +321,8 @@ class TurnActor {
       this.setPlan(this.planner.after(rest.until), 'rest', `${this.c.chat} rests: ${rest.why}`);
       return;
     }
-    const live = this.ctx.mode.get() === 'live';
+    // Through a dry-run edge, nothing is sent: it waits for no connection (D64).
+    const live = this.ctx.outbox('chat').mode() === 'live';
     if (live && this.ctx.connector('chat').status().state !== 'connected') {
       if (!this.waiting) this.step('waiting', "the owner's account is not connected");
       this.waiting = true;

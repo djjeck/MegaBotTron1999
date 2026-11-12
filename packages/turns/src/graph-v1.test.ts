@@ -1,7 +1,8 @@
 /**
  * A graph saved before chat edges were split (bot-os.md D60), with the shell's own plugins: a
  * connector's three chat edges, all empty, to a parser, a turn-actor and a reactor on events. It
- * converts on load, runs, and is shown as version 2.
+ * converts on load, runs, and is shown as version 2; and, at the first start since the modes went
+ * (bot-os.md D64), its senders, which kept no mode (`read-only`), send through dry-run edges.
  */
 import { TELEGRAM_USER } from '@megabottron1999/connectors/plugins/telegram-user.ts';
 import {
@@ -73,8 +74,20 @@ describe('a version 1 graph of the shell’s plugins', () => {
       const edges = [
         { from: `${TELEGRAM_USER}.chat`, to: `${QUEST}.chat`, type: 'chat-in', reads: [] },
         { from: `${TELEGRAM_USER}.chat`, to: 'quest-turns.chat', type: 'chat-in', reads: [] },
-        { from: 'quest-turns.chat', to: `${TELEGRAM_USER}.chat`, type: 'chat-out', sends: [] },
-        { from: 'look.chat', to: `${TELEGRAM_USER}.chat`, type: 'chat-out', sends: [] },
+        {
+          from: 'quest-turns.chat',
+          to: `${TELEGRAM_USER}.chat`,
+          type: 'chat-out',
+          sends: [],
+          dryRun: true,
+        },
+        {
+          from: 'look.chat',
+          to: `${TELEGRAM_USER}.chat`,
+          type: 'chat-out',
+          sends: [],
+          dryRun: true,
+        },
         { from: `${QUEST}.interface`, to: 'quest-turns.parser', type: 'interface' },
         { from: `${QUEST}.events`, to: 'look.events', type: 'events' },
       ];

@@ -1,11 +1,11 @@
 /**
  * "Review changes" (D55), a dialog: what the draft changes from the saved graph, as
  * `POST /graph/check` says it (nodes and edges added, removed, changed), with every problem the
- * check finds, and two actions:
+ * check finds, the stops cleared (D64), and two actions:
  *
- * - **Apply**: the draft saved (`PUT /graph/file`), then the instance restarted on it, with the
- *   reconnect overlay. A graph the check refuses is neither saved nor applied, and the dialog says
- *   why.
+ * - **Apply**: the draft saved (`PUT /graph/file`), each stop cleared
+ *   (`POST /plugins/<id>/clear-stop`), then the instance restarted on it, with the reconnect
+ *   overlay. A graph the check refuses is neither saved nor applied, and the dialog says why.
  * - **Revert**: the draft discarded, back to the saved graph (asked first).
  *
  * Its close button (×), or Escape, only closes it: the draft is kept.
@@ -68,8 +68,10 @@ export function DiffView({ diff: d }: { diff: GraphDiff }) {
 
 export function Review(props: {
   check: GraphCheckView | undefined;
-  /** Whether the draft differs from the saved graph. */
+  /** Whether the draft differs from the saved graph, or clears a stop. */
   dirty: boolean;
+  /** The nodes whose stop the draft clears (D64). */
+  clears?: readonly string[];
   /** Applying: the save or the restart under way. */
   busy: boolean;
   /** Why the last Apply was refused, with the problems named. */
@@ -80,7 +82,8 @@ export function Review(props: {
 }) {
   const { check, refused } = props;
   const d = check?.diff;
-  const none = d !== undefined && noChange(d);
+  const clears = props.clears ?? [];
+  const none = d !== undefined && noChange(d) && clears.length === 0;
   const ok = check?.ok === true;
   const first = useRef<HTMLButtonElement>(null);
   const { close } = props;
@@ -113,7 +116,10 @@ export function Review(props: {
         ) : none ? (
           <p className="muted">Nothing differs from the saved graph.</p>
         ) : (
-          <DiffView diff={d} />
+          <>
+            <DiffView diff={d} />
+            <Items title="Stops cleared (started again)" items={[...clears]} />
+          </>
         )}
         {check === undefined || ok ? null : (
           <>

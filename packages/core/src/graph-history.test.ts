@@ -161,23 +161,27 @@ describe('a diff on one line', () => {
     expect(
       printable({
         nodes: [
-          { id: 'a', plugin: 'p', instance: 'i', account: 'x:y', mode: 'live', config: { k: 1 } },
-          { id: 'b', settings: { s: true } },
+          { id: 'a', plugin: 'p', instance: 'i', account: 'x:y', disabled: true, config: { k: 1 } },
+          { id: 'b', settings: { s: true }, disabled: 'yes' },
           { plugin: 'p' },
           'x',
         ],
         edges: [
           { from: 'a.o', to: 'b.i', type: 'chat-in', reads: ['#a', 1], sends: 's', commands: [] },
+          { from: 'b.o', to: 'a.i', type: 'chat-out', sends: ['#a'], dryRun: true },
           { from: 'a.o' },
         ],
       })
     ).toEqual({
       version: 2,
       nodes: [
-        { id: 'a', plugin: 'p', instance: 'i', account: 'x:y', mode: 'live', config: { k: 1 } },
+        { id: 'a', plugin: 'p', instance: 'i', account: 'x:y', disabled: true, config: { k: 1 } },
         { id: 'b', plugin: '?', settings: { s: true } },
       ],
-      edges: [{ from: 'a.o', to: 'b.i', type: 'chat-in', reads: ['#a'], commands: [] }],
+      edges: [
+        { from: 'a.o', to: 'b.i', type: 'chat-in', reads: ['#a'], commands: [] },
+        { from: 'b.o', to: 'a.i', type: 'chat-out', sends: ['#a'], dryRun: true },
+      ],
     });
     expect(printable(null)).toEqual({ version: 2, nodes: [], edges: [] });
   });

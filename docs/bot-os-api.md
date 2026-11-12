@@ -1,6 +1,6 @@
 # MegaBotTron1999: the plugin API
 
-Documented as of 8 Nov 2026. The plugin model of MegaBotTron1999 ([bot-os.md](bot-os.md)): what a
+Documented as of 12 Nov 2026. The plugin model of MegaBotTron1999 ([bot-os.md](bot-os.md)): what a
 plugin declares, how the core runs it, what it is given, and the shell's own plugins. The API stays
 open until launch (P13): this document changes with it, in the same commit as the code.
 
@@ -96,9 +96,10 @@ which registers them in its menus and answers them where they were asked
 answer (`Answer`: a text, plain or Markdown, with buttons that each run a command again and an
 expiry in a group; a photo, as bytes or by the network's id of one sent before), and the surface
 sends it in reply to the asker (`Asker`: the network's id and username, and whether it is the
-owner), outside the plugin's mode. What a plugin sends on its own goes through its outbox, in its
-mode (§4.6). The surface is a connector's (`ChatSurface`): the core serves every running connector
-that offers one the commands (`serve`), once every plugin has started.
+owner), outside the plugin's outbox. What a plugin sends on its own goes through its outbox, within
+its chat-out edges, each sending for real or as a dry run (§4.6). The surface is a connector's
+(`ChatSurface`): the core serves every running connector that offers one the commands (`serve`),
+once every plugin has started.
 
 **The owner's commands.** A command may be the owner's (`owner: true`): the core answers it to the
 owner only (`Asker.owner`), and the surface only in the owner's chat, never in a group. A command
@@ -238,22 +239,66 @@ A node is a plugin instance: its id (a plugin id's form), the plugin it instanti
 or a module offers, registered with `core.register`), the `instance` whose kept state it runs on
 (§2.2; the node's id when it names none), its configuration, and, for a connector, its own `account`
 in place of the manifest's (of the same network). It may also give the `settings` (checked against
-its plugin's `settings`) and the `mode` its instance starts with: they are put in force only while
-the instance keeps none of its own, so the owner's later changes win. An edge goes from `node.port`
-(or `node`, when one of its outputs fits) to `node.port`, with its type and, for a chat, what it
-carries: a chat-in its `reads` and `senders`, a chat-out its `sends` and `commands` (each carries
-only its own). The core checks it with zod and against the manifests at load, and fails the start
-naming the node and the port: a plugin not in the image, a node twice, an instance named by two
-nodes or kept by another plugin (`node b: its instance tally is of the plugin other, not counter`),
-a setting the plugin does not have or refuses, an edge between ports of two types or to a port that
-is not there, an interface member not declared, a single input (or a chat-out output) bound twice, a
-connector account held twice, a required input or chat-out output unbound
+its plugin's `settings`) its instance starts with: they are put in force only while the instance
+keeps none of its own, so the owner's later changes win. A node may be `"disabled": true` (absent:
+enabled), and a chat-out edge `"dryRun": true` (absent: live): see **Node states** below. An edge
+goes from `node.port` (or `node`, when one of its outputs fits) to `node.port`, with its type and,
+for a chat, what it carries: a chat-in its `reads` and `senders`, a chat-out its `sends` and
+`commands` (each carries only its own). The core checks it with zod and against the manifests at
+load, and fails the start naming the node and the port: a plugin not in the image, a node twice, an
+instance named by two nodes or kept by another plugin
+(`node b: its instance tally is of the plugin other, not counter`), a setting the plugin does not
+have or refuses, an edge between ports of two types or to a port that is not there, an interface
+member not declared, a single input (or a chat-out output) bound twice, a connector account held
+twice, a required input or chat-out output unbound
 (`node actor: input port channel (chat-in of irc) is not bound`), a cycle of required edges.
 
-Each instance has its own id (`ctx.id`), configuration, store, settings, mode, timers and drift; its
-log lines, its records and the owner's controls name the instance (`PluginControl.plugin` names its
-plugin). Two instances of one plugin publish its event types, each heard only by the instances its
-edges bind; two whose commands share a name fail the load.
+Each instance has its own id (`ctx.id`), configuration, store, settings, state, timers and drift;
+its log lines, its records and the owner's controls name the instance (`PluginControl.plugin` names
+its plugin). Two instances of one plugin publish its event types, each heard only by the instances
+its edges bind; two whose commands share a name fail the load.
+
+**Node states** (bot-os.md D64). A node is in one of four states, which replaced the modes
+(`read-only`, `dry-run`, `live`) of before:
+
+- **Enabled**, the default: it starts and runs with all its edges allow.
+- **Disabled** by the owner: `"disabled": true` on the node. Never started; its config and edges are
+  checked all the same, and it survives restarts, being in the graph.
+- **Stopped**, by exception: a safety stop (`ctx.stop`, or module API 1's
+  `ctx.mode.set('read-only')`), drift (§4.7), the owner's kill in the editor or stop from Telegram's
+  `/plugins` (§4.11). Kept in its instance (§2.2) as `_stop.json`,
+  `{ "reason": "killed by the owner", "time": "2026-11-12T10:00:00.000Z", "source": "owner" }`
+  (`source`: `safety`, `drift` or `owner`), so it survives restarts: the node is not started while
+  it is there. The owner clears it in the editor, a change of the draft that Apply makes
+  (`POST /plugins/<id>/clear-stop`, then the restart). A stop made while the node runs takes effect
+  at once: its outbox refuses its sends (`stopped: <reason>`), its `pause` hook is called, and
+  module API 1's `ctx.mode` listeners hear `read-only`; the nodes that require it go on until the
+  next start.
+- **Inactive**, derived at the load, never stored: a node a **required** port of which (an input, or
+  a chat-out output) binds a node disabled, stopped or inactive, transitively, is not started, and
+  says why (`GET /status`: `state: "inactive"`, `reason: "needs tg (disabled)"`). An **optional**
+  port bound to such a node counts as unbound: its node runs, and `ctx.useOptional` gives undefined.
+  A connector is one node: disabled, every node reading from it or sending to it through a required
+  port is inactive.
+
+A plugin that fails (§3) is `failed`, with why, as before, and is not kept so across restarts. Every
+change of a state (enable, disable, a stop cleared, an edge's dry run) is the editor's, a change of
+the draft applied with Apply (a restart); nothing raises a state at runtime. **A dry-run edge**
+(`"dryRun": true` on a chat-out edge): what the plugin sends through it is logged as sent
+(`core.send`, outcome `dry-run`, counted in the account's rate as a send) and never sent; the plugin
+sees it sent (§4.6). It covers messages only: a model's calls stop when its node is disabled. In the
+editor a new node starts disabled, for the owner to set its config first, and a new chat-out edge
+starts a dry run.
+
+**The first start since the modes** (at most once; `core/node-states.json` marks it done): each
+node's mode, as its instance kept it (`_mode.json`), else as its node's `mode` gave it, else
+`read-only` (the default before), is folded into the graph: `live`, its chat-out edges stay live;
+`dry-run` or `read-only`, each becomes a dry run. Every node is enabled, the node's `mode` is
+dropped, the file is written as a version of its history (`migrated`, §2.3) when that changes it,
+and the instances' `_mode.json` are deleted. No safety stop nor drift pause was kept across a
+restart before, so none becomes a stop. A graph read later with a node's `mode` (an older version of
+the history, a file written by hand) has it folded as it loads (`foldModes`), from the node's `mode`
+alone.
 
 **Where the graph comes from.** `CoreOptions.graph` is the instance's graph; without it, the core
 makes the default one from the plugins registered, in their order: a node per plugin, its id the
@@ -268,7 +313,7 @@ graph saved in its volume (`CoreOptions.graphFile`, §2.3).
 ### 2.2 Instances
 
 A plugin's kept state belongs to an **instance**, apart from the node that runs on it (bot-os.md
-D50): its store and the core's documents beside it (its timers, its settings, its mode, what it
+D50): its store and the core's documents beside it (its timers, its settings, its stop, what it
 serialised), in `/data/instances/<instance>/`. A node names its instance: an existing one of the
 same plugin, whose state it takes up, or a fresh id, made at its first start. So a node can be
 removed and added again, renamed, or replaced by another node of its plugin, without losing what it
@@ -308,7 +353,6 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
       "id": "quest-turns",
       "plugin": "turn-actor",
       "instance": "quest-turns",
-      "mode": "dry-run",
       "config": { "chat": "@QuestBot" }
     }
   ],
@@ -326,12 +370,16 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
       "to": "tg.chat",
       "type": "chat-out",
       "sends": ["@QuestBot"],
-      "commands": ["/play"]
+      "commands": ["/play"],
+      "dryRun": true
     },
     { "from": "quest.interface", "to": "quest-turns.parser", "type": "interface" }
   ]
 }
 ```
+
+Here `quest-turns` sends its turns as a dry run, logged and not sent, until the owner switches its
+edge to send for real; a node `"disabled": true` would not start at all (§2.1, Node states).
 
 **Version 1** (one `chat` edge for both the reads and the sends, from the connector to the plugin)
 is converted as it is read (`upgradeGraph`, `packages/core/src/graph.ts`, bot-os.md D60), against
@@ -432,14 +480,16 @@ No agent grant ever includes these (P11): they are the control API's, which no a
 ```text
 registered ─ manifests, graph and config valid ─▶ starting ─ create(), start() ─▶ running
    running ─ every plugin started: ready() ─▶ running
-   running ⇄ paused        running, paused ─ serialise(), stop() ─▶ stopping ─▶ stopped
+   running ─ a safety stop, drift, the owner's kill or stop ─▶ stopped (kept in its instance)
+   running, stopped ─ serialise(), stop() ─▶ stopping ─▶ stopped
    create(), start(), ready() or a migration fails ─▶ failed (with why), and so do the plugins
    requiring it
+   at load: disabled in the graph, stopped in its instance, or inactive ─▶ never started
 ```
 
-`packages/core/src/core.ts` runs it (`Core`: `register`, `load`, `start`, `stop`, `pause`, `resume`,
-`status`); every change of state is logged as `core.plugin`, with the plugin, the state and the
-reason.
+`packages/core/src/core.ts` runs it (`Core`: `register`, `load`, `start`, `stop`, `stopNode`,
+`clearStop`, `status`); every change of state is logged as `core.plugin`, with the plugin, the state
+and the reason.
 
 - **Errors of the deployment** fail the whole instance at load, before any plugin runs, naming the
   plugin and what is wrong: a bad manifest, two plugins with one id, a bad graph, a cycle, a bad
@@ -457,9 +507,12 @@ reason.
   the core's `start` resolves. It is for the work that needs the plugins that use this one in place
   (a parser replaying recent history to the plugins that listen to it). A `ready` that throws fails
   its plugin, which is stopped, and those that require it.
-- **Paused** is the core's: an acting plugin paused by drift (§4.7) or by the owner. Its sends are
-  refused by the outbox while it is; its `pause` and `resume` hooks are called so that it can stop
-  planning. Only the owner resumes it.
+- **Stopped** by exception is the core's (§2.1, Node states): a plugin stopped by its own safety
+  stop, by drift (§4.7) or by the owner. Its sends are refused by the outbox from then on; its
+  `pause` hook is called so that it can stop planning, and its stop is kept in its instance, so the
+  next start does not start it. Only the owner clears it, in the editor, applied with a restart; the
+  `resume` hook is never called (module API 1 keeps it, unused).
+- **Disabled** and **inactive** nodes are never started (§2.1): their state is the load's.
 - **Serialise and restore** (P8): a plugin writes what must survive through its store as it changes,
   which survives a crash too. For state cheap to lose but costly to rebuild, its `serialise` hook is
   called at stop, and what it returned is handed back to the next `create` as `ctx.restored`.
@@ -472,8 +525,8 @@ interface Instance {
   ready?(): void | Promise<void>; // every plugin has started
   stop?(): void | Promise<void>;
   serialise?(): unknown;
-  pause?(reason: string): void;
-  resume?(): void;
+  pause?(reason: string): void; // the core stopped it (§2.1, Node states)
+  resume?(): void; // module API 1, deprecated: never called
   /** The owner changed settings; the new values are already in ctx.settings. */
   settingsChanged?(keys: string[]): void;
   off?(): void; // the owner turned the instance off (§4.11)
@@ -509,18 +562,29 @@ interface PluginContext<Config, Settings> {
   config: Config; // validated (§2)
   settings: { kept(): Partial<Settings>; set(key, value): string | undefined }; // §2
   connector(port: string): ConnectorHandle; // §4.5, a chat-in input an edge binds (§2.1)
-  outbox(port: string): Outbox; // §4.6, the account a chat-out output's edge binds
+  outbox(port: string): Outbox; // §4.6, through a chat-out output's edge (a dry run if it is one)
   use<T>(port: string): T; // the interface an input's edge binds (§2.1)
   useOptional<T>(port: string): T | undefined; // an optional input's, while bound and running
   drift: DriftReporter; // §4.7, parsers only
   notify(text: string, buttons?: Buttons): void; // the owner (§4.8); nothing while off
-  mode: { get(); set(mode, by?: 'owner' | 'safety'); onChange(listener) }; // its own (P10)
+  stop(reason: string): void; // its safety stop: its node stopped, kept (§2.1, Node states)
   off(): boolean; // the instance is off (§4.11)
-  resume(): boolean; // the owner's resume, carried by the plugin
+  mode: { get(); set(mode, by?: 'owner' | 'safety'); onChange(listener) }; // module API 1, derived
+  resume(): boolean; // module API 1, deprecated: refused, false
   restored?: unknown; // what serialise returned at the last stop (§3)
   render: Render; // §4.13: SVG to PNG
 }
 ```
+
+**`ctx.mode`, module API 1, deprecated** (bot-os.md D64): the modes are gone, and `ctx.mode` is
+derived for the plugins written against them. `get()` is `dry-run` when every chat-out edge of the
+node is a dry run (or it has none), `live` otherwise, never `read-only` (a stopped node does not
+run). `set('read-only', by)`, the owner's (`by` absent or `owner`) or a safety stop's (`safety`),
+**stops** the node (`source` `owner` or `safety`, its reason `read-only, by the owner` or
+`safety stop (read-only)`). `set('dry-run' | 'live', …)` is **refused and logged**, returning why:
+states are raised only in the editor. `onChange(listener)` hears `read-only` when the node is
+stopped. `ctx.resume()` is refused and logged too, and returns false. A plugin written now uses
+`ctx.stop(reason)`, and reads how it sends from its outbox handle (`mode()`).
 
 A connector's context also has `secrets.get(name)`, for the secrets it declared or its config names
 (§4.9), `account`, its node's account (§4.5), on which it makes its connector, and `readers()`, what
@@ -590,10 +654,11 @@ Durable named timers, kept in the plugin's store (P8):
 As built (`packages/core/src/scheduler.ts`): `ctx.scheduler` has `at`, `after`, `cancel`, `get` and
 `names`. Those due while the instance was down are settled when the plugin is created: dropped ones
 (logged as `core.timer`) are gone before `create`; the rest fire at once after its `start`, in time
-order. A timer fires once its plugin is running (or paused), never while it is starting, stopped or
-failed; a timer that fires is removed before `onTimer` runs, so the handler may set it again. A
-handler that throws is logged, and the core goes on. Timers beyond Node's longest delay (about 24.8
-days) are armed again when they wake.
+order. A timer fires once its plugin is running (or stopped since it started, bot-os.md D64: its
+plugin drops what it planned), never while it is starting, shut down or failed; a timer that fires
+is removed before `onTimer` runs, so the handler may set it again. A handler that throws is logged,
+and the core goes on. Timers beyond Node's longest delay (about 24.8 days) are armed again when they
+wake.
 
 ### 4.4 Event types and the bus
 
@@ -732,12 +797,18 @@ One per account; every send goes through it (bot-os.md §3). A plugin gets its h
 `ctx.outbox(port)`, bound to its own id, through a chat-out output an edge binds to the account's
 connector (§2.1):
 
-- **The mode (P10)** of the sending plugin: `read-only` refuses, `dry-run` logs as if sent, `live`
-  sends. Every acting plugin has one, starts `read-only`, is changed only by the owner (a safety
-  stop may only lower it), and keeps it across restarts, in the core's store (`_mode.json` in its
-  instance's store, §2.2).
 - **The reach:** each chat-out edge from it to the account's connector lets it send to its `sends`,
-  with its `commands`; a send outside them is refused. A chat-in edge sends nothing.
+  with its `commands`; a send outside them is refused. A chat-in edge sends nothing. The handle
+  `ctx.outbox(port)` gives sends through that output's edge alone; named by the connector or the
+  account, through every edge to it.
+- **A dry run** (bot-os.md D64): a send through a `dryRun` chat-out edge is logged as sent (outcome
+  `dry-run`), counted in the account's rate, and never sent; through a live edge (one of several
+  that let it send this, if any is live), it is sent. The handle's `mode()` says which: `dry-run`
+  when every edge it sends through is a dry run, `live` otherwise.
+- **The node's state** (§2.1, Node states): a stopped node's sends are refused
+  (`stopped: <reason>`), and so are those of a node not running (`not running (<state>)`). The modes
+  of before (P10's `read-only`, `dry-run`, `live`, kept as `_mode.json`) are gone: the first start
+  folded them into the edges.
 - **Pacing:** `send` sends now or is refused with why (too soon, the hourly limit), for actors that
   time their sends to the second; `enqueue` queues the send and spaces it within the account's
   limits (`connector.limits`), and the network's waits (Telegram's `FLOOD_WAIT`) hold the account's
@@ -749,14 +820,19 @@ connector (§2.1):
 
 As built (`packages/core/src/outbox.ts`): the checks run in a fixed order, each refusal with its
 reason: the caller's own refusal (`refuse`, for a game's grammar), the reach
-(`… does not send to …`, `… is not among …'s commands`, by first word), the mode (`read-only`), a
-pause (`paused: …`, also for a plugin not running), a flood wait (a connector throws `FloodWait`,
-which holds the account), the rate (`too soon`, `hourly limit`, dry runs counted), and the connector
+(`… does not send to …`, `… is not among …'s commands`, by first word), whether it is a dry run, a
+stop (`stopped: …`, or `not running (…)`), a flood wait (a connector throws `FloodWait`, which holds
+the account), the rate (`too soon`, `hourly limit`, dry runs counted), and the connector
 (`not connected`). `deliver(chat, text)` runs the same checks, then awaits the connector's
 `deliver`: `sent` with the network's id of the message, `refused`, or `failed` with why the network
 refused it; the rate counts the send when it leaves. A send may say its text is Markdown
 (`format: 'markdown'`): a connector of a network that formats sends it formatted, any other as
-written. `core.modes.has(plugin)` tells whether a mode was ever set.
+written. Every attempt's record (`core.send`) has the `mode` it went in (`dry-run` or `live`).
+
+**An outbox made outside the core** (a module's own, over a game of its own: module API 1,
+deprecated) may still keep its senders' modes: `new Outbox({ …, modes: new Modes() })`, with
+`modes.set(plugin, mode, by?)`, where `read-only` refuses, `dry-run` logs as if sent and `live`
+sends, as before. The core's own outboxes have no modes.
 
 ### 4.7 Drift
 
@@ -766,20 +842,21 @@ the third to `ctx.drift`, with the text; the core logs it (`core.drift`), counts
 tells the owner.
 
 **Unrecoverable** (bot-os.md D21): more than 5 unread messages from one parser within 15 minutes, a
-threshold each parser's manifest may change (`drift`: `unreadAt`, `windowMin`). Then the core pauses
-every running plugin of kind `actor` that requires that parser, directly or through other plugins,
-until the owner resumes it; read-only plugins keep running and reporting.
+threshold each parser's manifest may change (`drift`: `unreadAt`, `windowMin`). Then the core stops
+every running plugin of kind `actor` that requires that parser, directly or through other plugins
+(`source` `drift`, kept in its instance: §2.1, Node states), until the owner clears its stop in the
+editor; the other plugins keep running and reporting.
 
 As built (`packages/core/src/drift.ts`): a parser reports through `ctx.drift` (`read`, `unread` with
 the text and the lines it did not know); the contract's type is `Reading`. Each unread message is
 logged (`event: "unread"`) and told to the owner, the first at once and then at most once an hour
-with the count of those meanwhile. Past the threshold the core pauses the actors once until the rate
-falls back, logs it (`event: "pause"`, with the plugins) and tells the owner; `core.drift()` gives
-the counts.
+with the count of those meanwhile. Past the threshold the core stops the actors once until the rate
+falls back, logs it (`event: "pause"`, with the plugins stopped) and tells the owner; `core.drift()`
+gives the counts.
 
 ### 4.8 The owner
 
-The owner of the instance (D19) is told of what the core does on its own (a plugin failed, a pause
+The owner of the instance (D19) is told of what the core does on its own (a plugin failed, a stop
 for drift) and of what a plugin asks to say (`notify`): through the core, to the owner's chat
 surface, and never while the instance is off. **Which surface is the graph's** (bot-os.md D56): the
 first node, in load order, whose instance offers a chat surface, which is a `telegram-bot` node
@@ -830,12 +907,11 @@ public API (`packages/core/src/devkit.ts`):
 - **`DevKit`**: a core on a `VirtualClock` (§4.1) whose stores are in memory, with the plugins of
   the run, the run's graph (`graph`; by default one instance of each, bound as the manifests say)
   and, set before it starts, keyed by plugin instance: their configuration (`config`), the owner's
-  kept settings (`settings`), the acting instances' modes (`modes`; `read-only` otherwise) and the
-  documents their stores start with (`documents`), and the event log before the run (`history`),
-  which the plugins read with `ctx.events`; `kit.log` is that log in memory, every record of the run
-  added (`MemoryEventLog`). An archived plugin runs on a kit only when the run says so
-  (`allowArchived`). `start` refuses a setting refused and a run with a plugin failed; `runUntil(t)`
-  runs the clock. The core is the instance's own, unchanged.
+  kept settings (`settings`) and the documents their stores start with (`documents`), and the event
+  log before the run (`history`), which the plugins read with `ctx.events`; `kit.log` is that log in
+  memory, every record of the run added (`MemoryEventLog`). An archived plugin runs on a kit only
+  when the run says so (`allowArchived`). `start` refuses a setting refused and a run with a plugin
+  failed; `runUntil(t)` runs the clock. The core is the instance's own, unchanged.
 - **`defineSimulator({ manifest, run })`**: a simulator plugin (bot-os.md D13), a model of a game
   that runs other plugins on a kit. It is not registered in an instance: its manifest (kind
   `simulator`) names it, the game it plays (`games.consumes`) and the plugins it runs (`requires`),
@@ -848,34 +924,41 @@ nothing else, so that every surface offers the same: the chat surface's owner co
 control API, the web UI and later the agents, whose grants will be subsets of it. As built
 (`packages/core/src/controls.ts`, `core.controls`):
 
-- **Each plugin:** its state (running, paused with why, failed with why), its mode if it sends
-  anywhere (an edge binds a chat it `sends` to, P10), its settings with the values in force, the
-  names of the reads and actions its `interface` declares, and its own account of itself if it
-  declares a read named `status`.
-- **The owner's changes:** a plugin's mode (`setMode`, P10); a paused plugin resumed (`resume`, P5);
-  a declared read (`read`) and a declared action (`act`), whose input is checked against the
-  action's schema (an error names the field) and which the plugin refuses by throwing, with why.
-- **The off switch,** instance-wide: off, every running plugin hears `off` and stops what it does,
-  the owner is told nothing, and every change of a mode or a resume is refused until on; `on` lets
-  each plugin take up what it did and say what. It is kept in the core's store
-  (`/data/core/power.json`) across restarts, logged as `core.power`, and a plugin reads it with
-  `ctx.off()`. The outbox does not refuse sends while off: a plugin's `off` stops it (D30).
+- **Each plugin:** its state (bot-os.md D64, §2.1: `running`; `disabled`; `stopped`, with its
+  `stop`, `{ reason, time, source }`; `inactive`, its `reason` the node it needs,
+  `needs tg (disabled)`; `failed` with why), its settings with the values in force, the names of the
+  reads and actions its `interface` declares, and its own account of itself if it declares a read
+  named `status`.
+- **The owner's changes:** a declared read (`read`) and a declared action (`act`), whose input is
+  checked against the action's schema (an error names the field) and which the plugin refuses by
+  throwing, with why; a node's stop cleared (`clearStop`), for the next start. No control raises a
+  state at runtime: a node is enabled, disabled or cleared of its stop, and an edge sent for real,
+  in the editor, applied with a restart (the modes and their `setMode`, and `resume`, are gone).
+- **The off switch,** instance-wide, unchanged: off, every running plugin hears `off` and stops what
+  it does, the owner is told nothing; `on` lets each plugin take up what it did and say what. It is
+  kept in the core's store (`/data/core/power.json`) across restarts, logged as `core.power`, and a
+  plugin reads it with `ctx.off()`. The outbox does not refuse sends while off: a plugin's `off`
+  stops it (D30).
 - **The accounts and drift:** each connector instance with its account and its connection's status
   (`accounts`), and each parser's drift (`drift`).
-- **The kill switch:** each running plugin's own `kill`, its safety stop, with what came of it and
-  the buttons of its ways on; a plugin without one is left as it is (D30).
-- **A node's kill** (`killNode`, D44, D48), the graph view's: that plugin's own `kill`, then the
-  core pauses it with the reason `killed by the owner` (`KILLED`), so that its outbox refuses its
-  sends; the status marks it `killed: true`, and its `resume` reinstates it. The core leaves its
-  mode as its stop made it, kills nothing else with it, and does not keep the kill across a restart.
-  Refused for a node that is not running or paused.
+- **The kill switch:** each running plugin's own `kill`, its safety stop (which may stop its node,
+  `ctx.stop`), with what came of it and the buttons of its ways on; a plugin without one is left as
+  it is (D30).
+- **A node's kill** (`killNode(id, reason = KILLED)`, D44, D48, D64), the graph view's, and its stop
+  from Telegram's `/plugins` (the reason `stopped by the owner`, `STOPPED`): that plugin's own
+  `kill`, then the core stops it (`source` `owner`), kept in its instance, so that its outbox
+  refuses its sends and the next start does not start it. Nothing else is stopped with it until the
+  next start, when the nodes that require it are inactive. The owner clears the stop in the editor
+  (Clear stop, applied with Apply: `POST /plugins/<id>/clear-stop`, then the restart). Refused for a
+  node that is not up (running, or stopped since it started).
 
 **The core's commands** (`packages/core/src/owner-commands.ts`), the owner's, answered by the chat
-surface after the plugins': `/plugins` (the instance on or off and each plugin's state and mode,
-with buttons), `/plugins <id>` (a plugin's state, mode, settings, reads and actions, with a button
-for each mode and one to resume it if paused), `/mode <id> <mode>`, `/kill`, `/settings` and
-`/set <key> <value>`; hidden, the cards' buttons. Each card ends with the way back to the owner's
-main card that the wiring names (`CoreOptions.home`).
+surface after the plugins': `/plugins` (the instance on or off and each plugin's state, with
+buttons), `/plugins <id>` (a plugin's state and why, its stop, its settings, reads and actions; and,
+while it runs, the one action that changes a node's state there, **⛔ Stop**, `/plugins <id> stop`,
+a node's kill as above), `/kill`, `/settings` and `/set <key> <value>`; hidden, the cards' buttons
+and the off switch's `/off` and `/on`. Nothing there starts a node again: that is the editor's. Each
+card ends with the way back to the owner's main card that the wiring names (`CoreOptions.home`).
 
 **The HTTP control API** (`packages/core/src/control-server.ts`), one request handler
 (`controlHandler`) that the entry point serves twice: on the container's loopback (`CONTROL_PORT`,
@@ -887,9 +970,9 @@ false for a connector that cannot list its chats, 409 with why when it cannot te
 connected, 404 for a node that is not a connector); `GET /drift`;
 `GET /events?limit=100&type=<prefix>&hours=24` (the event log's latest records, newest first);
 `POST /off`, `/on`, `/kill`; `GET` and `POST /settings`; `GET /graph` and `GET /graph/view` (§4.12);
-`POST /plugins/<id>/mode`, `/plugins/<id>/resume` and `/plugins/<id>/kill` (409 with why when
-refused); `GET /plugins/<id>/state/<name>`; `POST /plugins/<id>/actions/<name>`, the body the
-action's input (400 for an input refused by its schema, 409 for the plugin's refusal);
+`POST /plugins/<id>/kill` and `POST /plugins/<id>/clear-stop` (409 with why when refused, such as
+`actor is not stopped`); `GET /plugins/<id>/state/<name>`; `POST /plugins/<id>/actions/<name>`, the
+body the action's input (400 for an input refused by its schema, 409 for the plugin's refusal);
 `GET /instances` (§2.2); `GET /graph/file`, `POST /graph/check`, `PUT /graph/file`,
 `GET /graph/history`, `GET /graph/history/<id>`, `POST /graph/history/<id>/rollback`,
 `POST /graph/rollback` and `POST /restart` (§2.3); `GET /legacy`, `GET /legacy/events`,
@@ -913,20 +996,21 @@ every session; `POST /api/logout` ends its own; expired ones are pruned. `GET /a
 ### 4.12 The graph printed and drawn
 
 `packages/core/src/graph-view.ts`: `graphText` prints the graph so that a changed value is a changed
-line (bot-os.md D61): each node a line, `<id> (<plugin>)`, then its instance when not its id, its
-mode and its account; then a line per key of its config and of its settings, the value as compact
-JSON with its keys sorted; then each edge a line, with its type and what it carries; nodes sorted by
-id, edges by their text, so the same graph prints the same:
+line (bot-os.md D61): each node a line, `<id> (<plugin>)`, then its instance when not its id,
+`disabled` when it is (D64), and its account; then a line per key of its config and of its settings,
+the value as compact JSON with its keys sorted; then each edge a line, with its type and what it
+carries, a chat-out edge's `dry-run` among it, so that the history's diffs show a state changed;
+nodes sorted by id, edges by their text, so the same graph prints the same:
 
 ```text
 nodes:
   quest (quest-parser)
-  quest-turns (turn-actor), instance quest-turns-old, mode dry-run
+  quest-turns (turn-actor), instance quest-turns-old, disabled
     config.chat: "@QuestBot"
   tg (telegram-user), account telegram:alice
     config.chats: ["@QuestBot"]
 edges:
-  quest-turns.chat → tg.chat (chat-out): sends @QuestBot; commands /play
+  quest-turns.chat → tg.chat (chat-out): sends @QuestBot; commands /play; dry-run
   quest.interface → quest-turns.parser (interface)
   tg.chat → quest.chat (chat-in): reads @QuestBot
 ```
@@ -947,34 +1031,42 @@ account, its input and output ports, the reads, actions and commands its `interf
 the JSON Schemas of its `config`, its `settings` and its actions' inputs and outputs and reads'
 outputs, zod's `toJSONSchema`), with the node's own id, account and config; the port types' looks
 come from `GET /graph/view` (`PORT_TYPE_INFO`). It polls `GET /status` and `GET /drift` for each
-node's live state, mode and drift. Each change of the draft is checked (`POST /graph/check`) and
-every problem shown where it is located (§2.3). A node's config starts filled with its schema's
-defaults (nested objects within), written to the draft as if typed; a node opened shows the defaults
-of the fields its config leaves unset filled in, unmarked, and writes them with its first change, so
-that merely opening a node changes nothing. A field's description is its help. A node selected shows
-its forms, editable, a key of `configSecrets` as a choice of `GET /secrets`; an edge selected, what
-it carries: a chat-in edge its `reads` alone, a chat-out edge its `sends` and `commands`. A
-connector is drawn as two cards (`cards.ts`, bot-os.md D60), one node in the graph all the same: its
-**in** card (`telegram-user · in`) at the left, with its chat-in output and its other ports, and its
-**out** card (`telegram-user · out`) in a column of its own at the right, with its chat-out input,
-where the senders' edges end. Each card is placed on its own; selecting either selects the node and
-opens its panel (the other card shows itself selected too); removing it removes both, after a
-confirmation that names them. The split lives in the editor's view alone: the graph file holds one
-node. Each edge has a rhombus at its midpoint in its port type's colour (`PortEdge.tsx`, React
-Flow's `EdgeLabelRenderer`), a button named after the edge (`edge irc.chat → dice.channel`) that
-selects it and opens its panel, by a click or the keyboard. Its review shows the diff and two
-actions: Apply, `PUT /graph/file` then `POST /restart` (none if the core refuses the graph, which
-the review says, nor if the saved graph is what runs already), and Revert, the draft back to the
-saved graph; a banner offers Apply (`POST /restart`) when the saved file differs from what runs
-(`differs`). After a restart the page waits on `GET /session` for the new process (another `boot`
-id), and comes back to the page, still logged in. One or several running nodes selected can be
-killed, each by `POST /plugins/<id>/kill`. Its **Text** toggle shows the draft printed (the check's
-`text`), read-only, with a copy button. The rollback is not the editor's: it is the admin page's
-**Graph history** (`#/graph-history`), which lists the versions newest first (time, summary, start,
-the last that ran marked "last good"), shows one opened in two tabs, **Changes** (the review's diff
-from the saved graph to it) and **As text** (the line diff), and rolls back to it after a
-confirmation repeating the diff, then restarts as Apply does; beside it, **Graph as text**, the
-saved graph printed.
+node's live state and drift. Each change of the draft is checked (`POST /graph/check`) and every
+problem shown where it is located (§2.3). A node's config starts filled with its schema's defaults
+(nested objects within), written to the draft as if typed; a node opened shows the defaults of the
+fields its config leaves unset filled in, unmarked, and writes them with its first change, so that
+merely opening a node changes nothing. A field's description is its help. A node selected shows its
+forms, editable, a key of `configSecrets` as a choice of `GET /secrets`; an edge selected, what it
+carries: a chat-in edge its `reads` alone, a chat-out edge its `sends` and `commands`. **States and
+dry runs** (bot-os.md D64, §2.1): a node is drawn greyed while disabled in the draft (its panel's
+**Enabled** switch), in red tones with a warning icon and its reason while stopped, greyed with the
+node it needs while inactive (from `GET /status`); a stopped node's panel says why, when and by
+what, with **Clear stop**. A node added starts disabled, and a chat-out edge drawn starts a dry run:
+its rhombus hollow and its part from the rhombus to the connector greyed and dashed, its panel's
+**Dry-run / Send for real** switch setting `dryRun`. All of these are changes of the draft, listed
+in the review (a stop cleared as "Stops cleared") and made by Apply. A connector is drawn as two
+cards (`cards.ts`, bot-os.md D60), one node in the graph all the same: its **in** card
+(`telegram-user · in`) at the left, with its chat-in output and its other ports, and its **out**
+card (`telegram-user · out`) in a column of its own at the right, with its chat-out input, where the
+senders' edges end. Each card is placed on its own; selecting either selects the node and opens its
+panel (the other card shows itself selected too); removing it removes both, after a confirmation
+that names them. The split lives in the editor's view alone: the graph file holds one node. Each
+edge has a rhombus at its midpoint in its port type's colour (`PortEdge.tsx`, React Flow's
+`EdgeLabelRenderer`), a button named after the edge (`edge irc.chat → dice.channel`) that selects it
+and opens its panel, by a click or the keyboard. Its review shows the diff and two actions: Apply,
+`PUT /graph/file`, then `POST /plugins/<id>/clear-stop` for each stop cleared, then `POST /restart`
+(none if the core refuses the graph, which the review says, nor if the saved graph is what runs
+already and no stop was cleared), and Revert, the draft back to the saved graph; a banner offers
+Apply (`POST /restart`) when the saved file differs from what runs (`differs`). After a restart the
+page waits on `GET /session` for the new process (another `boot` id), and comes back to the page,
+still logged in. One or several running nodes selected can be killed, each by
+`POST /plugins/<id>/kill`: stopped, until their stops are cleared. Its **Text** toggle shows the
+draft printed (the check's `text`), read-only, with a copy button. The rollback is not the editor's:
+it is the admin page's **Graph history** (`#/graph-history`), which lists the versions newest first
+(time, summary, start, the last that ran marked "last good"), shows one opened in two tabs,
+**Changes** (the review's diff from the saved graph to it) and **As text** (the line diff), and
+rolls back to it after a confirmation repeating the diff, then restarts as Apply does; beside it,
+**Graph as text**, the saved graph printed.
 
 ### 4.13 The standard services
 
@@ -1118,8 +1210,9 @@ interface Reaction {
   (`reason: "no value at outcome.item"`), never sent half made. Text in braces that is not a path is
   kept as written.
 - **Through the outbox:** each send is `ctx.outbox(via).enqueue(chat, text, { origin: name })`,
-  through its chat-out output `via`, so the plugin's mode, its edge's reach (the chats it `sends`
-  to, its `commands`), the account's pacing and the `core.send` log all apply (§4.6).
+  through its chat-out output `via`, so its edge's reach (the chats it `sends` to, its `commands`)
+  and dry run (D64), its node's state, the account's pacing and the `core.send` log all apply
+  (§4.6).
 - **Recorded:** each reaction is written with `ctx.record(record, …)`:
   `{ reaction, on, outcome, reason?, chat?, text? }`, its outcome the outbox's (`sent`, `dry-run`,
   `refused`, with why) or `skipped`.
@@ -1200,11 +1293,11 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   store (`parsed`) as they change and read back at its start; it never re-reads the chat, and reads
   missed messages as any other. The tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
 - **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
-  (P3, P17), each with its own id, configuration, store, timer and mode. Its ports: `chat`, a
+  (P3, P17), each with its own id, configuration, store, timer and state. Its ports: `chat`, a
   chat-in input on `telegram`, which reads the private chat with its bot (for the turns the owner
   sends by hand), and `chat`, a chat-out output, which sends there (its command only); and `parser`,
   a contract (`state.rest`, `actions.sent`) bound to its bot's parser, required, so that drift on
-  the parser pauses it. (Its read is to go, its parser telling it of the turns sent by hand, #21.)
+  the parser stops it. (Its read is to go, its parser telling it of the turns sent by hand, #21.)
   Its configuration: `chat` (the bot's `@username`), `command` (the bot's turn command; `/play` when
   unset), `schedule` (the planner's pace, each field with its default in the schema,
   `DEFAULT_SCHEDULE` of `packages/turns/src/schedule.ts`: 17–20 minutes between turns, some skipped,
@@ -1212,30 +1305,33 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   `seed`. It plans from the owner's last turn with the bot (kept in its store; a turn sent by hand
   counts too), as the durable timer `turn` (dropped if it came due more than 10 minutes before a
   start); when it is due, it asks its parser whether the bot rests and, if so, comes back a few
-  minutes after; in `live` it waits for the account to be connected, sends through its outbox and
-  tells its parser the message's id; a failed send is tried again two minutes later. It plays in
-  `dry-run` and `live` only (a new instance starts `dry-run`, D33). It declares no chat command,
-  since two instances would clash: the owner reaches each with `/plugins <id>` and its read
-  `status`. Each step is published as `turn-actor.step`. The image offers it (`src/main.ts`): the
-  editor adds one node per bot, each on its own instance, its `chat` edges from and to the owner's
-  `telegram-user` node and its `parser` edge to its bot's parser. The turn parsers are not the
-  image's: each is made from a game's grammar, so a game's module offers it.
+  minutes after; through a live chat-out edge it waits for the account to be connected, sends
+  through its outbox and tells its parser the message's id; through a dry-run edge (bot-os.md D64,
+  as a new one is drawn) it logs its turn (`sent`, `/play (dry run)`) and sends nothing; a failed
+  send is tried again two minutes later. It plays while its node runs and the instance is on; its
+  safety stop (`kill`) stops its node (`ctx.stop`), which drops its plan until the owner clears the
+  stop in the editor. It needs no `ctx.mode`. It declares no chat command, since two instances would
+  clash: the owner reaches each with `/plugins <id>` and its read `status`. Each step is published
+  as `turn-actor.step`. The image offers it (`src/main.ts`): the editor adds one node per bot, each
+  on its own instance, its `chat` edges from and to the owner's `telegram-user` node and its
+  `parser` edge to its bot's parser. The turn parsers are not the image's: each is made from a
+  game's grammar, so a game's module offers it.
 - **`reactor`** (`packages/turns/src/reactor.ts`): one reaction (`react`, §4.15) made from its
-  node's config, with no code, run as one instance per reaction. An actor: it starts `read-only`,
-  and the owner sets its mode. Its configuration (`reactorConfig`): `on`, the event type it reacts
-  to (or a namespace), or `match`, a regular expression the messages read on its chat-in input must
-  match (its named groups in the payload), with `in` (the one chat whose messages it reads; every
-  chat its edge reads without) and `ignoreCase`; exactly one of `on` and `match`. Then `when`
-  (dotted paths of the payload, each equal to its value), `chat` and `send` (`{path}` templates of
-  the payload), and `maxAgeS` (how old an event may be, 120 seconds by default). Its ports: `chat`,
-  a chat-out output, the account it sends through (on any network), whose edge carries the chat it
-  sends to and its commands; `chat`, a chat-in input there only with `match`
-  (`when: { config: 'match' }`, §2.1), the chats it reads; and `events`, optional, whose namespace
-  is the one of its `on` (§2.1): bound to the nodes whose events it hears, and not a port at all of
-  a reactor on messages. So a reactor on events only sends. Each reaction is recorded as
-  `reactor.reaction`, and each send logged as `core.send` with the node's id as its origin. The
-  image offers it (`src/main.ts`); a node that examines what a game's parser reads, in the graph
-  file:
+  node's config, with no code, run as one instance per reaction. An actor: whether it sends for real
+  is its chat-out edge's (a dry run as the editor draws it, D64). Its configuration
+  (`reactorConfig`): `on`, the event type it reacts to (or a namespace), or `match`, a regular
+  expression the messages read on its chat-in input must match (its named groups in the payload),
+  with `in` (the one chat whose messages it reads; every chat its edge reads without) and
+  `ignoreCase`; exactly one of `on` and `match`. Then `when` (dotted paths of the payload, each
+  equal to its value), `chat` and `send` (`{path}` templates of the payload), and `maxAgeS` (how old
+  an event may be, 120 seconds by default). Its ports: `chat`, a chat-out output, the account it
+  sends through (on any network), whose edge carries the chat it sends to and its commands; `chat`,
+  a chat-in input there only with `match` (`when: { config: 'match' }`, §2.1), the chats it reads;
+  and `events`, optional, whose namespace is the one of its `on` (§2.1): bound to the nodes whose
+  events it hears, and not a port at all of a reactor on messages. So a reactor on events only
+  sends. Each reaction is recorded as `reactor.reaction`, and each send logged as `core.send` with
+  the node's id as its origin. The image offers it (`src/main.ts`); a node that examines what a
+  game's parser reads, in the graph file:
 
   ```json
   {
@@ -1368,6 +1464,16 @@ second. A module written for the plugin API `"1"` before the split keeps loading
 input and a chat-out output of its name, its `bind`'s `reads` to the first and `sends` and
 `commands` to the second. Its graphs of version 1 are converted as they load (§2.3); code that types
 a graph as `GraphInput` writes `version: 2`, and its chat edges each way.
+
+**Its mode** (§4, bot-os.md D64): the plugin API stays `"1"`, and a module written for the modes
+keeps loading. Its `ctx.mode` is derived from its node's edges (`get()`: `dry-run` or `live`), its
+`ctx.mode.set('read-only', 'owner' | 'safety')` stops its node, kept until the owner clears it, and
+its `set('dry-run' | 'live', …)` is refused and logged, since only the editor raises a state;
+`onChange` hears `read-only` at a stop, and `ctx.resume()` is refused, false. So a module that
+lowers its mode from its owner commands and its safety stops stops its node with them, and its
+raises do nothing: the owner clears the stop, and chooses its edges' dry runs, in the editor. An
+outbox it makes of its own keeps its `Modes` (§4.6). These are deprecated: a plugin written now
+calls `ctx.stop(reason)`, and its outbox handle's `mode()` says whether it sends for real.
 
 ### 7.3 Loading
 
@@ -1517,9 +1623,9 @@ built: `packages/core/src/legacy.ts` (`LegacyImport`).
   store's JSON documents, the core's beside them, into a fresh instance (`instances/<instance>/`,
   `from` by default), of a plugin the instance offers (`from` by default), which a node then names
   (§2.2). Its version comes with it, so its plugin's migrations run from there; its timers and
-  settings come too; its mode does not (P10): the instance starts `read-only`, or in its node's
-  `mode`. 409 for an instance kept already, 400 for an unknown plugin. An instance no node uses is
-  deleted after 7 days, as any.
+  settings come too; its mode does not: whether its node sends for real is its chat-out edges'
+  (bot-os.md D64), and the mode it had is only reported. 409 for an instance kept already, 400 for
+  an unknown plugin. An instance no node uses is deleted after 7 days, as any.
 - `GET /legacy/events`: the types of its event log that are not namespaced (those an import would
   skip), each with how many records have it and the event types registered here whose name after the
   namespace is it (`suggest`: `message` → `dice.message`, where a plugin registers `dice.message`),

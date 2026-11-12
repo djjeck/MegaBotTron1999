@@ -98,7 +98,7 @@ function setup(graph: GraphInput = twoBots(), extra: Record<string, unknown> = {
 }
 
 describe('plugin instances', () => {
-  it('run one plugin more than once, each with its own id, configuration, store, settings and mode', async () => {
+  it('run one plugin more than once, each with its own id, configuration, store, settings and state', async () => {
     const { core, contexts } = setup(twoBots(), {
       documents: { 'game-b': { kept: { x: 1 } } },
     });
@@ -119,13 +119,13 @@ describe('plugin instances', () => {
     expect(core.settings.set('game-a.loud', true)).toBeUndefined();
     expect(core.settings.of('game-a')?.kept()).toEqual({ loud: true });
     expect(core.settings.of('game-b')?.kept()).toEqual({});
-    core.modes.set('actor-a', 'live');
-    expect(core.controls.status().plugins.map((p) => [p.id, p.plugin, p.mode])).toEqual([
-      ['tg', 'tg', undefined],
-      ['game-a', 'game', undefined],
-      ['game-b', 'game', undefined],
-      ['actor-a', 'actor', 'live'],
-      ['actor-b', 'actor', 'read-only'],
+    core.stopNode('actor-a', 'safety', 'safety');
+    expect(core.controls.status().plugins.map((p) => [p.id, p.plugin, p.state])).toEqual([
+      ['tg', 'tg', 'running'],
+      ['game-a', 'game', 'running'],
+      ['game-b', 'game', 'running'],
+      ['actor-a', 'actor', 'stopped'],
+      ['actor-b', 'actor', 'running'],
     ]);
     expect(core.nodes().map((n) => `${n.id}:${n.manifest.id}`)).toContain('game-b:game');
     expect(core.graph()?.edges).toHaveLength(8);
@@ -142,9 +142,6 @@ describe('plugin instances', () => {
 
   it('send only where their edges send, with the commands their edges allow', async () => {
     const { core, tg, contexts } = setup();
-    core.load();
-    core.modes.set('actor-a', 'live');
-    core.modes.set('actor-b', 'live');
     await core.start();
     tg.open();
     const [a, b] = contexts as [PluginContext, PluginContext];

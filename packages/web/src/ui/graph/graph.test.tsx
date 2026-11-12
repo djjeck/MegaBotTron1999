@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeCore } from '#test/fake-core.ts';
-import { status, VIEW } from '#test/graph-view.ts';
+import { status, STOP, VIEW } from '#test/graph-view.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
 import { GraphPage } from './GraphPage.tsx';
 import { layout } from './layout.ts';
@@ -29,7 +29,7 @@ describe('GraphPage', () => {
     const actor = await screen.findByLabelText('node actor-a', {}, slow);
     expect(within(actor).getAllByText('actor')).toHaveLength(2);
     await waitFor(() => expect(within(actor).getByText('running')).toBeDefined(), slow);
-    expect(within(actor).getByText('dry-run')).toBeDefined();
+    expect(actor.className).not.toContain('state-');
     const parser = screen.getByLabelText('node parser');
     expect(within(parser).getByText('drift 1/2')).toBeDefined();
     // Each port in its type's shape and colour, inputs left and outputs right.
@@ -93,6 +93,66 @@ describe('GraphPage', () => {
     expect(screen.getByText('optional port')).toBeDefined();
   });
 
+  it('draws a stopped node red, an inactive one and a disabled one greyed, and a dry-run edge hollow', async () => {
+    const dry = {
+      ...VIEW.graph,
+      edges: VIEW.graph.edges.map((e) => (e.type === 'chat-out' ? { ...e, dryRun: true } : e)),
+    };
+    const stopped = { reason: 'drift on parser', time: STOP.time, source: 'drift' as const };
+    fakeCore({
+      file: dry,
+      status: {
+        off: false,
+        plugins: status().plugins.map((p) =>
+          p.id === 'parser'
+            ? { ...p, state: 'stopped', reason: stopped.reason, stop: stopped }
+            : p.id === 'actor-a'
+              ? { ...p, state: 'inactive', reason: 'needs parser (stopped)' }
+              : p
+        ),
+      },
+    });
+    render(<GraphPage loggedOut={loggedOut} checkAfterMs={0} />);
+    const parser = await screen.findByLabelText('node parser', {}, slow);
+    await waitFor(() => expect(parser.className).toContain('state-stopped'), slow);
+    expect(within(parser).getByRole('img', { name: 'warning' })).toBeDefined();
+    expect(within(parser).getByText('drift on parser')).toBeDefined();
+    const actor = screen.getByLabelText('node actor-a');
+    expect(actor.className).toContain('state-inactive');
+    expect(actor.getAttribute('aria-disabled')).toBe('true');
+    expect(within(actor).getByText('needs parser (stopped)')).toBeDefined();
+    const edge = screen.getByRole('button', { name: 'edge actor-a.chat → chat.chat' });
+    expect(edge.className).toContain('dry-run');
+    expect(screen.getByTestId('dry run actor-a.chat → chat.chat')).toBeDefined();
+    expect(screen.getByText('dry run')).toBeDefined();
+    cleanup();
+    // Disabled in the saved graph, as the core says it is.
+    fakeCore({
+      file: {
+        ...VIEW.graph,
+        nodes: VIEW.graph.nodes.map((n) => (n.id === 'actor-a' ? { ...n, disabled: true } : n)),
+      },
+      status: {
+        off: false,
+        plugins: status().plugins.map((p) =>
+          p.id === 'actor-a' ? { ...p, state: 'disabled' } : p
+        ),
+      },
+    });
+    render(<GraphPage loggedOut={loggedOut} checkAfterMs={0} />);
+    const off = await screen.findByLabelText('node actor-a', {}, slow);
+    await waitFor(() => expect(off.className).toContain('state-disabled'), slow);
+    expect(within(off).getByText('disabled')).toBeDefined();
+    expect(within(off).queryByText('from the next Apply')).toBeNull();
+    // Enabled in the draft: so drawn, until the Apply.
+    fireEvent.click(off);
+    const details = await screen.findByLabelText('details of actor-a');
+    fireEvent.click(within(details).getByRole('switch', { name: 'enabled' }));
+    await waitFor(() => expect(off.className).not.toContain('state-disabled'));
+    expect(within(off).getByText('enabled')).toBeDefined();
+    expect(within(off).getByText('disabled until the next Apply')).toBeDefined();
+  });
+
   it('shows a node’s details: its instance, forms, and interface', async () => {
     fakeCore({
       instances: [
@@ -103,7 +163,10 @@ describe('GraphPage', () => {
     fireEvent.click(await screen.findByLabelText('node actor-a', {}, slow));
     const details = await screen.findByLabelText('details of actor-a');
     expect(within(details).getByText('plays the game')).toBeDefined();
-    expect(within(details).getByText('dry-run')).toBeDefined();
+    expect(
+      (within(details).getByRole('switch', { name: 'enabled' }) as HTMLInputElement).checked
+    ).toBe(true);
+    expect(within(details).getByText('Enabled')).toBeDefined();
     expect(within(details).getByText('no config')).toBeDefined();
     expect(within(details).getByText('(fresh: made at its first start)')).toBeDefined();
     expect((within(details).getByLabelText('loud') as HTMLInputElement).checked).toBe(false);
@@ -140,23 +203,21 @@ describe('GraphPage', () => {
     expect(within(parser).getByText('10 read, 2 unread (1 recent)')).toBeDefined();
   });
 
-  it('kills the nodes selected, once confirmed, and reinstates a killed one', async () => {
-    let killed = false;
-    const { api } = fakeCore({
+  it('kills the nodes selected, once confirmed, draws a stopped one red, and clears its stop at Apply', async () => {
+    let stopped = false;
+    const core = fakeCore({
       routes: {
-        'GET /status': () => [200, status(killed)],
+        'GET /status': () => [200, status(stopped)],
         'GET /drift': [200, []],
         'POST /plugins/actor-a/kill': () => {
-          killed = true;
-          return [200, { result: 'actor-a killed: actor-a: read-only' }];
+          stopped = true;
+          return [200, { result: 'actor-a killed: actor-a: stopped' }];
         },
         'POST /plugins/parser/kill': [409, { error: 'parser is not running' }],
-        'POST /plugins/actor-a/resume': () => {
-          killed = false;
-          return [200, { resumed: 'actor-a' }];
-        },
+        'POST /plugins/actor-a/clear-stop': [200, { cleared: 'actor-a' }],
       },
     });
+    const { api } = core;
     const confirm = vi.fn(() => false);
     vi.stubGlobal('confirm', confirm);
     render(<GraphPage loggedOut={loggedOut} checkAfterMs={0} />);
@@ -172,31 +233,50 @@ describe('GraphPage', () => {
     expect(screen.getByText('Selected: parser, actor-a')).toBeDefined();
     expect(screen.queryByLabelText(/^details of/u)).toBeNull();
     fireEvent.click(kill);
-    expect(confirm).toHaveBeenCalledWith("Kill parser, actor-a: run each one's safety stop?");
+    expect(confirm).toHaveBeenCalledWith(
+      "Kill parser, actor-a: run each one's safety stop, then stop it until its stop is cleared here?"
+    );
     expect(api.calls.filter((c) => c.includes('/kill'))).toEqual([]);
     confirm.mockReturnValue(true);
     fireEvent.click(kill);
     await waitFor(() =>
       expect(screen.getByRole('status').textContent).toBe(
-        'parser: parser is not running; actor-a killed: actor-a: read-only'
+        'parser: parser is not running; actor-a killed: actor-a: stopped'
       )
     );
-    // Drawn disabled, with its reinstatement at hand.
+    // Drawn stopped: red tones, a warning icon, and why.
     const actor = screen.getByLabelText('node actor-a');
-    await waitFor(() => expect(actor.getAttribute('aria-disabled')).toBe('true'));
-    expect(actor.className).toContain('killed');
-    expect(within(actor).getByText('killed')).toBeDefined();
+    await waitFor(() => expect(actor.className).toContain('state-stopped'));
+    expect(within(actor).getByRole('img', { name: 'warning' })).toBeDefined();
+    expect(within(actor).getByText('killed by the owner')).toBeDefined();
     expect(screen.getByRole('button', { name: 'Kill selected (1)' })).toBeDefined();
-    fireEvent.click(within(actor).getByRole('button', { name: 'Reinstate' }));
-    await waitFor(() =>
-      expect(screen.getByRole('status')).toHaveProperty('textContent', 'actor-a reinstated')
-    );
-    await waitFor(() => expect(actor.getAttribute('aria-disabled')).toBe('false'));
-    expect(api.calls).toContain('POST /plugins/actor-a/resume {}');
+    // Its stop cleared in its details: a change of the draft, reviewed, then applied.
+    fireEvent.keyDown(document, { key: 'Meta' });
+    fireEvent.click(screen.getByLabelText('node parser'), { metaKey: true });
+    fireEvent.keyUp(document, { key: 'Meta' });
+    const details = await screen.findByLabelText('details of actor-a');
+    expect(within(details).getByText(/by the owner at 2026-11-12 10:00 UTC/u)).toBeDefined();
+    expect(within(details).queryByRole('button', { name: 'Kill actor-a' })).toBeNull();
+    fireEvent.click(within(details).getByRole('button', { name: 'Clear stop' }));
+    expect(within(details).getByText(/cleared at the next Apply/u)).toBeDefined();
+    await waitFor(() => expect(actor.className).toContain('state-cleared'));
+    fireEvent.click(within(details).getByRole('button', { name: 'Keep it stopped' }));
+    fireEvent.click(within(details).getByRole('button', { name: 'Clear stop' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }));
+    const review = await screen.findByRole('dialog', { name: 'review changes' });
+    expect(within(review).getByText('actor-a')).toBeDefined();
+    expect(within(review).getByText('Stops cleared (started again)')).toBeDefined();
+    fireEvent.click(within(review).getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(core.restarted).toBe(true));
+    const put = api.calls.findIndex((c) => c.startsWith('PUT /graph/file'));
+    const clear = api.calls.indexOf('POST /plugins/actor-a/clear-stop {}');
+    expect(put).toBeGreaterThanOrEqual(0);
+    expect(clear).toBeGreaterThan(put);
+    expect(api.calls.indexOf('POST /restart {}')).toBeGreaterThan(clear);
   });
 
-  it('kills one node from its details, and keeps a killed node’s config editable', async () => {
-    let killed = false;
+  it('kills one node from its details, and keeps a stopped node’s config editable', async () => {
+    let stopped = false;
     const { checked } = fakeCore({
       routes: {
         'GET /status': () => [
@@ -204,17 +284,16 @@ describe('GraphPage', () => {
           {
             off: true,
             plugins: status().plugins.map((p) =>
-              p.id === 'chat' && killed
-                ? { ...p, state: 'paused', reason: 'killed by the owner', killed: true }
+              p.id === 'chat' && stopped
+                ? { ...p, state: 'stopped', reason: STOP.reason, stop: STOP }
                 : p
             ),
           },
         ],
         'POST /plugins/chat/kill': () => {
-          killed = true;
+          stopped = true;
           return [200, { result: 'chat killed' }];
         },
-        'POST /plugins/chat/resume': [409, { error: 'the bot is off: `cli.ts on` first' }],
       },
     });
     vi.stubGlobal('confirm', () => true);
@@ -224,11 +303,7 @@ describe('GraphPage', () => {
     const details = await screen.findByLabelText('details of chat');
     await waitFor(() => expect(within(details).getByRole('button', { name: 'Kill chat' })));
     fireEvent.click(within(details).getByRole('button', { name: 'Kill chat' }));
-    expect(
-      await within(details).findByText('Killed: it sends nothing until reinstated.', {}, slow)
-    );
-    fireEvent.click(within(details).getByRole('button', { name: 'Reinstate' }));
-    expect(await screen.findByText('chat: the bot is off: `cli.ts on` first')).toBeDefined();
+    expect(await within(details).findByRole('button', { name: 'Clear stop' }, slow)).toBeDefined();
     const host = within(details).getByLabelText('host') as HTMLInputElement;
     fireEvent.change(host, { target: { value: 'other.test' } });
     // Its defaults, shown filled in, are written with the first change.

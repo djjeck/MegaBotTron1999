@@ -62,7 +62,8 @@ describe('the draft', () => {
     ]);
     expect(g.nodes.map(instanceOf)).toEqual(['a', 'old-b']);
     g = updateNode(g, 'a', { config: { host: 'h' }, account: 'chat:x' });
-    g = updateNode(g, 'a', { account: '', settings: {}, mode: undefined });
+    g = updateNode(g, 'a', { account: '', settings: {}, disabled: true });
+    g = updateNode(g, 'a', { disabled: undefined });
     expect(g.nodes[0]).toEqual({ id: 'a', plugin: 'chat', config: { host: 'h' } });
     g = connect(g, { from: 'a.chat', to: 'b.chat', type: 'chat-out' });
     g = connect(g, { from: 'a.chat', to: 'b.chat', type: 'chat-out', reads: ['#a'] });
@@ -119,14 +120,14 @@ describe('the draft', () => {
       to: 'actor-a.chat',
       type: 'chat-in',
     });
-    // Dragged to a connector's out card: an edge to its node.
+    // Dragged to a connector's out card: an edge to its node, a dry run until said (D64).
     expect(
       edgeOf(
         { source: 'actor-a', sourceHandle: 'chat', target: 'chat::out', targetHandle: 'chat' },
         plugins,
         g
       )
-    ).toEqual({ from: 'actor-a.chat', to: 'chat.chat', type: 'chat-out' });
+    ).toEqual({ from: 'actor-a.chat', to: 'chat.chat', type: 'chat-out', dryRun: true });
     expect(
       edgeOf(
         { source: 'gone', sourceHandle: null, target: 'actor-a', targetHandle: null },

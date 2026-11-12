@@ -170,17 +170,23 @@ const plugin = (id: string, more: Partial<PluginControl> = {}): PluginControl =>
   ...more,
 });
 
-/** The status, with the actor killed or not. */
-export const status = (killed = false, off = false): Status => ({
+/** A stop, as the status gives it (D64). */
+export const STOP = {
+  reason: 'killed by the owner',
+  time: '2026-11-12T10:00:00.000Z',
+  source: 'owner' as const,
+};
+
+/** The status, with the actor stopped (killed) or not. */
+export const status = (stopped = false, off = false): Status => ({
   off,
   plugins: [
     plugin('chat'),
     plugin('parser'),
     plugin('actor-a', {
       plugin: 'actor',
-      mode: 'dry-run',
       settings: { 'actor-a.loud': true, level: 2 },
-      ...(killed ? { state: 'paused', reason: 'killed by the owner', killed: true } : {}),
+      ...(stopped ? { state: 'stopped', reason: STOP.reason, stop: STOP } : {}),
     }),
   ],
 });

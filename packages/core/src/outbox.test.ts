@@ -214,8 +214,8 @@ describe('Outbox.send', () => {
     expect(a.p.send('#c', '!nuke x').reason).toBe("!nuke is not among p's commands");
     a.modes.set('p', 'read-only');
     expect(a.p.send('#c', '!roll x').reason).toBe('read-only');
-    const b = setup({ policy: { reach: { sends: ['#c'] }, paused: 'drift' } });
-    expect(b.p.send('#c', 'anything').reason).toBe('paused: drift');
+    const b = setup({ policy: { reach: { sends: ['#c'] }, held: 'stopped: drift' } });
+    expect(b.p.send('#c', 'anything').reason).toBe('stopped: drift');
     expect(a.records.map((r) => r.origin)).toEqual(['p', 'p', 'p', 'p']);
     expect(a.connector.sent).toEqual([]);
   });
@@ -338,32 +338,42 @@ describe('the outboxes of the core', () => {
     return { conn, actor };
   }
 
-  it('give each plugin its way out within its reach and mode, kept by the core', async () => {
+  it('give each plugin its way out within its reach, a dry run by its edge, and its state', async () => {
     const connector = new FakeConnector('test:me', 'test');
     const seen: { handle?: unknown; error?: unknown } = {};
     const { conn, actor } = plugins(connector, seen);
     const records: { type: string }[] = [];
-    const core = new Core({ clock: new VirtualClock(), record: (r) => records.push(r) });
+    const core = new Core({
+      clock: new VirtualClock(),
+      record: (r) => records.push(r),
+      // The sender's edge a dry run (D64).
+      graph: (g) => ({
+        ...g,
+        edges: g.edges.map((e) => (e.type === 'chat-out' ? { ...e, dryRun: true } : e)),
+      }),
+    });
     const early = core.outbox('test:me');
     expect(early.send('sender', '#c', '!a').reason).toBe('sender does not send to #c');
     core.register(conn, actor('sender', true), actor('stranger', false));
     await core.start();
     expect(core.outbox('test:me')).toBe(early);
     const handle = seen.handle as ReturnType<Outbox['as']>;
-    expect(handle.send('#c', '!a').reason).toBe('read-only');
-    core.modes.set('sender', 'live');
-    expect(handle.send('#c', '!a').outcome).toBe('sent');
+    expect(handle.mode()).toBe('dry-run');
+    expect(handle.send('#c', '!a').outcome).toBe('dry-run');
+    expect(records).toContainEqual(
+      expect.objectContaining({ type: 'core.send', mode: 'dry-run', outcome: 'dry-run' })
+    );
     expect(handle.send('#c', '!b').reason).toBe("!b is not among sender's commands");
     expect(String(seen.error)).toContain('stranger has no reach on the account test:me');
     expect(early.send('stranger', '#c', '!a').reason).toBe('stranger does not send to #c');
-    core.pause('sender', 'drift');
-    expect(handle.send('#c', '!a').reason).toBe('paused: drift');
+    core.stopNode('sender', 'drift', 'drift');
+    expect(handle.send('#c', '!a').reason).toBe('stopped: drift');
     await core.stop();
-    expect(handle.send('#c', '!a').reason).toBe('paused: not running (stopped)');
+    expect(handle.send('#c', '!a').reason).toBe('not running (stopped)');
     expect(core.outbox('nobody:here').send('sender', '#c', '!a').reason).toBe(
       'sender does not send to #c'
     );
-    expect(records.filter((r) => r.type === 'core.send')).toHaveLength(8);
-    expect(connector.sent).toEqual(['#c !a']);
+    expect(records.filter((r) => r.type === 'core.send')).toHaveLength(7);
+    expect(connector.sent).toEqual([]);
   });
 });

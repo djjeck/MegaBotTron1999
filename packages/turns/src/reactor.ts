@@ -3,9 +3,9 @@
  * with no code, run as one instance per reaction. When an event of its `on` type is heard (from the
  * nodes its `events` edges bind), or a message read on its `chat` input matches its `match`, and
  * the payload's fields equal its `when`, it sends its `send` to its `chat` through the outbox of its
- * `chat` output (chat-out, bot-os.md D60): in its mode (an actor, `read-only` until the owner sets one), within its edge's
- * reach, at the account's pace, each attempt logged as `core.send` and each reaction recorded as
- * `reactor.reaction`.
+ * `chat` output (chat-out, bot-os.md D60): within its edge's reach, a dry run while that edge is
+ * one (D64; the editor draws a new one so), at the account's pace, each attempt logged as
+ * `core.send` and each reaction recorded as `reactor.reaction`.
  *
  * Its `events` input takes its namespace from `on` (§2.1): the namespace of the event type it
  * reacts to. A reactor on messages has no such port; one on events has no chat-in input (its

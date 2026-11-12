@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { DevKit, FakeConnector, fakeConnectorPlugin } from './devkit.ts';
-import { type Mode } from './outbox.ts';
 import { definePlugin, type PluginContext } from './plugin.ts';
 import { fill, matches, react, REACT_MAX_AGE_MS, type Reaction, valueAt } from './react.ts';
 
@@ -15,15 +14,20 @@ const flush = async (): Promise<void> => {
 /**
  * A parser of a made-up game (`quest`), alice's faked account, and `watcher`, a plugin that hands
  * its context out for the test's reactions: its chat edge reads @QuestBot and #lobby, and sends
- * only `/look` to @QuestBot.
+ * only `/look` to @QuestBot; a dry run through a dry-run edge, refused once `watcher` is stopped.
  */
-async function run(mode: Mode = 'live') {
+async function run(state: 'live' | 'dry-run' | 'stopped' = 'live') {
   const account = new FakeConnector({ account: 'telegram:alice' });
   let quest: PluginContext | undefined;
   let watcher: PluginContext | undefined;
   const kit = new DevKit({
     start: T0,
-    modes: { watcher: mode },
+    graph: (g) => ({
+      ...g,
+      edges: g.edges.map((e) =>
+        e.type === 'chat-out' && state === 'dry-run' ? { ...e, dryRun: true } : e
+      ),
+    }),
     plugins: [
       fakeConnectorPlugin('tg', account),
       definePlugin({
@@ -68,6 +72,7 @@ async function run(mode: Mode = 'live') {
     ],
   });
   await kit.start();
+  if (state === 'stopped') kit.core.stopNode('watcher', 'a safety stop', 'safety');
   account.open();
   const records = () =>
     kit.log
@@ -174,7 +179,7 @@ describe('react on an event', () => {
     expect(records()).toHaveLength(2);
   });
 
-  it('keeps to the mode and the reach of its edge', async () => {
+  it('keeps to the reach of its edge, a dry run through a dry-run one, and its stop', async () => {
     const dry = await run('dry-run');
     dry.on({ on: 'quest.turn', chat: BOT, send: '/look {outcome.item}' });
     dry.quest.bus.publish('quest.turn', gain('lantern'));
@@ -182,7 +187,7 @@ describe('react on an event', () => {
     expect(dry.account.sent).toEqual([]);
     expect(dry.records().map((r) => r['outcome'])).toEqual(['dry-run']);
 
-    const ro = await run('read-only');
+    const ro = await run('stopped');
     ro.on({ on: 'quest.turn', chat: BOT, send: '/look {outcome.item}' });
     ro.quest.bus.publish('quest.turn', gain('lantern'));
     await flush();
@@ -191,7 +196,7 @@ describe('react on an event', () => {
         reaction: 'react',
         on: 'quest.turn',
         outcome: 'refused',
-        reason: 'read-only',
+        reason: 'stopped: a safety stop',
         chat: BOT,
         text: '/look lantern',
       },

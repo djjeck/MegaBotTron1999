@@ -10,6 +10,10 @@
  *   the plugins that use it); one that throws fails, stopped, with those that require it.
  * - `stop` runs in the reverse order, keeping what each plugin's `serialise` returns, which its
  *   next `create` gets back as `restored`.
+ * - A node's state (bot-os.md D64): a node `disabled` in the graph, or `stopped` (a safety stop, a
+ *   drift pause, the owner's kill or stop, kept in its instance as `_stop.json` across restarts),
+ *   is not started, nor is one whose required ports bind a node down (`inactive`, derived at the
+ *   load). A stop made while it runs holds it until the owner clears it in the editor and applies.
  */
 import path from 'node:path';
 import { type z } from 'zod';
@@ -22,27 +26,35 @@ import {
   type CommandHandler,
 } from './commands.ts';
 import { type ChatSurface, type Connector, handleOf, type ReadFilter } from './connector.ts';
-import { Controls, KILLED } from './controls.ts';
+import { Controls, type StopRecord, type StopSource } from './controls.ts';
 import { DEFAULT_DRIFT, type DriftCounts, DriftMonitor, type DriftRecord } from './drift.ts';
 import { type EventReader, type LogEntry } from './event-log.ts';
 import {
   type Binding,
   defaultGraph,
+  downText,
   type Graph,
   GRAPH_VERSION,
   GraphError,
   type GraphInput,
   loadOrder,
+  nodeStates,
   requiredOf,
   type ResolvedNode,
   resolveGraph,
   upgradeGraph,
 } from './graph.ts';
-import { type GraphCheck, type GraphFile, type GraphProblem, locateProblem } from './graph-file.ts';
+import {
+  type GraphCheck,
+  type GraphFile,
+  type GraphProblem,
+  locateProblem,
+  sameGraph,
+} from './graph-file.ts';
 import { describePlugin, type PluginView } from './graph-view.ts';
 import { type InstanceInfo, InstanceRegistry } from './instance-registry.ts';
 import { type Manifest, parseManifest, SECRET_NAME } from './manifest.ts';
-import { Modes, Outbox, type SenderPolicy, type SendRecord } from './outbox.ts';
+import { isMode, type Mode, Outbox, type SenderPolicy, type SendRecord } from './outbox.ts';
 import { CORE_COMMANDS, coreCommands } from './owner-commands.ts';
 import {
   type EventQuery,
@@ -59,14 +71,28 @@ import { type Secrets, SecretStore } from './secrets.ts';
 import { PluginSettings, SETTINGS_DOC, SettingsRegistry } from './settings.ts';
 import { CORE_STORE, type Migration, Stores } from './store.ts';
 
+/**
+ * A node's state (bot-os.md D64): `disabled` by the owner, `stopped` by exception (a safety stop,
+ * drift, the owner's kill or stop; `stop` says which) or at shutdown, `inactive` for a required
+ * port bound to a node down, `failed` with why; otherwise on its way through its lifecycle.
+ */
 export type PluginState =
-  'registered' | 'starting' | 'running' | 'paused' | 'stopping' | 'stopped' | 'failed';
+  | 'registered'
+  | 'starting'
+  | 'running'
+  | 'stopping'
+  | 'stopped'
+  | 'failed'
+  | 'disabled'
+  | 'inactive';
 
 export interface PluginStatus {
   id: string;
   state: PluginState;
-  /** Why it failed or is paused. */
+  /** Why it failed, is stopped, or is inactive. */
   reason?: string;
+  /** Its stop, kept in its instance, while it is stopped by exception. */
+  stop?: StopRecord;
 }
 
 /** A record the core writes to the event log. */
@@ -188,12 +214,20 @@ interface Entry {
   status: PluginStatus;
   instance?: Instance;
   scheduler?: PluginScheduler;
+  /** Its instance is up: started, neither failed nor shut down (it may be stopped since). */
+  up?: boolean;
+  /** Its `ctx.mode.onChange` listeners (module API 1), told `read-only` when it is stopped. */
+  modeListeners?: ((mode: Mode) => void)[];
 }
 
 /** The core's own store, beside the instances'. */
 const CORE = CORE_STORE;
-/** The core's document, in each instance's store, of its mode (P10). */
-const MODE_DOC = '_mode';
+/** The core's document, in each instance's store, of its stop (bot-os.md D64). */
+export const STOP_DOC = '_stop';
+/** The core's document, in each instance's store, of its mode before bot-os.md D64: migrated. */
+export const MODE_DOC = '_mode';
+/** The core's document of the first start's migration of the modes into states (D64). */
+export const STATES_DOC = 'node-states';
 /** How often the orphaned instances are looked for: daily. */
 const SWEEP_MS = 86_400_000;
 
@@ -222,8 +256,6 @@ export class Core {
   /** Why the saved graph was refused at this start (§2.3). */
   private refused: GraphProblem[] = [];
   private readonly outboxes = new Map<string, Outbox>();
-  /** The acting plugins' modes (P10), kept in the core's own store. */
-  readonly modes: Modes;
   private readonly driftMonitor: DriftMonitor;
   /** The owner's notices waiting for the owner's surface to start. */
   private readonly pendingTells: [string, Buttons | undefined][] = [];
@@ -272,19 +304,6 @@ export class Core {
     if (secrets !== undefined && dir !== undefined)
       this.secretStore = new SecretStore(path.join(dir, 'secrets'), secrets);
     this.registry = new InstanceRegistry(this.stores, () => options.clock.now());
-    // Each node's mode is kept in its instance's store, with the rest of its state.
-    this.modes = new Modes({
-      load: (plugin) => {
-        const instance = this.entries.get(plugin)?.node.instance;
-        const doc =
-          instance === undefined ? undefined : this.stores.internal(instance).get(MODE_DOC);
-        return (doc as { mode?: unknown } | undefined)?.mode;
-      },
-      save: (plugin, mode) => {
-        const instance = this.entries.get(plugin)?.node.instance;
-        if (instance !== undefined) this.stores.internal(instance).put(MODE_DOC, { mode });
-      },
-    });
     this.settings = new SettingsRegistry((plugin) => {
       const entry = this.entries.get(plugin);
       try {
@@ -294,20 +313,16 @@ export class Core {
       }
     });
     this.controls = new Controls({
-      modes: this.modes,
       settings: this.settings,
       store: this.stores.open(CORE),
       nodes: () => this.nodes(),
-      sends: (id) => this.sends(id),
       status: (id) => this.state(id),
       instance: (id) => {
         const e = this.entries.get(id);
-        return e?.status.state === 'running' || e?.status.state === 'paused'
-          ? e.instance
-          : undefined;
+        return e?.up === true ? e.instance : undefined;
       },
-      resume: (id) => this.resume(id),
-      killNode: (id) => this.killNode(id),
+      stopNode: (id, reason) => this.stopNode(id, reason, 'owner'),
+      clearStop: (id) => this.clearStop(id),
       record: (fields) => this.o.record?.({ type: 'core.power', t: this.o.clock.now(), ...fields }),
       error: (id, line) => this.logger(id).error(line),
       account: (id) => {
@@ -325,7 +340,7 @@ export class Core {
       ...(options.record === undefined ? {} : { record: options.record }),
       notify: (text) => this.tell(text),
       threshold: (parser) => this.entries.get(parser)?.manifest.drift ?? DEFAULT_DRIFT,
-      pause: (parser, reason) => this.pauseActorsOf(parser, reason),
+      pause: (parser, reason) => this.stopActorsOf(parser, reason),
     });
     this.bus = this.newBus();
   }
@@ -379,13 +394,12 @@ export class Core {
   }
 
   /**
-   * The connector of a running (or paused) connector plugin, sends included: for the instance's
-   * wiring, which sends for the app until the outbox does. Plugins get handles.
+   * The connector of a running (or stopped since it started) connector plugin, sends included: for
+   * the instance's wiring, which sends for the app until the outbox does. Plugins get handles.
    */
   connector(id: string): Connector | undefined {
     const e = this.entries.get(id);
-    if (e?.status.state !== 'running' && e?.status.state !== 'paused') return undefined;
-    return e.instance?.connector;
+    return e?.up === true ? e.instance?.connector : undefined;
   }
 
   /**
@@ -405,8 +419,7 @@ export class Core {
         connector,
         limits: () => connector()?.limits,
         clock: this.o.clock,
-        modes: this.modes,
-        policy: (plugin) => this.policyOf(plugin, account),
+        policy: (plugin, port) => this.policyOf(plugin, account, port),
         ...(this.o.record === undefined ? {} : { record: this.o.record }),
       });
       this.outboxes.set(account, outbox);
@@ -415,24 +428,28 @@ export class Core {
   }
 
   /**
-   * What an outbox knows of a sender: what its edges to the account's connector bind (P6), and
-   * whether it may send now.
+   * What an outbox knows of a sender: what its edges to the account's connector bind (P6), each a
+   * dry run or not (D64), those of its output `port` only if one is named; and whether it may send
+   * now.
    */
-  private policyOf(plugin: string, account: string): SenderPolicy {
+  private policyOf(plugin: string, account: string, port?: string): SenderPolicy {
     const entry = this.entries.get(plugin);
     if (entry === undefined) return { reach: { sends: [] } };
     const holder = [...this.entries.values()].find((e) => e.node.account === account);
     const reaches = sendsOf(entry.node)
-      .filter(([, b]) => b.node === holder?.id)
-      .map(([, b]) => b.chat ?? { reads: [], sends: [] });
+      .filter(([p, b]) => b.node === holder?.id && (port === undefined || p === port))
+      .map(([, b]) => ({
+        ...(b.chat ?? { reads: [], sends: [] }),
+        ...(b.dryRun === true ? { dryRun: true } : {}),
+      }));
     const { state, reason } = entry.status;
     return {
       reach: reaches.length === 0 ? { sends: [] } : reaches,
-      ...(state === 'paused'
-        ? { paused: reason ?? 'paused' }
+      ...(state === 'stopped' && entry.up === true
+        ? { held: `stopped: ${reason ?? 'stopped'}` }
         : state === 'running'
           ? {}
-          : { paused: `not running (${state})` }),
+          : { held: `not running (${state})` }),
     };
   }
 
@@ -454,9 +471,9 @@ export class Core {
   }
 
   /**
-   * The chat commands of the running (or paused) plugins, in load order, for the chat surface
-   * (§2 `interface.commands`, P11). A command whose plugin stops, or fails, since is answered by
-   * nobody: its handler does nothing.
+   * The chat commands of the plugins up (running, or stopped since they started), in load order,
+   * for the chat surface (§2 `interface.commands`, P11). A command whose plugin shuts down, or
+   * fails, since is answered by nobody: its handler does nothing.
    */
   commands(): ChatCommand[] {
     const out: ChatCommand[] = [];
@@ -468,11 +485,10 @@ export class Core {
           }
         : c;
     for (const e of this.entries.values()) {
-      const { state } = e.status;
-      if (state !== 'running' && state !== 'paused') continue;
+      if (e.up !== true) continue;
       for (const [name, declared] of Object.entries(e.manifest.interface.commands ?? {})) {
         const handler = e.instance?.commands?.[name] as CommandHandler;
-        const live = (): boolean => e.status.state === 'running' || e.status.state === 'paused';
+        const live = (): boolean => e.up === true;
         out.push({
           plugin: e.id,
           name,
@@ -524,8 +540,7 @@ export class Core {
    * the first running node's, in load order, that offers one.
    */
   private ownerSurface(): ChatSurface | undefined {
-    const live = (e: Entry | undefined): e is Entry =>
-      e?.status.state === 'running' || e?.status.state === 'paused';
+    const live = (e: Entry | undefined): e is Entry => e?.up === true;
     if (this.o.owner !== undefined) {
       const e = this.entries.get(this.o.owner);
       return live(e) ? e.instance?.surface : undefined;
@@ -549,15 +564,20 @@ export class Core {
   }
 
   /**
-   * Pauses every running plugin that acts and requires `parser` (a required edge), directly or
-   * through another plugin; read-only plugins go on. The plugins paused.
+   * Stops every running plugin that acts and requires `parser` (a required edge), directly or
+   * through another plugin, for drift (P5, D64); the others go on. The plugins stopped.
    */
-  private pauseActorsOf(parser: string, reason: string): string[] {
-    const paused: string[] = [];
-    for (const { id, manifest } of this.entries.values())
-      if (manifest.kinds.includes('actor') && this.requires(id, parser) && this.pause(id, reason))
-        paused.push(id);
-    return paused;
+  private stopActorsOf(parser: string, reason: string): string[] {
+    const stopped: string[] = [];
+    for (const { id, manifest, status } of this.entries.values())
+      if (
+        manifest.kinds.includes('actor') &&
+        status.state === 'running' &&
+        this.requires(id, parser) &&
+        this.stopNode(id, reason, 'drift')
+      )
+        stopped.push(id);
+    return stopped;
   }
 
   /** Whether instance `id` requires `other`, through required edges, directly or not. */
@@ -589,7 +609,7 @@ export class Core {
     return this.loadedGraph === undefined ? undefined : structuredClone(this.loadedGraph);
   }
 
-  /** Whether an instance sends anywhere (a chat-out edge binds a chat it sends to): it has a mode (P10). */
+  /** Whether an instance sends anywhere: a chat-out edge binds a chat it sends to. */
   sends(id: string): boolean {
     const node = this.entries.get(id)?.node;
     return node !== undefined && sendsOf(node).some(([, b]) => (b.chat?.sends.length ?? 0) > 0);
@@ -610,8 +630,7 @@ export class Core {
     // The chat surfaces answer the commands from now on.
     const commands = this.commands();
     for (const entry of this.entries.values()) {
-      const { state } = entry.status;
-      if (state !== 'running' && state !== 'paused') continue;
+      if (entry.up !== true) continue;
       try {
         entry.instance?.surface?.serve(commands);
       } catch (e) {
@@ -666,12 +685,30 @@ export class Core {
     for (const { id, manifest, node } of this.entries.values()) {
       this.registry.touch(node.instance, manifest.id);
       const kept = this.stores.internal(node.instance);
-      // A fresh instance starts with the settings and the mode its node gives.
+      // A fresh instance starts with the settings its node gives.
       if (node.settings !== undefined && kept.get(SETTINGS_DOC) === undefined)
         kept.put(SETTINGS_DOC, node.settings);
       if (manifest.settings !== undefined)
         this.settings.add(new PluginSettings(id, manifest.settings, kept));
-      if (node.mode !== undefined && !this.modes.has(id)) this.modes.set(id, node.mode);
+    }
+    // The nodes not started (D64): disabled, stopped (kept in their instance), and inactive.
+    const stops = new Map<string, StopRecord>();
+    for (const { id, node } of this.entries.values()) {
+      const stop = this.stopOf(node);
+      if (stop !== undefined) stops.set(id, stop);
+    }
+    const down = nodeStates(
+      [...this.entries.values()].map((e) => e.node),
+      (n) => stops.has(n.id)
+    );
+    for (const [id, d] of down) {
+      const entry = this.entries.get(id) as Entry;
+      const stop = stops.get(id);
+      if (d.state === 'stopped' && stop !== undefined)
+        this.set(entry, 'stopped', stop.reason, stop);
+      else if (d.state === 'inactive')
+        this.set(entry, 'inactive', downText(d).slice('inactive: '.length));
+      else this.set(entry, d.state);
     }
   }
 
@@ -725,13 +762,16 @@ export class Core {
     this.sweepTimer = this.o.clock.setTimeout(() => this.sweepDaily(), SWEEP_MS);
   }
 
-  /** Stops the plugins running or paused, in the reverse order, keeping what they serialise. */
+  /**
+   * Stops the plugins up (running, or stopped since they started), in the reverse order, keeping
+   * what they serialise; a node stopped by exception stays so in its instance.
+   */
   async stop(): Promise<void> {
     this.o.clock.clearTimeout(this.sweepTimer);
     for (const entry of [...this.entries.values()].reverse()) {
-      const { instance, status } = entry;
-      if (instance === undefined || (status.state !== 'running' && status.state !== 'paused'))
-        continue;
+      const { instance } = entry;
+      if (instance === undefined || entry.up !== true) continue;
+      entry.up = false;
       this.set(entry, 'stopping');
       entry.scheduler?.disarm();
       this.bus.drop(entry.id);
@@ -746,35 +786,63 @@ export class Core {
     }
   }
 
-  /** Pauses a running plugin, with why (drift, or the owner); false if it is not running. */
-  pause(id: string, reason: string): boolean {
+  /**
+   * Stops a node by exception (bot-os.md D64): a safety stop, drift, the owner's kill or stop.
+   * Kept in its instance (`_stop.json`: why, when, who), so that it is not started again until the
+   * owner clears it (`clearStop`) and the instance restarts; while it runs, its outbox refuses its
+   * sends, it hears `pause` and its `ctx.mode` listeners `read-only`. A node stopped again keeps
+   * the latest stop. False for a node that is not up.
+   */
+  stopNode(id: string, reason: string, source: StopSource): boolean {
     const entry = this.entries.get(id);
-    if (entry?.status.state !== 'running') return false;
-    this.set(entry, 'paused', reason);
-    entry.instance?.pause?.(reason);
+    if (entry?.up !== true) return false;
+    const stop: StopRecord = { reason, time: new Date(this.o.clock.now()).toISOString(), source };
+    this.stores.internal(entry.node.instance).put(STOP_DOC, stop);
+    const was = entry.status.state;
+    this.set(entry, 'stopped', reason, stop);
+    if (was !== 'running' && was !== 'starting') return true;
+    this.logger(id).warn(`stopped (${source}): ${reason}`);
+    try {
+      entry.instance?.pause?.(reason);
+    } catch (e) {
+      this.logger(id).error(`pause: ${message(e)}`);
+    }
+    for (const listener of [...(entry.modeListeners ?? [])])
+      try {
+        listener('read-only');
+      } catch (e) {
+        this.logger(id).error(`mode listener: ${message(e)}`);
+      }
     return true;
   }
 
   /**
-   * Pauses a running or paused plugin as the owner killed it (D44, `KILLED`), whatever paused it
-   * before; false if it is neither.
+   * Clears a node's stop, kept in its instance (D64): it starts again at the next start (the
+   * editor's Clear stop, applied with a restart). False for a node of no stop.
    */
-  killNode(id: string): boolean {
+  clearStop(id: string): boolean {
     const entry = this.entries.get(id);
-    const was = entry?.status.state;
-    if (entry === undefined || (was !== 'running' && was !== 'paused')) return false;
-    this.set(entry, 'paused', KILLED);
-    if (was === 'running') entry.instance?.pause?.(KILLED);
+    if (entry === undefined) return false;
+    const kept = this.stores.internal(entry.node.instance);
+    if (kept.get(STOP_DOC) === undefined) return false;
+    kept.backend.delete(STOP_DOC);
+    this.o.record?.({ type: 'core.plugin', t: this.o.clock.now(), plugin: id, event: 'cleared' });
     return true;
   }
 
-  /** Resumes a paused plugin (the owner's word only); false if it is not paused. */
-  resume(id: string): boolean {
-    const entry = this.entries.get(id);
-    if (entry?.status.state !== 'paused') return false;
-    this.set(entry, 'running');
-    entry.instance?.resume?.();
-    return true;
+  /** A node's stop as its instance keeps it, if any. */
+  private stopOf(node: ResolvedNode): StopRecord | undefined {
+    const doc = this.stores.internal(node.instance).get(STOP_DOC) as
+      Partial<StopRecord> | undefined;
+    if (doc === undefined || doc === null || typeof doc !== 'object') return undefined;
+    return {
+      reason: typeof doc.reason === 'string' ? doc.reason : 'stopped',
+      time: typeof doc.time === 'string' ? doc.time : new Date(0).toISOString(),
+      source:
+        doc.source === 'safety' || doc.source === 'drift' || doc.source === 'owner'
+          ? doc.source
+          : 'owner',
+    };
   }
 
   /**
@@ -790,12 +858,13 @@ export class Core {
     const file = this.o.graphFile;
     if (given === undefined && file !== undefined) {
       const r = file.read();
-      if (!r.exists) return { raw: EMPTY_GRAPH, fromFile: true };
+      // No graph yet: nothing to migrate, ever (D64).
+      if (!r.exists) return { raw: this.migrateModes(file, undefined), fromFile: true };
       if ('error' in r) {
         this.refused = [{ text: r.error }];
         return { raw: EMPTY_GRAPH, fromFile: true };
       }
-      return { raw: r.raw, fromFile: true };
+      return { raw: this.migrateModes(file, r.raw), fromFile: true };
     }
     if (typeof given === 'function' || given === undefined) {
       const manifests = this.plugins.flatMap((p) => {
@@ -809,6 +878,60 @@ export class Core {
       return { raw: typeof given === 'function' ? given(defaults) : defaults, fromFile: false };
     }
     return { raw: given, fromFile: false };
+  }
+
+  /**
+   * The first start since the modes were replaced by states (bot-os.md D64): each node's mode, as
+   * its instance kept it (`_mode.json`), else as its node gave it, else `read-only` (P10's default),
+   * folded into the graph: `live`, its chat-out edges live; `dry-run` or `read-only`, each a dry
+   * run; every node enabled. The file is written (a version of the history, `migrated`) if that
+   * changes it, the instances' modes are deleted, and it is done once (`node-states` in the core's
+   * store). No stop is made: no safety stop nor drift pause was kept across a restart before.
+   */
+  private migrateModes(file: GraphFile, raw: unknown): unknown {
+    const core = this.stores.internal(CORE);
+    if (core.get(STATES_DOC) !== undefined) return raw ?? EMPTY_GRAPH;
+    if (raw === undefined) {
+      core.put(STATES_DOC, { migrated: new Date(this.o.clock.now()).toISOString() });
+      this.o.record?.({ type: 'core.graph', t: this.o.clock.now(), event: 'migrated', modes: {} });
+      return EMPTY_GRAPH;
+    }
+    const nodes = isObject(raw) && Array.isArray(raw['nodes']) ? (raw['nodes'] as unknown[]) : [];
+    const instances: string[] = [];
+    const modes = nodes.flatMap((n) => {
+      if (!isObject(n) || typeof n['id'] !== 'string') return [];
+      const instance = typeof n['instance'] === 'string' ? n['instance'] : n['id'];
+      const kept = (this.stores.internal(instance).get(MODE_DOC) as { mode?: unknown } | undefined)
+        ?.mode;
+      if (kept !== undefined) instances.push(instance);
+      const mode = isMode(kept) ? kept : isMode(n['mode']) ? n['mode'] : 'read-only';
+      return [[n['id'], mode] as const];
+    });
+    const withModes = isObject(raw)
+      ? {
+          ...raw,
+          nodes: nodes.map((n) => {
+            if (!isObject(n)) return n;
+            const mode = modes.find(([id]) => id === n['id'])?.[1];
+            return mode === undefined ? n : { ...n, mode };
+          }),
+        }
+      : raw;
+    const migrated = this.upgrade(withModes);
+    if (!sameGraph(migrated, raw)) {
+      // The history first takes in what an older release left (§2.3), then this write.
+      file.adopt((g) => this.upgrade(g));
+      file.save(migrated as Graph, { source: 'migrated', upgrade: (g) => this.upgrade(g) });
+    }
+    for (const instance of instances) this.stores.internal(instance).backend.delete(MODE_DOC);
+    core.put(STATES_DOC, { migrated: new Date(this.o.clock.now()).toISOString() });
+    this.o.record?.({
+      type: 'core.graph',
+      t: this.o.clock.now(),
+      event: 'migrated',
+      modes: Object.fromEntries(modes),
+    });
+    return migrated;
   }
 
   /**
@@ -935,6 +1058,8 @@ export class Core {
 
   private async startOne(entry: Entry): Promise<void> {
     const { id } = entry;
+    // Disabled, stopped or inactive (D64): not started.
+    if (entry.status.state !== 'registered') return;
     const down = requiredOf(entry.node).find((r) => this.entries.get(r)?.status.state === 'failed');
     if (down !== undefined) {
       this.fail(entry, `requires ${down}, which failed`);
@@ -948,6 +1073,7 @@ export class Core {
       );
       const instance = await entry.plugin.create(this.contextFor(entry));
       entry.instance = instance;
+      entry.up = true;
       if (instance.settings !== undefined) this.settings.serveFor(id, instance.settings);
       if (entry.manifest.kinds.includes('connector')) {
         if (instance.connector === undefined)
@@ -965,7 +1091,8 @@ export class Core {
       this.fail(entry, message(e));
       return;
     }
-    this.set(entry, 'running');
+    // A plugin that stopped itself as it started stays stopped.
+    if ((entry.status.state as PluginState) === 'starting') this.set(entry, 'running');
     entry.scheduler?.arm();
     // The owner's notices made before its surface existed, in order.
     const surface =
@@ -977,9 +1104,8 @@ export class Core {
   }
 
   private async readyOne(entry: Entry): Promise<void> {
-    const { instance, status } = entry;
-    if (instance?.ready === undefined) return;
-    if (status.state !== 'running' && status.state !== 'paused') return;
+    const { instance } = entry;
+    if (instance?.ready === undefined || entry.up !== true) return;
     try {
       await instance.ready();
     } catch (e) {
@@ -999,8 +1125,7 @@ export class Core {
     }
     this.fail(entry, why);
     for (const other of this.entries.values()) {
-      const { state } = other.status;
-      if ((state === 'running' || state === 'paused') && requiredOf(other.node).includes(entry.id))
+      if (other.up === true && requiredOf(other.node).includes(entry.id))
         await this.failRunning(other, `requires ${entry.id}, which failed`);
     }
   }
@@ -1060,7 +1185,8 @@ export class Core {
           throw new Error(
             `${id} has no reach on the account ${key}: no edge binds a chat-out of it`
           );
-        return this.outbox(holder.node.account).as(id);
+        // Through that output's edge alone, when named by the port (D64: its dry run is its own).
+        return this.outbox(holder.node.account).as(id, bound?.[0] === key ? key : undefined);
       },
       connector: (key) => {
         const bound = this.chatEnd(chatsOf(node), key);
@@ -1082,16 +1208,35 @@ export class Core {
         set: (key, raw) => this.settings.set(`${id}.${key}`, raw),
       },
       notify: (text, buttons) => this.tell(text, buttons),
+      // Module API 1's modes, derived from the node's state and its edges (D64), deprecated.
       mode: {
-        get: () => this.modes.get(id),
-        set: (mode, by = 'owner') => this.modes.set(id, mode, by),
-        onChange: (listener) =>
-          this.modes.onChange((plugin, mode) => {
-            if (plugin === id) listener(mode);
-          }),
+        get: () => (sendsOf(node).every(([, b]) => b.dryRun === true) ? 'dry-run' : 'live'),
+        set: (mode, by = 'owner') => {
+          if (!isMode(mode)) return `not a mode: ${String(mode)}`;
+          if (mode === 'read-only') {
+            this.stopNode(
+              id,
+              by === 'safety' ? 'safety stop (read-only)' : 'read-only, by the owner',
+              by === 'safety' ? 'safety' : 'owner'
+            );
+            return undefined;
+          }
+          const why = `${mode} refused: a node's state and its edges' dry runs change only in the editor`;
+          log.warn(`ctx.mode.set: ${why}`);
+          return why;
+        },
+        onChange: (listener) => {
+          (entry.modeListeners ??= []).push(listener);
+        },
+      },
+      stop: (reason) => {
+        this.stopNode(id, reason, 'safety');
       },
       off: () => this.controls.off,
-      resume: () => this.resume(id),
+      resume: () => {
+        log.warn('ctx.resume refused: a stop is cleared only in the editor');
+        return false;
+      },
       render: this.o.render ?? resvgRender,
       events: { read: (options) => this.readEvents(entry, options) },
       record: (type, fields) => {
@@ -1208,12 +1353,13 @@ export class Core {
       throw new Error(`${entry.id} does not use ${key}: add an interface input of it`);
     const other = node.inputs.get(port)?.[0]?.node;
     const e = other === undefined ? undefined : this.entries.get(other);
-    if (e?.status.state !== 'running' && e?.status.state !== 'paused') return undefined;
+    if (e?.up !== true) return undefined;
     return interfaceOf(e.id, e.instance?.interface ?? {}, input.members);
   }
 
   private fail(entry: Entry, why: string): void {
     const reason = this.o.secrets?.redact(why) ?? why;
+    entry.up = false;
     entry.scheduler?.disarm();
     this.bus.drop(entry.id);
     this.set(entry, 'failed', reason);
@@ -1221,8 +1367,13 @@ export class Core {
     this.tell(`Plugin ${entry.id} failed: ${reason}`);
   }
 
-  private set(entry: Entry, state: PluginState, reason?: string): void {
-    entry.status = { id: entry.id, state, ...(reason === undefined ? {} : { reason }) };
+  private set(entry: Entry, state: PluginState, reason?: string, stop?: StopRecord): void {
+    entry.status = {
+      id: entry.id,
+      state,
+      ...(reason === undefined ? {} : { reason }),
+      ...(stop === undefined ? {} : { stop }),
+    };
     this.o.record?.({
       type: 'core.plugin',
       t: this.o.clock.now(),
@@ -1322,3 +1473,6 @@ function interfaceOf(
   }
   return out as PluginInterface;
 }
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);

@@ -93,7 +93,7 @@ describe('FakeConnector', () => {
 });
 
 describe('DevKit', () => {
-  it('runs a plugin on a virtual clock, with its configuration, settings, mode and documents', async () => {
+  it('runs a plugin on a virtual clock, with its configuration, settings and documents', async () => {
     const records: { type: string }[] = [];
     const fake = new FakeConnector({ account: 'irc:alice' });
     const p = pinger();
@@ -102,7 +102,6 @@ describe('DevKit', () => {
       plugins: [fakeConnectorPlugin('fake', fake), p.plugin],
       config: { pinger: { every: 5000 } },
       settings: { pinger: { loud: true } },
-      modes: { pinger: 'live' },
       documents: { pinger: { count: 41 } },
       record: (r) => records.push(r),
       validateEvents: true,
@@ -147,13 +146,24 @@ describe('DevKit', () => {
     expect(kit.core.settings.kept()).toEqual({ n: 4 });
   });
 
-  it('keeps a plugin read-only unless its mode is given', async () => {
+  it('sends nothing through a dry-run edge, and logs it as sent (D64)', async () => {
     const fake = new FakeConnector({ account: 'irc:alice' });
-    const kit = new DevKit({ plugins: [fakeConnectorPlugin('fake', fake), pinger().plugin] });
+    const records: { type: string; outcome?: unknown }[] = [];
+    const kit = new DevKit({
+      plugins: [fakeConnectorPlugin('fake', fake), pinger().plugin],
+      graph: (g) => ({
+        ...g,
+        edges: g.edges.map((e) => (e.type === 'chat-out' ? { ...e, dryRun: true } : e)),
+      }),
+      record: (r) => records.push(r as { type: string }),
+    });
     await kit.start();
     fake.open();
     fake.hear({ chat: '#test', sender: 'Bot', text: 'ping', time: 0 });
     expect(fake.sent).toEqual([]);
+    expect(records.filter((r) => r.type === 'core.send').map((r) => r.outcome)).toEqual([
+      'dry-run',
+    ]);
   });
 
   it('refuses a run with a setting refused or a plugin failed', async () => {

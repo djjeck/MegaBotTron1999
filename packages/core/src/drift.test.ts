@@ -57,7 +57,7 @@ describe('DriftMonitor', () => {
     }
     expect(pauses).toEqual(['drift: game could not read 6 messages in 15 minutes']);
     expect(told.at(-1)).toBe(
-      'Drift: drift: game could not read 6 messages in 15 minutes; paused actor until you look'
+      'Drift: drift: game could not read 6 messages in 15 minutes; stopped actor until you clear the stop in the editor'
     );
     expect(records.filter((x) => x.event === 'pause')).toHaveLength(1);
     expect(m.counts()[0]?.tripped).toBe(true);
@@ -106,7 +106,7 @@ describe('drift in the core', () => {
     });
   }
 
-  it('pauses the actors that require the parser, through others too, and nothing else', async () => {
+  it('stops the actors that require the parser, through others too, and nothing else', async () => {
     const got: Record<string, PluginContext> = {};
     const seen: string[] = [];
     const core = new Core({ clock: new VirtualClock() });
@@ -126,6 +126,7 @@ describe('drift in the core', () => {
       'direct paused: drift: parser could not read 2 messages in 5 minutes',
       'indirect paused: drift: parser could not read 2 messages in 5 minutes',
     ]);
+    expect(core.state('direct')).toMatchObject({ state: 'stopped', stop: { source: 'drift' } });
     expect(core.state('stats')?.state).toBe('running');
     expect(core.state('apart')?.state).toBe('running');
     expect(core.drift()).toEqual([

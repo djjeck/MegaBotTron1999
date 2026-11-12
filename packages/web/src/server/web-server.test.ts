@@ -102,12 +102,12 @@ describe('webHandler', () => {
       boot: first.boot,
     });
     expect(await (await b.call('/api/status')).json()).toEqual({ ok: true });
-    await b.call('/api/plugins/a%20b/mode', { json: { mode: 'live' } });
+    await b.call('/api/plugins/a%20b/kill', { json: {} });
     await b.call('/api/events?limit=5');
     await b.call('/api');
     expect(seen).toEqual([
       'GET /status',
-      'POST /plugins/a%20b/mode',
+      'POST /plugins/a%20b/kill',
       'GET /events?limit=5',
       'GET /',
     ]);

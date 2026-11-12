@@ -47,9 +47,11 @@ describe('the graph editor', () => {
     // A connector: its in card, and its out card.
     expect(await screen.findByLabelText('node irc-main · in', {}, slow)).toBeDefined();
     expect(screen.getByLabelText('node irc-main · out')).toBeDefined();
+    // It starts disabled (D64), drawn greyed.
     expect(screen.getByRole('status').textContent).toContain(
-      'irc-main added on the instance irc-main'
+      'irc-main added, disabled, on the instance irc-main'
     );
+    expect(screen.getByLabelText('node irc-main · in').className).toContain('state-disabled');
     expect(screen.queryByRole('region', { name: 'first step' })).toBeNull();
     // Reviewed: the diff the core gives, then applied: saved, and restarted at once.
     expect(screen.getByText('Changes not applied')).toBeDefined();
@@ -78,6 +80,7 @@ describe('the graph editor', () => {
         {
           id: 'irc-main',
           plugin: 'chat',
+          disabled: true,
           config: { port: 6667, tls: true, channels: ['#a'] },
         },
       ],
@@ -169,6 +172,7 @@ describe('the graph editor', () => {
         id: 'actor-b',
         plugin: 'actor',
         instance: 'old-actor',
+        disabled: true,
       })
     );
     // Imported: the stores of its plugin's id, or all of them.
@@ -310,7 +314,7 @@ describe('the graph editor', () => {
         account: 'chat:alice',
       })
     );
-    // A node's mode and settings.
+    // A node disabled and enabled again (D64), and its settings.
     fireEvent.click(screen.getByLabelText('node actor-a'));
     const details = await screen.findByLabelText('details of actor-a');
     expect(
@@ -318,16 +322,22 @@ describe('the graph editor', () => {
         'node actor-a: input port parser (interface of parser) is not bound'
       )
     ).toBeDefined();
-    fireEvent.change(within(details).getByLabelText('mode'), { target: { value: 'live' } });
+    const enabled = within(details).getByRole('switch', { name: 'enabled' }) as HTMLInputElement;
+    expect(enabled.checked).toBe(true);
+    fireEvent.click(enabled);
     fireEvent.click(within(details).getByLabelText('loud'));
     await waitFor(() =>
       expect(core.checked.at(-1)?.nodes[2]).toMatchObject({
-        mode: 'live',
+        disabled: true,
         settings: { loud: true },
       })
     );
-    fireEvent.change(within(details).getByLabelText('mode'), { target: { value: '' } });
-    await waitFor(() => expect(core.checked.at(-1)?.nodes[2]).not.toHaveProperty('mode'));
+    const node = screen.getByLabelText('node actor-a');
+    await waitFor(() => expect(node.className).toContain('state-disabled'));
+    expect(within(node).getByText('disabled')).toBeDefined();
+    expect(within(node).getByText('from the next Apply')).toBeDefined();
+    fireEvent.click(within(details).getByRole('switch', { name: 'enabled' }));
+    await waitFor(() => expect(core.checked.at(-1)?.nodes[2]).not.toHaveProperty('disabled'));
     // An edge selected by the rhombus at its midpoint: what it carries.
     const rhombus = screen.getByRole('button', { name: 'edge chat.chat → actor-a.chat' });
     expect(rhombus.className).toContain('refused');
@@ -384,6 +394,22 @@ describe('the graph editor', () => {
         commands: ['/play'],
       })
     );
+    // Live, drawn whole; a dry run (D64): its rhombus hollow, its part to the connector greyed.
+    const how = within(sends).getByRole('radiogroup', { name: 'how it sends' });
+    expect(
+      within(how).getByRole('radio', { name: 'Send for real' }).getAttribute('aria-checked')
+    ).toBe('true');
+    const handle = (): HTMLElement =>
+      screen.getByRole('button', { name: 'edge actor-a.chat → chat.chat' });
+    expect(handle().className).not.toContain('dry-run');
+    fireEvent.click(within(how).getByRole('radio', { name: 'Dry-run' }));
+    await waitFor(() => expect(core.checked.at(-1)?.edges[0]).toMatchObject({ dryRun: true }));
+    await waitFor(() => expect(handle().className).toContain('dry-run'));
+    expect(handle().getAttribute('title')).toContain('a dry run: nothing goes out');
+    expect(screen.getByTestId('dry run actor-a.chat → chat.chat')).toBeDefined();
+    expect(within(sends).getByText(/logged as sent, and nothing goes out/u)).toBeDefined();
+    fireEvent.click(within(how).getByRole('radio', { name: 'Send for real' }));
+    await waitFor(() => expect(core.checked.at(-1)?.edges[0]).not.toHaveProperty('dryRun'));
     // An edge that carries nothing to set.
     fireEvent.click(
       container.querySelector('[data-id="parser.interface → actor-a.parser"]') as Element

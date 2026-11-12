@@ -49,6 +49,9 @@ export {
   type PluginControl,
   POWER_DOC,
   type PowerDoc,
+  STOPPED,
+  type StopRecord,
+  type StopSource,
   type SurfacesView,
 } from './controls.ts';
 export {
@@ -56,9 +59,12 @@ export {
   Core,
   type CoreOptions,
   type CoreRecord,
+  MODE_DOC,
   type PluginState,
   type PluginStatus,
   StartError,
+  STATES_DOC,
+  STOP_DOC,
 } from './core.ts';
 export {
   defineSimulator,
@@ -87,6 +93,8 @@ export {
 export {
   type Binding,
   defaultGraph,
+  downText,
+  foldModes,
   type Graph,
   GRAPH_VERSION,
   type GraphEdge,
@@ -96,7 +104,9 @@ export {
   graphSchema,
   type InstanceInput,
   loadOrder,
+  type NodeDown,
   nodeInputs,
+  nodeStates,
   type ResolvedNode,
   resolveGraph,
   upgradeGraph,

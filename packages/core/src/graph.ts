@@ -6,8 +6,8 @@
  * the port; the core runs it (packages/core/src/core.ts), and the edges are the permissions
  * (P6).
  *
- * - A plugin may be instantiated more than once, each node with its own id, configuration, store,
- *   settings and mode. A node's kept state (its store, timers, settings and mode) belongs to the
+ * - A plugin may be instantiated more than once, each node with its own id, configuration, store
+ *   and settings. A node's kept state (its store, timers, settings and stop) belongs to the
  *   _instance_ it names (`/data/instances/<instance>/`, the node's id when it names none), which
  *   outlives the node: a node of the same plugin may take it up again.
  * - The programmatic wiring is the default graph: a node per plugin registered, each input bound as
@@ -22,12 +22,16 @@
  * - An events input whose namespace its node's config names (`{ config: key }`) is resolved per
  *   node, from the config as its plugin's schema makes it (`resolveInputs`): a required one the
  *   config leaves unresolved fails the start, naming the node.
+ * - A node may be `disabled` by the owner: checked as any other, never started. A chat-out edge may
+ *   be a `dryRun`: what it sends is logged as sent, never sent (bot-os.md D64). A node whose
+ *   required ports bind one that is down (disabled, stopped or inactive) is inactive
+ *   (`nodeStates`); an optional one bound to it counts as unbound.
  *
  * Nothing in here knows of any game.
  */
 import { z } from 'zod';
 import { ACCOUNT_ID, type Manifest, PLUGIN_ID } from './manifest.ts';
-import { type Mode, MODES } from './outbox.ts';
+import { isMode } from './outbox.ts';
 import {
   type ChatBinding,
   describePort,
@@ -79,8 +83,8 @@ export const graphSchema = z.strictObject({
        * force only while the instance keeps none of its own (a fresh one).
        */
       settings: z.record(z.string(), z.unknown()).optional(),
-      /** The mode its instance starts in (P10), while the instance keeps none. */
-      mode: z.enum(MODES).optional(),
+      /** Disabled by the owner (bot-os.md D64): checked, never started; absent, enabled. */
+      disabled: z.boolean().optional(),
     })
   ),
   edges: z
@@ -99,6 +103,8 @@ export const graphSchema = z.strictObject({
         /** A chat-out's: the chats sent to, and the commands sent (first words). */
         sends: z.array(z.string().min(1)).optional(),
         commands: z.array(z.string().min(1)).optional(),
+        /** A chat-out's: what it sends is logged as sent, never sent (D64); absent, live. */
+        dryRun: z.boolean().optional(),
       })
     )
     .default([]),
@@ -129,6 +135,8 @@ export interface Binding {
   type: PortType;
   /** A chat-in's reads, or a chat-out's sends and commands. */
   chat?: ChatBinding;
+  /** A chat-out's: a dry run (D64). */
+  dryRun?: boolean;
 }
 
 /** A node of a checked graph, with its manifest and what each of its inputs is bound to. */
@@ -140,9 +148,10 @@ export interface ResolvedNode {
   /** Its account: the node's own, or its manifest's. */
   account?: string;
   config?: Record<string, unknown>;
-  /** The settings and the mode a fresh instance starts with. */
+  /** The settings a fresh instance starts with. */
   settings?: Record<string, unknown>;
-  mode?: Mode;
+  /** Disabled by the owner (D64): never started. */
+  disabled?: boolean;
   /** Its input ports: its manifest's, each events input's namespace resolved from its config. */
   ports: Record<string, InputPort>;
   /** Each of its input ports, with its other ends (none: unbound). */
@@ -313,6 +322,50 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  * The other edges and the nodes are kept as they are. Nothing is checked: `resolveGraph` does.
  */
 export function upgradeGraph(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unknown {
+  return foldModes(upgradeChats(raw, plugins));
+}
+
+/**
+ * A graph whose nodes carry a `mode` (the mode a fresh instance started in, before bot-os.md D64)
+ * with it folded into their chat-out edges: a node's `dry-run` or `read-only` makes each chat-out
+ * edge from it a `dryRun`, a `live` leaves them live; the `mode` is dropped. Any other graph as it
+ * is. The instances' own kept modes are the first start's to fold (`Core`).
+ */
+export function foldModes(raw: unknown): unknown {
+  if (!isRecord(raw) || !Array.isArray(raw['nodes'])) return raw;
+  const nodes = raw['nodes'] as unknown[];
+  const modes = new Map<string, unknown>();
+  for (const n of nodes)
+    if (isRecord(n) && typeof n['id'] === 'string' && 'mode' in n) modes.set(n['id'], n['mode']);
+  if (modes.size === 0) return raw;
+  const dry = (id: string): boolean => {
+    const mode = modes.get(id);
+    return isMode(mode) && mode !== 'live';
+  };
+  return {
+    ...raw,
+    nodes: nodes.map((n) => {
+      if (!isRecord(n) || !('mode' in n)) return n;
+      const { mode: _, ...rest } = n;
+      return rest;
+    }),
+    ...(Array.isArray(raw['edges'])
+      ? {
+          edges: (raw['edges'] as unknown[]).map((e) =>
+            isRecord(e) &&
+            e['type'] === 'chat-out' &&
+            typeof e['from'] === 'string' &&
+            dry(e['from'].split('.')[0] as string)
+              ? { ...e, dryRun: true }
+              : e
+          ),
+        }
+      : {}),
+  };
+}
+
+/** A graph of version 1, its chat edges split (`upgradeGraph`); any other as it is. */
+function upgradeChats(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unknown {
   if (!isRecord(raw) || raw['version'] !== 1) return raw;
   const known = new Map<string, { manifest: Manifest; ports: Record<string, InputPort> }>();
   for (const n of Array.isArray(raw['nodes']) ? (raw['nodes'] as unknown[]) : []) {
@@ -446,7 +499,7 @@ export function resolveGraph(
       ...(account === undefined ? {} : { account }),
       ...(n.config === undefined ? {} : { config: n.config }),
       ...(n.settings === undefined ? {} : { settings: n.settings }),
-      ...(n.mode === undefined ? {} : { mode: n.mode }),
+      ...(n.disabled === true ? { disabled: true } : {}),
       inputs: new Map(Object.keys(ports).map((p) => [p, []])),
       outputs: new Map(
         Object.entries(manifest.outputs).flatMap(([p, o]) =>
@@ -517,8 +570,11 @@ export function resolveGraph(
       problems.push(`${name}: only a chat-in edge carries reads and senders`);
       continue;
     }
-    if ((e.sends !== undefined || e.commands !== undefined) && input.type !== 'chat-out') {
-      problems.push(`${name}: only a chat-out edge carries sends and commands`);
+    if (
+      (e.sends !== undefined || e.commands !== undefined || e.dryRun !== undefined) &&
+      input.type !== 'chat-out'
+    ) {
+      problems.push(`${name}: only a chat-out edge carries sends, commands and dryRun`);
       continue;
     }
     const bound = to.inputs.get(toPort) as Binding[];
@@ -539,21 +595,29 @@ export function resolveGraph(
       input.type === 'chat-in'
         ? { reads: e.reads ?? [], ...(e.senders === undefined ? {} : { senders: e.senders }) }
         : input.type === 'chat-out'
-          ? { sends: e.sends ?? [], ...(e.commands === undefined ? {} : { commands: e.commands }) }
+          ? {
+              sends: e.sends ?? [],
+              ...(e.commands === undefined ? {} : { commands: e.commands }),
+              ...(e.dryRun === undefined ? {} : { dryRun: e.dryRun }),
+            }
           : undefined;
+    const { dryRun: _dry, ...carried } = (written ?? {}) as Record<string, unknown>;
     const chat: ChatBinding | undefined =
-      written === undefined ? undefined : { reads: [], sends: [], ...written };
+      written === undefined ? undefined : ({ reads: [], sends: [], ...carried } as ChatBinding);
+    const dryRun = e.dryRun === true ? { dryRun: true } : {};
     bound.push({
       node: fromNode,
       port,
       type: input.type,
       ...(chat === undefined ? {} : { chat }),
+      ...dryRun,
     });
     sending?.push({
       node: toNode,
       port: toPort,
       type: input.type,
       ...(chat === undefined ? {} : { chat }),
+      ...dryRun,
     });
     edges.push({ from: `${fromNode}.${port}`, to: e.to, type: input.type, ...(written ?? {}) });
   }
@@ -635,4 +699,47 @@ export function loadOrder(nodes: readonly ResolvedNode[]): ResolvedNode[] {
   };
   for (const n of nodes) visit(n.id);
   return [...ordered.values()];
+}
+
+/** Why a node is not started (bot-os.md D64), as the load finds it. */
+export type NodeDown =
+  | { state: 'disabled' }
+  | { state: 'stopped' }
+  | {
+      state: 'inactive';
+      /** The node a required port of it binds that is down, and that node's state. */
+      needs: string;
+      because: 'disabled' | 'stopped' | 'inactive';
+    };
+
+/** A node down, in words: `disabled`, `stopped`, `inactive: needs tg (disabled)`. */
+export const downText = (d: NodeDown): string =>
+  d.state === 'inactive' ? `inactive: needs ${d.needs} (${d.because})` : d.state;
+
+/**
+ * The nodes that are not started, in load order (bot-os.md D64): those `disabled` in the graph,
+ * those `stopped` (kept in their instance), and, derived, those a required port of which binds a
+ * node down, transitively: inactive, naming the first such node in the order of its ports. An
+ * optional port bound to a node down counts as unbound, and does not make it inactive. A disabled
+ * node is disabled, whether or not it is stopped too.
+ */
+export function nodeStates(
+  ordered: readonly ResolvedNode[],
+  stopped: (node: ResolvedNode) => boolean
+): Map<string, NodeDown> {
+  const down = new Map<string, NodeDown>();
+  for (const n of ordered) {
+    if (n.disabled === true) down.set(n.id, { state: 'disabled' });
+    else if (stopped(n)) down.set(n.id, { state: 'stopped' });
+    else {
+      const needs = requiredOf(n).find((r) => down.has(r));
+      if (needs !== undefined)
+        down.set(n.id, {
+          state: 'inactive',
+          needs,
+          because: (down.get(needs) as NodeDown).state,
+        });
+    }
+  }
+  return down;
 }

@@ -174,6 +174,12 @@ form.inline {
   color: var(--bad);
 }
 
+.badge.disabled,
+.badge.inactive,
+.badge.not-running {
+  color: var(--muted);
+}
+
 ul.log {
   list-style: none;
   padding: 0;
@@ -235,6 +241,14 @@ main.wide {
   border-top: 2px dashed var(--muted);
 }
 
+.rhombus-sample.hollow {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border: 2px solid var(--muted);
+  transform: rotate(45deg);
+}
+
 .graph-body {
   display: flex;
   gap: 1rem;
@@ -294,44 +308,94 @@ main.wide {
   border-left: 3px solid #8a4fd1;
 }
 
-/* A killed node (D44): visibly disabled, its reinstatement prominent. */
-.plugin-node.killed {
-  border: 2px dashed var(--bad);
+/* A node's states (D64). Disabled, or inactive for a node it needs that is down: greyed. */
+.plugin-node.state-disabled,
+.plugin-node.state-inactive {
+  border: 1px dashed var(--muted);
+  background: color-mix(in srgb, var(--muted) 14%, var(--bg));
+}
+
+.plugin-node.state-disabled .head,
+.plugin-node.state-disabled .port-name,
+.plugin-node.state-inactive .head,
+.plugin-node.state-inactive .port-name {
+  opacity: 0.6;
+}
+
+/* Stopped by exception: red tones, a warning icon, and its reason. */
+.plugin-node.state-stopped {
+  border: 2px solid var(--bad);
   background: repeating-linear-gradient(
     -45deg,
-    var(--bg),
-    var(--bg) 8px,
-    color-mix(in srgb, var(--bad) 12%, var(--bg)) 8px,
-    color-mix(in srgb, var(--bad) 12%, var(--bg)) 16px
+    color-mix(in srgb, var(--bad) 8%, var(--bg)),
+    color-mix(in srgb, var(--bad) 8%, var(--bg)) 8px,
+    color-mix(in srgb, var(--bad) 16%, var(--bg)) 8px,
+    color-mix(in srgb, var(--bad) 16%, var(--bg)) 16px
   );
 }
 
-.plugin-node.killed .head > :not(.reinstate),
-.plugin-node.killed .port-name {
-  opacity: 0.55;
+.plugin-node.state-stopped .state-why {
+  color: var(--bad);
 }
 
-button.reinstate {
-  margin: 0.3rem 0 0;
-  padding: 0.2rem 0.6rem;
-  border: none;
+/* Its stop cleared in the draft: still stopped until the Apply. */
+.plugin-node.state-stopped.state-cleared {
+  border-style: dashed;
+}
+
+.state-why {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+
+.warning-icon {
+  color: var(--bad);
+}
+
+.stop-note {
+  border: 1px solid var(--bad);
+  border-left-width: 4px;
   border-radius: 4px;
-  background: var(--ok);
+  padding: 0 0.6rem;
+  background: color-mix(in srgb, var(--bad) 8%, var(--bg));
+}
+
+.stop-note.cleared {
+  border-style: dashed;
+}
+
+/* A two-way switch: Dry-run or Send for real (EdgeDetails.tsx). */
+.toggle {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.toggle button {
+  border: none;
+  padding: 0.3rem 0.7rem;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.toggle button.on {
+  background: var(--accent);
   color: var(--bg);
   font-weight: bold;
-  cursor: pointer;
+}
+
+.toggle button.on.danger {
+  background: var(--bad);
 }
 
 .small {
   font-size: 0.8rem;
 }
 
-.badge.killed {
-  color: var(--bad);
-  font-weight: bold;
-}
-
-.badge.mode,
 .badge.drift {
   color: var(--muted);
 }
@@ -523,6 +587,12 @@ ul.problems {
 
 .edge-handle.refused .rhombus {
   background: var(--bad);
+}
+
+/* A dry-run edge (D64): its rhombus hollow, ringed in its port type's colour. */
+.edge-handle.dry-run .rhombus {
+  background: var(--bg);
+  border-color: var(--edge-colour, gray);
 }
 
 .edge-problem {

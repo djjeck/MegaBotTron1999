@@ -142,7 +142,7 @@ describe('the import from an older data directory', () => {
     expect(() => imp.importStore({ from: 'gone', plugin: 'counter' })).toThrow(
       `${legacy} has no store gone`
     );
-    // A node of its plugin runs on it: its documents, settings and timers, not its mode.
+    // A node of its plugin runs on it: its documents, settings and timers, not its mode (D64).
     const seen: PluginContext[] = [];
     const core = new Core({
       clock: new VirtualClock(T0),
@@ -154,7 +154,7 @@ describe('the import from an older data directory', () => {
     expect(seen[0]?.store.read('state')).toEqual({ count: 41 });
     expect(seen[0]?.settings.kept()).toEqual({ step: 2 });
     expect(seen[0]?.scheduler.names()).toEqual(['tick']);
-    expect(core.modes.get('c')).toBe('read-only');
+    expect(core.state('c')?.state).toBe('running');
     await core.stop();
     expect(snapshot(legacy)).toEqual(before);
   });

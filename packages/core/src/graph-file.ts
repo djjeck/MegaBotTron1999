@@ -243,7 +243,7 @@ export function printable(raw: unknown): Graph {
       const r = record(n);
       const id = text(r?.['id']);
       if (r === undefined || id === undefined) return [];
-      const [instance, account, mode] = [text(r['instance']), text(r['account']), text(r['mode'])];
+      const [instance, account] = [text(r['instance']), text(r['account'])];
       const [config, settings] = [obj(r['config']), obj(r['settings'])];
       return [
         {
@@ -251,7 +251,7 @@ export function printable(raw: unknown): Graph {
           plugin: text(r['plugin']) ?? '?',
           ...(instance === undefined ? {} : { instance }),
           ...(account === undefined ? {} : { account }),
-          ...(mode === undefined ? {} : { mode: mode as NonNullable<GraphNode['mode']> }),
+          ...(r['disabled'] === true ? { disabled: true } : {}),
           ...(config === undefined ? {} : { config }),
           ...(settings === undefined ? {} : { settings }),
         },
@@ -274,6 +274,7 @@ export function printable(raw: unknown): Graph {
           ...(reads === undefined ? {} : { reads }),
           ...(sends === undefined ? {} : { sends }),
           ...(commands === undefined ? {} : { commands }),
+          ...(r['dryRun'] === true ? { dryRun: true } : {}),
         },
       ];
     }),
@@ -388,7 +389,7 @@ export class GraphFile {
    */
   save(
     graph: Graph,
-    o: { source?: 'save' | 'rollback'; restores?: string; upgrade?: Upgrade } = {}
+    o: { source?: 'save' | 'rollback' | 'migrated'; restores?: string; upgrade?: Upgrade } = {}
   ): boolean {
     const upgrade = o.upgrade ?? asIs;
     this.keepFile(upgrade, 'found');
@@ -411,6 +412,25 @@ export class GraphFile {
    */
   started(core: Pick<GraphChecker, 'upgrade' | 'graphProblems'>): void {
     const upgrade: Upgrade = core.upgrade === undefined ? asIs : (raw) => core.upgrade?.(raw);
+    const version = this.adopt(upgrade);
+    if (version === undefined) return;
+    const problems = core.graphProblems();
+    const at = new Date(this.now()).toISOString();
+    this.history.started(
+      version.id,
+      problems.length === 0
+        ? { result: 'ran', at }
+        : { result: 'refused', at, problems: problems.map((p) => p.text) }
+    );
+  }
+
+  /**
+   * The history taken in from the files before it if it has no version yet (`graph.previous.json`,
+   * then `graph.json`, at their files' times; the first then removed), and the file kept as a
+   * version if none holds it: the newest version, if it is the file's graph. At each start, and
+   * before the core's first write of a start (the modes' migration, bot-os.md D64).
+   */
+  adopt(upgrade: Upgrade = asIs): GraphVersion | undefined {
     const first = this.history.latest() === undefined;
     let after: number | undefined;
     if (first) {
@@ -433,16 +453,7 @@ export class GraphFile {
       } catch {
         time = undefined;
       }
-    const version = this.keepFile(upgrade, first ? 'migrated' : 'found', time);
-    if (version === undefined) return;
-    const problems = core.graphProblems();
-    const at = new Date(this.now()).toISOString();
-    this.history.started(
-      version.id,
-      problems.length === 0
-        ? { result: 'ran', at }
-        : { result: 'refused', at, problems: problems.map((p) => p.text) }
-    );
+    return this.keepFile(upgrade, first ? 'migrated' : 'found', time);
   }
 }
 

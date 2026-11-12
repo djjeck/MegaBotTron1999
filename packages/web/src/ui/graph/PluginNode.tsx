@@ -1,11 +1,13 @@
 /**
  * One node of the graph editor: a plugin instance, its inputs on the left and its outputs on
- * the right, each port drawn in its type's shape and colour (`PORT_TYPE_INFO`), and its live state:
- * running or paused, its mode, its parser's drift, or not running (added, or not applied yet). A
- * killed node (D44) is drawn disabled, with its reinstatement at hand. An edge is dragged from an
- * output to an input; a node or a port the check refuses is marked, with why. A connector is drawn
- * as two cards, its in card and its out card (`cards.ts`, D60): each is titled with its side, and
- * shows itself selected while its twin is.
+ * the right, each port drawn in its type's shape and colour (`PORT_TYPE_INFO`), and its state
+ * (D64): running, with its parser's drift; **disabled** in the draft, greyed; **stopped** (a safety
+ * stop, drift, the owner's kill or stop), in red tones with a warning icon and its reason;
+ * **inactive** for a node it needs that is down, greyed with its reason; failed, with why; or not
+ * running (added, or not applied yet). An edge is dragged from an output to an input; a node or a
+ * port the check refuses is marked, with why. A connector is drawn as two cards, its in card and
+ * its out card (`cards.ts`, D60): each is titled with its side, and shows itself selected while
+ * its twin is.
  */
 import type { Node, NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
@@ -18,7 +20,10 @@ export interface PluginNodeData extends Record<string, unknown> {
   live?: PluginControl | undefined;
   drift?: DriftCounts | undefined;
   portTypes: Record<string, PortTypeInfo>;
-  reinstate: (id: string) => void;
+  /** Disabled in the draft (D64). */
+  disabled?: boolean;
+  /** Its stop cleared in the draft, for the next Apply. */
+  cleared?: boolean;
   /** The check's problems with the node itself, and with each of its ports by name. */
   problems?: string[];
   portProblems?: Record<string, string[]>;
@@ -75,53 +80,81 @@ function Port(props: {
   );
 }
 
+/** How a node's state is drawn (D64): its class, its badge, and why, if it says. */
+export function stateOf(
+  live: PluginControl | undefined,
+  disabled: boolean,
+  cleared = false
+): { look: string; badge: string; why?: string } {
+  if (disabled)
+    return {
+      look: 'disabled',
+      badge: 'disabled',
+      ...(live !== undefined && live.state !== 'disabled' ? { why: 'from the next Apply' } : {}),
+    };
+  if (live === undefined)
+    return { look: '', badge: 'not running', why: 'added, or not applied yet' };
+  if (live.state === 'stopped' && live.stop !== undefined)
+    return cleared
+      ? { look: 'stopped cleared', badge: 'stopped', why: 'its stop cleared at the next Apply' }
+      : { look: 'stopped', badge: 'stopped', why: live.reason ?? live.stop.reason };
+  if (live.state === 'inactive')
+    return {
+      look: 'inactive',
+      badge: 'inactive',
+      ...(live.reason === undefined ? {} : { why: live.reason }),
+    };
+  if (live.state === 'disabled')
+    return { look: '', badge: 'enabled', why: 'disabled until the next Apply' };
+  return {
+    look: live.state === 'failed' ? 'failed' : '',
+    badge: live.state,
+    ...(live.reason === undefined ? {} : { why: live.reason }),
+  };
+}
+
 export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
   const { view, live, drift, portTypes, problems = [], portProblems = {}, side } = data;
-  const killed = live?.killed === true;
+  const state = stateOf(live, data.disabled === true, data.cleared === true);
+  const greyed = state.look === 'disabled' || state.look === 'inactive';
   const title = cardTitle(view.id, side);
   const shown = selected || data.twinSelected === true;
   const inputs = Object.entries(view.inputs);
   const outputs = Object.entries(view.outputs);
   return (
     <div
-      className={`plugin-node${killed ? ' killed' : ''}${shown ? ' selected' : ''}${problems.length > 0 ? ' refused' : ''}${side === undefined ? '' : ` card-${side}`}`}
+      className={`plugin-node${state.look === '' ? '' : ` state-${state.look.replace(' ', ' state-')}`}${shown ? ' selected' : ''}${problems.length > 0 ? ' refused' : ''}${side === undefined ? '' : ` card-${side}`}`}
       style={{ height: nodeHeight(view) }}
       aria-label={`node ${title}`}
-      aria-disabled={killed}
+      aria-disabled={greyed}
     >
       <div className="head">
         <strong>{title}</strong>
         {view.plugin === view.id ? null : <span className="muted"> {view.plugin}</span>}
         <div className="muted small">{view.kinds.join(', ')}</div>
         <div>
-          {live === undefined ? (
-            <span className="badge" title="not running: added, or not applied yet">
-              not running
-            </span>
-          ) : (
-            <span className={`badge ${killed ? 'killed' : live.state}`}>
-              {killed ? 'killed' : live.state}
-            </span>
-          )}
-          {live?.mode === undefined ? null : <span className="badge mode">{live.mode}</span>}
+          <span
+            className={`badge ${state.badge.replace(' ', '-')}`}
+            {...(state.why === undefined ? {} : { title: state.why })}
+          >
+            {state.look === 'stopped' ? (
+              <span className="warning-icon" role="img" aria-label="warning">
+                ⚠{' '}
+              </span>
+            ) : null}
+            {state.badge}
+          </span>
           {drift === undefined ? null : (
             <span className={`badge ${drift.tripped ? 'failed' : 'drift'}`} title="drift (P5)">
               drift {drift.recent}/{drift.unread}
             </span>
           )}
         </div>
-        {killed ? (
-          <button
-            type="button"
-            className="reinstate nodrag"
-            onClick={(e) => {
-              e.stopPropagation();
-              data.reinstate(view.id);
-            }}
-          >
-            Reinstate
-          </button>
-        ) : null}
+        {state.why === undefined || state.badge === 'not running' ? null : (
+          <div className="state-why small" title={state.why}>
+            {state.why}
+          </div>
+        )}
         {problems.length > 0 ? (
           <div className="error small" title={problems.join('\n')}>
             ✗ {problems[0]}

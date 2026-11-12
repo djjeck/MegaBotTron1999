@@ -6,7 +6,6 @@ import {
   FakeConnector,
   fakeConnectorPlugin,
   type GraphInput,
-  type Mode,
   parseManifest,
   type PluginContext,
   StartError,
@@ -42,8 +41,11 @@ function questParser(seen: { ctx?: PluginContext }) {
   });
 }
 
-/** The graph file of the editor: alice's account, the parser, and one reactor node `look`. */
-const graph = (config: Record<string, unknown>, events = true): GraphInput => ({
+/**
+ * The graph file of the editor: alice's account, the parser, and one reactor node `look`, its
+ * chat-out edge a dry run (as the editor draws a new one, D64) unless `live`.
+ */
+const graph = (config: Record<string, unknown>, events = true, live = false): GraphInput => ({
   version: 2,
   nodes: [
     { id: 'tg', plugin: 'tg', account: 'telegram:alice' },
@@ -61,6 +63,7 @@ const graph = (config: Record<string, unknown>, events = true): GraphInput => ({
       type: 'chat-out',
       sends: [BOT],
       commands: ['/look'],
+      ...(live ? {} : { dryRun: true }),
     },
     ...(events ? [{ from: 'quest.events', to: 'look.events', type: 'events' as const }] : []),
   ],
@@ -73,13 +76,12 @@ const ON_GAIN = {
   send: '/look {outcome.item}',
 };
 
-async function run(config: Record<string, unknown>, o: { mode?: Mode; events?: boolean } = {}) {
+async function run(config: Record<string, unknown>, o: { live?: boolean; events?: boolean } = {}) {
   const account = new FakeConnector({ account: 'telegram:alice' });
   const seen: { ctx?: PluginContext } = {};
   const kit = new DevKit({
     start: T0,
-    graph: graph(config, o.events),
-    ...(o.mode === undefined ? {} : { modes: { look: o.mode } }),
+    graph: graph(config, o.events, o.live),
     plugins: [fakeConnectorPlugin('tg', account), questParser(seen), reactorPlugin()],
   });
   await kit.start();
@@ -102,7 +104,7 @@ const gain = (item: string, sure = true) => ({
 
 describe('the reactor', () => {
   it('sends a command when its event is heard and the payload matches', async () => {
-    const { quest, account, reactions } = await run(ON_GAIN, { mode: 'live' });
+    const { quest, account, reactions } = await run(ON_GAIN, { live: true });
     quest.bus.publish('quest.turn', gain('lantern'));
     quest.bus.publish('quest.turn', gain('rope', false));
     await flush();
@@ -110,13 +112,12 @@ describe('the reactor', () => {
     expect(reactions()).toEqual(['sent']);
   });
 
-  it('starts read-only, as every acting plugin', async () => {
-    const { core, quest, account, reactions } = await run(ON_GAIN);
-    expect(core.modes.get('look')).toBe('read-only');
+  it('through a dry-run edge, as a new one is drawn, logs what it sends and sends nothing', async () => {
+    const { quest, account, reactions } = await run(ON_GAIN);
     quest.bus.publish('quest.turn', gain('lantern'));
     await flush();
     expect(account.sent).toEqual([]);
-    expect(reactions()).toEqual(['refused (read-only)']);
+    expect(reactions()).toEqual(['dry-run']);
   });
 
   it('has an events port of its event type’s namespace, which the graph checks', async () => {
@@ -154,7 +155,7 @@ describe('the reactor', () => {
       chat: BOT,
       send: '/look {prize}',
     };
-    const { core, account, reactions } = await run(config, { mode: 'live', events: false });
+    const { core, account, reactions } = await run(config, { live: true, events: false });
     expect(core.nodes().find((n) => n.id === 'look')?.ports).not.toHaveProperty('events');
     account.hear({ chat: BOT, sender: 'QuestBot', text: 'The GOLD draw opens', time: T0 });
     account.hear({ chat: BOT, sender: 'QuestBot', text: 'the gold draw is shut', time: T0 });
@@ -165,7 +166,7 @@ describe('the reactor', () => {
 
   it('matches with case, in every chat its edge reads, without in', async () => {
     const config = { match: 'the draw opens', chat: BOT, send: '/look' };
-    const { account } = await run(config, { mode: 'live', events: false });
+    const { account } = await run(config, { live: true, events: false });
     account.hear({ chat: BOT, sender: 'QuestBot', text: 'The draw opens', time: T0 });
     account.hear({ chat: BOT, sender: 'QuestBot', text: 'now the draw opens', time: T0 });
     await flush();
@@ -173,7 +174,7 @@ describe('the reactor', () => {
   });
 
   it('stops reacting when it stops', async () => {
-    const { kit, quest, account } = await run(ON_GAIN, { mode: 'live' });
+    const { kit, quest, account } = await run(ON_GAIN, { live: true });
     await kit.stop();
     quest.bus.publish('quest.turn', gain('lantern'));
     await flush();

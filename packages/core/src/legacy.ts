@@ -10,7 +10,8 @@
  *
  * - A store is imported into a fresh instance (`instances/<id>/`, §2.2), of the plugin a node will
  *   run on it, copied whole, so that its documents, version, timers and settings come with it. Its
- *   mode is not: the instance starts `read-only`, or in its node's `mode` (P10).
+ *   mode is not: whether its node sends for real is its chat-out edges' (`dryRun`, bot-os.md D64),
+ *   and the mode it had is only reported, for the owner to draw its edges by.
  * - The event log is merged into this instance's, day by day, a record already there not added
  *   twice; a table of type names renames the records written before types were namespaced
  *   (`{"message": "dice.message"}`), and a record whose type is still not namespaced is left out,
@@ -52,7 +53,7 @@ export interface LegacyStore {
   version: number;
   timers: string[];
   settings: boolean;
-  /** The mode it had there, for the owner to set again; never imported. */
+  /** The mode it had there, for the owner to draw its edges by (D64); never imported. */
   mode?: Mode;
 }
 

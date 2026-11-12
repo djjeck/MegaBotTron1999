@@ -66,13 +66,13 @@ describe('instances apart from nodes', () => {
     }).core;
     await first.start();
     expect(first.controls.read('a', 'count')).toEqual({ value: 2 });
-    expect(first.modes.set('a', 'dry-run')).toBeUndefined();
+    expect(first.stopNode('a', 'a safety stop', 'safety')).toBe(true);
     await first.stop();
     const dir = path.join(dataDir, 'instances', 'tally');
     expect(fs.readdirSync(dir).sort()).toEqual([
       '_instance.json',
-      '_mode.json',
       '_settings.json',
+      '_stop.json',
       '_timers.json',
       'count.json',
     ]);
@@ -81,15 +81,27 @@ describe('instances apart from nodes', () => {
       created: clock.now(),
       referenced: clock.now(),
     });
-    // Another node, on the same instance: its count, its settings, its mode and its timer.
+    expect(read('instances/tally/_stop.json')).toEqual({
+      reason: 'a safety stop',
+      time: new Date(clock.now()).toISOString(),
+      source: 'safety',
+    });
+    // Another node, on the same instance: its count, its settings, its timer and its stop.
     const second = core({
       version: 2,
-      nodes: [{ id: 'b', plugin: 'counter', instance: 'tally', mode: 'live' }],
+      nodes: [{ id: 'b', plugin: 'counter', instance: 'tally' }],
     }).core;
     await second.start();
-    expect(second.controls.read('b', 'count')).toEqual({ value: 4 });
-    expect(second.modes.get('b')).toBe('dry-run');
-    expect(second.instances()).toEqual([
+    expect(second.state('b')).toMatchObject({ state: 'stopped', reason: 'a safety stop' });
+    expect(second.clearStop('b')).toBe(true);
+    await second.stop();
+    const third = core({
+      version: 2,
+      nodes: [{ id: 'b', plugin: 'counter', instance: 'tally' }],
+    }).core;
+    await third.start();
+    expect(third.controls.read('b', 'count')).toEqual({ value: 4 });
+    expect(third.instances()).toEqual([
       {
         id: 'tally',
         plugin: 'counter',
@@ -99,16 +111,15 @@ describe('instances apart from nodes', () => {
         used: true,
       },
     ]);
-    await second.stop();
+    await third.stop();
   });
 
-  it('start a fresh instance in its node’s mode and settings, and a node on its own id', async () => {
+  it('start a fresh instance in its node’s settings, and a node on its own id', async () => {
     const { core: c } = core({
       version: 2,
-      nodes: [{ id: 'c', plugin: 'counter', mode: 'live', settings: { step: 5 } }],
+      nodes: [{ id: 'c', plugin: 'counter', settings: { step: 5 } }],
     });
     await c.start();
-    expect(c.modes.get('c')).toBe('live');
     expect(c.controls.read('c', 'count')).toEqual({ value: 5 });
     expect(fs.existsSync(path.join(dataDir, 'instances', 'c', '_instance.json'))).toBe(true);
     await c.stop();

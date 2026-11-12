@@ -46,6 +46,7 @@ const carried = (e: GraphEdge): string =>
     e.senders === undefined ? '' : `from ${e.senders.join(' ')}`,
     e.sends !== undefined && e.sends.length > 0 ? `sends ${e.sends.join(' ')}` : '',
     e.commands === undefined ? '' : `commands ${e.commands.join(' ')}`,
+    e.dryRun === true ? 'dry-run' : '',
   ]
     .filter((x) => x !== '')
     .join('; ');
@@ -54,17 +55,18 @@ const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * The graph as text, for reading and for a line diff (`lineDiff`): so that a changed value is a
- * changed line, each node is a line (its id, its plugin, its instance when not its id, its mode and
- * its account), then a line per key of its config and of its settings, the value as compact JSON
- * with its keys sorted; then each edge is a line, with what it carries. Nodes are sorted by id and
- * edges by their ends, so that the same graph always prints the same.
+ * changed line, each node is a line (its id, its plugin, its instance when not its id, `disabled`
+ * when it is, and its account), then a line per key of its config and of its settings, the value
+ * as compact JSON with its keys sorted; then each edge is a line, with what it carries (a chat-out
+ * edge's `dry-run` among it). Nodes are sorted by id and edges by their ends, so that the same
+ * graph always prints the same.
  */
 export function graphText(graph: Graph): string {
   const lines = ['nodes:'];
   for (const n of [...graph.nodes].sort((a, b) => byText(a.id, b.id))) {
     const about = [
       n.instance === undefined || n.instance === n.id ? '' : `instance ${n.instance}`,
-      n.mode === undefined ? '' : `mode ${n.mode}`,
+      n.disabled === true ? 'disabled' : '',
       n.account === undefined ? '' : `account ${n.account}`,
     ].filter((x) => x !== '');
     lines.push(`  ${n.id} (${n.plugin})${about.map((x) => `, ${x}`).join('')}`);

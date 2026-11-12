@@ -9,57 +9,63 @@ the server that guards them.
   React Flow (`@xyflow/react`): a draft of the saved graph, each plugin instance a node with its
   input ports on the left and its output ports on the right, each port type in its own shape and
   colour, each binding an edge in its type's colour, dashed when the input is optional, and on each
-  node its live state, mode and drift. Chats flow left to right (docs/bot-os.md D60): a connector is
-  drawn as two cards (`cards.ts`), its **in** card (`telegram-user · in`) at the left, whose chat-in
-  output feeds the readers, and its **out** card (`telegram-user · out`) in a column of its own at
-  the right, whose chat-out input takes the senders' edges; one node in the graph file all the same.
-  Each card is placed on its own, either selects the node and opens its panel, and removing it
-  removes both, after a confirmation that names them. An empty graph offers its first node, a
-  connector. **Add a node** lists the plugins offered, by the image and each module (`Palette.tsx`),
-  and asks its id and its instance: fresh, kept, or imported from an older data directory
-  (`AddNode.tsx`). An edge is dragged from an output to an input; a rhombus at its midpoint, in its
-  port type's colour (`PortEdge.tsx`), is a button that selects it and opens its panel
-  (`EdgeDetails.tsx`), where a chat-in edge's `reads` (or all the chats its connector monitors) and
-  its `senders` (anyone, or a list with _me_), or a chat-out edge's `sends` and `commands`, are set,
-  the chats ticked among its connector's monitored chats and the words as rows (`Surfaces.tsx`, D62,
-  D63); a connector's own `chats`, what it monitors, are ticked from its surfaces, with a search. A
-  connector not running yet says to apply first. A node's config, settings, mode and account are
-  forms made from its schemas, each field's description as its help; a new node's config starts
-  filled with its schema's defaults, and an opened node shows its unset ones filled in, written with
-  its first change (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a
-  secret a choice of the secrets' names. Every change is checked by the core, and each refusal shown
-  on its edge, port, node or field (`draft.ts`, the draft's pure changes). **Review changes** opens
-  a dialog with the diff and two actions (`Review.tsx`): **Apply** saves the graph
-  (`PUT /graph/file`) and restarts the instance on it, waiting for it and coming back to the page,
-  still logged in (`src/ui/Restart.tsx`), or says why the core refused it and restarts nothing;
-  **Revert** drops the draft, back to the graph saved, once confirmed. Its × (or Escape) only closes
-  it, the draft kept. When the saved graph is not what runs (changed through the API, rolled back,
-  or a restart that did not happen), a banner offers **Apply (restart)**; a saved graph refused at
-  the last start is shown first. **Text** shows the draft printed (`graphText`), read-only, with a
-  copy button (`GraphText.tsx`); the rollback is Admin's, with the history. Select one node or
-  several (Shift, Ctrl or Cmd with a click; Shift and drag for a box) and **Kill selected** kills
-  each: its plugin's own safety stop, then paused until reinstated; a killed node is drawn disabled,
-  with a **Reinstate** button, and its forms stay editable. Nodes start in columns (`layout.ts`) and
-  can be moved. **Modules** (`#/modules`) lists the modules installed, installs one from its folder,
-  chosen (**Choose folder**) or dropped on the page, after showing the id, version and description
-  its `module.json` gives (`src/ui/module-folder.ts`), or from a `.tar.gz`, and rolls one back;
-  **Import** (`#/import`) shows an older data directory and imports its event log with a table of
-  type renames. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59) has one
-  section per area, each reached by its route (`#/instance`, `#/graph-history`, `#/graph-text`,
-  `#/accounts`, `#/plugins`), which opens the page scrolled to it: **Instance** (on or off with its
-  switch, uptime, memory, the plugins and accounts by state, the kill switch), **Graph history**
-  (`GraphHistoryPage.tsx`, docs/bot-os.md D61: each version of the saved graph, newest first, with
-  its time, what changed and how the instance started on it, the last that ran marked "last good";
-  one opened shows what rolling back to it would change, as the review's diff (**Changes**) and as a
-  line diff of the two printouts (**As text**), and **Roll back to this** asks, repeating the diff,
-  then restarts on it), **Graph as text** (the saved graph printed, with a copy button),
-  **Accounts** (each connector, its account and its connection's status) and **Plugins** (each
-  plugin instance with its state, a mode control, a resume when paused, and, opened, its settings,
-  its own status and the reads and actions it declares). Beside it, **Drift** (each parser's counts
-  and the latest reports) and **Events** (the event log's latest records, filtered by type). Every
-  page reads the control API only; the app imports the core's types and nothing else of it, so its
-  bundle holds none of the shell's code. All the pages are in one menu, with no admin part apart:
-  the whole app is the owner's console. A page is a line of `PAGES` in `src/ui/App.tsx`.
+  node its state and drift (docs/bot-os.md D64): disabled, greyed; stopped, in red tones with a
+  warning icon and its reason; inactive, greyed with the node it needs. Chats flow left to right
+  (docs/bot-os.md D60): a connector is drawn as two cards (`cards.ts`), its **in** card
+  (`telegram-user · in`) at the left, whose chat-in output feeds the readers, and its **out** card
+  (`telegram-user · out`) in a column of its own at the right, whose chat-out input takes the
+  senders' edges; one node in the graph file all the same. Each card is placed on its own, either
+  selects the node and opens its panel, and removing it removes both, after a confirmation that
+  names them. An empty graph offers its first node, a connector. **Add a node** lists the plugins
+  offered, by the image and each module (`Palette.tsx`), and asks its id and its instance: fresh,
+  kept, or imported from an older data directory (`AddNode.tsx`). An edge is dragged from an output
+  to an input; a rhombus at its midpoint, in its port type's colour (`PortEdge.tsx`), is a button
+  that selects it and opens its panel (`EdgeDetails.tsx`), where a chat-in edge's `reads` (or all
+  the chats its connector monitors) and its `senders` (anyone, or a list with _me_), or a chat-out
+  edge's `sends` and `commands`, are set, the chats ticked among its connector's monitored chats and
+  the words as rows (`Surfaces.tsx`, D62, D63); a connector's own `chats`, what it monitors, are
+  ticked from its surfaces, with a search. A connector not running yet says to apply first. A new
+  node starts **disabled** and a new chat-out edge a **dry run**: its rhombus hollow and its part
+  from the rhombus to the connector greyed and dashed; its panel's **Dry-run / Send for real**
+  switch, and a node's **Enabled** switch, are changes of the draft, applied with Apply. A node's
+  config, settings and account are forms made from its schemas, each field's description as its
+  help; a new node's config starts filled with its schema's defaults, and an opened node shows its
+  unset ones filled in, written with its first change (`defaults.ts`) (`SchemaForm.tsx`,
+  `NodeDetails.tsx`), a config key that names a secret a choice of the secrets' names. Every change
+  is checked by the core, and each refusal shown on its edge, port, node or field (`draft.ts`, the
+  draft's pure changes). **Review changes** opens a dialog with the diff and two actions
+  (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`) and restarts the instance on it,
+  waiting for it and coming back to the page, still logged in (`src/ui/Restart.tsx`), or says why
+  the core refused it and restarts nothing; **Revert** drops the draft, back to the graph saved,
+  once confirmed. Its × (or Escape) only closes it, the draft kept. When the saved graph is not what
+  runs (changed through the API, rolled back, or a restart that did not happen), a banner offers
+  **Apply (restart)**; a saved graph refused at the last start is shown first. **Text** shows the
+  draft printed (`graphText`), read-only, with a copy button (`GraphText.tsx`); the rollback is
+  Admin's, with the history. Select one node or several (Shift, Ctrl or Cmd with a click; Shift and
+  drag for a box) and **Kill selected** kills each: its plugin's own safety stop, then stopped, kept
+  across restarts; a stopped node's panel has **Clear stop**, a change of the draft that Review
+  lists and Apply makes (`clear-stop`, then the restart), and its forms stay editable. Nodes start
+  in columns (`layout.ts`) and can be moved. **Modules** (`#/modules`) lists the modules installed,
+  installs one from its folder, chosen (**Choose folder**) or dropped on the page, after showing the
+  id, version and description its `module.json` gives (`src/ui/module-folder.ts`), or from a
+  `.tar.gz`, and rolls one back; **Import** (`#/import`) shows an older data directory and imports
+  its event log with a table of type renames. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`,
+  docs/bot-os.md D59) has one section per area, each reached by its route (`#/instance`,
+  `#/graph-history`, `#/graph-text`, `#/accounts`, `#/plugins`), which opens the page scrolled to
+  it: **Instance** (on or off with its switch, uptime, memory, the plugins and accounts by state,
+  the kill switch), **Graph history** (`GraphHistoryPage.tsx`, docs/bot-os.md D61: each version of
+  the saved graph, newest first, with its time, what changed and how the instance started on it, the
+  last that ran marked "last good"; one opened shows what rolling back to it would change, as the
+  review's diff (**Changes**) and as a line diff of the two printouts (**As text**), and **Roll back
+  to this** asks, repeating the diff, then restarts on it), **Graph as text** (the saved graph
+  printed, with a copy button), **Accounts** (each connector, its account and its connection's
+  status) and **Plugins** (each plugin instance with its state, read-only (its reason and its stop),
+  and, opened, its settings, its own status and the reads and actions it declares). Beside it,
+  **Drift** (each parser's counts and the latest reports) and **Events** (the event log's latest
+  records, filtered by type). Every page reads the control API only; the app imports the core's
+  types and nothing else of it, so its bundle holds none of the shell's code. All the pages are in
+  one menu, with no admin part apart: the whole app is the owner's console. A page is a line of
+  `PAGES` in `src/ui/App.tsx`.
 - `src/server/web-server.ts`: the UI's own listener. It serves the built app, and the core's control
   API (`controlHandler` of `@megabottron1999/core`) under `/api/`, only to a logged-in owner.
   `startWebUi` starts it only when the `web_ui_password` Docker secret is provided (12 characters at

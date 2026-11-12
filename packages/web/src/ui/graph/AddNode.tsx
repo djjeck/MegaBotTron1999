@@ -202,8 +202,8 @@ export function AddNode(props: {
                   onChange={(e) => setImported(e.target.value.trim())}
                 />
                 <small className="muted">
-                  Copied now into this new instance; its mode is not (it starts read-only, or in the
-                  node’s mode).
+                  Copied now into this new instance; its mode is not: whether it sends for real is
+                  its chat-out edges’ (dry runs when drawn).
                 </small>
               </>
             )

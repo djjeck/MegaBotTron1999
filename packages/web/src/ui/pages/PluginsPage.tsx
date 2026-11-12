@@ -1,26 +1,15 @@
 /**
- * The plugins: the graph's node instances, in load order, each with its state, its mode and
- * a control for it (P10), a resume when the core paused it (P5), and, opened, its settings, its own
- * status and the reads and actions it declares (P11). The instance's off switch heads the page:
- * there is no plugin's own off in the core (a partial kill is the graph view's, D44).
+ * The plugins: the graph's node instances, in load order, each with its state (D64: running,
+ * disabled, stopped with its stop, inactive with the node it needs, failed with why), read-only:
+ * a node's state changes only in the graph editor, applied with Apply. Opened, its settings, its
+ * own status and the reads and actions it declares (P11). The instance's off switch heads the page.
  */
-import type { Mode } from '@megabottron1999/core';
 import type { FormEvent } from 'react';
 import { useState } from 'react';
 import type { PluginControl, Status } from '#src/ui/api.ts';
 import { api, seg } from '#src/ui/api.ts';
 import type { PageProps } from '#src/ui/App.tsx';
 import { useLoad } from '#src/ui/hooks.ts';
-
-/**
- * The modes (P10), each with what it does: a record of the core's type, so that a mode added to the
- * core fails the type check here. The app imports none of the core's modules, only its types.
- */
-const MODES: Record<Mode, string> = {
-  'read-only': 'read-only: sends nothing',
-  'dry-run': 'dry-run: records, sends nothing',
-  live: 'live: sends',
-};
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 const show = (v: unknown): string => JSON.stringify(v, null, 2) ?? 'null';
@@ -138,13 +127,8 @@ function Details({ p, reload }: { p: PluginControl; reload: () => void }) {
   );
 }
 
-function Row({ p, off, reload }: { p: PluginControl; off: boolean; reload: () => void }) {
+function Row({ p, reload }: { p: PluginControl; reload: () => void }) {
   const [open, setOpen] = useState(false);
-  const [error, setError] = useState<string>();
-  const post = (route: string, body: unknown): void => {
-    setError(undefined);
-    api(route, body).then(reload, (e: unknown) => setError(message(e)));
-  };
   return (
     <>
       <tr>
@@ -161,42 +145,26 @@ function Row({ p, off, reload }: { p: PluginControl; off: boolean; reload: () =>
         </td>
         <td>{p.kinds.join(', ')}</td>
         <td>
-          <span className={`badge ${p.state}`}>{p.state}</span>
+          <span className={`badge ${p.state}`}>
+            {p.state === 'stopped' ? (
+              <span className="warning-icon" role="img" aria-label="warning">
+                ⚠{' '}
+              </span>
+            ) : null}
+            {p.state}
+          </span>
           {p.reason === undefined ? null : <span className="muted"> {p.reason}</span>}
-          {p.state === 'paused' ? (
-            <button type="button" onClick={() => post(`/plugins/${seg(p.id)}/resume`, {})}>
-              Resume
-            </button>
-          ) : null}
-        </td>
-        <td>
-          {p.mode === undefined ? (
-            <span className="muted">sends nothing</span>
-          ) : (
-            <select
-              aria-label={`${p.id} mode`}
-              value={p.mode}
-              disabled={off}
-              onChange={(e) => post(`/plugins/${seg(p.id)}/mode`, { mode: e.target.value })}
-            >
-              {Object.entries(MODES).map(([m, label]) => (
-                <option key={m} value={m}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          )}
-          {error === undefined ? null : (
-            <span role="alert" className="error">
+          {p.stop === undefined ? null : (
+            <span className="muted small">
               {' '}
-              {error}
+              ({p.stop.source}, {p.stop.time.slice(0, 16).replace('T', ' ')} UTC)
             </span>
           )}
         </td>
       </tr>
       {open ? (
         <tr>
-          <td colSpan={4}>
+          <td colSpan={3}>
             <Details p={p} reload={reload} />
           </td>
         </tr>
@@ -219,7 +187,10 @@ export function PluginsPage({ loggedOut }: PageProps) {
         <button type="button" onClick={() => power(s.off ? '/on' : '/off')}>
           {s.off ? 'Turn on' : 'Turn off'}
         </button>
-        {s.off ? <span className="muted"> (modes change only while on)</span> : null}
+      </p>
+      <p className="muted small">
+        A node is enabled, disabled or cleared of its stop, and a chat-out edge sent for real or as
+        a dry run, in the <a href="#/graph">graph</a>, then applied.
       </p>
       <table>
         <thead>
@@ -227,12 +198,11 @@ export function PluginsPage({ loggedOut }: PageProps) {
             <th>Plugin</th>
             <th>Kinds</th>
             <th>State</th>
-            <th>Mode</th>
           </tr>
         </thead>
         <tbody>
           {s.plugins.map((p) => (
-            <Row key={p.id} p={p} off={s.off} reload={status.reload} />
+            <Row key={p.id} p={p} reload={status.reload} />
           ))}
         </tbody>
       </table>

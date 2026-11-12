@@ -4,18 +4,20 @@
  * surface's owner commands, the HTTP control API under `cli.ts`, the web UI and the agents later)
  * is made from these.
  *
- * - Each plugin's state (running, paused with why, failed with why), its mode if it sends (P10),
- *   its settings, and the state and actions its manifest's `interface` declares, which the owner
- *   reads and calls (an action's input checked against its schema).
- * - The owner sets a plugin's mode and resumes a paused one (P5: only the owner resumes).
+ * - Each node's state (bot-os.md D64: running; disabled; stopped, with its stop; inactive, with
+ *   the node it needs; failed, with why), its settings, and the state and actions its manifest's
+ *   `interface` declares, which the owner reads and calls (an action's input checked against its
+ *   schema). The states are raised only in the editor, applied with a restart: no control here
+ *   starts a node again.
  * - The off switch, instance-wide and kept across restarts in the core's store (P8): off, the
- *   owner is told nothing, and each plugin hears it (`off`, `on`) and stops what it does; every
- *   change of a mode is refused until on.
- * - The kill switch: each plugin's own `kill` (a safety stop, such as an actor paused and
- *   `read-only`), whatever its state; a plugin without one is left as it is.
- * - A node's kill (D44, the graph view's): that plugin's own safety stop, then the core pauses it as
- *   killed (`KILLED`), so that its outbox refuses its sends; its resume reinstates it. Its mode is
- *   left as its stop made it, nothing else is killed with it, and it is not kept across a restart.
+ *   owner is told nothing, and each plugin hears it (`off`, `on`) and stops what it does.
+ * - The kill switch: each plugin's own `kill` (its safety stop, such as an actor stopped), whatever
+ *   its state; a plugin without one is left as it is.
+ * - A node's kill (D44, the graph view's) or stop (Telegram's `/plugins`): that plugin's own safety
+ *   stop, then the core stops it, kept in its instance across restarts (D64), so that its outbox
+ *   refuses its sends; nothing else is stopped with it until the next start, which leaves the
+ *   nodes that require it inactive. The owner clears the stop in the editor
+ *   (`clearStop`, then a restart).
  *
  * Nothing in here knows of any game or any network.
  */
@@ -23,7 +25,6 @@ import { type Buttons } from './commands.ts';
 import { type ConnectorStatus, type Surface, type SurfaceQuery } from './connector.ts';
 import { type DriftCounts } from './drift.ts';
 import { type Manifest } from './manifest.ts';
-import { isMode, type Mode, type Modes } from './outbox.ts';
 import { type Instance } from './plugin.ts';
 import { type InputPort } from './ports.ts';
 import { type SettingsRegistry, type SettingValue } from './settings.ts';
@@ -36,30 +37,40 @@ export interface PowerDoc {
   off: boolean;
 }
 
-/** The reason of a plugin the owner killed (D44): paused, until its resume. */
+/** Who or what stopped a node (bot-os.md D64). */
+export type StopSource = 'safety' | 'drift' | 'owner';
+
+/** A node's stop, as its instance keeps it (`_stop.json`): why, when, and who or what. */
+export interface StopRecord {
+  reason: string;
+  /** When, in ISO 8601. */
+  time: string;
+  source: StopSource;
+}
+
+/** The reason of a node the owner killed in the editor (D44): stopped, until cleared (D64). */
 export const KILLED = 'killed by the owner';
+/** The reason of a node the owner stopped from the chat surface (`/plugins`, D64). */
+export const STOPPED = 'stopped by the owner';
 
 /** The text of a change refused while the instance is off. */
 export const OFF_REFUSAL = 'the bot is off: `cli.ts on` first';
 
 /** What the controls need of the core. */
 export interface ControlsHost {
-  modes: Modes;
   settings: SettingsRegistry;
   /** The core's own documents. */
   store: { read<T>(name: string): T | undefined; write(name: string, value: unknown): void };
   /** The plugin instances, in load order: each one's id and its plugin's manifest. */
   nodes(): { id: string; manifest: Manifest; ports?: Record<string, InputPort> }[];
-  /** Whether an instance sends anywhere: an edge binds a chat it sends to (P10). */
-  sends(id: string): boolean;
-  /** A plugin's state, with why. */
-  status(id: string): { state: string; reason?: string } | undefined;
-  /** A running or paused plugin's instance. */
+  /** A plugin's state, with why, and its stop if it is stopped. */
+  status(id: string): { state: string; reason?: string; stop?: StopRecord } | undefined;
+  /** An up plugin's instance (running, or stopped since it started). */
   instance(id: string): Instance | undefined;
-  /** Resumes a paused plugin; false if it is not paused. */
-  resume(id: string): boolean;
-  /** Pauses a running or paused plugin as killed (`KILLED`); false if it is neither. */
-  killNode(id: string): boolean;
+  /** Stops a node up, as the owner, kept in its instance (D64); false if it is not up. */
+  stopNode(id: string, reason: string): boolean;
+  /** Clears a node's kept stop, for the next start; false if it has none. */
+  clearStop(id: string): boolean;
   /** Logs the change in the event log (`core.power`). */
   record(fields: Record<string, unknown>): void;
   /** Logs a hook that failed. */
@@ -113,12 +124,15 @@ export interface PluginControl {
   plugin: string;
   description: string;
   kinds: readonly string[];
+  /**
+   * Its state (D64): `running`, `disabled`, `stopped`, `inactive`, `failed`, or on its way
+   * (`starting`, `stopping`).
+   */
   state: string;
+  /** Why it is stopped, inactive (the node it needs: `needs tg (disabled)`) or failed. */
   reason?: string;
-  /** The owner killed it (D44): paused as `KILLED`, until its resume. */
-  killed?: true;
-  /** Its mode, if it sends (P10). */
-  mode?: Mode;
+  /** Its stop, as its instance keeps it, while it is stopped. */
+  stop?: StopRecord;
   /** Its settings, by the surfaces' names, with the values in force. */
   settings: Record<string, SettingValue | undefined>;
   /** The names of the reads and the actions it declares. */
@@ -147,11 +161,6 @@ export class Controls {
     return this.offNow;
   }
 
-  /** Whether a plugin has a mode: it sends somewhere (P10). */
-  hasMode(id: string): boolean {
-    return this.host.sends(id);
-  }
-
   /** The instance and each plugin, in load order. */
   status(): { off: boolean; plugins: PluginControl[] } {
     const current = this.host.settings.current();
@@ -173,8 +182,7 @@ export class Controls {
           kinds: [...m.kinds],
           state: s?.state ?? 'unknown',
           ...(s?.reason === undefined ? {} : { reason: s.reason }),
-          ...(s?.state === 'paused' && s.reason === KILLED ? { killed: true as const } : {}),
-          ...(this.hasMode(id) ? { mode: this.host.modes.get(id) } : {}),
+          ...(s?.stop === undefined ? {} : { stop: { ...s.stop } }),
           settings,
           reads,
           actions: Object.keys(m.interface.actions ?? {}),
@@ -227,20 +235,13 @@ export class Controls {
     return this.host.drift();
   }
 
-  /** The owner sets a plugin's mode; why not, or undefined. */
-  setMode(id: string, mode: unknown): string | undefined {
+  /**
+   * The owner clears a node's stop (D64), for the next start: the editor's Clear stop, applied
+   * with a restart. Why not, or undefined.
+   */
+  clearStop(id: string): string | undefined {
     if (this.manifest(id) === undefined) return `no plugin ${id}`;
-    if (!this.hasMode(id)) return `${id} sends nothing: it has no mode`;
-    if (!isMode(mode)) return 'mode must be read-only, dry-run or live';
-    if (this.offNow) return OFF_REFUSAL;
-    return this.host.modes.set(id, mode);
-  }
-
-  /** The owner resumes a plugin paused (drift, P5); why not, or undefined. */
-  resume(id: string): string | undefined {
-    if (this.manifest(id) === undefined) return `no plugin ${id}`;
-    if (this.offNow) return OFF_REFUSAL;
-    return this.host.resume(id) ? undefined : `${id} is not paused`;
+    return this.host.clearStop(id) ? undefined : `${id} is not stopped`;
   }
 
   /** The instance off: kept, logged, and heard by every plugin running. What came of it. */
@@ -283,11 +284,13 @@ export class Controls {
   }
 
   /**
-   * The owner kills one node (D44): its plugin's own safety stop (`kill`), then the core pauses it
-   * as killed, so that it sends nothing until its resume (`resume`) reinstates it. Its mode is left
-   * as its stop made it; the nodes that use it are not killed with it. What came of it, or why not.
+   * The owner kills one node (D44), or stops it (`/plugins`, `reason` `STOPPED`): its plugin's own
+   * safety stop (`kill`), then the core stops it (D64), kept in its instance, so that it sends
+   * nothing and is not started again until the owner clears the stop in the editor. The nodes that
+   * use it are not stopped with it; at the next start, those that require it are inactive. What
+   * came of it, or why not.
    */
-  killNode(id: string): { result: string } | { error: string } {
+  killNode(id: string, reason = KILLED): { result: string } | { error: string } {
     if (this.manifest(id) === undefined) return { error: `no plugin ${id}` };
     const i = this.host.instance(id);
     if (i === undefined) return { error: `${id} is not running` };
@@ -298,8 +301,9 @@ export class Controls {
     } catch (e) {
       this.host.error(id, message(e));
     }
-    this.host.killNode(id);
-    return { result: `${id} killed${said === '' ? '' : `: ${said}`}` };
+    this.host.stopNode(id, reason);
+    const done = reason === KILLED ? 'killed' : 'stopped';
+    return { result: `${id} ${done}${said === '' ? '' : `: ${said}`}` };
   }
 
   /**
@@ -354,7 +358,7 @@ export class Controls {
     return this.host.nodes().find((n) => n.id === id)?.manifest;
   }
 
-  /** Calls `fn` on each running or paused plugin, in load order; one that throws is logged. */
+  /** Calls `fn` on each plugin up, in load order; one that throws is logged. */
   private each(fn: (id: string, instance: Instance) => void): void {
     for (const { id } of this.host.nodes()) {
       const i = this.host.instance(id);

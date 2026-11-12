@@ -3,7 +3,6 @@ import {
   Core,
   FakeConnector,
   fakeConnectorPlugin,
-  type Mode,
   VirtualClock,
   withInstances,
 } from '@megabottron1999/core';
@@ -48,7 +47,8 @@ const flush = async (): Promise<void> => {
 /** @QuestBot's parser and one turn-actor instance, `quest-turns`, on alice's faked account. */
 async function run(
   o: {
-    mode?: Mode;
+    /** Its chat-out edge: a dry run (the editor's default for a new edge, D64), or live. */
+    edge?: 'dry-run' | 'live';
     dataDir?: string;
     clock?: VirtualClock;
     config?: Record<string, unknown>;
@@ -77,6 +77,7 @@ async function run(
               to: `${TELEGRAM_USER}.chat`,
               sends: [CHAT],
               commands: ['/play'],
+              ...(o.edge === 'live' ? {} : { dryRun: true }),
             },
             { from: QUEST, to: 'quest-turns.parser' },
           ],
@@ -84,8 +85,6 @@ async function run(
       ]),
   });
   core.register(fakeConnectorPlugin(TELEGRAM_USER, account), questPlugin(), turnActorPlugin());
-  core.load();
-  if (o.mode !== undefined) core.modes.set('quest-turns', o.mode);
   await core.start();
   const status = (): TurnStatus => {
     const r = core.controls.read('quest-turns', 'status');
@@ -138,7 +137,7 @@ describe('turnActorConfig', () => {
 });
 
 describe('turnSummary', () => {
-  it("gives an instance's chat, mode, last and next turn", () => {
+  it("gives an instance's chat, state, last and next turn", () => {
     expect(
       turnSummary('quest-turns', 'live', {
         chat: CHAT,
@@ -147,21 +146,37 @@ describe('turnSummary', () => {
         next: T0 + 18 * MIN,
       })
     ).toBe('@QuestBot: live, last 12:00, next 12:18 UTC');
-    expect(turnSummary('quest-turns', 'read-only', undefined)).toBe('quest-turns: read-only');
+    expect(turnSummary('quest-turns', 'stopped', undefined)).toBe('quest-turns: stopped');
   });
 });
 
 describe('the turn-actor', () => {
-  it('plays nothing read-only, the mode it starts in', async () => {
-    const r = await run();
-    await r.until(T0 + 120 * MIN);
-    expect(r.events()).toEqual([]);
-    expect(r.status()).toEqual({ chat: CHAT, command: '/play' });
-    expect(r.account.sent).toEqual([]);
+  it('plays nothing once its node is stopped, nor after a restart, until the stop is cleared', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'turn-actor-'));
+    try {
+      const a = await run({ dataDir, clock: new VirtualClock(T0 - MIN) });
+      expect(a.status().next).toBeDefined();
+      expect(a.core.stopNode('quest-turns', 'drift on quest', 'drift')).toBe(true);
+      expect(a.status().next).toBeUndefined();
+      expect(a.steps.at(-1)?.detail).toBe('plan dropped: stopped: drift on quest');
+      await a.core.stop();
+      const b = await run({ dataDir, clock: a.clock });
+      await b.until(T0 + 120 * MIN);
+      expect(b.core.state('quest-turns')).toMatchObject({ state: 'stopped' });
+      expect(b.events()).toEqual([]);
+      expect(b.account.sent).toEqual([]);
+      expect(b.core.clearStop('quest-turns')).toBe(true);
+      await b.core.stop();
+      const c = await run({ dataDir, clock: a.clock });
+      expect(c.events()).toEqual(['planned']);
+      await c.core.stop();
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 
-  it('in dry-run sends nothing, at once with no last turn, then at the planner’s pace', async () => {
-    const r = await run({ mode: 'dry-run' });
+  it('through a dry-run edge sends nothing, at once with no last turn, then at the planner’s pace', async () => {
+    const r = await run();
     expect(r.events()).toEqual(['planned']);
     await r.until(T0);
     expect(r.steps[1]).toMatchObject({
@@ -180,7 +195,7 @@ describe('the turn-actor', () => {
   });
 
   it('in live sends its command to its chat, tells its parser, and waits out the rest it reads', async () => {
-    const r = await run({ mode: 'live', config: { schedule: { maxGapMin: 17, skipChance: 0 } } });
+    const r = await run({ edge: 'live', config: { schedule: { maxGapMin: 17, skipChance: 0 } } });
     r.account.open();
     await r.until(T0);
     expect(r.account.sent).toEqual([{ chat: CHAT, text: '/play' }]);
@@ -202,14 +217,14 @@ describe('the turn-actor', () => {
   });
 
   it('with no recent turn, sends within the spread of its interval, not at once', async () => {
-    const r = await run({ mode: 'dry-run', config: { schedule: {} } });
+    const r = await run({ config: { schedule: {} } });
     const first = r.status().next as number;
     expect(first - T0).toBeGreaterThanOrEqual(0);
     expect(first - T0).toBeLessThanOrEqual(3 * MIN);
   });
 
   it('counts from a turn alice sends by hand in its chat, and from none elsewhere', async () => {
-    const r = await run({ mode: 'dry-run', clock: new VirtualClock(T0 - 5 * MIN) });
+    const r = await run({ clock: new VirtualClock(T0 - 5 * MIN) });
     await r.until(T0 - 5 * MIN);
     const own = { sender: 'alice', own: true, id: '1' };
     r.account.hear({ ...own, chat: CHAT, time: T0, text: '/play' });
@@ -223,8 +238,8 @@ describe('the turn-actor', () => {
     expect(r.events().filter((e) => e === 'seen')).toHaveLength(1);
   });
 
-  it('waits for the account in live, and retries a failed send two minutes later', async () => {
-    const r = await run({ mode: 'live' });
+  it('waits for the account through a live edge, and retries a failed send two minutes later', async () => {
+    const r = await run({ edge: 'live' });
     await r.until(T0);
     expect(r.events()).toEqual(['planned', 'waiting']);
     await r.until(T0 + CONNECT_WAIT_MS);
@@ -240,32 +255,32 @@ describe('the turn-actor', () => {
     expect(r.account.sent).toHaveLength(1);
   });
 
-  it('drops its plan read-only, paused, off or killed, and plans again when it may', async () => {
-    const r = await run({ mode: 'dry-run', clock: new VirtualClock(T0 - MIN) });
-    expect(r.status().next).toBeDefined();
-    r.core.modes.set('quest-turns', 'read-only');
-    expect(r.status().next).toBeUndefined();
-    expect(r.steps.at(-1)?.detail).toBe('plan dropped: read-only');
-    r.core.modes.set('quest-turns', 'dry-run');
-    expect(r.status().next).toBeDefined();
-    expect(r.core.pause('quest-turns', 'drift')).toBe(true);
-    expect(r.status().next).toBeUndefined();
-    expect(r.core.resume('quest-turns')).toBe(true);
+  it('drops its plan off and plans again on; its safety stop stops its node', async () => {
+    const r = await run({ clock: new VirtualClock(T0 - MIN) });
     expect(r.status().next).toBeDefined();
     r.core.controls.turnOff();
     expect(r.status().next).toBeUndefined();
+    expect(r.steps.at(-1)?.detail).toBe('plan dropped: the bot is off');
     r.core.controls.turnOn();
     expect(r.status().next).toBeDefined();
     const killed = r.core.controls.kill();
-    expect(JSON.stringify(killed)).toContain('@QuestBot: read-only');
-    expect(r.core.modes.get('quest-turns')).toBe('read-only');
+    expect(JSON.stringify(killed)).toContain('@QuestBot: stopped');
+    expect(r.core.state('quest-turns')).toMatchObject({
+      state: 'stopped',
+      stop: { reason: 'safety stop', source: 'safety' },
+    });
+    expect(r.status().next).toBeUndefined();
+    expect(r.steps.at(-1)?.detail).toBe('plan dropped: stopped: safety stop');
+    // Back on, still stopped: only the owner, in the editor, starts it again.
+    r.core.controls.turnOff();
+    r.core.controls.turnOn();
     expect(r.status().next).toBeUndefined();
   });
 
   it('keeps its last turn and its plan across a restart, and drops a plan long overdue', async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'turn-actor-'));
     try {
-      const a = await run({ mode: 'dry-run', dataDir });
+      const a = await run({ dataDir });
       await a.until(T0);
       const kept = a.status();
       expect(kept.last).toBe(T0);
@@ -292,7 +307,7 @@ describe('the turn-actor', () => {
 });
 
 describe('several turn-actor nodes', () => {
-  it('run one per bot from a saved graph, each on its own instance, store, mode and records', async () => {
+  it('run one per bot from a saved graph, each on its own instance, store, state and records', async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'turn-actors-'));
     const account = new Account({ account: 'telegram:alice' });
     const records: { type: string; instance?: unknown; event?: unknown }[] = [];
@@ -312,13 +327,14 @@ describe('several turn-actor nodes', () => {
         type: 'chat-out' as const,
         sends: [bot],
         commands,
+        dryRun: true,
       },
     ];
     const core = new Core({
       clock,
       dataDir,
       record: (r) => records.push(r as (typeof records)[number]),
-      // As the editor saves it: plain data, each node its instance, config and mode.
+      // As the editor saves it: plain data, each node its instance, config and state.
       graph: {
         version: 2,
         nodes: [
@@ -328,13 +344,12 @@ describe('several turn-actor nodes', () => {
             id: 'quest-a',
             plugin: TURN_ACTOR,
             instance: 'turns-a',
-            mode: 'dry-run',
             config: { chat: CHAT, seed: 1, schedule: { maxGapMin: 17 } },
           },
           {
             id: 'quest-b',
             plugin: TURN_ACTOR,
-            mode: 'read-only',
+            disabled: true,
             config: { chat: CHAT, seed: 2, command: '/quest' },
           },
         ],
@@ -353,15 +368,11 @@ describe('several turn-actor nodes', () => {
       [TELEGRAM_USER, 'running'],
       [QUEST, 'running'],
       ['quest-a', 'running'],
-      ['quest-b', 'running'],
-    ]);
-    expect([core.modes.get('quest-a'), core.modes.get('quest-b')]).toEqual([
-      'dry-run',
-      'read-only',
+      ['quest-b', 'disabled'],
     ]);
     clock.advanceTo(T0 + 20 * MIN);
     await flush();
-    // Each records as its own instance: only the dry-run one played; the read-only one waits.
+    // Each records as its own instance: only the enabled one played; the disabled one never ran.
     const steps = records.filter((r) => r.type === `${TURN_ACTOR}.step`);
     expect(steps.some((s) => s.event === 'sent')).toBe(true);
     expect(new Set(steps.map((s) => s.instance))).toEqual(new Set(['turns-a']));

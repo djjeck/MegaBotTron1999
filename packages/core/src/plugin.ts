@@ -60,8 +60,9 @@ export interface PluginContext {
   connector(port: string): ConnectorHandle;
   /**
    * Its way out through the outbox of the account its chat-out output `port` is bound to (§4.6):
-   * within what the edge sends to and the commands it allows, in its mode. `port` may also name
-   * the connector instance or the account. Refused if no edge binds one.
+   * within what the edge sends to and the commands it allows, a dry run when the edge is one
+   * (`mode()` says which). `port` may also name the connector instance or the account. Refused if
+   * no edge binds one.
    */
   outbox(port: string): OutboxHandle;
   /**
@@ -85,16 +86,24 @@ export interface PluginContext {
    */
   notify(text: string, buttons?: Buttons): void;
   /**
-   * Its mode (P10, §4.6), for a plugin that sends: `set` as the owner's only on the owner's word
-   * that reached it (an owner command, an action, `on`), as a safety stop (`safety`) only lower
-   *.
+   * Its mode, as module API 1 knew it (deprecated, bot-os.md D64): derived, `dry-run` when every
+   * chat-out edge of its node is a dry run (or it has none), `live` otherwise. `set('read-only')`,
+   * the owner's or a safety stop, stops the node (`stop`); `set('dry-run' | 'live')` is refused
+   * and logged, since a node's state and its edges' dry runs change only in the editor;
+   * `onChange` hears `read-only` when the node is stopped.
    */
   readonly mode: PluginMode;
+  /**
+   * Stops its node (bot-os.md D64), its safety stop: its sends refused from now on, its `pause`
+   * heard, and the stop kept in its instance across restarts, until the owner clears it in the
+   * editor.
+   */
+  stop(reason: string): void;
   /** Whether the owner turned the instance off (§4.11). */
   off(): boolean;
   /**
-   * Resumes it, paused by the core (drift, P5), on the owner's word that reached it (the
-   * plugin switched on by the owner); false if it was not paused.
+   * Module API 1 (deprecated, D64): refused and logged, false; a stop is cleared only by the owner,
+   * in the editor.
    */
   resume(): boolean;
   /** What `serialise` returned at the last stop, if anything (§3). */
@@ -135,11 +144,13 @@ export interface EventQuery {
   all?: boolean;
 }
 
-/** A plugin's mode, as its context gives it. */
+/** A plugin's mode, as its context gives it (module API 1, deprecated, bot-os.md D64). */
 export interface PluginMode {
+  /** `dry-run` when every chat-out edge of its node is a dry run (or it has none), else `live`. */
   get(): Mode;
+  /** `read-only` stops the node; another is refused, with why. */
   set(mode: Mode, by?: 'owner' | 'safety'): string | undefined;
-  /** Hears every change of it, whoever made it (the owner's controls among them). */
+  /** Hears `read-only` when the node is stopped. */
   onChange(listener: (mode: Mode) => void): void;
 }
 
@@ -171,8 +182,12 @@ export interface Instance {
   stop?(): void | Promise<void>;
   /** State cheap to lose but costly to rebuild, kept at stop and handed back as `restored`. */
   serialise?(): unknown;
-  /** The core paused it (drift, or the owner): its sends are refused until `resume`. */
+  /**
+   * The core stopped it (bot-os.md D64: a safety stop, drift, the owner's kill or stop): its sends
+   * are refused, and it is not started again until the owner clears the stop in the editor.
+   */
   pause?(reason: string): void;
+  /** Module API 1 (deprecated, D64): never called, since a stop is cleared only by a restart. */
   resume?(): void;
   /** A connector plugin's connector (§4.5): the core hands out handles to it. */
   readonly connector?: Connector;

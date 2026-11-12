@@ -251,7 +251,7 @@ describe('Core', () => {
     expect(c.status().every((s) => s.state === 'stopped')).toBe(true);
   });
 
-  it('pauses and resumes a running plugin, telling its hooks', async () => {
+  it('stops a running plugin, telling its hooks, kept until the stop is cleared', async () => {
     const seen: string[] = [];
     const { core: c } = core();
     c.register(
@@ -264,19 +264,25 @@ describe('Core', () => {
       plugin('b', seen)
     );
     await c.start();
-    expect(c.pause('a', 'drift')).toBe(true);
-    expect(c.pause('a', 'again')).toBe(false);
-    expect(c.state('a')).toEqual({ id: 'a', state: 'paused', reason: 'drift' });
-    expect(c.resume('a')).toBe(true);
-    expect(c.resume('a')).toBe(false);
-    expect(c.pause('b', 'owner')).toBe(true);
-    expect(c.resume('b')).toBe(true);
-    expect(c.pause('nobody', 'x')).toBe(false);
-    expect(seen).toContain('pause drift');
-    expect(seen).toContain('resume');
-    c.pause('a', 'before stop');
+    expect(c.stopNode('a', 'drift', 'drift')).toBe(true);
+    expect(c.state('a')).toEqual({
+      id: 'a',
+      state: 'stopped',
+      reason: 'drift',
+      stop: { reason: 'drift', time: expect.any(String), source: 'drift' },
+    });
+    // Stopped again: the latest stop is kept, its hooks not told twice.
+    expect(c.stopNode('a', 'again', 'owner')).toBe(true);
+    expect(c.state('a')?.stop).toMatchObject({ reason: 'again', source: 'owner' });
+    expect(c.stopNode('b', 'owner', 'owner')).toBe(true);
+    expect(c.stopNode('nobody', 'x', 'owner')).toBe(false);
+    expect(seen.filter((x) => x.startsWith('pause'))).toEqual(['pause drift']);
+    expect(seen).not.toContain('resume');
+    expect(c.clearStop('a')).toBe(true);
+    expect(c.clearStop('a')).toBe(false);
     await c.stop();
     expect(c.state('a')?.state).toBe('stopped');
+    expect(seen).toContain('stop a');
   });
 
   it('takes no plugin once started, and needs no options beyond the clock', async () => {
@@ -418,7 +424,7 @@ describe('Core', () => {
     expect(commands[1]?.allow?.({ id: '1', owner: true })).toBe(false);
     expect(answered).toEqual(['map x']);
     // The core's own stay, the owner's.
-    expect(c.commands().map((x) => x.plugin)).toEqual(Array(8).fill('core'));
+    expect(c.commands().map((x) => x.plugin)).toEqual(Array(6).fill('core'));
   });
 
   it('fails the load for a command name taken twice', async () => {
@@ -507,7 +513,7 @@ describe('Core', () => {
     );
     await down.core.start();
     expect(down.core.state('player')?.state).toBe('running');
-    down.core.pause('game', 'owner');
+    down.core.stopNode('game', 'owner', 'owner');
     await down.core.stop();
   });
 

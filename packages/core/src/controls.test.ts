@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { VirtualClock } from './clock.ts';
 import { type Answer, type AnswerOptions, type ChatCommand, tapOf } from './commands.ts';
 import { controlServer } from './control-server.ts';
-import { KILLED } from './controls.ts';
+import { KILLED, STOPPED } from './controls.ts';
 import { Core, type CoreRecord } from './core.ts';
 import { FakeConnector, fakeConnectorPlugin } from './devkit.ts';
 import { lamp, showValue } from './owner-commands.ts';
@@ -147,7 +147,7 @@ describe('tapOf', () => {
 });
 
 describe('Controls', () => {
-  it('shows each plugin with its state, mode, settings, reads, actions and own status', async () => {
+  it('shows each plugin with its state, settings, reads, actions and own status', async () => {
     const { core } = instance();
     await core.start();
     expect(core.controls.status()).toEqual({
@@ -160,7 +160,6 @@ describe('Controls', () => {
           description: 'acts',
           kinds: ['actor'],
           state: 'running',
-          mode: 'read-only',
           settings: { loud: false, level: 1 },
           reads: ['status', 'broken', 'absent'],
           actions: ['bump', 'refuse'],
@@ -169,27 +168,11 @@ describe('Controls', () => {
         expect.objectContaining({ id: 'broken', state: 'running' }),
       ],
     });
-    expect(core.controls.hasMode('chat')).toBe(false);
   });
 
-  it('sets modes, resumes, reads and acts as the owner, refusing what is not declared', async () => {
-    const { core, seen, ctx } = instance();
+  it('reads and acts as the owner, refusing what is not declared', async () => {
+    const { core } = instance();
     await core.start();
-    expect(core.controls.setMode('actor', 'live')).toBeUndefined();
-    expect(ctx().mode.get()).toBe('live');
-    expect(seen).toContain('mode live');
-    expect(core.controls.setMode('actor', 'loud')).toBe('mode must be read-only, dry-run or live');
-    expect(core.controls.setMode('chat', 'live')).toBe('chat sends nothing: it has no mode');
-    expect(core.controls.setMode('nobody', 'live')).toBe('no plugin nobody');
-    expect(ctx().mode.set('live', 'safety')).toBe('only the owner raises a mode');
-    expect(core.controls.resume('actor')).toBe('actor is not paused');
-    expect(core.controls.resume('nobody')).toBe('no plugin nobody');
-    core.pause('actor', 'drift');
-    expect(core.controls.resume('actor')).toBeUndefined();
-    core.pause('actor', 'drift');
-    expect(ctx().resume()).toBe(true);
-    expect(ctx().resume()).toBe(false);
-    expect(seen.filter((s) => s === 'resume')).toHaveLength(2);
     expect(core.controls.read('actor', 'status')).toEqual({ value: { count: 0 } });
     expect(core.controls.read('actor', 'broken')).toEqual({ error: 'no way' });
     expect(core.controls.read('actor', 'absent')).toEqual({ error: 'actor is not running' });
@@ -225,8 +208,6 @@ describe('Controls', () => {
     expect(seen).toContain('off');
     expect(lines).toContain('broken: error: cannot stop');
     ctx().notify('nobody hears this');
-    expect(core.controls.setMode('actor', 'live')).toBe('the bot is off: `cli.ts on` first');
-    expect(core.controls.resume('actor')).toBe('the bot is off: `cli.ts on` first');
     expect(told).toEqual([]);
     // Kept across a restart.
     await core.stop();
@@ -291,41 +272,58 @@ describe('Controls', () => {
   });
 });
 
-describe('a node’s kill (D44)', () => {
-  it('runs its own safety stop, pauses it as killed, and its resume reinstates it', async () => {
-    const { core, seen, records, ctx } = instance();
+describe('a node’s kill (D44) and stop (D64)', () => {
+  it('runs its own safety stop, then stops it, kept in its instance until cleared', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'controls-'));
+    const { core, seen, records, ctx } = instance({ dataDir: dir });
     await core.start();
-    expect(core.controls.setMode('actor', 'live')).toBeUndefined();
     expect(core.controls.killNode('actor')).toEqual({ result: 'actor killed: actor stopped' });
     expect(seen).toContain(`pause ${KILLED}`);
+    expect(seen).toContain('mode read-only');
     expect(core.controls.status().plugins[1]).toMatchObject({
       id: 'actor',
-      state: 'paused',
+      state: 'stopped',
       reason: KILLED,
-      killed: true,
-      // Its mode is as its own stop left it; the core does not lower it.
-      mode: 'live',
+      stop: { reason: KILLED, source: 'owner', time: new Date(1000).toISOString() },
     });
-    // The other nodes go on, and the killed one's settings and mode can still be changed.
+    // The other nodes go on, and the stopped one's settings can still be changed.
     expect(core.controls.status().plugins[0]).toMatchObject({ id: 'chat', state: 'running' });
     expect(core.settings.set('level', 4)).toBeUndefined();
-    expect(core.controls.setMode('actor', 'dry-run')).toBeUndefined();
     expect(records).toContainEqual(
       expect.objectContaining({
         type: 'core.plugin',
         plugin: 'actor',
-        state: 'paused',
+        state: 'stopped',
         reason: KILLED,
       })
     );
-    expect(ctx().resume()).toBe(true);
-    expect(core.controls.status().plugins[1]).not.toHaveProperty('killed');
-    expect(core.controls.killNode('actor')).toMatchObject({ result: expect.any(String) });
-    expect(core.controls.resume('actor')).toBeUndefined();
-    expect(core.controls.status().plugins[1]).toMatchObject({ state: 'running' });
+    // Its own resume no longer starts it: only the owner, in the editor.
+    expect(ctx().resume()).toBe(false);
+    expect(core.controls.status().plugins[1]).toMatchObject({ state: 'stopped' });
+    // Kept across a restart: not started again.
+    await core.stop();
+    const again = instance({ dataDir: dir });
+    await again.core.start();
+    expect(again.core.controls.status().plugins[1]).toMatchObject({
+      state: 'stopped',
+      reason: KILLED,
+      stop: { source: 'owner' },
+    });
+    expect(again.seen).toEqual([]);
+    expect(again.core.controls.killNode('actor')).toEqual({ error: 'actor is not running' });
+    // Cleared, for the next start.
+    expect(again.core.controls.clearStop('actor')).toBeUndefined();
+    expect(again.core.controls.clearStop('actor')).toBe('actor is not stopped');
+    expect(again.core.controls.clearStop('nobody')).toBe('no plugin nobody');
+    await again.core.stop();
+    const third = instance({ dataDir: dir });
+    await third.core.start();
+    expect(third.core.controls.status().plugins[1]).toMatchObject({ state: 'running' });
+    expect(third.core.controls.status().plugins[1]).not.toHaveProperty('stop');
+    await third.core.stop();
   });
 
-  it('kills a node a drift paused, and one with no stop of its own, its error logged', async () => {
+  it('stops a node a drift stopped, and one with no stop of its own, its error logged', async () => {
     const quiet = definePlugin({
       manifest: { id: 'quiet', version: '0.1.0', kinds: ['stats'], description: 'no stop' },
       create: () => ({}),
@@ -336,30 +334,41 @@ describe('a node’s kill (D44)', () => {
         kill: () => {
           throw new Error('cannot stop');
         },
+        pause: () => {
+          throw new Error('cannot pause');
+        },
       }),
     });
     const lines: string[] = [];
     const core = new Core({ clock: new VirtualClock(1000), print: (l) => lines.push(l) });
     core.register(quiet, throws);
     await core.start();
-    expect(core.controls.killNode('quiet')).toEqual({ result: 'quiet killed' });
+    expect(core.controls.killNode('quiet', STOPPED)).toEqual({ result: 'quiet stopped' });
     expect(core.controls.killNode('throws')).toEqual({ result: 'throws killed' });
     expect(lines).toContain('throws: error: cannot stop');
-    core.pause('quiet', 'drift');
-    expect(core.controls.status().plugins[0]).toMatchObject({ killed: true });
+    expect(lines).toContain('throws: error: pause: cannot pause');
+    expect(core.stopNode('quiet', 'drift', 'drift')).toBe(true);
+    expect(core.controls.status().plugins[0]).toMatchObject({
+      state: 'stopped',
+      stop: { reason: 'drift', source: 'drift' },
+    });
     expect(core.controls.killNode('nobody')).toEqual({ error: 'no plugin nobody' });
     await core.stop();
     expect(core.controls.killNode('quiet')).toEqual({ error: 'quiet is not running' });
-    expect(core.killNode('quiet')).toBe(false);
-    expect(core.killNode('nobody')).toBe(false);
+    expect(core.stopNode('quiet', 'x', 'owner')).toBe(false);
+    expect(core.stopNode('nobody', 'x', 'owner')).toBe(false);
+    expect(core.clearStop('nobody')).toBe(false);
   });
 
-  it('replaces a drift’s pause with the kill', async () => {
+  it('replaces a drift’s stop with the kill, heard once', async () => {
     const { core, seen } = instance();
     await core.start();
-    core.pause('actor', 'drift');
+    core.stopNode('actor', 'drift', 'drift');
     core.controls.killNode('actor');
-    expect(core.controls.status().plugins[1]).toMatchObject({ reason: KILLED, killed: true });
+    expect(core.controls.status().plugins[1]).toMatchObject({
+      reason: KILLED,
+      stop: { source: 'owner' },
+    });
     expect(seen.filter((s) => s.startsWith('pause'))).toEqual(['pause drift']);
   });
 });
@@ -378,8 +387,6 @@ describe('the core’s commands', () => {
       'core kill',
       'core settings',
       'core set',
-      'core mode (hidden)',
-      'core resume (hidden)',
       'core off (hidden)',
       'core on (hidden)',
     ]);
@@ -390,15 +397,15 @@ describe('the core’s commands', () => {
     expect(await ask(named(core, 'tac'), 'evade:on')).toEqual([{ text: 'tac evade:on' }]);
   });
 
-  it('show the plugins and each one, and change their modes and the off switch', async () => {
+  it('show the plugins and each one, stop one, and turn the instance off and on', async () => {
     const { core } = instance();
     await core.start();
     const [list] = await ask(named(core, 'plugins'));
     expect(list?.text).toBe(
       [
-        'The bot is on. Its plugins, with their modes:',
+        'The bot is on. Its plugins, with their states:',
         '🟢 chat: running',
-        '🟢 actor: running · read-only',
+        '🟢 actor: running',
         '🟢 broken: running',
       ].join('\n')
     );
@@ -411,33 +418,45 @@ describe('the core’s commands', () => {
       [{ label: 'broken', action: 'plugins:broken' }],
       [{ label: '← Status', action: 'status' }],
     ]);
-    core.pause('actor', 'drift');
     const [one] = await ask(named(core, 'plugins'), 'actor');
     expect(one?.text).toBe(
       [
-        '⏸️ actor: acts',
-        'State: paused (drift)',
-        'Mode: read-only',
+        '🟢 actor: acts',
+        'State: running',
         'loud: off',
         'level: 1',
         'Reads: status, broken, absent',
         'Actions: bump, refuse',
       ].join('\n')
     );
-    expect(one?.options?.buttons?.slice(0, 2)).toEqual([
-      [
-        { label: '✅ read-only', action: 'mode:actor:read-only' },
-        { label: '⬜ dry-run', action: 'mode:actor:dry-run' },
-        { label: '⬜ live', action: 'mode:actor:live' },
-      ],
-      [{ label: '▶️ Resume', action: 'resume:actor' }],
+    // Its one action that changes its state: stop.
+    expect(one?.options?.buttons).toEqual([
+      [{ label: '⛔ Stop', action: 'plugins:actor:stop' }],
+      [{ label: '← Plugins', action: 'plugins' }],
+      [{ label: '← Status', action: 'status' }],
     ]);
     expect((await ask(named(core, 'plugins'), 'nobody'))[0]?.text).toMatch(
       /^Refused: no plugin nobody\nThe bot is on/u
     );
-    expect((await ask(named(core, 'resume'), 'actor'))[0]?.text).toMatch(/^🟢 actor: acts/u);
-    expect((await ask(named(core, 'mode'), 'actor:live'))[0]?.text).toContain('Mode: live');
-    expect((await ask(named(core, 'mode'), 'actor loud'))[0]?.text).toMatch(/^Refused: mode must/u);
+    const [stopped] = await ask(named(core, 'plugins'), 'actor:stop');
+    expect(stopped?.text).toBe(
+      [
+        '⛔ actor: acts',
+        `State: stopped (${STOPPED})`,
+        'Stopped at 1970-01-01 00:00 UTC (owner)',
+        'Started again only from the editor, then Apply.',
+        'loud: off',
+        'level: 1',
+        'Reads: status, broken, absent',
+        'Actions: bump, refuse',
+      ].join('\n')
+    );
+    expect(stopped?.options?.buttons?.[0]).toEqual([{ label: '← Plugins', action: 'plugins' }]);
+    // Stopped again, typed: the latest stop is kept.
+    expect((await ask(named(core, 'plugins'), 'actor stop'))[0]?.text).toMatch(/^⛔ actor/u);
+    expect((await ask(named(core, 'plugins'), 'nobody stop'))[0]?.text).toMatch(
+      /^Refused: no plugin nobody\nThe bot is on/u
+    );
     const [off] = await ask(named(core, 'off'));
     expect(off?.text).toMatch(/^The bot is off\./u);
     expect(off?.options?.buttons?.[0]).toEqual([{ label: '🟢 Turn the bot on', action: 'on' }]);
@@ -555,25 +574,22 @@ describe('controlServer', () => {
       ],
     });
     expect(await call('/plugins/actor/mode', { mode: 'dry-run' })).toEqual([
-      200,
-      { mode: 'dry-run' },
+      404,
+      { error: 'not found' },
     ]);
-    expect(await call('/plugins/actor/mode', { mode: 'x' })).toEqual([
+    expect(await call('/plugins/actor/clear-stop', {})).toEqual([
       409,
-      { error: 'mode must be read-only, dry-run or live' },
+      { error: 'actor is not stopped' },
     ]);
-    expect(await call('/plugins/actor/resume', {})).toEqual([
-      409,
-      { error: 'actor is not paused' },
-    ]);
-    core.pause('actor', 'drift');
-    expect(await call('/plugins/actor/resume', {})).toEqual([200, { resumed: 'actor' }]);
     expect(await call('/plugins/actor/kill', {})).toEqual([
       200,
       { result: 'actor killed: actor stopped' },
     ]);
     expect(await call('/plugins/nobody/kill', {})).toEqual([409, { error: 'no plugin nobody' }]);
-    expect(await call('/plugins/actor/resume', {})).toEqual([200, { resumed: 'actor' }]);
+    expect((await call('/status'))[1]).toMatchObject({
+      plugins: [{}, { id: 'actor', state: 'stopped', stop: { source: 'owner' } }, {}],
+    });
+    expect(await call('/plugins/actor/clear-stop', {})).toEqual([200, { cleared: 'actor' }]);
     expect(await call('/plugins/actor/state/status')).toEqual([200, { count: 0 }]);
     expect(await call('/plugins/actor/state/nope')).toEqual([
       404,

@@ -1,6 +1,6 @@
 /**
  * Parser drift (docs/bot-os-api.md §4.7, P5): every message a parser claims but cannot read is
- * reported, with the text that failed, and too many of them pause what acts on that parser.
+ * reported, with the text that failed, and too many of them stop what acts on that parser (D64).
  *
  * - The parser contract: each message a parser sees is `not-mine` (not its bot's), `read`, or
  *   `unread` (its bot's, in a form it does not know).
@@ -59,7 +59,7 @@ export interface DriftOptions {
   notify?: (text: string) => void;
   /** The threshold of a parser: its manifest's, or the default. */
   threshold?: (parser: string) => DriftThreshold;
-  /** Pauses what acts on the parser; returns the plugins paused. */
+  /** Stops what acts on the parser (bot-os.md D64); returns the plugins stopped. */
   pause: (parser: string, reason: string) => string[];
 }
 
@@ -168,7 +168,7 @@ export class DriftMonitor {
     this.o.notify?.(
       paused.length === 0
         ? `Drift: ${reason}; nothing that acts depends on it`
-        : `Drift: ${reason}; paused ${paused.join(', ')} until you look`
+        : `Drift: ${reason}; stopped ${paused.join(', ')} until you clear the stop in the editor`
     );
   }
 }

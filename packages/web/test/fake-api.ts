@@ -1,6 +1,6 @@
 /**
  * A fake of the UI's server for the app's tests: `fetch` answered from a table of routes, each
- * call kept. A route is the method and the path after `api` (`GET /status`, `POST /plugins/a/mode`).
+ * call kept. A route is the method and the path after `api` (`GET /status`, `POST /plugins/a/kill`).
  */
 import { vi } from 'vitest';
 

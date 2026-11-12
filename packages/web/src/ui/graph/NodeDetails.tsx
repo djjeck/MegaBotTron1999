@@ -1,11 +1,12 @@
 /**
  * The node selected in the graph editor (D55): what it is, its instance and its live state, and,
- * editable for the draft, its account (a connector's), the mode its instance starts in, its config
+ * editable for the draft, whether it is enabled (D64), its account (a connector's), its config
  * and the settings its instance starts with, in forms made from their schemas, each field with the
  * check's errors; a config key that names a secret (`configSecrets`) is a choice of the secrets'
  * names; a connector's `chats` (what it monitors) is picked from its surfaces (D63). Then the
- * interface it declares (P11) and its removal, which keeps its instance. A killed
- * node (D44) says so, with its reinstatement; its forms stay editable as any other's.
+ * interface it declares (P11) and its removal, which keeps its instance. A stopped node (D64)
+ * says why, when and by what, with **Clear stop**, a change of the draft that Apply makes; a
+ * running one can be killed (D44). Its forms stay editable whatever its state.
  */
 import type {
   DriftCounts,
@@ -13,7 +14,6 @@ import type {
   InstanceInfo,
   JsonSchema,
   MemberView,
-  Mode,
   NodeView,
   PluginControl,
   PortView,
@@ -30,13 +30,6 @@ function withoutChats(schema: JsonSchema | undefined): JsonSchema | undefined {
   const { [CHATS_KEY]: _, ...rest } = props;
   return { ...schema, properties: rest };
 }
-
-/** The modes a node's instance may start in (P10); unset, it starts `read-only`. */
-const MODES: Record<Mode, string> = {
-  'read-only': 'read-only: sends nothing',
-  'dry-run': 'dry-run: records, sends nothing',
-  live: 'live: sends',
-};
 
 function Ports(props: { title: string; ports: Record<string, PortView> }) {
   const entries = Object.entries(props.ports);
@@ -98,10 +91,14 @@ export function NodeDetails(props: {
   change: (change: Partial<GraphNode>) => void;
   remove: () => void;
   kill: (ids: string[]) => void;
-  reinstate: (id: string) => void;
+  /** Its stop cleared in the draft (D64), for the next Apply. */
+  cleared: boolean;
+  /** Clears its stop in the draft, or keeps it again. */
+  clearStop: (clear: boolean) => void;
 }) {
   const { node, view, live, drift } = props;
-  const killed = live?.killed === true;
+  const enabled = node.disabled !== true;
+  const stop = live?.state === 'stopped' ? live.stop : undefined;
   const connector = view.kinds.includes('connector');
   const i = view.interface;
   const instance = instanceOf(node);
@@ -136,13 +133,9 @@ export function NodeDetails(props: {
         </dd>
         <dt>State</dt>
         <dd>
-          {live === undefined ? 'not running' : killed ? 'killed' : live.state}
-          {live?.reason === undefined || killed ? null : (
-            <span className="muted"> {live.reason}</span>
-          )}
+          {live === undefined ? 'not running' : live.state}
+          {live?.reason === undefined ? null : <span className="muted"> {live.reason}</span>}
         </dd>
-        <dt>Mode</dt>
-        <dd>{live?.mode ?? <span className="muted">sends nothing</span>}</dd>
         {drift === undefined ? null : (
           <>
             <dt>Drift</dt>
@@ -153,23 +146,65 @@ export function NodeDetails(props: {
           </>
         )}
       </dl>
-      {live === undefined ? null : killed ? (
-        <p className="killed-note">
-          Killed: it sends nothing until reinstated.{' '}
-          <button type="button" className="reinstate" onClick={() => props.reinstate(view.id)}>
-            Reinstate
-          </button>
-        </p>
-      ) : (
+      <div className="field state-switch">
+        <label className="choice">
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label="enabled"
+            checked={enabled}
+            onChange={(e) => props.change({ disabled: e.target.checked ? undefined : true })}
+          />
+          {enabled ? 'Enabled' : 'Disabled'}
+        </label>
+        <small className="muted">
+          {enabled
+            ? 'It starts with the instance. Disable it to keep it, its config and its edges, not running.'
+            : 'It does not start; its config and edges are still checked, and the nodes that need it are inactive.'}{' '}
+          Applied with Apply.
+        </small>
+      </div>
+      {stop === undefined ? null : (
+        <div className={`stop-note${props.cleared ? ' cleared' : ''}`} role="note">
+          <p>
+            <span className="warning-icon" role="img" aria-label="warning">
+              ⚠
+            </span>{' '}
+            <strong>Stopped</strong> by{' '}
+            {stop.source === 'safety'
+              ? 'its safety stop'
+              : stop.source === 'drift'
+                ? 'drift'
+                : 'the owner'}{' '}
+            at {stop.time.slice(0, 16).replace('T', ' ')} UTC: {stop.reason}. It stays stopped
+            across restarts until its stop is cleared.
+          </p>
+          {props.cleared ? (
+            <p>
+              Its stop is cleared at the next Apply.{' '}
+              <button type="button" onClick={() => props.clearStop(false)}>
+                Keep it stopped
+              </button>
+            </p>
+          ) : (
+            <p>
+              <button type="button" className="primary" onClick={() => props.clearStop(true)}>
+                Clear stop
+              </button>
+            </p>
+          )}
+        </div>
+      )}
+      {live?.state !== 'running' ? null : (
         <p>
           <button type="button" className="danger" onClick={() => props.kill([view.id])}>
             Kill {view.id}
           </button>
         </p>
       )}
-      <section>
-        <h3>Node</h3>
-        {connector ? (
+      {!connector ? null : (
+        <section>
+          <h3>Account</h3>
           <div className="field">
             <label>
               <code>account</code>
@@ -184,31 +219,8 @@ export function NodeDetails(props: {
               {'<network>:<name>'}; the plugin’s own ({view.account ?? 'none'}) when empty
             </small>
           </div>
-        ) : (
-          <div className="field">
-            <label>
-              <code>mode</code>
-              <select
-                aria-label="mode"
-                value={node.mode ?? ''}
-                onChange={(e) =>
-                  props.change({ mode: (e.target.value || undefined) as Mode | undefined })
-                }
-              >
-                <option value="">(unset: read-only)</option>
-                {Object.entries(MODES).map(([m, help]) => (
-                  <option key={m} value={m}>
-                    {help}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <small className="muted">
-              The mode its instance starts in, while it keeps none of its own (P10).
-            </small>
-          </div>
-        )}
-      </section>
+        </section>
+      )}
       <section>
         <h3>Config</h3>
         {view.configSchema === undefined ? (

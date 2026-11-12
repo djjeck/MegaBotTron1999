@@ -8,7 +8,7 @@
  * Editable when given `onChange` (the editor's draft, D55): a field emptied (once left) is taken
  * away, so that its default holds; a key of `secretKeys` (a connector's `configSecrets`, bot-os-api.md §4.9) is a
  * choice of the secrets' names, never a value; `errors` are the check's, by key. Read-only without
- * it (an action's input). Nothing here depends on the node's state, so a killed node's form is as
+ * it (an action's input). Nothing here depends on the node's state, so a stopped node's form is as
  * any other's (D44).
  */
 import { useState } from 'react';

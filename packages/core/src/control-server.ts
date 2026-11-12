@@ -6,7 +6,8 @@
  * login (`@megabottron1999/web`). Nothing here knows of any plugin: the routes are the
  * controls', and each plugin's are its declared reads and actions.
  *
- * - `GET /status`: the instance (off or on) and each plugin: its state, mode, settings, reads,
+ * - `GET /status`: the instance (off or on) and each plugin: its state (bot-os.md D64: running,
+ *   disabled, stopped with its stop, inactive with the node it needs, failed), settings, reads,
  *   actions, and its own `status` read if it declares one; `graph.refused`, why the saved graph
  *   did not run, when it did not.
  * - `GET /instance`: the instance's health: off or on, the process's uptime, Node's version and
@@ -46,9 +47,10 @@
  *   merged into this instance's.
  * - `POST /restart`: the instance stops, its state kept, and exits to be started again: how a
  *   saved graph, or a module installed, takes effect.
- * - `POST /plugins/<id>/mode {"mode": "live"}`, `POST /plugins/<id>/resume`.
- * - `POST /plugins/<id>/kill`: that node's kill (D44): its own safety stop, then paused as killed
- *   until its resume reinstates it.
+ * - `POST /plugins/<id>/kill`: that node's kill (D44): its own safety stop, then stopped (D64),
+ *   kept in its instance until the owner clears it.
+ * - `POST /plugins/<id>/clear-stop`: that node's stop cleared, for the next start (the editor's
+ *   Clear stop, which Apply sends before its restart); 409 when it is not stopped.
  * - `GET /plugins/<id>/state/<name>`: a declared read.
  * - `POST /plugins/<id>/actions/<name>` with the action's input as the body: its output, a 400 for
  *   an input its schema refuses, a 409 when the plugin refuses, with why.
@@ -354,20 +356,15 @@ export function controlHandler(
         }
         return reply(200, settings.current());
       }
-      const m = /^\/plugins\/([^/]+)\/(mode|resume|kill|state|actions)(?:\/([^/]+))?$/u.exec(route);
+      const m = /^\/plugins\/([^/]+)\/(clear-stop|kill|state|actions)(?:\/([^/]+))?$/u.exec(route);
       if (m !== null) {
         const [, rawId = '', what, rawName] = m;
         const id = decodeURIComponent(rawId);
         const name = rawName === undefined ? undefined : decodeURIComponent(rawName);
-        if (post && what === 'mode' && name === undefined) {
-          const mode = field(await body(req), 'mode');
-          const refused = controls.setMode(id, mode);
-          return refused === undefined ? reply(200, { mode }) : reply(409, { error: refused });
-        }
-        if (post && what === 'resume' && name === undefined) {
-          const refused = controls.resume(id);
+        if (post && what === 'clear-stop' && name === undefined) {
+          const refused = controls.clearStop(id);
           return refused === undefined
-            ? reply(200, { resumed: id })
+            ? reply(200, { cleared: id })
             : reply(409, { error: refused });
         }
         if (post && what === 'kill' && name === undefined) {

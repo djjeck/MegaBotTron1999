@@ -2,24 +2,25 @@
  * The core's own chat commands (docs/bot-os-api.md §4.11, P11): the owner's controls that belong
  * to no plugin, answered by the chat surface as the plugins' are, to the owner only.
  *
- * - `/plugins`: the instance (on or off) and each plugin, its state and mode, with a button to turn
- *   the instance off or on and one for each plugin; `/plugins <id>` (a plugin's card): its state,
- *   mode, settings, reads and actions, with a button for each mode and, paused, one to resume it.
+ * - `/plugins`: the instance (on or off) and each plugin, its state (bot-os.md D64), with a button
+ *   to turn the instance off or on and one for each plugin; `/plugins <id>` (a plugin's card): its
+ *   state and why, settings, reads and actions, and, while it runs, the one action that changes a
+ *   node's state here: **Stop** (`/plugins <id> stop`), its own safety stop then the core's stop,
+ *   kept until the owner clears it in the editor. Nothing here starts a node again.
  * - `/kill`: the kill switch (`Controls.kill`), answered in a new message under a tapped notice.
  * - `/settings`: every setting, by plugin, with the value in force and a switch for each that is on
  *   or off; `/set <key> <value>` (or a tap's `set:<key>:<value>`) changes one.
- * - In no menu, a card's buttons: `mode:<id>:<mode>`, `resume:<id>`, `off`, `on`.
+ * - In no menu, a card's buttons: `plugins:<id>:stop`, `off`, `on`.
  *
  * Every card may end with a way back to the owner's main card (`home`, the wiring's). Nothing in
  * here knows of any game or any network.
  */
 import { type Answer, type Buttons, type ChatCommand, type CommandButton } from './commands.ts';
-import { type Controls, type PluginControl } from './controls.ts';
-import { MODES } from './outbox.ts';
+import { type Controls, type PluginControl, STOPPED } from './controls.ts';
 import { type SettingsRegistry, type SettingValue } from './settings.ts';
 
 /** The names of the core's commands, which no plugin's may take. */
-export const CORE_COMMANDS = ['plugins', 'kill', 'settings', 'set', 'mode', 'resume', 'off', 'on'];
+export const CORE_COMMANDS = ['plugins', 'kill', 'settings', 'set', 'off', 'on'];
 
 /** A switch as the cards show it: 🟢 on, 🔴 off, ⚪ unknown. */
 export const lamp = (v: unknown): string => (v === true ? '🟢' : v === false ? '🔴' : '⚪');
@@ -27,9 +28,10 @@ export const lamp = (v: unknown): string => (v === true ? '🟢' : v === false ?
 /** A plugin's state as the cards show it. */
 const STATE_LAMP: Record<string, string> = {
   running: '🟢',
-  paused: '⏸️',
+  stopped: '⛔',
   failed: '🔴',
-  stopped: '⚫',
+  disabled: '⚫',
+  inactive: '💤',
 };
 
 /** A setting's value as the cards show it. */
@@ -74,8 +76,7 @@ export function coreCommands(o: CoreCommandsOptions): ChatCommand[] {
   const pluginsCard = (): Card => {
     const s = controls.status();
     const line = (p: PluginControl): string =>
-      `${STATE_LAMP[p.state] ?? '⚪'} ${p.id}: ${p.state}${p.reason === undefined ? '' : ` (${p.reason})`}` +
-      (p.mode === undefined ? '' : ` · ${p.mode}`);
+      `${STATE_LAMP[p.state] ?? '⚪'} ${p.id}: ${p.state}${p.reason === undefined ? '' : ` (${p.reason})`}`;
     const buttons: CommandButton[][] = [
       [
         s.off
@@ -88,7 +89,7 @@ export function coreCommands(o: CoreCommandsOptions): ChatCommand[] {
       buttons.push(ids.slice(i, i + 2).map((id) => ({ label: id, action: `plugins:${id}` })));
     return {
       text: [
-        `The bot is ${s.off ? 'off' : 'on'}. Its plugins, with their modes:`,
+        `The bot is ${s.off ? 'off' : 'on'}. Its plugins, with their states:`,
         ...s.plugins.map(line),
       ].join('\n'),
       buttons: [...buttons, ...foot],
@@ -101,20 +102,18 @@ export function coreCommands(o: CoreCommandsOptions): ChatCommand[] {
     const text = [
       `${STATE_LAMP[p.state] ?? '⚪'} ${p.id}: ${p.description}`,
       `State: ${p.state}${p.reason === undefined ? '' : ` (${p.reason})`}`,
-      ...(p.mode === undefined ? [] : [`Mode: ${p.mode}`]),
+      ...(p.stop === undefined
+        ? []
+        : [`Stopped at ${p.stop.time.slice(0, 16).replace('T', ' ')} UTC (${p.stop.source})`]),
+      ...(p.state === 'stopped' || p.state === 'disabled' || p.state === 'inactive'
+        ? ['Started again only from the editor, then Apply.']
+        : []),
       ...Object.entries(p.settings).map(([k, v]) => `${k}: ${showValue(v)}`),
       ...(p.reads.length === 0 ? [] : [`Reads: ${p.reads.join(', ')}`]),
       ...(p.actions.length === 0 ? [] : [`Actions: ${p.actions.join(', ')}`]),
     ].join('\n');
     const buttons: CommandButton[][] = [];
-    if (p.mode !== undefined)
-      buttons.push(
-        MODES.map((m) => ({
-          label: `${m === p.mode ? '✅' : '⬜'} ${m}`,
-          action: `mode:${p.id}:${m}`,
-        }))
-      );
-    if (p.state === 'paused') buttons.push([{ label: '▶️ Resume', action: `resume:${p.id}` }]);
+    if (p.state === 'running') buttons.push([{ label: '⛔ Stop', action: `plugins:${p.id}:stop` }]);
     buttons.push([{ label: '← Plugins', action: 'plugins' }]);
     return { text, buttons: [...buttons, ...foot] };
   };
@@ -170,15 +169,19 @@ export function coreCommands(o: CoreCommandsOptions): ChatCommand[] {
   return [
     command(
       'plugins',
-      'The plugins: each one’s state and mode, and the off switch',
+      'The plugins: each one’s state, and the off switch',
       (answer, { args }) => {
-        const id = args.trim();
+        const [id, what] = keyValue(args);
+        if (what === 'stop') {
+          const r = controls.killNode(id, STOPPED);
+          return show(answer, pluginCard(id) ?? pluginsCard(), 'error' in r ? r.error : undefined);
+        }
         const card = id === '' ? pluginsCard() : pluginCard(id);
         return card === undefined
           ? show(answer, pluginsCard(), `no plugin ${id}`)
           : show(answer, card);
       },
-      { args: '[plugin]' }
+      { args: '[plugin] [stop]' }
     ),
     command('kill', 'Kill switch: everything off, and no command sent', async (answer) => {
       if (controls.off) {
@@ -198,26 +201,6 @@ export function coreCommands(o: CoreCommandsOptions): ChatCommand[] {
         return show(answer, settingsCard(), refused);
       },
       { args: '<key> <value>' }
-    ),
-    command(
-      'mode',
-      "Set a plugin's mode: /mode quest-turns live",
-      (answer, { args }) => {
-        const [id, mode] = keyValue(args);
-        const refused = controls.setMode(id, mode);
-        return show(answer, pluginCard(id) ?? pluginsCard(), refused);
-      },
-      { args: '<plugin> <mode>', hidden: true }
-    ),
-    command(
-      'resume',
-      'Resume a plugin paused for drift',
-      (answer, { args }) => {
-        const id = args.trim();
-        const refused = controls.resume(id);
-        return show(answer, pluginCard(id) ?? pluginsCard(), refused);
-      },
-      { args: '<plugin>', hidden: true }
     ),
     command(
       'off',

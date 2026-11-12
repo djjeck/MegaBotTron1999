@@ -11,6 +11,9 @@ reaction.
 - `turnActorPlugin` (`src/turn-actor.ts`): an actor that sends one bot's turn command in the private
   chat with it, at a person's pace (`src/schedule.ts`: intervals drawn from a range, skipped turns,
   nights off), waiting out the rest its parser reads. One plugin, run as one instance per bot.
+  Through a dry-run chat-out edge it logs each turn and sends nothing; through a live one it waits
+  for the account to be connected. Its safety stop (the kill switch) stops its node (`ctx.stop`,
+  docs/bot-os.md D64), until the owner clears the stop in the editor.
 - `reactorPlugin` (`src/reactor.ts`): the `reactor`, one reaction (`react()` of the core) from its
   node's config: when an event of its `on` type is heard, or a message on its chat-in input (there
   only with `match`) matches its `match`, and the payload's fields equal its `when`, it sends its
@@ -18,6 +21,7 @@ reaction.
   instance per reaction.
 
 Their chats run left to right (docs/bot-os.md D60): a parser has a chat-in input only, the reactor a
-chat-out output (and a chat-in only with `match`), and the turn-actor both, for now.
+chat-out output (and a chat-in only with `match`), and the turn-actor both, for now. Whether a send
+goes for real is its chat-out edge's: a `dryRun` edge logs it as sent and sends nothing (D64).
 
 The tests play a made-up @QuestBot (`test/quest.ts`).

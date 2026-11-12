@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { VirtualClock } from './clock.ts';
 import { controlServer } from './control-server.ts';
-import { Core } from './core.ts';
+import { Core, STATES_DOC } from './core.ts';
 import { FakeConnector, fakeConnectorPlugin } from './devkit.ts';
 import { type GraphInput } from './graph.ts';
 import { graphDiff, GraphFile, graphFileControls, locateProblem } from './graph-file.ts';
@@ -93,6 +93,9 @@ function instance(): { core: Core; lines: string[]; told: string[]; file: GraphF
   const lines: string[] = [];
   const told: string[] = [];
   const file = new GraphFile(dir, () => clock.now());
+  // The modes of before bot-os.md D64 migrated already: a first start's is `states.test.ts`'s.
+  fs.mkdirSync(path.join(dir, 'core'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'core', `${STATES_DOC}.json`), '{"migrated":"before"}\n');
   const core = new Core({
     clock,
     dataDir: dir,
