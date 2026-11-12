@@ -46,8 +46,10 @@ folder** (or drop the folder on the page), pick the module's own folder (for exa
 `modules/dice/`, not the whole repository), check the id and version it shows, install it, then
 click **Apply (restart)** to load it. The Modules page also installs a `.tar.gz` and rolls a module
 back to its previous version; the Import page brings in an older data directory's event log
-([docs/bot-os.md](docs/bot-os.md) D55). In a real deployment, use Docker or Compose secrets, and put
-the UI behind a reverse proxy with HTTPS rather than publishing the port.
+([docs/bot-os.md](docs/bot-os.md) D55); the Admin page shows the instance (with its off and kill
+switches), its accounts and their connections, and its plugins with their modes (D59). In a real
+deployment, use Docker or Compose secrets, and put the UI behind a reverse proxy with HTTPS rather
+than publishing the port.
 
 - **`/data`** is the instance's state: the graph (`graph.json`, and `graph.previous.json`), each
   plugin instance's state (`instances/<id>/`), the core's own (`core/`), the event log

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Answer } from '#test/fake-api.ts';
 import { fakeApi } from '#test/fake-api.ts';
@@ -73,13 +73,13 @@ describe('App', () => {
     });
     render(<App />);
     await screen.findByRole('heading', { name: 'Graph' });
-    // The graph is the main menu's; the admin pages are a menu of their own.
+    // One menu, every page in it: the whole app is the owner's console.
+    expect(screen.getAllByRole('navigation')).toHaveLength(1);
     expect(
-      within(screen.getByRole('navigation', { name: 'main' })).getAllByRole('link')
-    ).toHaveLength(3);
-    expect(
-      within(screen.getByRole('navigation', { name: 'admin' })).getAllByRole('link')
-    ).toHaveLength(5);
+      within(screen.getByRole('navigation', { name: 'main' }))
+        .getAllByRole('link')
+        .map((l) => l.textContent)
+    ).toEqual(['Graph', 'Modules', 'Import', 'Admin', 'Drift', 'Events']);
     for (const page of PAGES) {
       window.location.hash = `#/${page.route}`;
       window.dispatchEvent(new HashChangeEvent('hashchange'));
@@ -88,6 +88,16 @@ describe('App', () => {
         'page'
       );
     }
+    // The admin page's sections keep their old routes, which lead to it, scrolled to the section.
+    const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+    for (const old of ['instance', 'accounts', 'plugins']) {
+      window.location.hash = `#/${old}`;
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      await waitFor(() => expect(scrolled.mock.contexts.at(-1)).toBe(document.getElementById(old)));
+      expect(screen.getByRole('heading', { name: 'Admin', level: 1 })).toBeDefined();
+      expect(screen.getByRole('link', { name: 'Admin' }).getAttribute('aria-current')).toBe('page');
+    }
+    scrolled.mockRestore();
     window.location.hash = '#/nowhere';
     window.dispatchEvent(new HashChangeEvent('hashchange'));
     expect(await screen.findByRole('heading', { name: 'Graph' })).toBeDefined();

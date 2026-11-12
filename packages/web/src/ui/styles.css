@@ -198,11 +198,6 @@ ul.log time {
   margin: 0.25rem 0;
 }
 
-nav.secondary {
-  flex: 0 1 auto;
-  font-size: 0.9rem;
-}
-
 main.wide {
   max-width: none;
 }

@@ -1,7 +1,7 @@
 # @megabottron1999/web
 
-The shell's web UI: the instance's graph, its home page, the owner's admin pages, and the server
-that guards them.
+The shell's web UI, the owner's console: the instance's graph, its home page, the other pages, and
+the server that guards them.
 
 - `src/ui/`: a React app, built by Vite (`npm run build`, `vite.config.ts`, `index.html`) into
   `dist/`, the only build step of the shell. Its pages are reached by the URL's hash. The home page
@@ -34,14 +34,17 @@ that guards them.
   (**Choose folder**) or dropped on the page, after showing the id, version and description its
   `module.json` gives (`src/ui/module-folder.ts`), or from a `.tar.gz`, and rolls one back;
   **Import** (`#/import`) shows an older data directory and imports its event log with a table of
-  type renames. The admin pages are a secondary menu (Admin), one per area: **Instance** (on or off
-  with its switch, uptime, memory, the plugins and accounts by state, the kill switch), **Accounts**
-  (each connector, its account and its connection's status), **Plugins** (each plugin instance with
-  its state, a mode control, a resume when paused, and, opened, its settings, its own status and the
-  reads and actions it declares), **Drift** (each parser's counts and the latest reports) and
-  **Events** (the event log's latest records, filtered by type). Every page reads the control API
-  only; the app imports the core's types and nothing else of it, so its bundle holds none of the
-  shell's code. A page is a line of `PAGES` in `src/ui/App.tsx`.
+  type renames. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59) has one
+  section per area, each still reached by its old route (`#/instance`, `#/accounts`, `#/plugins`),
+  which opens the page scrolled to it: **Instance** (on or off with its switch, uptime, memory, the
+  plugins and accounts by state, the kill switch), **Accounts** (each connector, its account and its
+  connection's status) and **Plugins** (each plugin instance with its state, a mode control, a
+  resume when paused, and, opened, its settings, its own status and the reads and actions it
+  declares). Beside it, **Drift** (each parser's counts and the latest reports) and **Events** (the
+  event log's latest records, filtered by type). Every page reads the control API only; the app
+  imports the core's types and nothing else of it, so its bundle holds none of the shell's code. All
+  the pages are in one menu, with no admin part apart: the whole app is the owner's console. A page
+  is a line of `PAGES` in `src/ui/App.tsx`.
 - `src/server/web-server.ts`: the UI's own listener. It serves the built app, and the core's control
   API (`controlHandler` of `@megabottron1999/core`) under `/api/`, only to a logged-in owner.
   `startWebUi` starts it only when the `web_ui_password` Docker secret is provided (12 characters at

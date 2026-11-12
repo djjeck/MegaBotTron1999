@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeApi } from '#test/fake-api.ts';
 import { AccountsPage } from './AccountsPage.tsx';
+import { AdminPage } from './AdminPage.tsx';
 import { DriftPage } from './DriftPage.tsx';
 import { EventsPage } from './EventsPage.tsx';
 import { InstancePage } from './InstancePage.tsx';
@@ -23,6 +24,39 @@ const HEALTH = {
   plugins: { running: 2 },
   accounts: {},
 };
+
+describe('AdminPage', () => {
+  it('shows the instance, the accounts and the plugins, one section each, in order', async () => {
+    fakeApi({
+      'GET /instance': [200, HEALTH],
+      'GET /accounts': [200, []],
+      'GET /status': [200, { off: false, plugins: [] }],
+    });
+    const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+    render(<AdminPage loggedOut={loggedOut} />);
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Instance',
+      'Accounts',
+      'Plugins',
+    ]);
+    expect(
+      await within(screen.getByRole('region', { name: 'Accounts' })).findByText(
+        'No connector runs.'
+      )
+    ).toBeDefined();
+    expect(scrolled).not.toHaveBeenCalled();
+    scrolled.mockRestore();
+  });
+
+  it('scrolls to the section that the route names', () => {
+    fakeApi({});
+    const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+    render(<AdminPage loggedOut={loggedOut} section="plugins" />);
+    expect(scrolled).toHaveBeenCalledOnce();
+    expect(scrolled.mock.contexts[0]).toBe(document.getElementById('plugins'));
+    scrolled.mockRestore();
+  });
+});
 
 describe('InstancePage', () => {
   it('shows the health, and turns the instance off and on, and kills it once confirmed', async () => {
