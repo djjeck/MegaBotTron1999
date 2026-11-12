@@ -65,10 +65,20 @@ const BEFORE = {
   ],
 };
 
+/**
+ * A file the release before wrote, dated an hour before the test's clock: its history takes in a
+ * file at its time, which must come before the versions the start writes, whatever the real date.
+ */
+function written(file: string, text: string, minutesBefore = 60): void {
+  fs.writeFileSync(file, text);
+  const at = new Date(T0 - minutesBefore * 60_000);
+  fs.utimesSync(file, at, at);
+}
+
 let dir: string;
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'states-migration-'));
-  fs.writeFileSync(path.join(dir, 'graph.json'), JSON.stringify(BEFORE, null, 2));
+  written(path.join(dir, 'graph.json'), JSON.stringify(BEFORE, null, 2));
   const keep = (instance: string, mode: string): void => {
     fs.mkdirSync(path.join(dir, 'instances', instance), { recursive: true });
     fs.writeFileSync(path.join(dir, 'instances', instance, '_mode.json'), JSON.stringify({ mode }));
@@ -184,12 +194,13 @@ describe('the first start since modes became states (D64)', () => {
 
   it('takes the graph before the last change of a release before the history in first', async () => {
     const previous = { ...BEFORE, nodes: BEFORE.nodes.filter((n) => n.id !== 'shout') };
-    fs.writeFileSync(
+    written(
       path.join(dir, 'graph.previous.json'),
       JSON.stringify({
         ...previous,
         edges: BEFORE.edges.filter((e) => !e.to.startsWith('shout') && !e.from.startsWith('shout')),
-      })
+      }),
+      120
     );
     const { core, file } = start(new VirtualClock(T0));
     await core.start();
