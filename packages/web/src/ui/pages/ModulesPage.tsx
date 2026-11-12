@@ -41,7 +41,7 @@ const size = (n: number): string =>
       ? `${(n / 1024).toFixed(1)} KiB`
       : `${(n / 2 ** 20).toFixed(1)} MiB`;
 
-export function ModulesPage({ loggedOut }: PageProps) {
+export function ModulesPage({ loggedOut, restarted }: PageProps) {
   const report = useLoad(() => api<ModulesReport>('/modules'), loggedOut, 30_000);
   const [file, setFile] = useState<File>();
   const [folder, setFolder] = useState<ModuleFolder>();
@@ -287,7 +287,12 @@ export function ModulesPage({ loggedOut }: PageProps) {
       )}
       {restarting ? (
         <Restart
-          done={(note) => loggedOut(note)}
+          done={(note) => {
+            setRestarting(false);
+            if (restarted === undefined) setSaid(note);
+            else restarted(note);
+          }}
+          loggedOut={(note) => loggedOut(note)}
           failed={(why) => {
             setRestarting(false);
             setSaid(`restart: ${why}`);

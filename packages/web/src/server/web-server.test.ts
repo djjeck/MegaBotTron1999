@@ -1,4 +1,11 @@
-import { controlHandler, Core, FakeConnector, fakeConnectorPlugin } from '@megabottron1999/core';
+import {
+  controlHandler,
+  Core,
+  CORE_STORE,
+  FakeConnector,
+  fakeConnectorPlugin,
+  Stores,
+} from '@megabottron1999/core';
 import { VirtualClock } from '@megabottron1999/core/clock.ts';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -71,7 +78,8 @@ describe('webHandler', () => {
       })
     );
     const b = browser(base);
-    expect(await (await b.call('/api/session')).json()).toEqual({ authenticated: false });
+    const first = (await (await b.call('/api/session')).json()) as { boot: string };
+    expect(first).toEqual({ authenticated: false, boot: expect.stringMatching(/^[0-9a-f]{16}$/u) });
     const refused = await b.call('/api/status');
     expect(refused.status).toBe(401);
     expect(refused.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
@@ -85,11 +93,14 @@ describe('webHandler', () => {
     const set = ok.headers.get('set-cookie') ?? '';
     expect(set).toMatch(
       new RegExp(
-        `^${SESSION_COOKIE}=[\\w-]{43}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200$`,
+        `^${SESSION_COOKIE}=[\\w-]{43}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000$`,
         'u'
       )
     );
-    expect(await (await b.call('/api/session')).json()).toEqual({ authenticated: true });
+    expect(await (await b.call('/api/session')).json()).toEqual({
+      authenticated: true,
+      boot: first.boot,
+    });
     expect(await (await b.call('/api/status')).json()).toEqual({ ok: true });
     await b.call('/api/plugins/a%20b/mode', { json: { mode: 'live' } });
     await b.call('/api/events?limit=5');
@@ -104,6 +115,44 @@ describe('webHandler', () => {
     const out = await b.call('/api/logout', { json: {} });
     expect(out.headers.get('set-cookie')).toContain('Max-Age=0');
     expect((await b.call('/api/status')).status).toBe(401);
+  });
+
+  it('keeps the login across a restart, ends it at its logout, and at a new password', async () => {
+    const data = fs.mkdtempSync(path.join(os.tmpdir(), 'web-data-'));
+    const store = () => new Stores(data).open(CORE_STORE);
+    const api: http.RequestListener = (_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{"ok":true}');
+    };
+    const first = await serve(
+      webHandler({ password: PASSWORD, dist: dist(), api, store: store() })
+    );
+    const b = browser(first);
+    await b.call('/api/login', { json: { password: PASSWORD } });
+    const before = (await (await b.call('/api/session')).json()) as { boot: string };
+    // The next process, on the same data volume: logged in still, another boot.
+    const second = await serve(
+      webHandler({ password: PASSWORD, dist: dist(), api, store: store() })
+    );
+    const again = browser(second);
+    const cookie = b.cookie();
+    const res = await fetch(`${second}/api/status`, { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const now = (await (await fetch(`${second}/api/session`, { headers: { cookie } })).json()) as {
+      authenticated: boolean;
+      boot: string;
+    };
+    expect(now.authenticated).toBe(true);
+    expect(now.boot).not.toBe(before.boot);
+    // A second login, then one logout: the other session stays.
+    await again.call('/api/login', { json: { password: PASSWORD } });
+    await again.call('/api/logout', { json: {} });
+    expect((await fetch(`${second}/api/status`, { headers: { cookie } })).status).toBe(200);
+    // A new password ends every session.
+    const third = await serve(
+      webHandler({ password: 'another long password', dist: dist(), api, store: store() })
+    );
+    expect((await fetch(`${third}/api/status`, { headers: { cookie } })).status).toBe(401);
   });
 
   it('refuses a POST or a PUT from another origin, or not JSON', async () => {
@@ -169,7 +218,7 @@ describe('webHandler', () => {
     const ok = await b.call('/api/login', { json: { password: PASSWORD } });
     expect(ok.headers.get('set-cookie')).toContain('Max-Age=1');
     now += 1000;
-    expect(await (await b.call('/api/session')).json()).toEqual({ authenticated: false });
+    expect(await (await b.call('/api/session')).json()).toMatchObject({ authenticated: false });
   });
 
   it('refuses a login body too large', async () => {
@@ -263,6 +312,8 @@ describe('startWebUi', () => {
       port: 0,
       host: '127.0.0.1',
       dist: dist(),
+      store: new Stores(fs.mkdtempSync(path.join(os.tmpdir(), 'web-data-'))).open(CORE_STORE),
+      now: () => 0,
       print: (l) => lines.push(l),
     });
     expect(server).toBeDefined();

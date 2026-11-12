@@ -6,7 +6,7 @@
  * line of `PAGES`, as the widgets will be.
  */
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { api } from './api.ts';
 import { GraphPage } from './graph/GraphPage.tsx';
 import { useRoute } from './hooks.ts';
@@ -19,9 +19,13 @@ import { InstancePage } from './pages/InstancePage.tsx';
 import { ModulesPage } from './pages/ModulesPage.tsx';
 import { PluginsPage } from './pages/PluginsPage.tsx';
 
-/** What every page gets: the way to say the session is gone, and why (the login says it). */
+/**
+ * What every page gets: the way to say the session is gone, and why (the login says it), and the
+ * way to say the instance restarted, the session kept: the app loads the page afresh and says so.
+ */
 export interface PageProps {
   loggedOut: (note?: string) => void;
+  restarted?: (note: string) => void;
 }
 
 /** A page: its route, its title, and whether it is the main menu's or the admin pages'. */
@@ -48,6 +52,13 @@ export function App() {
   const [session, setSession] = useState<'unknown' | 'in' | 'out'>('unknown');
   const [note, setNote] = useState<string>();
   const route = useRoute();
+  // A restart's note, and the page's generation, bumped by a restart so that it loads afresh.
+  const [notice, setNotice] = useState<string>();
+  const [generation, setGeneration] = useState(0);
+  const restarted = useCallback((why: string) => {
+    setNotice(why);
+    setGeneration((g) => g + 1);
+  }, []);
   const loggedOut = useCallback((why?: string) => {
     setNote(why);
     setSession('out');
@@ -94,7 +105,15 @@ export function App() {
       </header>
       <main className={current.admin ? undefined : 'wide'}>
         <h1>{current.title}</h1>
-        {current.page({ loggedOut })}
+        {notice === undefined ? null : (
+          <p role="status" className="banner good">
+            {notice}{' '}
+            <button type="button" className="link" onClick={() => setNotice(undefined)}>
+              dismiss
+            </button>
+          </p>
+        )}
+        <Fragment key={generation}>{current.page({ loggedOut, restarted })}</Fragment>
       </main>
     </>
   );

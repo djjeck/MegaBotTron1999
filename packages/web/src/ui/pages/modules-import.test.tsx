@@ -82,6 +82,40 @@ describe('ModulesPage', () => {
     expect(await screen.findByText('restart: not now')).toBeDefined();
   });
 
+  it('restarts to load a module, and comes back to the page, still logged in', async () => {
+    let restarted = false;
+    fakeApi({
+      'GET /modules': [200, { installed: [], failures: [], restart: true }],
+      'POST /restart': () => {
+        restarted = true;
+        return [200, { restarting: true }];
+      },
+      'GET /session': () => [200, { authenticated: true, boot: restarted ? 'b2' : 'b1' }],
+    });
+    const back = vi.fn();
+    render(<ModulesPage loggedOut={vi.fn()} restarted={back} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply (restart)' }, slow));
+    await waitFor(
+      () =>
+        expect(back).toHaveBeenCalledWith(
+          'The instance restarted: it runs the saved graph and the modules installed.'
+        ),
+      slow
+    );
+    cleanup();
+    // Without the app's way back, the page says it itself.
+    restarted = false;
+    render(<ModulesPage loggedOut={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply (restart)' }, slow));
+    expect(
+      await screen.findByText(
+        'The instance restarted: it runs the saved graph and the modules installed.',
+        {},
+        slow
+      )
+    ).toBeDefined();
+  });
+
   it('says when no module is installed, or the list cannot be read', async () => {
     fakeApi({ 'GET /modules': [200, { installed: [], failures: [], restart: false }] });
     render(<ModulesPage loggedOut={vi.fn()} />);

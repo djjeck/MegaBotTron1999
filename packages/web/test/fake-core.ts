@@ -1,8 +1,8 @@
 /**
  * A fake of the core's control API for the graph editor's tests (`test/fake-api.ts` underneath):
  * the saved graph file and the one before it, a check that refuses what `refuse` says, a save, a
- * rollback, the instances kept, the secrets' names, an older data directory, and a restart after
- * which the session is gone. Synthetic: made-up plugins (`test/graph-view.ts`).
+ * rollback, the instances kept, the secrets' names, an older data directory, and a restart, after
+ * which a new process answers, the session kept. Synthetic: made-up plugins (`test/graph-view.ts`).
  */
 import {
   type AvailablePlugin,
@@ -129,7 +129,11 @@ export function fakeCore(
       core.restarted = true;
       return [200, { restarting: true }];
     },
-    'GET /session': () => [200, { authenticated: !core.restarted }],
+    // The session outlives a restart (it is kept in the data volume); the process's id changes.
+    'GET /session': () => [
+      200,
+      { authenticated: true, boot: core.restarted ? 'boot-2' : 'boot-1' },
+    ],
     ...o.routes,
   } satisfies Record<string, Answer>);
   return core;

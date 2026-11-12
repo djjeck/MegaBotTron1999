@@ -16,6 +16,7 @@ import { telegramUserPlugin } from '@megabottron1999/connectors/plugins/telegram
 import {
   controlHandler,
   Core,
+  CORE_STORE,
   CoreEventLog,
   GraphFile,
   graphFileControls,
@@ -28,6 +29,7 @@ import {
   Secrets,
   shutdown,
   StartError,
+  Stores,
   wallClock,
 } from '@megabottron1999/core';
 import { reactorPlugin } from '@megabottron1999/turns/reactor.ts';
@@ -144,6 +146,9 @@ const control = http.createServer(controlApi).listen(port('CONTROL_PORT', 8081),
 const web = startWebUi({
   secrets,
   api: controlApi,
+  // The sessions, kept across restarts in the core's own store (`<data>/core/web-sessions.json`).
+  store: new Stores(dataDir).open(CORE_STORE),
+  now: () => clock.now(),
   port: port('WEB_PORT', 8082),
   print: (line) => console.log(line),
 });

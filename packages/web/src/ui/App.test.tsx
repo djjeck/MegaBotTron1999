@@ -96,14 +96,32 @@ describe('App', () => {
     expect(api.calls).toContain('POST /logout {}');
   });
 
-  it('shows the login with why, after a restart ends the session', async () => {
+  it('comes back to the page after a restart, still logged in, and says so', async () => {
+    const core = fakeCore();
+    core.running = { version: 1, nodes: [], edges: [] };
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Apply (restart)' }, { timeout: 5000 })
+    );
+    const said = await screen.findByText(
+      /^The instance restarted: it runs the saved graph/u,
+      {},
+      { timeout: 5000 }
+    );
+    expect(screen.queryByLabelText('Password')).toBeNull();
+    expect(core.api.calls).toContain('POST /restart {}');
+    fireEvent.click(within(said).getByRole('button', { name: 'dismiss' }));
+    expect(screen.queryByText(/^The instance restarted/u)).toBeNull();
+  });
+
+  it('shows the login with why, when the session did not survive the restart', async () => {
     const api = fakeApi({ ...GRAPH(), 'GET /session': [200, { authenticated: true }] });
     let restarted = false;
     api.routes['POST /restart'] = () => {
       restarted = true;
       return [200, { restarting: true }];
     };
-    api.routes['GET /session'] = () => [200, { authenticated: !restarted }];
+    api.routes['GET /session'] = () => [200, { authenticated: !restarted, boot: 'boot-1' }];
     api.routes['GET /graph/file'] = [
       200,
       { exists: true, graph: { version: 1, nodes: [], edges: [] }, differs: true },
@@ -114,7 +132,7 @@ describe('App', () => {
     );
     expect(
       await screen.findByText(
-        'The instance restarted on the saved graph. A restart ends every session: log in again.',
+        'The instance restarted, but this session ended (the password changed?): log in again.',
         {},
         { timeout: 5000 }
       )

@@ -70,13 +70,16 @@ describe('the graph editor', () => {
     expect(screen.queryByText('Unsaved changes')).toBeNull();
     fireEvent.click(within(review).getByRole('button', { name: 'Apply (restart)' }));
     expect(await screen.findByRole('dialog', { name: 'restarting' })).toBeDefined();
-    await waitFor(
-      () =>
-        expect(loggedOut).toHaveBeenCalledWith(
-          'The instance restarted on the saved graph. A restart ends every session: log in again.'
-        ),
-      slow
-    );
+    // The session outlives the restart: back to the page, logged in still.
+    expect(
+      await screen.findByText(
+        'The instance restarted: it runs the saved graph and the modules installed.',
+        {},
+        slow
+      )
+    ).toBeDefined();
+    expect(screen.queryByRole('dialog', { name: 'restarting' })).toBeNull();
+    expect(loggedOut).not.toHaveBeenCalled();
     expect(core.restarted).toBe(true);
   });
 
@@ -443,7 +446,9 @@ describe('the graph editor', () => {
       return calls === 1 ? [200, { authenticated: true }] : [502, {}];
     };
     const { Restart } = await import('#src/ui/Restart.tsx');
-    render(<Restart done={vi.fn()} failed={vi.fn()} everyMs={5} giveUpMs={200} />);
+    render(
+      <Restart done={vi.fn()} loggedOut={vi.fn()} failed={vi.fn()} everyMs={5} giveUpMs={200} />
+    );
     expect(
       await screen.findByText('Starting again: waiting for the instance to answer…')
     ).toBeDefined();

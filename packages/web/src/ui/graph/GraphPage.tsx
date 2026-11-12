@@ -80,6 +80,7 @@ const CHECK_AFTER_MS = 300;
 
 export function GraphPage({
   loggedOut,
+  restarted,
   checkAfterMs = CHECK_AFTER_MS,
 }: PageProps & { checkAfterMs?: number }) {
   const file = useLoad(() => api<GraphFileView>('/graph/file'), loggedOut, 60_000);
@@ -563,7 +564,12 @@ export function GraphPage({
       </div>
       {restarting ? (
         <Restart
-          done={(note) => loggedOut(note)}
+          done={(note) => {
+            setRestarting(false);
+            if (restarted === undefined) setSaid(note);
+            else restarted(note);
+          }}
+          loggedOut={(note) => loggedOut(note)}
           failed={(why) => {
             setRestarting(false);
             setSaid(`restart: ${why}`);

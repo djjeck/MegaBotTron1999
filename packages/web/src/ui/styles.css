@@ -415,6 +415,10 @@ fieldset.schema textarea {
   border-left-color: var(--bad);
 }
 
+.banner.good {
+  border-left-color: var(--ok);
+}
+
 .banner.warn {
   color: inherit;
   border-left-color: var(--warn);

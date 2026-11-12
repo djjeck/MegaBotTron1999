@@ -723,6 +723,16 @@ secrets provided, never their values, for a connector's config to name (§4.9; t
 The control API is the owner's alone: no agent is ever given it (P11), so no agent installs a module
 (P1).
 
+**The web UI's login** (`packages/web/src/server/auth.ts`, bot-os.md D45): one password, the
+`web_ui_password` secret; a session is a random token in an `HttpOnly`, `SameSite=Strict` cookie
+(`Secure` over HTTPS) that lasts 30 days from its login, the cookie's `Max-Age` to match. The
+sessions outlive a restart, kept in the core's own store as `<data>/core/web-sessions.json`, written
+atomically:
+`{"version": 1, "password": {"salt", "hash"}, "sessions": {"<sha256 of a token>": <expiry in ms>}}`,
+never a token nor the password (`hash` is a salted scrypt of it). A start with another password ends
+every session; `POST /api/logout` ends its own; expired ones are pruned. `GET /api/session` answers
+`{"authenticated", "boot"}`, `boot` a random id per process.
+
 ### 4.12 The graph printed and drawn
 
 `packages/core/src/graph-view.ts`: `graphText` prints the nodes and the edges
@@ -743,7 +753,8 @@ node's live state, mode and drift. Each change of the draft is checked (`POST /g
 every problem shown where it is located (§2.3). A node selected shows its forms, editable, a key of
 `configSecrets` as a choice of `GET /secrets`; an edge selected, its chats and commands. Saving is
 `PUT /graph/file`, applying `POST /restart`, after which the page waits on `GET /session` for the
-new process. One or several running nodes selected can be killed, each by `POST /plugins/<id>/kill`.
+new process (another `boot` id), and comes back to the page, still logged in. One or several running
+nodes selected can be killed, each by `POST /plugins/<id>/kill`.
 
 ### 4.13 The standard services
 

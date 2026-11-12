@@ -4,7 +4,8 @@
  * only behind the owner's login. It knows no game and no plugin: the pages are made from what the
  * control API says.
  *
- * - `GET /api/session`: whether the request is logged in.
+ * - `GET /api/session`: whether the request is logged in, and the process's `boot` id, a random one
+ *   per start, by which the page sees that a restart has happened (its session outlives it).
  * - `POST /api/login {"password": "…"}`: a session cookie, or 401; 429 with `Retry-After` past the
  *   limit of failed logins (`auth.ts`).
  * - `POST /api/logout`: the session ended, the cookie cleared.
@@ -18,6 +19,7 @@
  * cookie is `Secure` when the request came over HTTPS (TLS here, or `X-Forwarded-Proto: https`
  * from the proxy in front).
  */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -28,6 +30,7 @@ import {
   SESSION_COOKIE,
   SESSION_MS,
   Sessions,
+  type SessionStore,
 } from './auth.ts';
 
 /** The Docker secret that holds the owner's password. */
@@ -46,6 +49,8 @@ export interface WebOptions {
   now?: () => number;
   /** A session's length (`SESSION_MS`). */
   sessionMs?: number;
+  /** Where the sessions are kept across restarts (the core's own store); memory only without. */
+  store?: SessionStore;
   /** Failed logins allowed per client within `windowMs`. */
   maxFailures?: number;
   windowMs?: number;
@@ -123,8 +128,11 @@ export function webHandler(o: WebOptions): Handler {
   const dist = o.dist ?? DIST;
   const sessions = new Sessions({
     now,
+    password: o.password,
     ...(o.sessionMs === undefined ? {} : { ttlMs: o.sessionMs }),
+    ...(o.store === undefined ? {} : { store: o.store }),
   });
+  const boot = crypto.randomBytes(8).toString('hex');
   const limiter = new LoginLimiter({
     now,
     ...(o.maxFailures === undefined ? {} : { max: o.maxFailures }),
@@ -215,7 +223,8 @@ export function webHandler(o: WebOptions): Handler {
       const change = req.method !== 'GET' && req.method !== 'HEAD';
       if (change && !sameOrigin(req)) return json(res, 403, { error: 'not from this page' });
       const token = cookies(req)[SESSION_COOKIE];
-      if (route === '/api/session') return json(res, 200, { authenticated: sessions.valid(token) });
+      if (route === '/api/session')
+        return json(res, 200, { authenticated: sessions.valid(token), boot });
       if (post && route === '/api/login') return login(req, res);
       if (post && route === '/api/logout') {
         sessions.end(token);
@@ -250,6 +259,9 @@ export function startWebUi(o: {
   port: number;
   host?: string;
   dist?: string;
+  /** Where the sessions are kept across restarts: the core's own store. */
+  store?: SessionStore;
+  now?: () => number;
   print: (line: string) => void;
 }): http.Server | undefined {
   const password = o.secrets.read(WEB_SECRET);
@@ -259,7 +271,13 @@ export function startWebUi(o: {
     return undefined;
   }
   const server = http.createServer(
-    webHandler({ password, api: o.api, ...(o.dist === undefined ? {} : { dist: o.dist }) })
+    webHandler({
+      password,
+      api: o.api,
+      ...(o.dist === undefined ? {} : { dist: o.dist }),
+      ...(o.store === undefined ? {} : { store: o.store }),
+      ...(o.now === undefined ? {} : { now: o.now }),
+    })
   );
   server.listen(o.port, o.host ?? '0.0.0.0');
   o.print(`web UI: on port ${o.port}`);
