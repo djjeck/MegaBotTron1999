@@ -20,7 +20,7 @@
  * Nothing in here knows of any game or any network.
  */
 import { type Buttons } from './commands.ts';
-import { type ConnectorStatus } from './connector.ts';
+import { type ConnectorStatus, type Surface, type SurfaceQuery } from './connector.ts';
 import { type DriftCounts } from './drift.ts';
 import { type Manifest } from './manifest.ts';
 import { isMode, type Mode, type Modes } from './outbox.ts';
@@ -75,6 +75,17 @@ export interface Connection {
   readonly network: string;
   self(): string | undefined;
   status(): ConnectorStatus;
+  surfaces?(query?: SurfaceQuery): Promise<Surface[]>;
+}
+
+/**
+ * A connector's surfaces, as the owner picks from them (bot-os.md D63): `running` false while it
+ * does not run (apply first), `listed` false for a connector that cannot list its chats.
+ */
+export interface SurfacesView {
+  running: boolean;
+  listed: boolean;
+  surfaces: Surface[];
 }
 
 /** One account, as the owner sees it: its connector instance and the connection's status. */
@@ -195,6 +206,20 @@ export class Controls {
           ...(self === undefined ? {} : { self }),
         };
       });
+  }
+
+  /**
+   * A connector's surfaces (bot-os.md D63): the chats it can see, latest first, matching the
+   * query; undefined for a node that is not a connector. Rejects when the connector cannot tell
+   * now (not connected).
+   */
+  async surfaces(id: string, query: SurfaceQuery = {}): Promise<SurfacesView | undefined> {
+    const node = this.host.nodes().find((n) => n.id === id);
+    if (node === undefined || !node.manifest.kinds.includes('connector')) return undefined;
+    const c = this.host.account(id).connection;
+    if (c === undefined) return { running: false, listed: false, surfaces: [] };
+    if (c.surfaces === undefined) return { running: true, listed: false, surfaces: [] };
+    return { running: true, listed: true, surfaces: await c.surfaces(query) };
   }
 
   /** Each parser's drift: what it read and could not read, and whether it tripped (P5). */

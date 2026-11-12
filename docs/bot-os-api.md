@@ -120,7 +120,7 @@ hears a namespace's events only through a port an edge binds.
 
 | Port type   | Output                                                                                     | Input                                                                                                                         |
 | ----------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `chat-in`   | `chat`: a connector's account, of its network (derived)                                    | `{ type: 'chat-in', network?, when? }` (declared); its edge carries the chats it `reads`                                      |
+| `chat-in`   | `chat`: a connector's account, of its network (derived)                                    | `{ type: 'chat-in', network?, when? }` (declared); its edge carries the chats it `reads` and its `senders`                    |
 | `chat-out`  | `{ type: 'chat-out', network? }` (declared in `outputs`); its edge carries what it `sends` | `chat`: a connector's account (derived), bound to any number of senders; their edges carry the chats sent to and `commands`   |
 | `events`    | `events` (`<ns>-events` with more than one): each namespace it registers (derived)         | `{ type: 'events', namespace }`, bound to any number of instances; it hears only theirs; `namespace` may be `{ config: key }` |
 | `interface` | `interface`: its declared reads and actions (every plugin has one, derived)                | `{ type: 'interface', plugin, members }`; none for a plugin it only needs started first; no `plugin`: a contract              |
@@ -137,6 +137,14 @@ one fails the start: `node actor: output port chat (chat-out of irc) is not boun
 `network` (`irc`, `telegram`) is matched against the connector's account, as it was for a chat.
 `ctx.connector(port)` hears through a chat-in input, and `ctx.outbox(port)` sends through a chat-out
 output (each also by the connector's id or its account).
+
+**What a chat-in edge reads** (bot-os.md D62) has two independent parts: `reads`, a list of chats or
+`"*"`, any chat its connector monitors (§4.5); and `senders`, a list of senders by username
+(`@QuestBot`, compared without case and without the `@`; a bot's username never changes, so it is
+not resolved to an id), with `me` for the account's own messages; without `senders`, anyone. An edge
+written before has no `senders`, so it reads from anyone as it did: nothing converts. The edge field
+is `senders`, not `from`, since an edge's `from` is its output end. _Any chat from anyone_ is
+allowed, and the editor flags it as broad. Sending stays explicit: a chat-out edge lists its chats.
 
 A chat-in input may say `when: { config: key }`, a key of its plugin's `config` schema: the node has
 the port only while its config sets that key (the reactor reads a chat only with a `match`),
@@ -178,15 +186,15 @@ failures together. Every other input is required: it must be bound, the instance
 first, and its failure fails this one.
 
 A manifest's `inputs` and `outputs` give each port its `bind`, the edge the default graph makes
-(`{ node, reads }` for a chat-in, from the connector `node`; `{ node, sends, commands }` for a
-chat-out, to it; `{ node }` for an interface, by default the node of the plugin's id; `{ nodes }`
-for events, by default every other node registering the namespace). The manifest's older fields stay
-as shorthand, read as ports: a `requires` that `reach` names is a required chat (a chat-in input and
-a chat-out output, as above) named after the connector, with the reach's chats and commands as its
-binding; any other `requires`, and each plugin `uses` names, a required interface input named after
-it; `games.consumes` an optional events input, `<namespace>-events`; a `reach` not required, an
-optional chat. A plugin's code names its ports: `ctx.connector('channel')`, `ctx.outbox('channel')`,
-`ctx.use('game')`.
+(`{ node, reads, senders? }` for a chat-in, from the connector `node`; `{ node, sends, commands }`
+for a chat-out, to it; `{ node }` for an interface, by default the node of the plugin's id;
+`{ nodes }` for events, by default every other node registering the namespace). The manifest's older
+fields stay as shorthand, read as ports: a `requires` that `reach` names is a required chat (a
+chat-in input and a chat-out output, as above) named after the connector, with the reach's chats and
+commands as its binding; any other `requires`, and each plugin `uses` names, a required interface
+input named after it; `games.consumes` an optional events input, `<namespace>-events`; a `reach` not
+required, an optional chat. A plugin's code names its ports: `ctx.connector('channel')`,
+`ctx.outbox('channel')`, `ctx.use('game')`.
 
 ```ts
 manifest: {
@@ -209,6 +217,13 @@ manifest: {
   "edges": [
     { "from": "irc.chat", "to": "dice.channel", "type": "chat-in", "reads": ["#lobby"] },
     {
+      "from": "irc.chat",
+      "to": "log.chat",
+      "type": "chat-in",
+      "reads": "*",
+      "senders": ["@DiceBot", "me"]
+    },
+    {
       "from": "dice.channel",
       "to": "irc.chat",
       "type": "chat-out",
@@ -226,13 +241,13 @@ in place of the manifest's (of the same network). It may also give the `settings
 its plugin's `settings`) and the `mode` its instance starts with: they are put in force only while
 the instance keeps none of its own, so the owner's later changes win. An edge goes from `node.port`
 (or `node`, when one of its outputs fits) to `node.port`, with its type and, for a chat, what it
-carries: a chat-in its `reads`, a chat-out its `sends` and `commands` (each carries only its own).
-The core checks it with zod and against the manifests at load, and fails the start naming the node
-and the port: a plugin not in the image, a node twice, an instance named by two nodes or kept by
-another plugin (`node b: its instance tally is of the plugin other, not counter`), a setting the
-plugin does not have or refuses, an edge between ports of two types or to a port that is not there,
-an interface member not declared, a single input (or a chat-out output) bound twice, a connector
-account held twice, a required input or chat-out output unbound
+carries: a chat-in its `reads` and `senders`, a chat-out its `sends` and `commands` (each carries
+only its own). The core checks it with zod and against the manifests at load, and fails the start
+naming the node and the port: a plugin not in the image, a node twice, an instance named by two
+nodes or kept by another plugin (`node b: its instance tally is of the plugin other, not counter`),
+a setting the plugin does not have or refuses, an edge between ports of two types or to a port that
+is not there, an interface member not declared, a single input (or a chat-out output) bound twice, a
+connector account held twice, a required input or chat-out output unbound
 (`node actor: input port channel (chat-in of irc) is not bound`), a cycle of required edges.
 
 Each instance has its own id (`ctx.id`), configuration, store, settings, mode, timers and drift; its
@@ -286,7 +301,7 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
       "id": "tg",
       "plugin": "telegram-user",
       "account": "telegram:alice",
-      "config": { "chats": ["@QuestBot"] }
+      "config": { "chats": ["@QuestBot", "-1001000000001"] }
     },
     { "id": "quest", "plugin": "quest-parser" },
     {
@@ -298,7 +313,13 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
     }
   ],
   "edges": [
-    { "from": "tg.chat", "to": "quest.chat", "type": "chat-in", "reads": ["@QuestBot"] },
+    {
+      "from": "tg.chat",
+      "to": "quest.chat",
+      "type": "chat-in",
+      "reads": "*",
+      "senders": ["@QuestBot", "me"]
+    },
     { "from": "tg.chat", "to": "quest-turns.chat", "type": "chat-in", "reads": ["@QuestBot"] },
     {
       "from": "quest-turns.chat",
@@ -319,11 +340,12 @@ the plugins' manifests and each node's config: each `chat` edge becomes a chat-i
 `sends` and `commands`, from the node's chat-out output of that name to the connector's `chat`, if
 it has one; both for a node with both (the turn-actor, any plugin of module API 1); and both for a
 node whose plugin is unknown, so nothing is lost. The port names stay the same, so the conversion is
-mechanical: `tg.chat → quest.chat` (a parser) stays one edge, of `chat-in`; `tg.chat → look.chat` (a
-reactor on events) becomes `look.chat → tg.chat`, of `chat-out`. The instance runs a version 1 file
-so converted, `GET /graph/file` shows it so, and `POST /graph/check` and `PUT /graph/file` take
-version 1 too; the file itself is rewritten (as version 2) only by the next save or rollback, and a
-version of the history (below) written in version 1 is shown, diffed and rolled back as version 2.
+mechanical (a version 1 edge has no `senders`: it reads from anyone): `tg.chat → quest.chat` (a
+parser) stays one edge, of `chat-in`; `tg.chat → look.chat` (a reactor on events) becomes
+`look.chat → tg.chat`, of `chat-out`. The instance runs a version 1 file so converted,
+`GET /graph/file` shows it so, and `POST /graph/check` and `PUT /graph/file` take version 1 too; the
+file itself is rewritten (as version 2) only by the next save or rollback, and a version of the
+history (below) written in version 1 is shown, diffed and rolled back as version 2.
 
 **At start** (`packages/core/src/graph-file.ts`, `GraphFile`), the core reads it and checks it as
 any graph (§2.1), against the plugins `core.available()` lists, their configuration and settings
@@ -596,15 +618,18 @@ days) are armed again when they wake.
   records in time order, of the namespaces it registers, of its plugin's id, and of those its events
   inputs consume (asking for another is refused, naming what it reads): one type (`dice.roll`), one
   namespace (`dice`), or all of them; from `since` (the log's first day without) to `until` (now
-  without). A parser replays its recent history at `ready` with
-  `read({ type: 'dice.roll', since: ctx.clock.now() - 6 * HOUR })`; a fresh instance reads the whole
-  log once with `read({ type: 'dice.roll' })`. It reads the instance's log (`CoreOptions.events`);
-  the dev kit's is in memory (§4.10); without one it reads nothing. **By instance:** it reads its
-  own instance's records of its own namespaces, and, of a namespace an events input consumes, those
-  of the instances its edges bind, as the bus would have delivered them; so two instances of one
-  plugin (a turn-actor per bot) never read each other's. `all: true` reads every instance's. A
-  record with no `instance` (imported from an older log, §8, or written before records carried one)
-  belongs to no instance, and every reader of its namespace reads it.
+  without). **Replay belongs to the parsers** (bot-os.md D62): a parser resumes from its own records
+  (what it parsed: its store, or its events read back), never by re-reading the chat; it rebuilds
+  its recent state at `ready` with `read({ type: 'dice.roll', since: ctx.clock.now() - 6 * HOUR })`,
+  and a fresh instance reads the whole log once with `read({ type: 'dice.roll' })`. What was said
+  while the instance was down is the connector's to deliver, once, as missed messages (§4.5). It
+  reads the instance's log (`CoreOptions.events`); the dev kit's is in memory (§4.10); without one
+  it reads nothing. **By instance:** it reads its own instance's records of its own namespaces, and,
+  of a namespace an events input consumes, those of the instances its edges bind, as the bus would
+  have delivered them; so two instances of one plugin (a turn-actor per bot) never read each
+  other's. `all: true` reads every instance's. A record with no `instance` (imported from an older
+  log, §8, or written before records carried one) belongs to no instance, and every reader of its
+  namespace reads it.
 
 Two plugins registering one type is an error of the deployment; two instances of one plugin share
 its types, and each subscriber hears only the instances its edges bind. A subscriber that throws is
@@ -626,8 +651,16 @@ interface Inbound {
   time: number;
   id?: string; // the network's message id, where it has one
   replyTo?: string;
-  playback: boolean; // history replayed at connection (ZNC's buffer), not news
+  playback: boolean; // not news: ZNC's buffer at connection, or missed while down
+  missed?: boolean; // said while the instance was down, delivered once by the connector
   own?: boolean; // sent by the account itself, from any of its devices
+}
+
+interface Surface {
+  id: string; // as configs and edges name it: '-100…', '@QuestBot', '#lobby'
+  title: string;
+  kind: 'private' | 'group' | 'channel' | 'bot';
+  lastActive?: number; // ms
 }
 
 interface ConnectorHandle {
@@ -644,13 +677,35 @@ The connector itself also implements `send(chat, text)`, and, for a network whos
 (Telegram), `deliver(chat, text)`, which resolves with the message's id; only the outbox calls them:
 no plugin holds a way to send that skips it.
 
+**Surfaces** (bot-os.md D63): a connector may list the chats it can see,
+`surfaces({ search?, limit? })`, most recently active first, for the owner to pick from (the control
+API's `GET /accounts/<id>/surfaces`, §4.11): `telegram-user` its dialogs, searched by title,
+username or id among all of them; `telegram-bot` the chats it has seen in updates, kept in its store
+(`surfaces`), and one searched by its id or `@username`, asked of Telegram (`getChat`) and kept,
+since the Bot API cannot list a bot's chats; `irc` its channel. A connector's `chats` config (the
+two Telegram ones) is what it **monitors**: unset, every chat it has; each chat-in edge reads a
+subset (`reads`, `"*"` for all of them). A connector not running lists nothing.
+
+**Missed messages** (bot-os.md D62): what was said while the instance was down is the connector's to
+deliver once, marked `playback` (so nothing acts on it: the reactor skips it, and the replies'
+matchers too) and `missed` (so a parser reads it as any other). `telegram-bot`: Telegram keeps a
+bot's updates for a day and delivers them at the next poll, and the connector marks those sent
+before it connected. `irc`: ZNC's buffer, played back at connection, is `playback` (not `missed`:
+ZNC may play back what was already heard). `telegram-user`: **none yet**. GramJS 2.26.22 offers no
+update catch-up (`client.catchUp()` is an empty stub, and neither `StringSession` nor the client
+keeps the update state, `pts`, `qts`, `date` and each supergroup's own `pts`, that
+`updates.getDifference` and `updates.getChannelDifference` need); the way to fill the gap is the
+author's to choose (D62).
+
 As built (`packages/core/src/connector.ts`): a connector plugin's instance offers its `connector`,
 whose account must be the manifest's (or its node's); `ConnectorBase` keeps the listeners and the
 status for the implementations. `ctx.connector(port)` gives a handle only on a connector a chat-in
 input of the plugin is bound to, and the handle hears only the chats that edge `reads` (compared
-without case). A connector's node has a chat-in output, `chat`, which the readers' edges leave, and
-a chat-out input, `chat`, which the senders' edges reach (§2.1, bot-os.md D60). The wiring reaches
-the full connector with `core.connector(id)`. The shell's connectors are in §5.
+without case; any, for `"*"`) and the `senders` it names (anyone without; `me`, the account's own,
+`own` or its own name), as `hears(filter, message, self)` matches them. A connector's node has a
+chat-in output, `chat`, which the readers' edges leave, and a chat-out input, `chat`, which the
+senders' edges reach (§2.1, bot-os.md D60). The wiring reaches the full connector with
+`core.connector(id)`. The shell's connectors are in §5.
 
 ### 4.6 The outbox
 
@@ -807,7 +862,10 @@ main card that the wiring names (`CoreOptions.home`).
 (`controlHandler`) that the entry point serves twice: on the container's loopback (`CONTROL_PORT`,
 8081), and under `/api/` on the web UI's listener, only behind its login. `GET /status`;
 `GET /instance` (off or on, the process's uptime, Node's version and memory, the plugins and the
-accounts counted by state); `GET /accounts`; `GET /drift`;
+accounts counted by state); `GET /accounts`; `GET /accounts/<id>/surfaces?search=&limit=50` (a
+connector's surfaces, §4.5: `{ running, listed, surfaces }`, `running` false until it runs, `listed`
+false for a connector that cannot list its chats, 409 with why when it cannot tell now, such as not
+connected, 404 for a node that is not a connector); `GET /drift`;
 `GET /events?limit=100&type=<prefix>&hours=24` (the event log's latest records, newest first);
 `POST /off`, `/on`, `/kill`; `GET` and `POST /settings`; `GET /graph` and `GET /graph/view` (§4.12);
 `POST /plugins/<id>/mode`, `/plugins/<id>/resume` and `/plugins/<id>/kill` (409 with why when
@@ -1057,7 +1115,7 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
 | --------------- | --------- | ----------------------------- | ------------------------------------------------------------------------------------------------ |
 | `irc`           | connector | `@megabottron1999/connectors` | An IRC account through a ZNC bouncer, with its flood limits and a health endpoint                |
 | `telegram-bot`  | connector | `@megabottron1999/connectors` | A Telegram bot (grammY), and the owner's chat surface                                            |
-| `telegram-user` | connector | `@megabottron1999/connectors` | A Telegram user account (GramJS), reading and sending in the chats of its configuration          |
+| `telegram-user` | connector | `@megabottron1999/connectors` | A Telegram user account (GramJS), reading and sending in the chats it monitors                   |
 | `anthropic`     | connector | `@megabottron1999/connectors` | The Claude API: `ask`, with structured output (§4.13)                                            |
 | (service)       | connector | `@megabottron1999/connectors` | `ServiceConnector`: the connector of a plugin that holds secrets for an API client, no chat      |
 | (turn parsers)  | parser    | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives     |
@@ -1077,21 +1135,25 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   capped at ten minutes). Its status is `connecting` until `getMe` answers, `connected` while it
   polls; its own name is the bot's username. It hears every message Telegram delivers the bot and
   sends through the account's outbox (`deliver`, to a chat id or an `@username`; a 429 longer than
-  auto-retry waits out becomes `FloodWait`). Configured with the owner's Telegram user id and
-  optionally a group (`owner`, `group`, in its node's config), it is the instance's chat surface,
-  and the owner's chat that the core sends the owner's notices to (§4.8, bot-os.md D56)
+  auto-retry waits out becomes `FloodWait`). With `chats` in its config (ids or `@username`s) it
+  monitors only those for the plugins; its surfaces are the chats it has seen (§4.5), and the
+  updates Telegram kept while it was down come marked `missed`. Configured with the owner's Telegram
+  user id and optionally a group (`owner`, `group`, in its node's config), it is the instance's chat
+  surface, and the owner's chat that the core sends the owner's notices to (§4.8, bot-os.md D56)
   (`telegram-surface.ts`): the switchboard on its bot (`telegram-switchboard.ts`, on
   grammy-switchboard), the plugins' commands answered in the group, the owner's chat and any other
   private chat (`telegram-commands.ts`), the menus kept registered, and the owner's notices carried
   in order (`telegram-notifier.ts`). Nothing hands its bot out (P9).
 - **`telegram-user`** (`packages/connectors/src/plugins/telegram-user.ts`, on GramJS in
   `packages/connectors/src/transport/telegram-user.ts`): the owner's own account, from three secrets
-  (`telegram_user_api_id`, `telegram_user_api_hash`, `telegram_user_session`). It reads only the
-  chats of its configuration (`chats`: a group by its id, a private chat with a bot by the bot's
-  `@username`, P3), since the account sees every chat of its owner. It starts without waiting,
-  retries every minute, and tells the owner of the first failure; a message carries its id, the one
-  it replies to, and `own` for the owner's own from any device. It sends only through the account's
-  outbox (`deliver`, with the message's id); GramJS's flood waits become `FloodWait`.
+  (`telegram_user_api_id`, `telegram_user_api_hash`, `telegram_user_session`). It monitors the chats
+  of its configuration (`chats`: a group by its id, a private chat by the other's `@username`, or
+  their id when they have none), or every chat of the account when `chats` is unset (a new
+  connection), each edge reading a subset (§2.1); it lists its dialogs as its surfaces (§4.5), and
+  has no catch-up yet (§4.5, D62). It starts without waiting, retries every minute, and tells the
+  owner of the first failure; a message carries its id, the one it replies to, and `own` for the
+  owner's own from any device. It sends only through the account's outbox (`deliver`, with the
+  message's id); GramJS's flood waits become `FloodWait`.
 - **`ServiceConnector`** (`packages/connectors/src/plugins/service.ts`): for a connector plugin that
   holds an account's secrets and offers what it makes from them through its declared interface, but
   has no chat: it reads and sends nothing. The `anthropic` connector is one.
@@ -1106,14 +1168,17 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
 - **`turnParserPlugin`** (`packages/turns/src/turn-parser.ts`): one parser plugin per game bot, each
   made from its bot's grammar (`read`), which knows the game. Each reads, on the owner's account
   (`telegram-user`), the private chat with its bot and, when its edge also reads it, the game's
-  group: a `chat-in` input only, with no way to send. It knows the owner's turns (a turn command of
-  its configuration, `commands`, bare or addressed to its bot, sent by hand from any device; and
-  those its actor sends, told through its action `sent`, since the account never sees its own sends
-  come back), and which of its bot's messages answer one: a reply to it or, in the private chat, the
+  group: a `chat-in` input only, with no way to send; its default edge reads from its bot and the
+  owner (`senders: ["@<bot>", "me"]`). It knows the owner's turns (a turn command of its
+  configuration, `commands`, bare or addressed to its bot, sent by hand from any device; and those
+  its actor sends, told through its action `sent`, since the account never sees its own sends come
+  back), and which of its bot's messages answer one: a reply to it or, in the private chat, the
   first message within two minutes of it. What it reads it publishes as `<id>.turn`
   (`{ chat, outcome }`); a message it claims and cannot read goes to drift (§4.7) and is published
-  as an `unknown` outcome. Its read `rest` says until when the bot rests, from its last answer. The
-  tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
+  as an `unknown` outcome. Its read `rest` says until when the bot rests, from its last answer. It
+  resumes from what it parsed (D62): the owner's recent turns and its bot's rest are kept in its
+  store (`parsed`) as they change and read back at its start; it never re-reads the chat, and reads
+  missed messages as any other. The tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
 - **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
   (P3, P17), each with its own id, configuration, store, timer and mode. Its ports: `chat`, a
   chat-in input on `telegram`, which reads the private chat with its bot (for the turns the owner

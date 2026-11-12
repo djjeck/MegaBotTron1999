@@ -16,7 +16,13 @@
  */
 import { type Clock, VirtualClock } from './clock.ts';
 import { type Buttons } from './commands.ts';
-import { type Connector, ConnectorBase, type Inbound } from './connector.ts';
+import {
+  type Connector,
+  ConnectorBase,
+  type Inbound,
+  type Surface,
+  type SurfaceQuery,
+} from './connector.ts';
 import { Core, type CoreOptions } from './core.ts';
 import { type LogEntry, MemoryEventLog } from './event-log.ts';
 import { type Manifest, ManifestError, type ManifestInput, parseManifest } from './manifest.ts';
@@ -34,6 +40,8 @@ export interface FakeConnectorOptions {
   onSend?: (chat: string, text: string) => boolean;
   /** The chats the account administers (`isAdmin`). */
   admins?: readonly string[];
+  /** The chats it can see (`surfaces`), in order; none: it cannot list them. */
+  surfaces?: readonly Surface[];
 }
 
 /** A message the connector hears: its account and network are the connector's. */
@@ -46,6 +54,8 @@ export class FakeConnector extends ConnectorBase implements Connector {
   readonly sent: { chat: string; text: string }[] = [];
   private readonly onSend: ((chat: string, text: string) => boolean) | undefined;
   private readonly admins: readonly string[];
+  /** Its surfaces, as a test sets them; undefined: none (it cannot list them). */
+  readonly surfaces?: (query?: SurfaceQuery) => Promise<Surface[]>;
 
   constructor(o: FakeConnectorOptions) {
     const colon = o.account.indexOf(':');
@@ -55,6 +65,17 @@ export class FakeConnector extends ConnectorBase implements Connector {
     if (o.limits !== undefined) this.limits = o.limits;
     this.onSend = o.onSend;
     this.admins = o.admins ?? [];
+    const listed = o.surfaces;
+    if (listed !== undefined)
+      this.surfaces = (q = {}) => {
+        if (this.status().state !== 'connected') return Promise.reject(new Error('not connected'));
+        const search = q.search?.toLowerCase() ?? '';
+        return Promise.resolve(
+          listed
+            .filter((x) => x.title.toLowerCase().includes(search) || x.id.includes(search))
+            .slice(0, q.limit ?? listed.length)
+        );
+      };
   }
 
   /** Whether the account administers `chat`: one of `admins`. */

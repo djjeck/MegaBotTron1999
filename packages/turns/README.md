@@ -6,7 +6,8 @@ reaction.
 - `turnParserPlugin` (`src/turn-parser.ts`): a parser of one bot's answers on a Telegram user
   account (a chat-in input: it reads, never sends), from a grammar the game provides. It knows the
   owner's turns (sent by hand or by the actor), which of the bot's messages answer one, publishes
-  what it reads, reports to drift what it cannot read, and says until when the bot rests.
+  what it reads, reports to drift what it cannot read, and says until when the bot rests. It resumes
+  from what it parsed, kept in its store, never by re-reading the chat (docs/bot-os.md D62).
 - `turnActorPlugin` (`src/turn-actor.ts`): an actor that sends one bot's turn command in the private
   chat with it, at a person's pace (`src/schedule.ts`: intervals drawn from a range, skipped turns,
   nights off), waiting out the rest its parser reads. One plugin, run as one instance per bot.

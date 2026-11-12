@@ -3,13 +3,15 @@
  * editable for the draft, its account (a connector's), the mode its instance starts in, its config
  * and the settings its instance starts with, in forms made from their schemas, each field with the
  * check's errors; a config key that names a secret (`configSecrets`) is a choice of the secrets'
- * names. Then the interface it declares (P11) and its removal, which keeps its instance. A killed
+ * names; a connector's `chats` (what it monitors) is picked from its surfaces (D63). Then the
+ * interface it declares (P11) and its removal, which keeps its instance. A killed
  * node (D44) says so, with its reinstatement; its forms stay editable as any other's.
  */
 import type {
   DriftCounts,
   GraphNode,
   InstanceInfo,
+  JsonSchema,
   MemberView,
   Mode,
   NodeView,
@@ -19,6 +21,15 @@ import type {
 import { withDefaults } from './defaults.ts';
 import { instanceOf } from './draft.ts';
 import { SchemaForm } from './SchemaForm.tsx';
+import { CHATS_KEY, MonitoredChats } from './Surfaces.tsx';
+
+/** A config schema without its `chats` list, which the picker shows; undefined: it has none. */
+function withoutChats(schema: JsonSchema | undefined): JsonSchema | undefined {
+  const props = schema?.['properties'] as Record<string, JsonSchema> | undefined;
+  if (props?.[CHATS_KEY]?.['type'] !== 'array') return undefined;
+  const { [CHATS_KEY]: _, ...rest } = props;
+  return { ...schema, properties: rest };
+}
 
 /** The modes a node's instance may start in (P10); unset, it starts `read-only`. */
 const MODES: Record<Mode, string> = {
@@ -94,6 +105,9 @@ export function NodeDetails(props: {
   const connector = view.kinds.includes('connector');
   const i = view.interface;
   const instance = instanceOf(node);
+  // A connector's monitored chats are picked from its surfaces, not typed (D63).
+  const picked = connector ? withoutChats(view.configSchema) : undefined;
+  const chats = node.config?.[CHATS_KEY];
   return (
     <aside className="details" aria-label={`details of ${view.id}`}>
       <h2>{view.id}</h2>
@@ -202,13 +216,23 @@ export function NodeDetails(props: {
         ) : (
           <SchemaForm
             legend="config"
-            schema={view.configSchema}
+            schema={picked === undefined ? view.configSchema : picked}
             // Unset fields shown with their defaults, written with the first change (`defaults.ts`).
             value={withDefaults(view.configSchema, node.config)}
             onChange={(config) => props.change({ config })}
             secretKeys={view.configSecrets}
             secretNames={props.secretNames}
             errors={props.configErrors}
+          />
+        )}
+        {picked === undefined ? null : (
+          <MonitoredChats
+            connector={view.id}
+            value={Array.isArray(chats) ? (chats as string[]) : undefined}
+            set={(v) => {
+              const { [CHATS_KEY]: _, ...rest } = node.config ?? {};
+              props.change({ config: v === undefined ? rest : { ...rest, [CHATS_KEY]: v } });
+            }}
           />
         )}
         {view.secrets.length === 0 ? null : (

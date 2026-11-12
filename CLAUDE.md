@@ -19,7 +19,7 @@ connectors, the turn plugins, the reactor and the web UI, in one Docker image. I
 ### Read the documentation first
 
 - [README.md](README.md): what the project is, how to run it, how plugins work.
-- [docs/bot-os.md](docs/bot-os.md): the principles (P1–P17) and the decisions (D1–D61). Check every
+- [docs/bot-os.md](docs/bot-os.md): the principles (P1–P17) and the decisions (D1–D63). Check every
   design choice against them; a choice that breaks one changes the principle there, with its reason,
   or is dropped.
 - [docs/bot-os-api.md](docs/bot-os-api.md): the plugin API, as built.

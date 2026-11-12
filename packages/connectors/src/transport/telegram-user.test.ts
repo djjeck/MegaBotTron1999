@@ -8,6 +8,7 @@ import {
   type GramClient,
   login,
   type LoginClient,
+  type RawDialog,
   type RawMessage,
   RETRY_MS,
   TelegramUserConnector,
@@ -33,7 +34,13 @@ function raw(over: Partial<RawMessage> & { sender?: unknown; chat?: unknown } = 
   };
 }
 
-function fake(o: { failConnect?: number; send?: () => Promise<{ id: number }> } = {}) {
+function fake(
+  o: {
+    failConnect?: number;
+    send?: () => Promise<{ id: number }>;
+    dialogs?: RawDialog[];
+  } = {}
+) {
   const calls: string[] = [];
   const sent: { entity: unknown; message: string }[] = [];
   let failures = o.failConnect ?? 0;
@@ -46,7 +53,10 @@ function fake(o: { failConnect?: number; send?: () => Promise<{ id: number }> } 
       return Promise.resolve(true);
     },
     disconnect: () => (calls.push('disconnect'), Promise.resolve()),
-    getDialogs: () => (calls.push('dialogs'), Promise.resolve([])),
+    getDialogs: (p) => (
+      calls.push(p.limit === undefined ? 'dialogs' : `dialogs ${p.limit}`),
+      Promise.resolve(o.dialogs ?? [])
+    ),
     getInputEntity: (id) => (calls.push(`entity ${id}`), Promise.resolve({ peer: id })),
     getMe: () => (calls.push('me'), Promise.resolve({ username: 'alice' })),
     sendMessage: (entity, { message }) => {
@@ -87,6 +97,7 @@ describe('TelegramUserConnector', () => {
   it('connects, fills the entity cache, then resolves its chats, once', async () => {
     const { c, f, logs } = await connector();
     expect(f.calls).toEqual(['connect', 'dialogs', `entity ${GROUP}`, 'entity @Quiz_bot', 'me']);
+    expect(f.handlers()).toBe(1);
     expect(c.status()).toEqual({ state: 'connected', phase: 'ready' });
     expect(c.self()).toBe('alice');
     expect(logs).toEqual([`connected as alice, reading ${GROUP}, @Quiz_bot`]);
@@ -219,6 +230,103 @@ describe('TelegramUserConnector', () => {
     expect(logs.at(-1)).toBe(`send to ${GROUP} failed: Error: nope`);
     await c.stop();
     expect(c.send(GROUP, 'x')).toBe(false);
+  });
+});
+
+describe('every chat, and the surfaces', () => {
+  const PRIVATE_ID = '5000001';
+  const dialog = (over: Partial<RawDialog>): RawDialog => ({
+    id: { toString: () => GROUP },
+    title: 'The Lobby',
+    date: 1_793_000_100,
+    isGroup: true,
+    inputEntity: { peer: GROUP },
+    message: { id: 20 },
+    ...over,
+  });
+  const quiz = dialog({
+    id: { toString: () => PRIVATE_ID },
+    title: 'Quiz Bot',
+    date: 1_793_000_200,
+    isUser: true,
+    isGroup: false,
+    entity: { username: 'Quiz_bot', bot: true },
+    inputEntity: { peer: '@Quiz_bot' },
+    message: { id: 9 },
+  });
+
+  function make(f: ReturnType<typeof fake>, o: { chats?: string[] } = {}) {
+    const clock = new VirtualClock(0);
+    const messages: Inbound[] = [];
+    const logs: string[] = [];
+    const c = new TelegramUserConnector({
+      account: 'telegram:alice',
+      client: f.client,
+      ...(o.chats === undefined ? {} : { chats: o.chats }),
+      clock,
+      log: (l) => logs.push(l),
+    });
+    c.onMessage((m) => messages.push(m));
+    return { c, clock, messages, logs };
+  }
+
+  it('given no chats, monitors every chat, by @username or id, and sends to any', async () => {
+    const f = fake();
+    const { c, messages, logs } = make(f);
+    c.start();
+    await flush();
+    expect(logs).toEqual(['connected as alice, reading every chat']);
+    await f.deliver(raw({ id: 1, chatId: { toString: () => '-100999' } }));
+    await f.deliver(
+      raw({
+        id: 2,
+        chatId: { toString: () => '777' },
+        isPrivate: true,
+        chat: { username: 'x_bot' },
+      })
+    );
+    await f.deliver(raw({ id: 3, chatId: { toString: () => '778' }, isPrivate: true }));
+    expect(messages.map((m) => m.chat)).toEqual(['-100999', '@x_bot', '778']);
+    await expect(c.deliver('778', 'hi')).resolves.toEqual({ id: '99' });
+    await expect(c.deliver('778', 'again')).resolves.toEqual({ id: '99' });
+    expect(f.calls.filter((x) => x.startsWith('entity'))).toEqual(['entity 778']);
+  });
+
+  it('lists its surfaces latest first, with their kind, and searches all of them', async () => {
+    const f = fake({
+      dialogs: [
+        dialog({}),
+        quiz,
+        dialog({
+          id: { toString: () => '-1004' },
+          title: 'News',
+          date: undefined,
+          isGroup: false,
+          isChannel: true,
+        }),
+        dialog({
+          id: { toString: () => '5000002' },
+          title: undefined,
+          isUser: true,
+          isGroup: false,
+          entity: {},
+        }),
+      ],
+    });
+    const { c } = make(f);
+    await expect(c.surfaces()).rejects.toThrow('not connected');
+    c.start();
+    await flush();
+    expect(await c.surfaces()).toEqual([
+      { id: '@Quiz_bot', title: 'Quiz Bot', kind: 'bot', lastActive: 1_793_000_200_000 },
+      { id: GROUP, title: 'The Lobby', kind: 'group', lastActive: 1_793_000_100_000 },
+      { id: '5000002', title: '5000002', kind: 'private', lastActive: 1_793_000_100_000 },
+      { id: '-1004', title: 'News', kind: 'channel' },
+    ]);
+    expect(f.calls).toContain('dialogs 50');
+    expect((await c.surfaces({ search: ' lobby ', limit: 5 })).map((x) => x.id)).toEqual([GROUP]);
+    expect((await c.surfaces({ search: 'quiz' })).map((x) => x.id)).toEqual(['@Quiz_bot']);
+    expect(await c.surfaces({ limit: 1 })).toHaveLength(1);
   });
 });
 

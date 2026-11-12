@@ -15,10 +15,14 @@
  * - offers `state.rest`: until when its bot rests, as its last answer said (the bot's rest after a
  *   turn, or the wait of a "too soon"), for the actor to wait out.
  *
- * It keeps nothing in its factory's closure: everything hangs off its instance (§2.1).
+ * It keeps nothing in its factory's closure: everything hangs off its instance (§2.1). It resumes
+ * from its own records (bot-os.md D62): the owner's recent turns and its bot's rest, kept in its
+ * store as they change, and never re-reads the chat; what was said while the instance was down
+ * comes from the connector's catch-up, once, as missed messages (`playback`, `missed`), which it
+ * reads as any other.
  */
 import { TELEGRAM_USER } from '@megabottron1999/connectors/plugins/telegram-user.ts';
-import { definePlugin, type Inbound, type Plugin } from '@megabottron1999/core';
+import { definePlugin, type Inbound, ME, type Plugin } from '@megabottron1999/core';
 import { z } from 'zod';
 
 /** A message of the bot, as its grammar reads it. */
@@ -87,6 +91,14 @@ export const TURN_PARSER_MEMBERS = ['state.rest', 'actions.sent'];
 export const ANSWER_WINDOW_MS = 2 * 60_000;
 /** How many of the owner's turns are kept, to match replies to. */
 const KEPT_TURNS = 100;
+/** The store's document of what it parsed: the owner's recent turns, and its bot's rest. */
+export const PARSED_DOC = 'parsed';
+
+/** What it keeps of what it parsed, to resume from at its next start. */
+interface Parsed {
+  turns: { chat: string; id?: string; t: number; answered: boolean }[];
+  rest?: Rest;
+}
 
 const outcomeSchema = z.looseObject({ kind: z.string(), bot: z.string() });
 
@@ -121,7 +133,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
           type: 'chat-in',
           network: 'telegram',
           help: `the owner's own account: the private chat with @${spec.bot}, and the game's group if the edge reads it`,
-          bind: { node: TELEGRAM_USER, reads: [privateChat] },
+          bind: { node: TELEGRAM_USER, reads: [privateChat], senders: [privateChat, ME] },
         },
       },
       interface: {
@@ -143,24 +155,31 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       const { commands } = ctx.config as z.infer<typeof turnParserConfig>;
       const handle = ctx.connector('chat');
       /** the owner's turns, newest last: chat, id, time, and whether something answered it. */
-      const turns: { chat: string; id?: string; t: number; answered: boolean }[] = [];
-      let rest: Rest | undefined;
+      const kept = ctx.store.read<Parsed>(PARSED_DOC);
+      const turns: Parsed['turns'] = kept?.turns ?? [];
+      let rest: Rest | undefined = kept?.rest;
+      const keep = (): void =>
+        ctx.store.write(PARSED_DOC, { turns, ...(rest === undefined ? {} : { rest }) });
       const remember = (turn: { chat: string; id?: string; t: number }): void => {
         if (turn.id !== undefined && turns.some((x) => x.chat === turn.chat && x.id === turn.id))
           return;
         turns.push({ ...turn, answered: false });
         if (turns.length > KEPT_TURNS) turns.shift();
+        keep();
       };
       const answered = (m: Inbound): boolean => {
         if (m.replyTo !== undefined) {
           const turn = turns.find((x) => x.chat === m.chat && x.id === m.replyTo);
-          if (turn !== undefined) turn.answered = true;
-          return turn !== undefined;
+          if (turn === undefined) return false;
+          turn.answered = true;
+          keep();
+          return true;
         }
         if (!m.chat.startsWith('@')) return false;
         const turn = turns.findLast((x) => x.chat === m.chat);
         if (turn === undefined || turn.answered || m.time - turn.t > ANSWER_WINDOW_MS) return false;
         turn.answered = true;
+        keep();
         return true;
       };
       handle.onMessage((m) => {
@@ -190,8 +209,10 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
         ctx.drift.read(m.time);
         if (reading.restMs !== undefined) {
           const until = m.time + reading.restMs;
-          if (rest === undefined || until > rest.until)
+          if (rest === undefined || until > rest.until) {
             rest = { until, why: whyOf(reading.outcome) };
+            keep();
+          }
         }
         ctx.bus.publish(`${spec.id}.turn`, { chat: m.chat, outcome: reading.outcome }, m.time);
       });

@@ -696,3 +696,39 @@ section.version {
 button[aria-pressed='true'] {
   background: #e0e7ff;
 }
+
+/* Chats picked from lists (Surfaces.tsx): a connector's surfaces, an edge's subset, rows of words. */
+fieldset.surfaces {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  margin: 0.5rem 0;
+  padding: 0.4rem 0.6rem;
+}
+ul.checks,
+ul.rows {
+  list-style: none;
+  margin: 0.3rem 0;
+  padding: 0;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+ul.checks li,
+ul.rows li {
+  margin: 0.15rem 0;
+}
+.row-add {
+  display: flex;
+  gap: 0.3rem;
+}
+.row-add input {
+  flex: 1;
+  min-width: 0;
+}
+label.block {
+  display: block;
+  margin: 0.3rem 0;
+}
+.warning {
+  color: var(--warn);
+  font-weight: 600;
+}

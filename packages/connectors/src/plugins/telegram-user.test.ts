@@ -1,7 +1,11 @@
-import { Core, VirtualClock } from '@megabottron1999/core';
+import { Core, definePlugin, VirtualClock } from '@megabottron1999/core';
 import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
 import { describe, expect, it } from 'vitest';
-import { type GramClient, type UserCredentials } from '#src/transport/telegram-user.ts';
+import {
+  type GramClient,
+  type RawMessage,
+  type UserCredentials,
+} from '#src/transport/telegram-user.ts';
 import { telegramUserPlugin, userCredentials } from './telegram-user.ts';
 
 const USER = {
@@ -76,6 +80,55 @@ describe('the telegram-user plugin', () => {
     });
     core.register(telegramUserPlugin({ self: 'alice', client }));
     expect(() => core.load()).toThrow('expected a group id (-100…) or a @username');
+  });
+
+  it('monitors every chat without chats, each reader hearing its edge’s senders', async () => {
+    const heard: string[] = [];
+    let deliver: ((e: { message: RawMessage }) => Promise<void>) | undefined;
+    const c = client();
+    c.addEventHandler = (h) => (deliver = h);
+    const core = new Core({
+      clock: new VirtualClock(),
+      secrets: secretsWith(USER),
+      graph: {
+        version: 2,
+        nodes: [
+          { id: 'tg', plugin: 'telegram-user' },
+          { id: 'reader', plugin: 'reader' },
+        ],
+        edges: [{ from: 'tg.chat', to: 'reader.chat', reads: '*', senders: ['@QuestBot'] }],
+      },
+    });
+    core.register(
+      telegramUserPlugin({ client: () => c }),
+      definePlugin({
+        manifest: {
+          id: 'reader',
+          version: '0.1.0',
+          kinds: ['parser'],
+          description: 'reader',
+          inputs: { chat: { type: 'chat-in', network: 'telegram' } },
+        },
+        create: (ctx) => {
+          ctx.connector('chat').onMessage((m) => heard.push(`${m.chat} ${m.text}`));
+          return {};
+        },
+      })
+    );
+    await core.start();
+    await new Promise((r) => setImmediate(r));
+    const said = (sender: string): RawMessage => ({
+      id: 3,
+      date: 1,
+      message: `/play ${sender}`,
+      chatId: { toString: () => GROUP },
+      getSender: () => Promise.resolve({ username: sender }),
+      getChat: () => Promise.resolve(undefined),
+    });
+    await deliver?.({ message: said('QuestBot') });
+    await deliver?.({ message: said('bob') });
+    expect(heard).toEqual([`${GROUP} /play QuestBot`]);
+    await core.stop();
   });
 
   it('fails the account on credentials that are not, naming each', () => {

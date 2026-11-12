@@ -3,8 +3,9 @@
  * account, on GramJS (packages/connectors/src/transport/telegram-user.ts). Its API id, API
  * hash and session string are Docker secrets (P9), which it alone receives; other plugins get a
  * handle, which hears only the chats their reach reads, and send through the account's outbox,
- * within the chats and commands their reach names. It reads the chats of its configuration only:
- * groups by id, and private chats with bots by their `@username` (P3).
+ * within the chats and commands their reach names. It monitors the chats of its configuration
+ * only (groups by id, private chats by `@username`), or every chat of the account when it names
+ * none (its surfaces, bot-os.md D63); each edge reads a subset (D62).
  */
 import { definePlugin, type Plugin } from '@megabottron1999/core';
 import { z } from 'zod';
@@ -23,12 +24,17 @@ export const USER_SECRETS = [
   'telegram_user_session',
 ] as const;
 
-/** The plugin's configuration: the chats it reads, a group by id or a private chat by `@username`. */
+/**
+ * The plugin's configuration: the chats it monitors, a group by id or a private chat by `@username`
+ * (or the other's id); none: every chat of the account.
+ */
 export const telegramUserConfig = z.object({
   chats: z
     .array(z.string().regex(USER_CHAT, 'expected a group id (-100…) or a @username'))
-    .min(1)
-    .describe('The chats it reads: a group by its id (-100…), or a private chat by @username'),
+    .optional()
+    .describe(
+      'The chats it monitors: a group by its id (-100…), a private chat by @username; unset: every chat'
+    ),
 });
 export type TelegramUserConfig = z.infer<typeof telegramUserConfig>;
 
@@ -66,7 +72,7 @@ export function telegramUserPlugin(
       id: TELEGRAM_USER,
       version: '0.1.0',
       kinds: ['connector'],
-      description: "The owner's own Telegram account: the chats of its configuration",
+      description: "The owner's own Telegram account: the chats it monitors",
       account,
       config: telegramUserConfig,
       secrets: [...USER_SECRETS],

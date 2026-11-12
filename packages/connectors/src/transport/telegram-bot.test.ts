@@ -8,6 +8,8 @@ import {
   createBot,
   type Startable,
   startBotWithRetry,
+  surfaceOf,
+  SURFACES_DOC,
   TelegramBotConnector,
 } from './telegram-bot.ts';
 
@@ -116,8 +118,9 @@ describe('startBotWithRetry', () => {
 describe('TelegramBotConnector', () => {
   const flush = () => new Promise((r) => setImmediate(r));
 
-  function connector(o: { listen?: Promise<unknown> } = {}) {
+  function connector(o: { listen?: Promise<unknown>; chats?: string[] } = {}) {
     const stub = stubBot();
+    const docs: Record<string, unknown> = {};
     const logs: string[] = [];
     const states: string[] = [];
     let polls = 0;
@@ -137,10 +140,18 @@ describe('TelegramBotConnector', () => {
       bot: stub.bot,
       log: (l) => logs.push(l),
       ...(o.listen === undefined ? {} : { listen: o.listen }),
+      ...(o.chats === undefined ? {} : { chats: o.chats }),
+      store: {
+        read: <T>(name: string) => docs[name] as T | undefined,
+        write: (name, value) => {
+          docs[name] = structuredClone(value);
+        },
+      },
+      now: () => 10_000,
       sleep: () => Promise.resolve(),
     });
     c.onStatus((s) => states.push(`${s.state} ${s.phase}`));
-    return { c, stub, logs, states, polls: () => polls };
+    return { c, stub, logs, states, docs, polls: () => polls };
   }
 
   it('polls once the app listens, and tells its status and its name', async () => {
@@ -195,6 +206,70 @@ describe('TelegramBotConnector', () => {
       playback: false,
     });
     expect(heard[1]?.sender).toBe('');
+  });
+
+  it('marks what Telegram kept while it was down as missed, and monitors only its chats', async () => {
+    const { c, stub } = connector({ chats: ['-100123', '@lobby_chat'] });
+    const heard: Inbound[] = [];
+    c.onMessage((m) => heard.push(m));
+    c.start();
+    await flush();
+    const at = (u: ReturnType<typeof stub.command>, date: number, username?: string) => {
+      const m = (u as unknown as { message: { date: number; chat: Record<string, unknown> } })
+        .message;
+      m.date = date;
+      if (username !== undefined) m.chat['username'] = username;
+      return u;
+    };
+    await stub.bot.handleUpdate(at(stub.command(-100123, 5, '/map'), 9));
+    await stub.bot.handleUpdate(at(stub.command(-100123, 5, '/map'), 10));
+    await stub.bot.handleUpdate(at(stub.command(-100777, 5, '/map'), 10, 'Lobby_Chat'));
+    await stub.bot.handleUpdate(at(stub.command(-100999, 5, '/map'), 10));
+    expect(heard.map((m) => [m.chat, m.playback, m.missed])).toEqual([
+      ['-100123', true, true],
+      ['-100123', false, undefined],
+      ['-100777', false, undefined],
+    ]);
+    await c.stop();
+  });
+
+  it('lists the chats it has seen, latest first, kept, and one searched by id', async () => {
+    const { c, stub, docs } = connector();
+    await stub.bot.handleUpdate(stub.command(-100123, 5, '/map'));
+    await stub.bot.handleUpdate(stub.command(5, 5, '/map'));
+    const at = (u: ReturnType<typeof stub.command>, date: number) => (
+      ((u as unknown as { message: { date: number } }).message.date = date),
+      u
+    );
+    await stub.bot.handleUpdate(at(stub.command(5, 5, '/map'), 30));
+    await stub.bot.handleUpdate(at(stub.command(5, 5, '/map'), 200));
+    expect(await c.surfaces()).toEqual([
+      { id: '5', title: 'Ada', kind: 'private', lastActive: 200_000 },
+      { id: '-100123', title: 'The Lobby', kind: 'group' },
+    ]);
+    expect(Object.keys(docs[SURFACES_DOC] as object)).toEqual(['5', '-100123']);
+    expect(await c.surfaces({ search: 'lobby' })).toHaveLength(1);
+    expect(await c.surfaces({ limit: 1 })).toHaveLength(1);
+    expect(await c.surfaces({ search: 'nothing' })).toEqual([]);
+    // One it has not seen, by its id: from Telegram, then kept.
+    stub.bot.api.getChat = ((id: number) =>
+      Promise.resolve({ id, type: 'channel', title: '' })) as never;
+    expect(await c.surfaces({ search: '-100555' })).toEqual([
+      { id: '-100555', title: '-100555', kind: 'channel' },
+    ]);
+    stub.bot.api.getChat = (() => Promise.reject(new Error('chat not found'))) as never;
+    expect(await c.surfaces({ search: '@nowhere_chat' })).toEqual([]);
+  });
+
+  it('names a chat by its username when it has no title', () => {
+    expect(surfaceOf({ id: 1, type: 'private', first_name: '', username: 'ada_x' })).toEqual({
+      id: '1',
+      title: '@ada_x',
+      kind: 'private',
+    });
+    expect(surfaceOf({ id: 2, type: 'private', first_name: 'Ada', last_name: 'L' }, 5).title).toBe(
+      'Ada L'
+    );
   });
 
   it('logs a listener that fails, and the app still hears the message', async () => {

@@ -54,6 +54,7 @@ export const VIEW: GraphViewData = {
           tls: { type: 'boolean', default: true },
           flavour: { type: 'string', enum: ['plain', 'fancy'] },
           channels: { type: 'array', items: { type: 'string' }, default: ['#a'] },
+          chats: { type: 'array', items: { type: 'string' }, description: 'chats it monitors' },
           note: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           limits: {
             type: 'object',

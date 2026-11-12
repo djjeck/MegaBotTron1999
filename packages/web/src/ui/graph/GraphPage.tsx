@@ -494,6 +494,10 @@ export function GraphPage({
         key={edgeKey(shownEdge)}
         edge={shownEdge}
         problems={placed.edges.get(edgeKey(shownEdge)) ?? []}
+        connector={draft.nodes.find(
+          (n) =>
+            n.id === (shownEdge.type === 'chat-out' ? shownEdge.to : shownEdge.from).split('.')[0]
+        )}
         change={(c) => change((g) => updateEdge(g, edgeKey(shownEdge), c))}
         remove={() => {
           change((g) => removeEdge(g, edgeKey(shownEdge)));

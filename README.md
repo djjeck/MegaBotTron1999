@@ -9,7 +9,9 @@ plugins are wired is a typed graph of ports, which the web UI draws: each plugin
 each binding an edge, and the edges are the permissions. Data flows left to right: a connector's
 chats are read on the left of the graph (chat-in edges, to the parsers) and written to on its right
 (chat-out edges, from the plugins that send), so a connector is drawn as two cards, in and out
-([docs/bot-os.md](docs/bot-os.md) D60).
+([docs/bot-os.md](docs/bot-os.md) D60). A chat-in edge reads some chats, or any its connector
+monitors, from some senders, or anyone (D62); the chats are picked from the lists the connectors
+give (D63).
 
 It knows no game. Games, and what plays them, are plugins on top of it.
 

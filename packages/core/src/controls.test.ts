@@ -659,4 +659,46 @@ describe('controlServer', () => {
     expect(spans.at(-1)?.[0]).toBe(10 * 3_600_000 - 24 * 3_600_000);
     expect((await get('/plugins/act%6Fr/state/st%61tus'))[1]).toEqual({ count: 0 });
   });
+
+  it('serves a connector’s surfaces, once it runs and while it can tell', async () => {
+    const lobby = { id: '-1001', title: 'The Lobby', kind: 'group' as const, lastActive: 5 };
+    const quest = { id: '@QuestBot', title: 'Quest Bot', kind: 'bot' as const };
+    const listing = new FakeConnector({ account: 'list:me', surfaces: [lobby, quest] });
+    const core = new Core({ clock: new VirtualClock(1000) });
+    core.register(
+      fakeConnectorPlugin('chat', new FakeConnector({ account: 'chat:me' })),
+      fakeConnectorPlugin('list', listing),
+      broken
+    );
+    core.load();
+    expect(await core.controls.surfaces('list')).toEqual({
+      running: false,
+      listed: false,
+      surfaces: [],
+    });
+    await core.start();
+    server = controlServer({ controls: core.controls, settings: core.settings });
+    await new Promise<void>((r) => server?.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as { port: number };
+    const get = async (p: string) => {
+      const res = await fetch(`http://127.0.0.1:${port}${p}`);
+      return [res.status, await res.json()] as const;
+    };
+    expect(await get('/accounts/list/surfaces')).toEqual([409, { error: 'not connected' }]);
+    listing.open();
+    expect(await get('/accounts/list/surfaces')).toEqual([
+      200,
+      { running: true, listed: true, surfaces: [lobby, quest] },
+    ]);
+    expect((await get('/accounts/list/surfaces?search=quest&limit=1'))[1]).toMatchObject({
+      surfaces: [quest],
+    });
+    expect(await get('/accounts/chat/surfaces')).toEqual([
+      200,
+      { running: true, listed: false, surfaces: [] },
+    ]);
+    expect(await get('/accounts/broken/surfaces')).toEqual([404, { error: 'no such connector' }]);
+    expect(await get('/accounts/nobody/surfaces')).toEqual([404, { error: 'no such connector' }]);
+    await core.stop();
+  });
 });

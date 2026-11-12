@@ -41,7 +41,9 @@ export const stableJson = (v: unknown): string =>
 
 const carried = (e: GraphEdge): string =>
   [
-    e.reads !== undefined && e.reads.length > 0 ? `reads ${e.reads.join(' ')}` : '',
+    e.reads === '*' ? 'reads any chat' : '',
+    Array.isArray(e.reads) && e.reads.length > 0 ? `reads ${e.reads.join(' ')}` : '',
+    e.senders === undefined ? '' : `from ${e.senders.join(' ')}`,
     e.sends !== undefined && e.sends.length > 0 ? `sends ${e.sends.join(' ')}` : '',
     e.commands === undefined ? '' : `commands ${e.commands.join(' ')}`,
   ]

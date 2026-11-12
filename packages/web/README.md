@@ -19,27 +19,30 @@ the server that guards them.
   and asks its id and its instance: fresh, kept, or imported from an older data directory
   (`AddNode.tsx`). An edge is dragged from an output to an input; a rhombus at its midpoint, in its
   port type's colour (`PortEdge.tsx`), is a button that selects it and opens its panel
-  (`EdgeDetails.tsx`), where a chat-in edge's `reads`, or a chat-out edge's `sends` and `commands`,
-  are set. A node's config, settings, mode and account are forms made from its schemas, each field's
-  description as its help; a new node's config starts filled with its schema's defaults, and an
-  opened node shows its unset ones filled in, written with its first change (`defaults.ts`)
-  (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a secret a choice of the secrets'
-  names. Every change is checked by the core, and each refusal shown on its edge, port, node or
-  field (`draft.ts`, the draft's pure changes). **Review changes** opens a dialog with the diff and
-  two actions (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`) and restarts the
-  instance on it, waiting for it and coming back to the page, still logged in
-  (`src/ui/Restart.tsx`), or says why the core refused it and restarts nothing; **Revert** drops the
-  draft, back to the graph saved, once confirmed. Its × (or Escape) only closes it, the draft kept.
-  When the saved graph is not what runs (changed through the API, rolled back, or a restart that did
-  not happen), a banner offers **Apply (restart)**; a saved graph refused at the last start is shown
-  first. **Text** shows the draft printed (`graphText`), read-only, with a copy button
-  (`GraphText.tsx`); the rollback is Admin's, with the history. Select one node or several (Shift,
-  Ctrl or Cmd with a click; Shift and drag for a box) and **Kill selected** kills each: its plugin's
-  own safety stop, then paused until reinstated; a killed node is drawn disabled, with a
-  **Reinstate** button, and its forms stay editable. Nodes start in columns (`layout.ts`) and can be
-  moved. **Modules** (`#/modules`) lists the modules installed, installs one from its folder, chosen
-  (**Choose folder**) or dropped on the page, after showing the id, version and description its
-  `module.json` gives (`src/ui/module-folder.ts`), or from a `.tar.gz`, and rolls one back;
+  (`EdgeDetails.tsx`), where a chat-in edge's `reads` (or all the chats its connector monitors) and
+  its `senders` (anyone, or a list with _me_), or a chat-out edge's `sends` and `commands`, are set,
+  the chats ticked among its connector's monitored chats and the words as rows (`Surfaces.tsx`, D62,
+  D63); a connector's own `chats`, what it monitors, are ticked from its surfaces, with a search. A
+  connector not running yet says to apply first. A node's config, settings, mode and account are
+  forms made from its schemas, each field's description as its help; a new node's config starts
+  filled with its schema's defaults, and an opened node shows its unset ones filled in, written with
+  its first change (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a
+  secret a choice of the secrets' names. Every change is checked by the core, and each refusal shown
+  on its edge, port, node or field (`draft.ts`, the draft's pure changes). **Review changes** opens
+  a dialog with the diff and two actions (`Review.tsx`): **Apply** saves the graph
+  (`PUT /graph/file`) and restarts the instance on it, waiting for it and coming back to the page,
+  still logged in (`src/ui/Restart.tsx`), or says why the core refused it and restarts nothing;
+  **Revert** drops the draft, back to the graph saved, once confirmed. Its × (or Escape) only closes
+  it, the draft kept. When the saved graph is not what runs (changed through the API, rolled back,
+  or a restart that did not happen), a banner offers **Apply (restart)**; a saved graph refused at
+  the last start is shown first. **Text** shows the draft printed (`graphText`), read-only, with a
+  copy button (`GraphText.tsx`); the rollback is Admin's, with the history. Select one node or
+  several (Shift, Ctrl or Cmd with a click; Shift and drag for a box) and **Kill selected** kills
+  each: its plugin's own safety stop, then paused until reinstated; a killed node is drawn disabled,
+  with a **Reinstate** button, and its forms stay editable. Nodes start in columns (`layout.ts`) and
+  can be moved. **Modules** (`#/modules`) lists the modules installed, installs one from its folder,
+  chosen (**Choose folder**) or dropped on the page, after showing the id, version and description
+  its `module.json` gives (`src/ui/module-folder.ts`), or from a `.tar.gz`, and rolls one back;
   **Import** (`#/import`) shows an older data directory and imports its event log with a table of
   type renames. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59) has one
   section per area, each reached by its route (`#/instance`, `#/graph-history`, `#/graph-text`,

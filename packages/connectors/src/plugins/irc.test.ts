@@ -96,6 +96,17 @@ describe('IrcConnector', () => {
     ]);
   });
 
+  it('offers its channel as its one surface, with its last line', async () => {
+    const f = fake();
+    const ch = IRC_OPTIONS.channel;
+    expect(await f.connector.surfaces()).toEqual([{ id: ch, title: ch, kind: 'group' }]);
+    f.events().line(line('hi', true));
+    expect(await f.connector.surfaces({ search: ch.slice(1, 3).toUpperCase() })).toEqual([
+      { id: ch, title: ch, kind: 'group', lastActive: 1000 },
+    ]);
+    expect(await f.connector.surfaces({ search: 'nowhere' })).toEqual([]);
+  });
+
   it('sends only to its channel, and says when it cannot', () => {
     const f = fake();
     expect(f.connector.send('#LOBBY', '!profile')).toBe(true);

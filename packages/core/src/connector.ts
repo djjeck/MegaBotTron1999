@@ -29,8 +29,14 @@ export interface Inbound {
   id?: string;
   /** The id of the message it replies to. */
   replyTo?: string;
-  /** History replayed at connection (ZNC's buffer), not news: never acted on. */
+  /**
+   * Not news: history replayed at connection (ZNC's buffer), or a message said while the instance
+   * was down and delivered once by the connector's catch-up (`missed`). Parsers read it; nothing
+   * acts on it.
+   */
   playback: boolean;
+  /** Said while the instance was down, delivered once by the connector's catch-up (§4.5). */
+  missed?: boolean;
   /** Sent by the account itself, from any of its devices (a Telegram user's own messages). */
   own?: boolean;
 }
@@ -42,6 +48,55 @@ export interface ConnectorStatus {
   /** The network's own name for the step (IRC's `registered`, `joined`). */
   phase: string;
   detail?: string;
+}
+
+/** What a chat surface is: a private chat (with a person), a group, a channel, a bot's chat. */
+export type SurfaceKind = 'private' | 'group' | 'channel' | 'bot';
+
+/** A chat a connector can see (bot-os-api.md §4.5, bot-os.md D63): what the owner picks from. */
+export interface Surface {
+  /** How the connector's config and the edges name it: a group's id, a `@username`, `#lobby`. */
+  id: string;
+  /** Its title, as the network shows it. */
+  title: string;
+  kind: SurfaceKind;
+  /** When something was last said there, in ms, where the network says. */
+  lastActive?: number;
+}
+
+/** Which surfaces to list: those whose title or id has `search` in it, at most `limit`. */
+export interface SurfaceQuery {
+  search?: string;
+  limit?: number;
+}
+
+/**
+ * What a chat-in edge reads (bot-os.md D62): its chats (`'*'`: any chat the connector monitors)
+ * and its senders (`senders`: usernames, `me` for the account's own; none: anyone).
+ */
+export interface ReadFilter {
+  reads: readonly string[] | '*';
+  senders?: readonly string[] | undefined;
+}
+
+/** A name compared as networks do: without case, and without a leading `@`. */
+const plainName = (s: string): string => s.replace(/^@/u, '').toLowerCase();
+
+/**
+ * Whether a read filter hears `m`: in one of its chats (any, for `'*'`), compared without case,
+ * and from one of its senders (anyone, without `senders`). `me` is the account's own messages
+ * (`own`, or sent as the account's own name, `self`).
+ */
+export function hears(filter: ReadFilter, m: Inbound, self?: string): boolean {
+  if (filter.reads !== '*' && !filter.reads.some((c) => c.toLowerCase() === m.chat.toLowerCase()))
+    return false;
+  if (filter.senders === undefined) return true;
+  const sender = plainName(m.sender);
+  return filter.senders.some((f) =>
+    f === 'me'
+      ? m.own === true || (self !== undefined && sender === plainName(self))
+      : sender !== '' && plainName(f) === sender
+  );
 }
 
 /** What a plugin gets of a connector: it reads, and knows the status; it cannot send. */
@@ -86,14 +141,19 @@ export interface Connector extends ConnectorHandle {
    * `format`, the text is Markdown, which a network that formats sends formatted.
    */
   deliver?(chat: string, text: string, options?: { format?: TextFormat }): Promise<{ id?: string }>;
+  /**
+   * The chats it can see, most recently active first, those matching `query.search` (bot-os.md
+   * D63): what the owner picks the monitored chats and each edge's from. Rejects while it cannot
+   * tell (not connected).
+   */
+  surfaces?(query?: SurfaceQuery): Promise<Surface[]>;
 }
 
 /**
- * The handle of a connector: everything but `send`. With `reads`, the chats a plugin's reach names
- * (P6), it hears those chats only, compared without case (IRC's channels, Telegram's usernames).
+ * The handle of a connector: everything but `send`. With `filter`, what a plugin's chat-in edge
+ * reads (P6, D62), it hears only those chats and senders (`hears`); without, everything.
  */
-export function handleOf(c: Connector, reads?: readonly string[]): ConnectorHandle {
-  const chats = reads === undefined ? undefined : new Set(reads.map((r) => r.toLowerCase()));
+export function handleOf(c: Connector, filter?: ReadFilter): ConnectorHandle {
   return {
     account: c.account,
     network: c.network,
@@ -101,7 +161,7 @@ export function handleOf(c: Connector, reads?: readonly string[]): ConnectorHand
     self: () => c.self(),
     onMessage: (h) =>
       c.onMessage((m) => {
-        if (chats === undefined || chats.has(m.chat.toLowerCase())) h(m);
+        if (filter === undefined || hears(filter, m, c.self())) h(m);
       }),
     onStatus: (h) => c.onStatus(h),
     ...(c.isAdmin === undefined

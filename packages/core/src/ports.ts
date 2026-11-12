@@ -76,12 +76,24 @@ const ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
 const chats = z.array(z.string().min(1));
 
+/** A chat-in edge's `reads` meaning every chat its connector monitors (bot-os.md D62). */
+export const ANY_CHAT = '*';
+/** In a chat-in edge's `senders`, the account's own messages (bot-os.md D62). */
+export const ME = 'me';
+
 /**
- * What a bound chat carries: the chats read (a chat-in edge's), the chats sent to and the commands
- * (first words) sent (a chat-out edge's). Each edge carries only its own: the others are empty.
+ * What a bound chat carries: the chats read (a chat-in edge's: a list, or `'*'`, any chat its
+ * connector monitors) and the senders read from (`senders`: usernames, with `me` for the account's
+ * own messages; none: anyone), the chats sent to and the commands (first words) sent (a chat-out
+ * edge's). Each edge carries only its own: the others are empty.
  */
+/** A chat-in's reads: the chats, or `'*'`. */
+export const readsSchema = z.union([z.literal(ANY_CHAT), chats]);
+
 export const chatBindingSchema = z.strictObject({
-  reads: chats.default([]),
+  reads: readsSchema.default([]),
+  /** The senders it hears, by username (`@QuestBot`), `me` for the account's own; none: anyone. */
+  senders: chats.optional(),
   sends: chats.default([]),
   /** The commands it may send, by their first word (`!roll`); none: any text. */
   commands: chats.optional(),
@@ -119,7 +131,11 @@ export const inputSchema = z.discriminatedUnion('type', [
     when: configKey.optional(),
     ...common,
     bind: z
-      .strictObject({ node: z.string().regex(ID), reads: chatBindingSchema.shape.reads })
+      .strictObject({
+        node: z.string().regex(ID),
+        reads: chatBindingSchema.shape.reads,
+        senders: chatBindingSchema.shape.senders,
+      })
       .optional(),
   }),
   /**

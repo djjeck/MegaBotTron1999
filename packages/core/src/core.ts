@@ -21,7 +21,7 @@ import {
   type CommandButton,
   type CommandHandler,
 } from './commands.ts';
-import { type ChatSurface, type Connector, handleOf } from './connector.ts';
+import { type ChatSurface, type Connector, handleOf, type ReadFilter } from './connector.ts';
 import { Controls, KILLED } from './controls.ts';
 import { DEFAULT_DRIFT, type DriftCounts, DriftMonitor, type DriftRecord } from './drift.ts';
 import { type EventReader, type LogEntry } from './event-log.ts';
@@ -1066,8 +1066,8 @@ export class Core {
           throw new Error(`${id} has no reach on ${key}: no edge binds a chat-in input of it`);
         const c = this.connector(bound[1].node);
         if (c === undefined) throw new Error(`${bound[1].node} is not a running connector`);
-        // It hears only the chats its edge reads (P6).
-        return handleOf(c, bound[1].chat?.reads ?? []);
+        // It hears only the chats and the senders its edge reads (P6, D62).
+        return handleOf(c, readFilter(bound[1]));
       },
       use: <T>(key: string): T => {
         const used = this.interfaceOf(entry, key);
@@ -1260,6 +1260,14 @@ function commandProblems(entries: readonly { id: string; manifest: Manifest }[])
 }
 
 /** A node's chat-in inputs that an edge binds, each with its edge: the chats it reads. */
+/** What a chat-in edge reads: its chats and its senders. */
+function readFilter(b: Binding): ReadFilter {
+  return {
+    reads: b.chat?.reads ?? [],
+    ...(b.chat?.senders === undefined ? {} : { senders: b.chat.senders }),
+  };
+}
+
 function chatsOf(node: ResolvedNode): [string, Binding][] {
   return [...node.inputs].flatMap(([port, bs]) =>
     bs.filter((b) => b.type === 'chat-in').map((b): [string, Binding] => [port, b])

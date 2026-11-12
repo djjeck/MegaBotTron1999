@@ -3,10 +3,15 @@
  * (docs/bot-os-api.md §4.5): the owner's own account, for parsers and turn-actors that read and
  * play in its chats.
  *
- * It reads the chats it is given and no other: a group by its id (`-100…`), or a private chat with a
- * bot by the bot's username (`@QuestBot`, P3). The account sees every chat of its owner, and
- * the rest never leaves this module. It sends any text to those chats, but only through the
- * account's outbox, which keeps each plugin to the chats and commands of its reach (§4.6).
+ * It monitors the chats it is given and no other (a group by its id, `-100…`; a private chat by the
+ * other's `@username`, or by their id when they have none), or, given none, every chat the account
+ * has (its surfaces, bot-os.md D63). The account sees every chat of its owner, and the rest never
+ * leaves this module. It sends any text to those chats, but only through the account's outbox,
+ * which keeps each plugin to the chats and commands of its reach (§4.6).
+ *
+ * **No catch-up yet**: what was said while the instance was down is not delivered. GramJS 2.26.22
+ * has no update catch-up (`client.catchUp()` is an empty stub, and its sessions keep no update
+ * state); how to fill the gap is the author's to choose (docs/bot-os.md D62).
  *
  * The session string gives full access to the account: it comes from the deployment's secrets,
  * never from this repository, and is never printed by this module.
@@ -16,6 +21,9 @@ import {
   type Connector,
   ConnectorBase,
   FloodWait,
+  type Inbound,
+  type Surface,
+  type SurfaceQuery,
   type TimerHandle,
 } from '@megabottron1999/core';
 import { TelegramClient } from 'telegram';
@@ -29,7 +37,7 @@ export interface RawMessage {
   id: number;
   /** In seconds. */
   date: number;
-  out: boolean;
+  out?: boolean | undefined;
   message: string;
   replyTo?: { replyToMsgId?: number | undefined } | undefined;
   chatId?: { toString(): string } | undefined;
@@ -39,12 +47,29 @@ export interface RawMessage {
   getChat(): Promise<unknown>;
 }
 
+/** The fields of a GramJS dialog the connector reads: one chat of the account. */
+export interface RawDialog {
+  /** The chat's id, marked (`-100…` for a group or a channel). */
+  id?: { toString(): string } | undefined;
+  title?: string | undefined;
+  /** When its latest message was sent, in seconds. */
+  date?: number | undefined;
+  isUser?: boolean | undefined;
+  isGroup?: boolean | undefined;
+  isChannel?: boolean | undefined;
+  /** The other user (a bot has `bot`), the group or the channel. */
+  entity?: unknown;
+  inputEntity?: unknown;
+  /** Its latest message. */
+  message?: { id: number } | undefined;
+}
+
 /** The part of GramJS's `TelegramClient` the connector uses; tests pass a fake. */
 export interface GramClient {
   connect(): Promise<boolean>;
   disconnect(): Promise<void>;
-  /** Fills the entity cache, so a group's id resolves to a peer. */
-  getDialogs(params: object): Promise<unknown>;
+  /** The account's chats, latest first (and fills the entity cache, so a group's id resolves). */
+  getDialogs(params: { limit?: number }): Promise<Iterable<RawDialog>>;
   getInputEntity(id: number | string): Promise<unknown>;
   /** The logged-in user. */
   getMe(): Promise<unknown>;
@@ -55,17 +80,25 @@ export interface GramClient {
   ): void;
 }
 
-/** The username of an entity GramJS returned (a user, a bot, a channel posting as itself). */
-function username(entity: unknown): string | undefined {
-  if (typeof entity !== 'object' || entity === null || !('username' in entity)) return undefined;
-  return typeof entity.username === 'string' ? entity.username : undefined;
+/** A string field of an entity GramJS returned, if it has one. */
+function field(entity: unknown, key: 'username' | 'bot'): unknown {
+  if (typeof entity !== 'object' || entity === null || !(key in entity)) return undefined;
+  return (entity as Record<string, unknown>)[key];
 }
 
-/** A chat the connector reads: a group's id, or a private chat by the other's `@username`. */
-export const USER_CHAT = /^(?:-\d+|@\w{4,})$/u;
+/** The username of an entity GramJS returned (a user, a bot, a channel posting as itself). */
+function username(entity: unknown): string | undefined {
+  const u = field(entity, 'username');
+  return typeof u === 'string' ? u : undefined;
+}
+
+/** A chat the connector monitors: a group's id, a private chat by `@username` or by id. */
+export const USER_CHAT = /^(?:-?\d+|@\w{4,})$/u;
 
 /** How long a failed start waits before the next. */
 export const RETRY_MS = 60_000;
+/** How many of the latest chats the surfaces list without a search. */
+export const SURFACES_LIMIT = 50;
 
 /** The wait GramJS asks for (its `FloodWaitError` and kin carry `seconds`), in ms. */
 function floodMs(e: unknown): number | undefined {
@@ -73,12 +106,18 @@ function floodMs(e: unknown): number | undefined {
   return e.seconds * 1000;
 }
 
+/** The kind of a dialog's chat. */
+function kindOf(d: RawDialog): Surface['kind'] {
+  if (d.isUser === true) return field(d.entity, 'bot') === true ? 'bot' : 'private';
+  return d.isChannel === true && d.isGroup !== true ? 'channel' : 'group';
+}
+
 export interface UserConnectorOptions {
   /** `telegram:<name>`. */
   account: string;
   client: GramClient;
-  /** The chats it reads and may send to (`USER_CHAT`). */
-  chats: readonly string[];
+  /** The chats it monitors and may send to (`USER_CHAT`); none given: every chat it has. */
+  chats?: readonly string[] | undefined;
   clock: Clock;
   log: (line: string) => void;
   /** Told of the first failed start (a revoked session needs a login). */
@@ -89,17 +128,21 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
   private readonly o: UserConnectorOptions;
   /** Each chat's peer, by the chat in lower case, once started. */
   private readonly peers = new Map<string, unknown>();
-  /** The chats as given, by their lower case. */
-  private readonly chats: Map<string, string>;
+  /** The chats as given, by their lower case; undefined: every chat. */
+  private readonly chats: Map<string, string> | undefined;
   private started = false;
   private listening = false;
+  private connected = false;
   private told = false;
   private retry: TimerHandle | undefined;
 
   constructor(options: UserConnectorOptions) {
     super(options.account, 'telegram');
     this.o = options;
-    this.chats = new Map(options.chats.map((c) => [c.toLowerCase(), c]));
+    this.chats =
+      options.chats === undefined
+        ? undefined
+        : new Map(options.chats.map((c) => [c.toLowerCase(), c]));
   }
 
   /** Connects, without waiting: a failure is retried every minute, and told the first time. */
@@ -113,6 +156,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
   async stop(): Promise<void> {
     if (!this.started) return;
     this.started = false;
+    this.connected = false;
     this.o.clock.clearTimeout(this.retry);
     this.peers.clear();
     this.changed({ state: 'closed', phase: 'closed' });
@@ -121,7 +165,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
 
   /** Sends without waiting for the answer, which is logged if it fails; `deliver` waits. */
   send(chat: string, text: string): boolean {
-    if (this.status().state !== 'connected' || !this.peers.has(chat.toLowerCase())) return false;
+    if (this.status().state !== 'connected' || !this.monitors(chat)) return false;
     this.deliver(chat, text).catch((e: unknown) =>
       this.o.log(`send to ${chat} failed: ${String(e)}`)
     );
@@ -129,10 +173,11 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
   }
 
   async deliver(chat: string, text: string): Promise<{ id?: string }> {
-    const peer = this.peers.get(chat.toLowerCase());
-    if (peer === undefined) throw new Error(`${chat} is not a chat of ${this.account}`);
+    if (!this.monitors(chat)) throw new Error(`${chat} is not a chat of ${this.account}`);
     try {
-      const sent = await this.o.client.sendMessage(peer as never, { message: text });
+      const sent = await this.o.client.sendMessage((await this.peer(chat)) as never, {
+        message: text,
+      });
       return { id: String(sent.id) };
     } catch (e) {
       const ms = floodMs(e);
@@ -140,24 +185,71 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     }
   }
 
+  /**
+   * Its surfaces (bot-os.md D63): the account's chats, latest first, with their kind and title;
+   * with a search, those whose title, username or id has it, among all of them.
+   */
+  async surfaces(query: SurfaceQuery = {}): Promise<Surface[]> {
+    if (!this.connected) throw new Error('not connected');
+    const search = query.search?.trim().toLowerCase() ?? '';
+    const limit = query.limit ?? SURFACES_LIMIT;
+    const dialogs = [...(await this.o.client.getDialogs(search === '' ? { limit } : {}))];
+    return dialogs
+      .map((d): Surface | undefined => {
+        const id = this.nameOf(d);
+        if (id === undefined) return undefined;
+        const title = d.title ?? id;
+        return {
+          id,
+          title,
+          kind: kindOf(d),
+          ...(d.date === undefined ? {} : { lastActive: d.date * 1000 }),
+        };
+      })
+      .filter((x): x is Surface => x !== undefined)
+      .filter(
+        (x) =>
+          search === '' ||
+          x.title.toLowerCase().includes(search) ||
+          x.id.toLowerCase().includes(search)
+      )
+      .sort((a, b) => (b.lastActive ?? 0) - (a.lastActive ?? 0))
+      .slice(0, limit);
+  }
+
+  /** Whether it monitors `chat`: one of its chats, or any when it was given none. */
+  private monitors(chat: string): boolean {
+    return this.chats === undefined || this.chats.has(chat.toLowerCase());
+  }
+
+  /** A chat's peer: resolved at connection for the chats given, else now. */
+  private async peer(chat: string): Promise<unknown> {
+    const key = chat.toLowerCase();
+    const known = this.peers.get(key);
+    if (known !== undefined) return known;
+    const peer = await this.o.client.getInputEntity(chat.startsWith('@') ? chat : Number(chat));
+    this.peers.set(key, peer);
+    return peer;
+  }
+
   private async connect(): Promise<void> {
     const { client } = this.o;
     try {
       await client.connect();
-      await client.getDialogs({});
-      for (const [key, chat] of this.chats)
-        this.peers.set(
-          key,
-          await client.getInputEntity(chat.startsWith('@') ? chat : Number(chat))
-        );
-      this.named(username(await client.getMe()));
       if (!this.started) return;
-      // Once, however often the start is retried.
+      // Once, however often the start is retried; before the dialogs, so nothing falls between.
       if (!this.listening) client.addEventHandler((e) => this.heard(e.message), new NewMessage({}));
       this.listening = true;
+      await client.getDialogs({});
+      for (const chat of this.chats?.values() ?? []) await this.peer(chat);
+      this.named(username(await client.getMe()));
+      if (!this.started) return;
+      this.connected = true;
       this.changed({ state: 'connected', phase: 'ready' });
       this.o.log(
-        `connected as ${this.self() ?? '(no username)'}, reading ${[...this.chats.values()].join(', ')}`
+        `connected as ${this.self() ?? '(no username)'}, reading ${
+          this.chats === undefined ? 'every chat' : [...this.chats.values()].join(', ')
+        }`
       );
     } catch (err) {
       if (!this.started) return;
@@ -175,30 +267,51 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     try {
       const chat = await this.chatOf(m);
       if (chat === undefined) return;
-      const sender = username(await m.getSender());
-      const replyTo = m.replyTo?.replyToMsgId;
-      this.received({
-        chat,
-        sender: sender ?? '',
-        text: m.message,
-        time: m.date * 1000,
-        id: String(m.id),
-        ...(replyTo === undefined ? {} : { replyTo: String(replyTo) }),
-        playback: false,
-        own: m.out,
-      });
+      this.received(await this.inbound(m, chat));
     } catch (err) {
       this.o.log(`message ${m.id} dropped: ${String(err)}`);
     }
   }
 
-  /** The chat of a message, as given, or undefined for a chat it does not read. */
+  private async inbound(
+    m: RawMessage,
+    chat: string
+  ): Promise<Omit<Inbound, 'account' | 'network'>> {
+    const sender = username(await m.getSender());
+    const replyTo = m.replyTo?.replyToMsgId;
+    return {
+      chat,
+      sender: sender ?? '',
+      text: m.message,
+      time: m.date * 1000,
+      id: String(m.id),
+      ...(replyTo === undefined ? {} : { replyTo: String(replyTo) }),
+      playback: false,
+      own: m.out === true,
+    };
+  }
+
+  /** The name a chat is delivered by: as given, else a group's id, a private chat's @username. */
+  private chatName(id: string | undefined, other: string | undefined): string | undefined {
+    const at = other === undefined ? undefined : `@${other}`;
+    if (this.chats === undefined) return at ?? id;
+    return (
+      (id === undefined ? undefined : this.chats.get(id.toLowerCase())) ??
+      (at === undefined ? undefined : this.chats.get(at.toLowerCase()))
+    );
+  }
+
+  private nameOf(d: RawDialog): string | undefined {
+    return this.chatName(d.id?.toString(), d.isUser === true ? username(d.entity) : undefined);
+  }
+
+  /** The chat of a message, as given, or undefined for a chat it does not monitor. */
   private async chatOf(m: RawMessage): Promise<string | undefined> {
-    const byId = this.chats.get(m.chatId?.toString() ?? '');
+    const id = m.chatId?.toString();
+    if (m.isPrivate !== true) return this.chatName(id, undefined);
+    const byId = this.chats?.get(id?.toLowerCase() ?? '');
     if (byId !== undefined) return byId;
-    if (m.isPrivate !== true) return undefined;
-    const other = username(await m.getChat());
-    return other === undefined ? undefined : this.chats.get(`@${other}`.toLowerCase());
+    return this.chatName(id, username(await m.getChat()));
   }
 }
 

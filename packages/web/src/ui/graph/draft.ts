@@ -149,18 +149,20 @@ export function edgeOf(
 }
 
 /** An edge's chats and commands changed (an empty list taken away). */
-export function updateEdge(
-  g: Graph,
-  key: string,
-  change: Pick<GraphEdge, 'reads' | 'sends' | 'commands'>
-): Graph {
+/** What an edge's panel changes: what it carries; a key set to undefined is taken away. */
+export type EdgeChange = {
+  [K in 'reads' | 'senders' | 'sends' | 'commands']?: GraphEdge[K] | undefined;
+};
+
+export function updateEdge(g: Graph, key: string, change: EdgeChange): Graph {
   return {
     ...g,
     edges: g.edges.map((e) => {
       if (edgeKey(e) !== key) return e;
       const out: Record<string, unknown> = { ...e };
       for (const [k, v] of Object.entries(change))
-        if (v === undefined || (k === 'commands' && v.length === 0)) delete out[k];
+        if (v === undefined || (k === 'commands' && Array.isArray(v) && v.length === 0))
+          delete out[k];
         else out[k] = v;
       return out as GraphEdge;
     }),

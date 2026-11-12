@@ -24,7 +24,12 @@ export {
   type ConnectorState,
   type ConnectorStatus,
   handleOf,
+  hears,
   type Inbound,
+  type ReadFilter,
+  type Surface,
+  type SurfaceKind,
+  type SurfaceQuery,
 } from './connector.ts';
 export {
   controlHandler,
@@ -44,6 +49,7 @@ export {
   type PluginControl,
   POWER_DOC,
   type PowerDoc,
+  type SurfacesView,
 } from './controls.ts';
 export {
   type AvailablePlugin,
@@ -219,6 +225,7 @@ export {
   type PluginSettingsHandle,
 } from './plugin.ts';
 export {
+  ANY_CHAT,
   type ChatBinding,
   type ChatOutInput,
   type DeclaredInput,
@@ -227,6 +234,7 @@ export {
   type InputPort,
   type InputPortInput,
   type ManifestInputPort,
+  ME,
   mismatch,
   namespaceOf,
   type NamespaceSource,

@@ -1,54 +1,36 @@
 /**
  * The edge selected in the graph editor (D55): its two ends, its type, why the check refuses it,
- * and, for a chat, what it carries (bot-os-api.md §2.1, D60): a chat-in edge, the chats it `reads`;
- * a chat-out edge, those it `sends` to and the `commands` sent (their first words); one per line.
- * Then its removal. The edges are the permissions (P6): a plugin reads and sends only what its edge
+ * and, for a chat, what it carries (bot-os-api.md §2.1, D60–D63), picked from its connector's
+ * monitored chats (`Surfaces.tsx`): a chat-in edge, the chats it `reads` (or all of them, `'*'`)
+ * and the `senders` it hears (anyone, or a list with `me`), any chat from anyone flagged as broad;
+ * a chat-out edge, those it `sends` to and the `commands` sent (their first words), as rows. Then
+ * its removal. The edges are the permissions (P6): a plugin reads and sends only what its edge
  * says.
  */
-import { useState } from 'react';
-import type { GraphEdge } from '#src/ui/api.ts';
+import type { GraphEdge, GraphNode } from '#src/ui/api.ts';
+import type { EdgeChange } from './draft.ts';
+import { CHATS_KEY, EdgeChats, RowsField, Senders } from './Surfaces.tsx';
 
-const lines = (v: readonly string[] | undefined): string => (v ?? []).join('\n');
-const list = (text: string): string[] =>
-  text
-    .split(/[\n,]/u)
-    .map((s) => s.trim())
-    .filter((s) => s !== '');
-
-/** A list edited as lines, set when the field is left. */
-function ListField(props: {
-  name: string;
-  help: string;
-  value: readonly string[] | undefined;
-  set: (v: string[]) => void;
-}) {
-  const [text, setText] = useState(lines(props.value));
-  return (
-    <div className="field">
-      <label>
-        <code>{props.name}</code>
-        <textarea
-          aria-label={props.name}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onBlur={() => props.set(list(text))}
-        />
-      </label>
-      <small className="muted">{props.help}</small>
-    </div>
-  );
+/** The connector's monitored chats, as its config lists them; undefined: every chat. */
+function monitoredOf(node: GraphNode | undefined): string[] | undefined {
+  const chats = node?.config?.[CHATS_KEY];
+  return Array.isArray(chats) ? chats.filter((c): c is string => typeof c === 'string') : undefined;
 }
 
 export function EdgeDetails(props: {
   edge: GraphEdge;
   problems: string[];
-  change: (change: Pick<GraphEdge, 'reads' | 'sends' | 'commands'>) => void;
+  /** The connector node at its chat end, if it is a chat edge. */
+  connector?: GraphNode | undefined;
+  change: (change: EdgeChange) => void;
   remove: () => void;
 }) {
   const { edge } = props;
   const reads = edge.type === 'chat-in';
   const sends = edge.type === 'chat-out';
   const name = `${edge.from} → ${edge.to}`;
+  const connector = props.connector?.id;
+  const monitored = monitoredOf(props.connector);
   return (
     <aside className="details" aria-label={`details of edge ${name}`} key={name}>
       <h2>Edge</h2>
@@ -65,26 +47,42 @@ export function EdgeDetails(props: {
       {reads ? (
         <section>
           <h3>What it reads</h3>
-          <ListField
+          {edge.reads === '*' && edge.senders === undefined ? (
+            <p className="warning" role="note">
+              Broad: it hears any chat its connector monitors, from anyone.
+            </p>
+          ) : null}
+          <EdgeChats
             name="reads"
-            help="The chats the plugin hears from the connector (a channel, a chat id, a bot’s @username), one per line; it hears no other"
+            any
+            help="The chats the plugin hears from the connector; it hears no other"
+            connector={connector}
+            monitored={monitored}
             value={edge.reads}
             set={(r) => props.change({ reads: r })}
+          />
+          <Senders
+            connector={connector}
+            value={edge.senders}
+            set={(senders) => props.change({ senders })}
           />
         </section>
       ) : sends ? (
         <section>
           <h3>What it sends</h3>
-          <ListField
+          <EdgeChats
             name="sends"
-            help="The chats the plugin may send to through the connector, one per line; the outbox refuses any other"
+            help="The chats the plugin may send to through the connector; the outbox refuses any other"
+            connector={connector}
+            monitored={monitored}
             value={edge.sends}
-            set={(s) => props.change({ sends: s })}
+            set={(s) => props.change({ sends: s === '*' ? [] : s })}
           />
-          <ListField
+          <RowsField
             name="commands"
-            help="The commands it may send there, by first word (/play); empty: any text"
-            value={edge.commands}
+            help="The commands it may send there, by first word (/play); none: any text"
+            placeholder="/play"
+            value={edge.commands ?? []}
             set={(commands) => props.change({ commands })}
           />
         </section>

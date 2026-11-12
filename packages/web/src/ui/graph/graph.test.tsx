@@ -306,7 +306,7 @@ describe('SchemaForm', () => {
     expect(screen.getByText('how fast it sends')).toBeDefined();
     // A default is shown as a value, unmarked.
     expect(screen.queryByText('default')).toBeNull();
-    expect(screen.getAllByText('(optional)')).toHaveLength(7);
+    expect(screen.getAllByText('(optional)')).toHaveLength(8);
   });
 
   it('edits each field: a value set, emptied (its default back), a secret named, JSON typed', () => {

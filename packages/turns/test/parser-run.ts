@@ -17,12 +17,13 @@ export const T0 = Date.parse('2026-11-06T12:00:00Z');
 
 /**
  * A parser on alice's faked account: what it publishes, drifts and offers. `group`: its edge reads
- * the game's group too.
+ * the game's group too; `documents`, what its store starts with (a restart's).
  */
 export async function runParser(
   plugin: Plugin,
   config: Record<string, unknown> = {},
-  group?: string
+  group?: string,
+  documents?: Record<string, unknown>
 ) {
   const account = new FakeConnector({ account: 'telegram:alice' });
   const events: BusEvent[] = [];
@@ -30,12 +31,13 @@ export async function runParser(
     start: T0,
     plugins: [fakeConnectorPlugin(TELEGRAM_USER, account), plugin],
     config: { [plugin.manifest.id]: config },
+    ...(documents === undefined ? {} : { documents: { [plugin.manifest.id]: documents } }),
     graph: (defaults) => ({
       ...defaults,
       edges: defaults.edges.map((e) =>
         group === undefined || e.to !== `${plugin.manifest.id}.chat`
           ? e
-          : { ...e, reads: [...(e.reads ?? []), group] }
+          : { ...e, reads: Array.isArray(e.reads) ? [...e.reads, group] : e.reads }
       ),
     }),
     record: (r) => {

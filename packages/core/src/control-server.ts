@@ -12,6 +12,9 @@
  * - `GET /instance`: the instance's health: off or on, the process's uptime, Node's version and
  *   memory, the plugins and the accounts counted by state.
  * - `GET /accounts`: each connector instance, its account and its connection's status.
+ * - `GET /accounts/<id>/surfaces?search=&limit=50`: the chats a connector can see, latest first
+ *   (bot-os.md D63): `running` false until it runs, `listed` false if it cannot list them; 409
+ *   with why when it cannot tell now (not connected).
  * - `GET /drift`: each parser's counts of what it read and could not read (§4.7).
  * - `GET /events?limit=100&type=core.&hours=24`: the event log's latest records, newest first,
  *   those whose type starts with `type` (when the wiring gives the log).
@@ -280,6 +283,21 @@ export function controlHandler(
         });
       }
       if (!post && route === '/accounts') return reply(200, controls.accounts());
+      const surfaces = /^\/accounts\/([^/]+)\/surfaces$/u.exec(route);
+      if (!post && surfaces !== null) {
+        const search = url.searchParams.get('search');
+        const query = {
+          ...(search === null ? {} : { search }),
+          limit: bounded(url.searchParams.get('limit'), 50, 500),
+        };
+        let view: unknown;
+        try {
+          view = await controls.surfaces(decodeURIComponent(surfaces[1] ?? ''), query);
+        } catch (e) {
+          return reply(409, { error: e instanceof Error ? e.message : String(e) });
+        }
+        return view === undefined ? reply(404, { error: 'no such connector' }) : reply(200, view);
+      }
       if (!post && route === '/drift') return reply(200, controls.drift());
       if (!post && route === '/events' && o.records !== undefined) {
         const limit = bounded(url.searchParams.get('limit'), 100, 1000);

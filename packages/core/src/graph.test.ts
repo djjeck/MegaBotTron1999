@@ -237,7 +237,7 @@ describe('the graph', () => {
       'edge irc → actor.game: no output of irc fits interface of game; name it',
       'edge game → actor.notices: its type is events, not chat-in',
       'edge game → actor.map: only a chat-out edge carries sends and commands',
-      'edge game → actor.map: only a chat-in edge carries reads',
+      'edge game → actor.map: only a chat-in edge carries reads and senders',
       'edge game.events → actor.notices: twice in the graph',
       'node actor: input port game (interface of game) is not bound',
       'node actor: output port channel (chat-out of irc) is not bound',

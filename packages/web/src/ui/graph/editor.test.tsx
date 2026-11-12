@@ -340,19 +340,25 @@ describe('the graph editor', () => {
       screen.getByRole('button', { name: 'edge chat.chat → actor-a.chat' });
     await waitFor(() => expect(pressed().getAttribute('aria-pressed')).toBe('true'));
     expect(pressed().className).toContain('selected');
-    expect((within(panel).getByLabelText('reads') as HTMLTextAreaElement).value).toBe('#a');
+    // Its connector does not run here: its chats as rows, to apply first to pick from a list.
+    expect(await within(panel).findByText('Apply first to list its chats.')).toBeDefined();
+    const readsRows = within(panel).getByRole('group', { name: 'reads list' });
+    expect(within(readsRows).getByText('#a')).toBeDefined();
     expect(within(panel).getByText('node actor-a: reads #a, which is not its chat')).toBeDefined();
-    // A chat-in edge carries its reads alone.
+    // A chat-in edge carries its reads and senders alone.
     expect(within(panel).queryByLabelText('sends')).toBeNull();
     expect(within(panel).queryByLabelText('commands')).toBeNull();
-    fireEvent.change(within(panel).getByLabelText('reads'), { target: { value: '#b\n#c, #d' } });
-    fireEvent.blur(within(panel).getByLabelText('reads'));
+    fireEvent.click(within(readsRows).getByRole('button', { name: 'remove #a' }));
+    fireEvent.change(within(panel).getByLabelText('new reads list'), { target: { value: '#b' } });
+    fireEvent.click(within(readsRows).getByRole('button', { name: 'Add' }));
+    fireEvent.click(within(panel).getByLabelText('only these'));
     await waitFor(() =>
       expect(core.checked.at(-1)?.edges[0]).toEqual({
         from: 'chat.chat',
         to: 'actor-a.chat',
         type: 'chat-in',
-        reads: ['#b', '#c', '#d'],
+        reads: ['#b'],
+        senders: ['me'],
       })
     );
     await waitFor(() => expect(container.querySelector('.react-flow__edge.refused')).toBeNull());
@@ -362,9 +368,13 @@ describe('the graph editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'edge actor-a.chat → chat.chat' }));
     const sends = await screen.findByLabelText('details of edge actor-a.chat → chat.chat');
     expect(within(sends).queryByLabelText('reads')).toBeNull();
-    expect((within(sends).getByLabelText('sends') as HTMLTextAreaElement).value).toBe('#a');
-    fireEvent.change(within(sends).getByLabelText('commands'), { target: { value: '/play' } });
-    fireEvent.blur(within(sends).getByLabelText('commands'));
+    expect(
+      within(within(sends).getByRole('group', { name: 'sends list' })).getByText('#a')
+    ).toBeDefined();
+    fireEvent.change(within(sends).getByLabelText('new commands'), {
+      target: { value: '/play' },
+    });
+    fireEvent.keyDown(within(sends).getByLabelText('new commands'), { key: 'Enter' });
     await waitFor(() =>
       expect(core.checked.at(-1)?.edges[0]).toEqual({
         from: 'actor-a.chat',

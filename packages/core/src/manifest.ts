@@ -310,7 +310,15 @@ function normalise<
     all[name] = {
       ...port,
       type: 'chat-in',
-      ...(bind === undefined ? {} : { bind: { node: bind.node, reads: bind.reads } }),
+      ...(bind === undefined
+        ? {}
+        : {
+            bind: {
+              node: bind.node,
+              reads: bind.reads,
+              ...(bind.senders === undefined ? {} : { senders: bind.senders }),
+            },
+          }),
     };
     chatOuts[name] = {
       ...port,

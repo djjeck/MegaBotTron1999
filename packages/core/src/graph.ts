@@ -36,6 +36,7 @@ import {
   type OutputPort,
   PORT_TYPES,
   type PortType,
+  readsSchema,
   resolveInputs,
 } from './ports.ts';
 
@@ -91,8 +92,10 @@ export const graphSchema = z.strictObject({
         to: z.string().regex(TO, 'expected node.port'),
         /** The ports' type; checked when given, and always written. */
         type: z.enum(PORT_TYPES).optional(),
-        /** A chat-in's: the chats read. */
-        reads: z.array(z.string().min(1)).optional(),
+        /** A chat-in's: the chats read, or `'*'`, any chat its connector monitors (D62). */
+        reads: readsSchema.optional(),
+        /** A chat-in's: the senders heard (usernames, `me` the account's own); none: anyone. */
+        senders: z.array(z.string().min(1)).optional(),
         /** A chat-out's: the chats sent to, and the commands sent (first words). */
         sends: z.array(z.string().min(1)).optional(),
         commands: z.array(z.string().min(1)).optional(),
@@ -114,6 +117,9 @@ export class GraphError extends Error {
     this.problems = problems;
   }
 }
+
+/** A chat-in's reads, copied: `'*'` as it is, a list anew. */
+const copyReads = (r: ChatBinding['reads']): ChatBinding['reads'] => (r === '*' ? r : [...r]);
 
 /** One port's other end. */
 export interface Binding {
@@ -207,7 +213,10 @@ export function defaultGraph(
           to: `${m.id}.${port}`,
           type: input.type,
           ...(input.type === 'chat-in' && input.bind !== undefined
-            ? { reads: [...input.bind.reads] }
+            ? {
+                reads: copyReads(input.bind.reads),
+                ...(input.bind.senders === undefined ? {} : { senders: [...input.bind.senders] }),
+              }
             : {}),
         });
       }
@@ -504,8 +513,8 @@ export function resolveGraph(
       problems.push(`${name}: its type is ${input.type}, not ${e.type}`);
       continue;
     }
-    if (e.reads !== undefined && input.type !== 'chat-in') {
-      problems.push(`${name}: only a chat-in edge carries reads`);
+    if ((e.reads !== undefined || e.senders !== undefined) && input.type !== 'chat-in') {
+      problems.push(`${name}: only a chat-in edge carries reads and senders`);
       continue;
     }
     if ((e.sends !== undefined || e.commands !== undefined) && input.type !== 'chat-out') {
@@ -528,7 +537,7 @@ export function resolveGraph(
     }
     const written =
       input.type === 'chat-in'
-        ? { reads: e.reads ?? [] }
+        ? { reads: e.reads ?? [], ...(e.senders === undefined ? {} : { senders: e.senders }) }
         : input.type === 'chat-out'
           ? { sends: e.sends ?? [], ...(e.commands === undefined ? {} : { commands: e.commands }) }
           : undefined;

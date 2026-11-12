@@ -1,7 +1,8 @@
+import { type Store } from '@megabottron1999/core';
 import { describe, expect, it } from 'vitest';
 import { runParser as run, T0 } from '#test/parser-run.ts';
 import { QUESTBOT, questPlugin } from '#test/quest.ts';
-import { isTurnCommand } from './turn-parser.ts';
+import { isTurnCommand, PARSED_DOC } from './turn-parser.ts';
 
 const GROUP = '-1001000000001';
 const MIN = 60_000;
@@ -40,6 +41,42 @@ describe('a turn parser', () => {
     ]);
     expect(p.iface.rest()).toMatchObject({ until: T0 + 15 * MIN, why: 'its rest after a turn' });
     expect(p.drift()).toMatchObject({ read: 1, unread: 0 });
+  });
+
+  it('resumes from what it parsed, kept in its store, and reads missed messages as any', async () => {
+    const plugin = questPlugin();
+    const stores: Store[] = [];
+    const first = await run({
+      ...plugin,
+      create: (ctx) => {
+        stores.push(ctx.store);
+        return plugin.create(ctx);
+      },
+    });
+    await first.iface.sent({ chat: PRIVATE, id: '5', t: first.kit.clock.now() });
+    first.hear({ ...bot, chat: PRIVATE, replyTo: '5', text: 'Too soon: 40 minutes.' });
+    await first.kit.stop();
+    const parsed = stores[0]?.read(PARSED_DOC);
+    expect(parsed).toMatchObject({
+      turns: [{ chat: PRIVATE, id: '5', answered: true }],
+      rest: { until: T0 + 40 * MIN },
+    });
+    // The next start: its rest kept, its turns too, and a reply missed while down is read.
+    const next = await run(questPlugin(), {}, undefined, { parsed });
+    expect(next.iface.rest()).toMatchObject({ until: T0 + 40 * MIN, why: 'it said too soon' });
+    await next.iface.sent({ chat: PRIVATE, id: '6', t: next.kit.clock.now() });
+    next.hear({
+      ...bot,
+      chat: PRIVATE,
+      replyTo: '6',
+      text: 'Found an apple.',
+      playback: true,
+      missed: true,
+    });
+    expect(next.outcomes()).toEqual(['gain']);
+    // Another sender in the private chat is not its edge's to hear.
+    next.hear({ sender: 'someone', chat: PRIVATE, replyTo: '6', text: 'Found a fig.' });
+    expect(next.outcomes()).toEqual(['gain']);
   });
 
   it('reads nothing of the group without one', async () => {

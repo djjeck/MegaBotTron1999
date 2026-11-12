@@ -37,6 +37,12 @@ export const telegramBotConfig = z.object({
     .int()
     .optional()
     .describe('A group whose members may use the plugins’ public commands'),
+  chats: z
+    .array(z.string().regex(/^(?:-?\d+|@\w{4,})$/u, 'expected a chat id or a @username'))
+    .optional()
+    .describe(
+      'The chats it monitors for the plugins, by id or @username; unset: every chat it hears'
+    ),
 });
 export type TelegramBotConfig = z.infer<typeof telegramBotConfig>;
 
@@ -86,6 +92,9 @@ export function telegramBotPlugin(
         bot,
         log,
         listen,
+        ...(config.chats === undefined ? {} : { chats: config.chats }),
+        store: ctx.store,
+        now: () => ctx.clock.now(),
         ...(o.sleep === undefined ? {} : { sleep: o.sleep }),
       });
       ref.connector = c;

@@ -7,11 +7,24 @@
  * a group, and everything in a private chat), and sends through the account's outbox. Its chat
  * surface (packages/connectors/src/transport/telegram-surface.ts) answers the commands
  * on the bot it holds, and it tells a plugin whether it administers a chat (`isAdmin`).
+ *
+ * Its surfaces (bot-os.md D63): the Bot API cannot list a bot's chats, so it keeps those it has
+ * seen in updates in its store, and adds one searched for by its id or `@username` (`getChat`).
+ * Given `chats`, it monitors only those (by id or `@username`); none, every chat it hears. What was
+ * said while it was down Telegram keeps for the bot (up to a day) and delivers at its next poll: its
+ * own catch-up, whose messages, older than the connection, it marks `playback` and `missed`.
  */
 import { autoRetry } from '@grammyjs/auto-retry';
-import { type Connector, ConnectorBase, FloodWait, type TextFormat } from '@megabottron1999/core';
+import {
+  type Connector,
+  ConnectorBase,
+  FloodWait,
+  type Surface,
+  type SurfaceQuery,
+  type TextFormat,
+} from '@megabottron1999/core';
 import { Bot, GrammyError } from 'grammy';
-import { type UserFromGetMe } from 'grammy/types';
+import { type Chat, type UserFromGetMe } from 'grammy/types';
 import { markdownToTelegramHtml } from 'grammy-switchboard';
 
 // A 429 is waited out as Telegram asks, a few times; network errors and 5xx fail the call, so the
@@ -109,11 +122,38 @@ function floodMs(e: unknown): number | undefined {
   return (e.parameters.retry_after ?? 0) * 1000;
 }
 
+/** The store's document of the chats the bot has seen, by id. */
+export const SURFACES_DOC = 'surfaces';
+/** How many of the latest chats the surfaces list without a search. */
+const SURFACES_LIMIT = 50;
+/** A chat's last activity is kept again only once it moved by this much. */
+const ACTIVE_STEP_MS = 60_000;
+
+/** A chat as the bot saw it, as a surface. */
+export function surfaceOf(chat: Chat, lastActive?: number): Surface {
+  const title =
+    chat.type === 'private'
+      ? [chat.first_name, chat.last_name].filter((x) => x !== undefined).join(' ')
+      : chat.title;
+  return {
+    id: String(chat.id),
+    title: title || (chat.username === undefined ? String(chat.id) : `@${chat.username}`),
+    kind: chat.type === 'private' ? 'private' : chat.type === 'channel' ? 'channel' : 'group',
+    ...(lastActive === undefined ? {} : { lastActive }),
+  };
+}
+
 export interface BotConnectorOptions {
   /** `telegram-bot:<name>`. */
   account: string;
   bot: Bot;
   log: (line: string) => void;
+  /** The chats it monitors, by id or `@username`; none: every chat it hears. */
+  chats?: readonly string[] | undefined;
+  /** Where it keeps the chats it has seen, its surfaces. */
+  store?: { read<T>(name: string): T | undefined; write(name: string, value: unknown): void };
+  /** The time now, in ms: what came before its connection was missed. */
+  now?: () => number;
   /** Polling waits for this: the app installs its handlers on the bot first. */
   listen?: Promise<unknown>;
   sleep?: (ms: number) => Promise<void>;
@@ -124,16 +164,25 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
   readonly bot: Bot;
   private readonly o: BotConnectorOptions;
   private started = false;
+  /** When it connected, in seconds: a message sent before was missed while it was down. */
+  private since = 0;
+  private readonly chats: Set<string> | undefined;
+  private readonly seen: Record<string, Surface>;
 
   constructor(options: BotConnectorOptions) {
     super(options.account, 'telegram');
     this.o = options;
     this.bot = options.bot;
+    this.chats =
+      options.chats === undefined ? undefined : new Set(options.chats.map((c) => c.toLowerCase()));
+    this.seen = { ...(options.store?.read<Record<string, Surface>>(SURFACES_DOC) ?? {}) };
     // First in the bot's chain, so it hears every message before the app's handlers.
     this.bot.on('message', async (ctx, next) => {
       const m = ctx.message;
       const text = m.text ?? m.caption;
-      if (text !== undefined)
+      this.saw(m.chat, m.date * 1000);
+      const missed = m.date < this.since;
+      if (text !== undefined && this.monitors(m.chat))
         try {
           this.received({
             chat: String(m.chat.id),
@@ -144,7 +193,8 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
             ...(m.reply_to_message === undefined
               ? {}
               : { replyTo: String(m.reply_to_message.message_id) }),
-            playback: false,
+            playback: missed,
+            ...(missed ? { missed } : {}),
           });
         } catch (e) {
           this.o.log(`a listener failed on message ${m.message_id}: ${String(e)}`);
@@ -165,6 +215,7 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
         ...(this.o.sleep === undefined ? {} : { sleep: this.o.sleep }),
         running: () => this.started,
         onStart: () => {
+          this.since = Math.floor((this.o.now ?? Date.now)() / 1000);
           this.named(this.bot.botInfo.username);
           this.changed({ state: 'connected', phase: 'polling' });
         },
@@ -179,6 +230,49 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
     this.started = false;
     this.changed({ state: 'closed', phase: 'closed' });
     await this.bot.stop();
+  }
+
+  /**
+   * Its surfaces (bot-os.md D63): the chats it has seen, latest first; with a search, those whose
+   * title or id has it, and, searched by its id or `@username`, a chat it has not seen, from
+   * Telegram (`getChat`), kept from then on.
+   */
+  async surfaces(query: SurfaceQuery = {}): Promise<Surface[]> {
+    const search = query.search?.trim() ?? '';
+    const lower = search.toLowerCase();
+    const found = () =>
+      Object.values(this.seen)
+        .filter(
+          (x) =>
+            lower === '' ||
+            x.title.toLowerCase().includes(lower) ||
+            x.id.toLowerCase().includes(lower)
+        )
+        .sort((a, b) => (b.lastActive ?? 0) - (a.lastActive ?? 0))
+        .slice(0, query.limit ?? SURFACES_LIMIT);
+    if (found().length > 0 || !/^(?:-?\d+|@\w{4,})$/u.test(search)) return found();
+    const chat = await this.bot.api
+      .getChat(/^-?\d+$/u.test(search) ? Number(search) : search)
+      .catch(() => undefined);
+    if (chat !== undefined) this.saw(chat);
+    return found();
+  }
+
+  /** Whether it monitors `chat`: one of its chats (by id or `@username`), or any without. */
+  private monitors(chat: Chat): boolean {
+    if (this.chats === undefined) return true;
+    const name = 'username' in chat && chat.username !== undefined ? `@${chat.username}` : '';
+    return this.chats.has(String(chat.id)) || this.chats.has(name.toLowerCase());
+  }
+
+  /** A chat seen: kept among its surfaces, when it is new or its activity moved enough. */
+  private saw(chat: Chat, lastActive?: number): void {
+    const id = String(chat.id);
+    const before = this.seen[id];
+    const active = Math.max(lastActive ?? 0, before?.lastActive ?? 0);
+    if (before !== undefined && active - (before.lastActive ?? 0) < ACTIVE_STEP_MS) return;
+    this.seen[id] = surfaceOf(chat, active === 0 ? undefined : active);
+    this.o.store?.write(SURFACES_DOC, this.seen);
   }
 
   /** Whether the bot administers `chat` (a group's id), as Telegram says now. */

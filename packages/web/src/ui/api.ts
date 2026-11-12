@@ -29,6 +29,8 @@ import type {
   PortType,
   PortTypeInfo,
   PortView,
+  Surface,
+  SurfacesView,
 } from '@megabottron1999/core';
 
 export type {
@@ -57,6 +59,8 @@ export type {
   PortType,
   PortTypeInfo,
   PortView,
+  Surface,
+  SurfacesView,
 };
 
 /** What the graph view draws, as `GET /graph/view` gives it; null before the load. */

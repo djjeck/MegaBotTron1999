@@ -19,6 +19,8 @@ import {
   definePlugin,
   type Limits,
   type Plugin,
+  type Surface,
+  type SurfaceQuery,
 } from '@megabottron1999/core';
 import http from 'node:http';
 import { z } from 'zod';
@@ -48,6 +50,8 @@ export class IrcConnector extends ConnectorBase implements Connector {
   private readonly channel: string;
   private readonly client: Transport;
   private started = false;
+  /** When the channel's last line was said, played back or live. */
+  private lastLine: number | undefined;
 
   /** `client` makes the IRC client on the connector's events (tests pass a fake). */
   constructor(
@@ -59,14 +63,16 @@ export class IrcConnector extends ConnectorBase implements Connector {
     if (options.limits !== undefined) this.limits = options.limits;
     this.channel = options.channel;
     this.client = client({
-      line: (l) =>
+      line: (l) => {
+        this.lastLine = Math.max(this.lastLine ?? 0, l.time);
         this.received({
           chat: this.channel,
           sender: l.nick,
           text: l.text,
           time: l.time,
           playback: l.playback,
-        }),
+        });
+      },
       status: (status, detail) =>
         this.changed({
           state: STATES[status],
@@ -87,6 +93,20 @@ export class IrcConnector extends ConnectorBase implements Connector {
     if (!this.started) return;
     this.started = false;
     this.client.stop();
+  }
+
+  /** Its surfaces (bot-os.md D63): its channel, the one it is in, matching the search if any. */
+  surfaces(query: SurfaceQuery = {}): Promise<Surface[]> {
+    const search = query.search?.trim().toLowerCase() ?? '';
+    const channel: Surface = {
+      id: this.channel,
+      title: this.channel,
+      kind: 'group',
+      ...(this.lastLine === undefined ? {} : { lastActive: this.lastLine }),
+    };
+    return Promise.resolve(
+      search === '' || this.channel.toLowerCase().includes(search) ? [channel] : []
+    );
   }
 
   send(chat: string, text: string): boolean {
