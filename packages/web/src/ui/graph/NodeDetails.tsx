@@ -6,8 +6,10 @@
  * names; a connector's `chats` (what it monitors) is picked from its surfaces (D63). Then the
  * interface it declares (P11) and its removal, which keeps its instance. A stopped node (D64)
  * says why, when and by what, with **Clear stop**, a change of the draft that Apply makes; a
- * running one can be killed (D44). Its forms stay editable whatever its state.
+ * running one can be killed (D44). Its forms stay editable whatever its state. Its group (D69),
+ * the lane it is drawn in, is picked among the draft's, or named anew.
  */
+import { useState } from 'react';
 import type {
   DriftCounts,
   GraphNode,
@@ -18,6 +20,7 @@ import type {
   PluginControl,
   PortView,
 } from '#src/ui/api.ts';
+import { isSplit } from './cards.ts';
 import { withDefaults } from './defaults.ts';
 import { instanceOf } from './draft.ts';
 import { SchemaForm } from './SchemaForm.tsx';
@@ -74,6 +77,81 @@ function Members(props: { title: string; members: MemberView[] }) {
   );
 }
 
+/** The choice of a new group, in the Group field. */
+const NEW_GROUP = '\u0000new';
+
+/**
+ * A node's group (D69): none, one of the draft's, or a new one named in a field and set with Set
+ * (or Enter), trimmed. A connector is drawn outside the lanes whatever its group: it says so.
+ */
+function GroupField(props: {
+  group: string | undefined;
+  groups: readonly string[];
+  connector: boolean;
+  set: (group: string | undefined) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const named = name.trim();
+  const add = (): void => {
+    if (named === '') return;
+    props.set(named);
+    setAdding(false);
+    setName('');
+  };
+  const groups =
+    props.group === undefined || props.groups.includes(props.group)
+      ? props.groups
+      : [...props.groups, props.group];
+  return (
+    <div className="field group-field">
+      <label>
+        Group
+        <select
+          aria-label="group"
+          value={adding ? NEW_GROUP : (props.group ?? '')}
+          onChange={(e) => {
+            const v = e.target.value;
+            setAdding(v === NEW_GROUP);
+            if (v !== NEW_GROUP) props.set(v === '' ? undefined : v);
+          }}
+        >
+          <option value="">none</option>
+          {groups.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
+          <option value={NEW_GROUP}>new group…</option>
+        </select>
+      </label>
+      {adding ? (
+        <span className="group-new">
+          <input
+            aria-label="new group"
+            value={name}
+            placeholder="its name"
+            autoFocus
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') add();
+            }}
+          />
+          <button type="button" disabled={named === ''} onClick={add}>
+            Set
+          </button>
+        </span>
+      ) : null}
+      <small className="muted">
+        {props.connector
+          ? 'A connector is drawn outside the lanes, its cards at the map’s left and right edges: its group is kept in the file, and ignored by the drawing.'
+          : 'The lane it is drawn in; it changes nothing that runs.'}{' '}
+        Applied with Apply.
+      </small>
+    </div>
+  );
+}
+
 const when = (t: number | undefined): string =>
   t === undefined ? 'never' : new Date(t).toISOString().slice(0, 16).replace('T', ' ');
 
@@ -88,6 +166,8 @@ export function NodeDetails(props: {
   configErrors: Record<string, string[]>;
   settingErrors: Record<string, string[]>;
   secretNames: readonly string[];
+  /** The draft's groups, in their lanes' order (D69). */
+  groups: readonly string[];
   change: (change: Partial<GraphNode>) => void;
   remove: () => void;
   kill: (ids: string[]) => void;
@@ -164,6 +244,12 @@ export function NodeDetails(props: {
           Applied with Apply.
         </small>
       </div>
+      <GroupField
+        group={node.group}
+        groups={props.groups}
+        connector={isSplit(view)}
+        set={(group) => props.change({ group })}
+      />
       {stop === undefined ? null : (
         <div className={`stop-note${props.cleared ? ' cleared' : ''}`} role="note">
           <p>

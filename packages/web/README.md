@@ -53,9 +53,19 @@ the server that guards them.
   box) and **Kill selected** kills each: its plugin's own safety stop, then stopped, kept across
   restarts; a stopped node's panel has **Clear stop**, a change of the draft that Review lists and
   Apply makes (`clear-stop`, then the restart), and its forms stay editable. Nodes start in columns
-  (`layout.ts`) and can be moved. **Modules** (`#/modules`, `ModulesPage.tsx`, docs/bot-os.md D67)
-  lists the modules installed, each with its version, its source (a folder upload, a tarball, or a
-  GitHub repository linked at its commit) and when it was installed. It installs modules from a
+  (`layout.ts`) and can be moved. **Swimlanes** (docs/bot-os.md D69): a node's panel sets its
+  **Group** (none, one of the draft's, or **new group…**, named and set), a change of the draft like
+  any other; a draft with groups is drawn in lanes (`layout.ts`'s `swimlanes`, `lanes.ts`,
+  `LaneNode.tsx`): the same global columns, each group a tinted band with its name at its top left,
+  in the order of its first node, the ungrouped nodes in an unlabelled band last, and the
+  connectors' in and out cards outside every band, at the left and the right (a connector's group is
+  ignored, which its panel says). A card is its lane's child in React Flow, and stays in its lane
+  when dragged. A lane's label zooms to fit it; resting on a node dims what it does not reach, and
+  on a lane's label everything outside the lane but its edges and the connectors they reach; the
+  minimap tints each lane. Its colour comes from a fixed palette, by a hash of its name, the next
+  free one when an earlier lane has it. **Modules** (`#/modules`, `ModulesPage.tsx`, docs/bot-os.md
+  D67) lists the modules installed, each with its version, its source (a folder upload, a tarball,
+  or a GitHub repository linked at its commit) and when it was installed. It installs modules from a
   folder, chosen (**Choose folder**) or dropped on the page, or from a public GitHub link
   (`https://github.com/<owner>/<repo>` or `…/tree/<ref>/<path>`): a module's own folder or a
   repository's that holds several. The folder's paths and its `module.json` files go to

@@ -1315,3 +1315,67 @@ label.block {
   color: var(--warn);
   font-weight: 600;
 }
+
+/* Swimlanes (D69): each group a tinted band in its colour (`--lane`, r g b), its label a button at
+   its top left, which zooms to it; the ungrouped nodes' band, unlabelled. */
+.react-flow__node.react-flow__node-lane {
+  /* The band itself takes no pointer, so that the map pans across it; its label does. */
+  pointer-events: none;
+}
+
+.lane {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgb(var(--lane) / 55%);
+  border-radius: 12px;
+  background: rgb(var(--lane) / 9%);
+}
+
+.lane.ungrouped {
+  border-style: dashed;
+  background: rgb(var(--lane) / 5%);
+}
+
+.lane-label {
+  pointer-events: all;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 8px 0 0 12px;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid rgb(var(--lane) / 55%);
+  border-radius: 999px;
+  background: color-mix(in srgb, rgb(var(--lane)) 16%, var(--bg));
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: zoom-in;
+}
+
+.lane-label:hover,
+.lane-label:focus-visible {
+  background: color-mix(in srgb, rgb(var(--lane)) 28%, var(--bg));
+}
+
+.lane-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: rgb(var(--lane));
+}
+
+/* A hover dims what it does not reach (D69). */
+.react-flow__node.dimmed,
+.react-flow__edge.dimmed,
+.edge-handle.dimmed {
+  opacity: 0.2;
+  transition: opacity 0.15s;
+}
+
+.group-new {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}

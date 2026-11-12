@@ -21,13 +21,14 @@ const graph: Graph = {
   version: 2,
   nodes: [
     { id: 'irc', plugin: 'irc', config: { host: 'znc', nick: 'me' } },
-    { id: 'game', plugin: 'game' },
+    { id: 'game', plugin: 'game', group: 'Quest Bot' },
     {
       id: 'actor-b',
       plugin: 'actor',
       account: 'x:y',
       instance: 'actor-1',
       disabled: true,
+      group: 'Quest Bot',
       config: { z: { b: 1, a: [2] }, a: 'x' },
       settings: { verbose: true },
     },
@@ -53,11 +54,11 @@ describe('the graph printed', () => {
     expect(graphText(graph)).toBe(
       [
         'nodes:',
-        '  actor-b (actor), instance actor-1, disabled, account x:y',
+        '  actor-b (actor), instance actor-1, disabled, account x:y, group Quest Bot',
         '    config.a: "x"',
         '    config.z: {"a":[2],"b":1}',
         '    settings.verbose: true',
-        '  game (game)',
+        '  game (game), group Quest Bot',
         '  irc (irc)',
         '    config.host: "znc"',
         '    config.nick: "me"',

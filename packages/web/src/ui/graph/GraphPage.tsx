@@ -37,8 +37,12 @@
  * Chats flow left to right (D60): a connector is drawn as two cards (`cards.ts`), its in card at
  * the left, whose chat-in output feeds the readers, and its out card at the right, whose chat-out
  * input takes the senders' edges. Either card selects the node; removing it removes both.
+ *
+ * A draft whose nodes name groups is drawn in swimlanes (D69, `layout.ts`, `lanes.ts`): each group
+ * a band, a React Flow group node holding its cards, the connectors' cards outside every band. A
+ * lane's label zooms to it; resting on a node or a lane's label dims what it does not reach.
  */
-import type { Connection } from '@xyflow/react';
+import type { Connection, Node } from '@xyflow/react';
 import {
   Background,
   Controls,
@@ -67,7 +71,7 @@ import { useLoad } from '#src/ui/hooks.ts';
 import { Restart } from '#src/ui/Restart.tsx';
 import type { NewNode } from './AddNode.tsx';
 import { AddNode } from './AddNode.tsx';
-import { cardsOf, cardTitle, isSplit, nodesOfCards, targetCard } from './cards.ts';
+import { cardsOf, cardTitle, isSplit, nodeOfCard, nodesOfCards, targetCard } from './cards.ts';
 import { withDefaults } from './defaults.ts';
 import {
   addNode,
@@ -88,17 +92,25 @@ import {
 } from './draft.ts';
 import { EdgeDetails } from './EdgeDetails.tsx';
 import { TextView } from './GraphText.tsx';
-import { layout } from './layout.ts';
+import type { LaneNodeType } from './LaneNode.tsx';
+import { LaneNode } from './LaneNode.tsx';
+import type { Hover } from './lanes.ts';
+import { groupsOf, isLaneId, laneColours, laneId, lit, UNGROUPED_COLOUR } from './lanes.ts';
+import type { Placed } from './layout.ts';
+import { layout, swimlanes } from './layout.ts';
 import { NodeDetails } from './NodeDetails.tsx';
 import { Palette } from './Palette.tsx';
 import type { PluginNodeType } from './PluginNode.tsx';
 import { nodeHeight, PluginNode } from './PluginNode.tsx';
-import type { PortEdgeType } from './PortEdge.tsx';
+import type { PortEdgeData, PortEdgeType } from './PortEdge.tsx';
 import { PortEdge } from './PortEdge.tsx';
 import { Review } from './Review.tsx';
 import '@xyflow/react/dist/style.css';
 
-const NODE_TYPES = { plugin: PluginNode };
+const NODE_TYPES = { plugin: PluginNode, lane: LaneNode };
+
+/** What the canvas draws: the cards, and the lanes that hold them (D69). */
+type CanvasNode = PluginNodeType | LaneNodeType;
 const EDGE_TYPES = { port: PortEdge };
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -135,13 +147,19 @@ export function GraphPage({
   /** Why the last Apply was refused. */
   const [refusedApply, setRefusedApply] = useState<{ error: string; problems: GraphProblem[] }>();
   const [restarting, setRestarting] = useState(false);
-  const [nodes, setNodes, onNodesChange] = useNodesState<PluginNodeType>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<PortEdgeType>([]);
   const [selected, setSelected] = useState<{ nodes: string[]; edges: string[] }>({
     nodes: [],
     edges: [],
   });
   const [said, setSaid] = useState<string>();
+  /** What the pointer rests on, a node or a lane's label: the rest is dimmed (D69). */
+  const [hover, setHover] = useState<Hover>();
+  const hoverLane = useCallback(
+    (lane: string | undefined) => setHover(lane === undefined ? undefined : { lane }),
+    []
+  );
 
   // The draft starts as the saved file, once it is read; a reload of the file later (after a save
   // or a rollback) starts it again only when the owner has changed nothing.
@@ -228,28 +246,75 @@ export function GraphPage({
   useEffect(() => {
     if (draft === undefined || !pluginsKnown) return;
     const byId = new Map(cards.map((c) => [c.id, c]));
-    const start = layout(
-      cards.map((c) => c.id),
-      draft.edges.map((e) => ({ from: endOf(e.from).node, to: targetCard(e, viewsById) })),
-      (id) => nodeHeight((byId.get(id) as (typeof cards)[number]).view),
-      new Set(cards.filter((c) => c.side === 'out').map((c) => c.id))
-    );
+    const draftNodes = new Map(draft.nodes.map((n) => [n.id, n]));
+    const ids = cards.map((c) => c.id);
+    const links = draft.edges.map((e) => ({
+      from: endOf(e.from).node,
+      to: targetCard(e, viewsById),
+    }));
+    const height = (id: string): number =>
+      nodeHeight((byId.get(id) as (typeof cards)[number]).view);
+    const last = new Set(cards.filter((c) => c.side === 'out').map((c) => c.id));
+    // A graph with groups is drawn in swimlanes (D69), its connectors' cards outside them; one
+    // without, in columns alone.
+    const groups = groupsOf(draft.nodes);
+    let start: Map<string, Placed & { lane?: number }>;
+    let lanes: LaneNodeType[] = [];
+    if (groups.length === 0) start = layout(ids, links, height, last);
+    else {
+      const plan = swimlanes(ids, links, height, {
+        first: new Set(cards.filter((c) => c.side === 'in').map((c) => c.id)),
+        last,
+        groupOf: (id) => draftNodes.get(byId.get(id)?.node ?? '')?.group,
+      });
+      // Coloured in the order of the lanes drawn: a group only connectors name draws none.
+      const colours = laneColours(
+        plan.lanes.flatMap((l) => (l.name === undefined ? [] : [l.name]))
+      );
+      start = plan.placed;
+      lanes = plan.lanes.map((l) => ({
+        id: laneId(l.name),
+        type: 'lane' as const,
+        position: { x: l.x, y: l.y },
+        width: l.width,
+        height: l.height,
+        selectable: false,
+        draggable: false,
+        focusable: false,
+        deletable: false,
+        connectable: false,
+        data: {
+          name: l.name,
+          colour:
+            l.name === undefined ? UNGROUPED_COLOUR : (colours.get(l.name) ?? UNGROUPED_COLOUR),
+          hover: hoverLane,
+        },
+      }));
+    }
     const chosen = new Set(selectedNodes.split('\n'));
     setNodes((before) => {
       const was = new Map(before.map((n) => [n.id, n]));
-      const draftNodes = new Map(draft.nodes.map((n) => [n.id, n]));
-      return cards.map((c) => {
+      const cardNodes = cards.map((c): PluginNodeType => {
+        const at = start.get(c.id);
+        const lane = at?.lane === undefined ? undefined : lanes[at.lane]?.id;
         const portProblems: Record<string, string[]> = {};
         for (const [key, texts] of placed.ports)
           if (key.startsWith(`${c.node}.`)) {
             const port = key.slice(c.node.length + 1);
             if (port in c.view.inputs || port in c.view.outputs) portProblems[port] = texts;
           }
-        const selectedHere = was.get(c.id)?.selected ?? false;
+        const kept = was.get(c.id);
+        const selectedHere = kept?.selected ?? false;
+        // Kept where it was moved, while it stays in the same lane (its position is the lane's).
+        const position =
+          kept !== undefined && kept.parentId === lane
+            ? kept.position
+            : { x: at?.x ?? 0, y: at?.y ?? 0 };
         return {
           id: c.id,
           type: 'plugin' as const,
-          position: was.get(c.id)?.position ?? start.get(c.id) ?? { x: 0, y: 0 },
+          position,
+          ...(lane === undefined ? {} : { parentId: lane, extent: 'parent' as const }),
           selected: selectedHere,
           data: {
             view: c.view,
@@ -265,6 +330,8 @@ export function GraphPage({
           },
         };
       });
+      // The lanes before their cards, as React Flow asks of parents.
+      return [...lanes, ...cardNodes];
     });
   }, [
     draft,
@@ -278,6 +345,7 @@ export function GraphPage({
     setNodes,
     selectedNodes,
     pluginsKnown,
+    hoverLane,
   ]);
 
   // The edges as React Flow draws them, kept as they were selected.
@@ -329,10 +397,44 @@ export function GraphPage({
     });
   }, [draft, views, viewsById, placed, portTypes, setEdges]);
 
+  // A hover dims what it does not reach (D69): the nodes and edges drawn with `dimmed`.
+  const shown = useMemo(() => {
+    const on = lit(
+      hover,
+      nodes.map((n) => ({
+        id: n.id,
+        node: n.type === 'plugin' ? nodeOfCard(n.id) : undefined,
+        parentId: n.parentId,
+      })),
+      edges
+    );
+    if (on === undefined) return { nodes, edges };
+    return {
+      nodes: nodes.map((n) => (on.nodes.has(n.id) ? n : { ...n, className: 'dimmed' })),
+      edges: edges.map((e) =>
+        on.edges.has(e.id)
+          ? e
+          : {
+              ...e,
+              className: `${e.className ?? ''} dimmed`,
+              data: { ...(e.data as PortEdgeData), dimmed: true },
+            }
+      ),
+    };
+  }, [hover, nodes, edges]);
+  const hoverNode = useCallback(
+    (_: unknown, n: Node) => setHover(n.type === 'plugin' ? { node: nodeOfCard(n.id) } : undefined),
+    []
+  );
+  const leaveNode = useCallback(() => setHover(undefined), []);
+
   const selectionChanged = useCallback(
-    ({ nodes: n, edges: e }: { nodes: PluginNodeType[]; edges: PortEdgeType[] }) => {
-      // A connector's two cards are one node.
-      const next = { nodes: nodesOfCards(n.map((x) => x.id)), edges: e.map((x) => x.id) };
+    ({ nodes: n, edges: e }: { nodes: CanvasNode[]; edges: PortEdgeType[] }) => {
+      // A connector's two cards are one node; a lane is none.
+      const next = {
+        nodes: nodesOfCards(n.filter((x) => !isLaneId(x.id)).map((x) => x.id)),
+        edges: e.map((x) => x.id),
+      };
       setSelected((was) =>
         was.nodes.join('\n') === next.nodes.join('\n') &&
         was.edges.join('\n') === next.edges.join('\n')
@@ -484,6 +586,7 @@ export function GraphPage({
         configErrors={placed.config.get(shownNode.id) ?? {}}
         settingErrors={placed.settings.get(shownNode.id) ?? {}}
         secretNames={secrets.data?.names ?? []}
+        groups={groupsOf(draft.nodes)}
         change={(c) => change((g) => updateNode(g, shownNode.id, c))}
         remove={() => {
           const both = isSplit(view)
@@ -582,14 +685,16 @@ export function GraphPage({
       <div className="graph-body">
         <div className="graph-canvas">
           <ReactFlow
-            nodes={nodes}
-            edges={edges}
+            nodes={shown.nodes}
+            edges={shown.edges}
             nodeTypes={NODE_TYPES}
             edgeTypes={EDGE_TYPES}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onSelectionChange={selectionChanged}
             onConnect={onConnect}
+            onNodeMouseEnter={hoverNode}
+            onNodeMouseLeave={leaveNode}
             deleteKeyCode={null}
             multiSelectionKeyCode={['Shift', 'Control', 'Meta']}
             selectionKeyCode="Shift"
@@ -599,7 +704,15 @@ export function GraphPage({
             minZoom={0.2}
           >
             <Background />
-            <MiniMap pannable zoomable position="top-right" />
+            {/* Each lane in its colour; the cards in the minimap's own (D69). */}
+            <MiniMap
+              pannable
+              zoomable
+              position="top-right"
+              nodeColor={(n) =>
+                n.type === 'lane' ? `rgb(${(n.data as { colour: string }).colour} / 35%)` : ''
+              }
+            />
             {needs ? (
               <Panel position="top-left" className="map-bar">
                 {dirty ? (

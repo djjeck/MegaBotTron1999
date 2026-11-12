@@ -241,12 +241,14 @@ or a module offers, registered with `core.register`), the `instance` whose kept 
 in place of the manifest's (of the same network). It may also give the `settings` (checked against
 its plugin's `settings`) its instance starts with: they are put in force only while the instance
 keeps none of its own, so the owner's later changes win. A node may be `"disabled": true` (absent:
-enabled), and a chat-out edge `"dryRun": true` (absent: live): see **Node states** below. An edge
-goes from `node.port` (or `node`, when one of its outputs fits) to `node.port`, with its type and,
-for a chat, what it carries: a chat-in its `reads` and `senders`, a chat-out its `sends` and
-`commands` (each carries only its own). The core checks it with zod and against the manifests at
-load, and fails the start naming the node and the port: a plugin not in the image, a node twice, an
-instance named by two nodes or kept by another plugin
+enabled), and a chat-out edge `"dryRun": true` (absent: live): see **Node states** below. A node may
+name the `group` it is drawn in, a swimlane of the editor (bot-os.md D69, §4.12): any name, not
+empty and without spaces at its ends (`"group": "Quest"`; absent: none); the check accepts it, and
+nothing that runs reads it. An edge goes from `node.port` (or `node`, when one of its outputs fits)
+to `node.port`, with its type and, for a chat, what it carries: a chat-in its `reads` and `senders`,
+a chat-out its `sends` and `commands` (each carries only its own). The core checks it with zod and
+against the manifests at load, and fails the start naming the node and the port: a plugin not in the
+image, a node twice, an instance named by two nodes or kept by another plugin
 (`node b: its instance tally is of the plugin other, not counter`), a setting the plugin does not
 have or refuses, an edge between ports of two types or to a port that is not there, an interface
 member not declared, a single input (or a chat-out output) bound twice, a connector account held
@@ -352,12 +354,13 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
       "account": "telegram:alice",
       "config": { "chats": ["@QuestBot", "-1001000000001"] }
     },
-    { "id": "quest", "plugin": "quest-parser" },
+    { "id": "quest", "plugin": "quest-parser", "group": "Quest" },
     {
       "id": "quest-turns",
       "plugin": "turn-actor",
       "instance": "quest-turns",
-      "config": { "chat": "@QuestBot" }
+      "config": { "chat": "@QuestBot" },
+      "group": "Quest"
     }
   ],
   "edges": [
@@ -383,7 +386,10 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
 ```
 
 Here `quest-turns` sends its turns as a dry run, logged and not sent, until the owner switches its
-edge to send for real; a node `"disabled": true` would not start at all (§2.1, Node states).
+edge to send for real; a node `"disabled": true` would not start at all (§2.1, Node states). Both
+Quest nodes are drawn in the editor's Quest lane (`group`, bot-os.md D69); the connector, whatever
+its group, outside every lane. A `group` is an addition to version 2, which a release before it
+refuses (its nodes are strict): roll the image back past it only with the groups taken out.
 
 **Version 1** (one `chat` edge for both the reads and the sends, from the connector to the plugin)
 is converted as it is read (`upgradeGraph`, `packages/core/src/graph.ts`, bot-os.md D60), against
@@ -1031,15 +1037,15 @@ every session; `POST /api/logout` ends its own; expired ones are pruned. `GET /a
 
 `packages/core/src/graph-view.ts`: `graphText` prints the graph so that a changed value is a changed
 line (bot-os.md D61): each node a line, `<id> (<plugin>)`, then its instance when not its id,
-`disabled` when it is (D64), and its account; then a line per key of its config and of its settings,
-the value as compact JSON with its keys sorted; then each edge a line, with its type and what it
-carries, a chat-out edge's `dry-run` among it, so that the history's diffs show a state changed;
-nodes sorted by id, edges by their text, so the same graph prints the same:
+`disabled` when it is (D64), its account, and its group (D69); then a line per key of its config and
+of its settings, the value as compact JSON with its keys sorted; then each edge a line, with its
+type and what it carries, a chat-out edge's `dry-run` among it, so that the history's diffs show a
+state changed; nodes sorted by id, edges by their text, so the same graph prints the same:
 
 ```text
 nodes:
-  quest (quest-parser)
-  quest-turns (turn-actor), instance quest-turns-old, disabled
+  quest (quest-parser), group Quest
+  quest-turns (turn-actor), instance quest-turns-old, disabled, group Quest
     config.chat: "@QuestBot"
   tg (telegram-user), account telegram:alice
     config.chats: ["@QuestBot"]
@@ -1101,6 +1107,21 @@ it is the admin page's **Graph history** (`#/graph-history`), which lists the ve
 **Changes** (the review's diff from the saved graph to it) and **As text** (the line diff), and
 rolls back to it after a confirmation repeating the diff, then restarts as Apply does; beside it,
 **Graph as text**, the saved graph printed.
+
+**Swimlanes** (bot-os.md D69): a draft whose nodes name groups is drawn in lanes (`layout.ts`'s
+`swimlanes`, `lanes.ts`, `LaneNode.tsx`). The columns stay global, as above, so a stage lines up
+across lanes; each group is a horizontal band across them, a tinted rounded box with its name at its
+top left, ordered by its first node in the graph's order, and the ungrouped nodes have an unlabelled
+band last. The connectors (the nodes drawn as two cards) stay outside every band, their in cards
+stacked in the leftmost column and their out cards in the rightmost; a connector's group is kept and
+ignored, as its panel says. A band is a React Flow group node and its cards its children, kept
+inside it: a card cannot be dragged into another lane. A node's panel sets its **Group**: none, one
+of the draft's, or **new group…**, named and set; a change of the draft, applied with Apply. A
+lane's label zooms to fit it; resting on a node dims what it does not reach, and resting on a lane's
+label dims everything outside it but the edges its cards are at and the connectors those reach; the
+minimap tints each lane in its colour. A lane's colour is the one of a fixed palette its name hashes
+to, or the next free one when a lane before it has it, so that no two lanes share one while the
+palette's eight last. A draft with no group is drawn with no lane.
 
 ### 4.13 The standard services
 

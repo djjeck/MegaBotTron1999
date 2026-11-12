@@ -244,6 +244,34 @@ describe('the graph', () => {
     ]);
   });
 
+  it('keeps each node’s group, a name without spaces at its ends, that the run ignores', () => {
+    const grouped = graph({
+      nodes: [
+        { id: 'irc', plugin: 'irc', group: 'Quest Bot' },
+        { id: 'game', plugin: 'game', group: 'Quest Bot' },
+        { id: 'actor', plugin: 'actor', config: { x: 1 }, group: 'Ünïcode · lane' },
+      ],
+    });
+    const { graph: g, nodes } = resolveGraph(grouped, image());
+    expect(g.nodes.map((n) => n.group)).toEqual(['Quest Bot', 'Quest Bot', 'Ünïcode · lane']);
+    expect(nodes.map((n) => n.id)).toEqual(['irc', 'game', 'actor']);
+    expect(
+      problems(
+        graph({
+          nodes: [
+            { id: 'irc', plugin: 'irc', group: '' },
+            { id: 'game', plugin: 'game', group: ' Quest' },
+            { id: 'actor', plugin: 'actor', config: { x: 1 }, group: 3 as unknown as string },
+          ],
+        })
+      )
+    ).toEqual([
+      'graph: nodes.0.group: expected a name, without spaces at its ends',
+      'graph: nodes.1.group: expected a name, without spaces at its ends',
+      'graph: nodes.2.group: Invalid input: expected string, received number',
+    ]);
+  });
+
   it('gives a connector instance its own account, of its plugin’s network', () => {
     const two = graph({
       nodes: [

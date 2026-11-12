@@ -27,6 +27,8 @@ export interface PortEdgeData extends Record<string, unknown> {
   problem?: string | undefined;
   /** A chat-out edge that is a dry run (D64): nothing it sends goes out. */
   dryRun?: boolean | undefined;
+  /** Dimmed by a hover elsewhere (D69): its rhombus too. */
+  dimmed?: boolean | undefined;
 }
 
 /** The grey of a dry run's disconnected part. */
@@ -122,7 +124,7 @@ export function PortEdge(props: EdgeProps<PortEdgeType>) {
       <EdgeLabelRenderer>
         <button
           type="button"
-          className={`edge-handle nodrag nopan${selected ? ' selected' : ''}${problem === undefined ? '' : ' refused'}${dryRun ? ' dry-run' : ''}`}
+          className={`edge-handle nodrag nopan${selected ? ' selected' : ''}${problem === undefined ? '' : ' refused'}${dryRun ? ' dry-run' : ''}${data?.dimmed === true ? ' dimmed' : ''}`}
           style={{ transform: at, '--edge-colour': colour } as CSSProperties}
           aria-label={`edge ${name}`}
           aria-pressed={selected}

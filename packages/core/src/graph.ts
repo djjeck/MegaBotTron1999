@@ -22,6 +22,7 @@
  * - An events input whose namespace its node's config names (`{ config: key }`) is resolved per
  *   node, from the config as its plugin's schema makes it (`resolveInputs`): a required one the
  *   config leaves unresolved fails the start, naming the node.
+ * - A node may name the `group` it is drawn in (bot-os.md D69), which the run ignores.
  * - A node may be `disabled` by the owner: checked as any other, never started. A chat-out edge may
  *   be a `dryRun`: what it sends is logged as sent, never sent (bot-os.md D64). A node whose
  *   required ports bind one that is down (disabled, stopped or inactive) is inactive
@@ -85,6 +86,14 @@ export const graphSchema = z.strictObject({
       settings: z.record(z.string(), z.unknown()).optional(),
       /** Disabled by the owner (bot-os.md D64): checked, never started; absent, enabled. */
       disabled: z.boolean().optional(),
+      /**
+       * The group it is drawn in, a swimlane of the editor (bot-os.md D69): any name, not empty and
+       * without spaces at its ends. Only the drawing reads it; absent, no group.
+       */
+      group: z
+        .string()
+        .refine((g) => g !== '' && g.trim() === g, 'expected a name, without spaces at its ends')
+        .optional(),
     })
   ),
   edges: z
