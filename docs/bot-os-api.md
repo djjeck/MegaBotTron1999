@@ -1147,13 +1147,20 @@ The owner installs a module through the control API (§4.11), never an agent (P1
 at the next start (P8). `ModuleStore` (`<data>/modules`):
 
 - **Install** (`POST /modules`): from a directory of the container's (`{"dir": "/path"}`; its `.git`
-  and `node_modules` are left behind), or from a tarball, `.tar.gz` or `.tar` (base64 in
+  and `node_modules` are left behind); from a tarball, `.tar.gz` or `.tar` (base64 in
   `{"tarball": "…"}`, which the web UI's same-origin rule allows; or the bytes as the body, with
-  `content-type: application/gzip`, on the loopback), up to 64 MiB. The tarball holds the module at
-  its root or in its one directory (as `git archive --prefix=dice/` and GitHub's release tarballs
-  make it); files and directories only, nothing outside it. It is staged in `.staging/`, checked
-  (its `module.json`), and replaces `<id>/`, whose version before is kept as `.previous/<id>/`. 400
-  with why for what is not a module.
+  `content-type: application/gzip`, on the loopback); or from a directory's files one by one, as a
+  browser reads a folder picked or dropped
+  (`{"files": [{"path": "dice/module.json", "content": "<base64>"}, …]}`). Up to 64 MiB: the body,
+  and the files' bytes together. The tarball, or the files, hold the module at their root or in
+  their one directory (as `git archive --prefix=dice/`, GitHub's release tarballs and a folder
+  picked make it), which is stripped. A tarball holds files and directories only, nothing outside
+  it; a file's path is relative to that root, with `/` (or `\`) between its parts, and one that is
+  absolute, a drive's, or goes through `..` refuses the whole upload
+  (`<path> leaves the module's directory`); the files under a `.git` or a `node_modules` directory
+  are left behind, as from a directory. It is staged in `.staging/`, checked (its `module.json`),
+  and replaces `<id>/`, whose version before is kept as `.previous/<id>/`. 400 with why for what is
+  not a module.
 - **Rollback** (`POST /modules/<id>/rollback`): `.previous/<id>/` and `<id>/` swap, so a second
   rollback goes forward again; 409 when there is no previous version.
 - **The list** (`GET /modules`): each module installed (its manifest, or why it does not read), the
@@ -1168,7 +1175,10 @@ at the next start (P8). `ModuleStore` (`<data>/modules`):
 From the host, through the loopback: `docker cp dice/ megabottron1999:/tmp/dice`, then
 `docker exec megabottron1999 wget -qO- --header 'content-type: application/json' --post-data '{"dir":"/tmp/dice"}' http://127.0.0.1:8081/modules`,
 and restart it (`POST /restart`). The web UI's Modules page does the same: it lists them, installs
-an uploaded `.tar.gz` (sent as base64) and rolls one back, and offers the restart.
+one from its folder (**Choose folder**, or the folder dropped on the page: it reads the folder's
+`module.json` and shows its id, version and description for the owner to confirm, leaves out `.git`
+and `node_modules`, and sends the rest as `files`) or from an uploaded `.tar.gz` (sent as base64),
+rolls one back, and offers the restart.
 
 ### 7.5 Developing a module against MegaBotTron1999
 

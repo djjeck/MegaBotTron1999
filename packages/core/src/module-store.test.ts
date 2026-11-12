@@ -100,6 +100,64 @@ describe('installing a module', () => {
     expect(fs.existsSync(path.join(store.dir, 'dice/src/deep/er/roll.ts'))).toBe(true);
   });
 
+  it('writes files uploaded one by one, from the root or from their one directory', () => {
+    const store = new ModuleStore(tempDir());
+    const file = (p: string, text: string) => ({ path: p, content: Buffer.from(text) });
+    const manifest = (v: string) => JSON.stringify(manifestOf('dice', { version: v }));
+    expect(
+      store.install({
+        files: [
+          file('module.json', manifest('0.1.0')),
+          file('./src/roll.ts', 'export {};'),
+          file('src\\deep\\er.ts', 'export {};'),
+          file('.git/HEAD', 'ref'),
+          file('node_modules/x/index.js', ''),
+          file('src/node_modules/y.js', ''),
+        ],
+      })
+    ).toEqual({ id: 'dice', version: '0.1.0' });
+    const at = path.join(store.dir, 'dice');
+    expect(fs.readFileSync(path.join(at, 'src/roll.ts'), 'utf8')).toBe('export {};');
+    expect(fs.existsSync(path.join(at, 'src/deep/er.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(at, '.git'))).toBe(false);
+    expect(fs.existsSync(path.join(at, 'node_modules'))).toBe(false);
+    expect(fs.existsSync(path.join(at, 'src/node_modules'))).toBe(false);
+    // A folder picked in a browser: every path under its one directory, which is stripped.
+    expect(
+      store.install({
+        files: [
+          file('dice-main/module.json', manifest('0.2.0')),
+          file('dice-main/src/roll.ts', 'export const v = 2;'),
+          file('dice-main/.git/config', ''),
+        ],
+      })
+    ).toEqual({ id: 'dice', version: '0.2.0', previous: '0.1.0' });
+    expect(fs.readFileSync(path.join(at, 'src/roll.ts'), 'utf8')).toBe('export const v = 2;');
+    expect(fs.existsSync(path.join(at, 'dice-main'))).toBe(false);
+    expect(version(path.join(store.dir, '.previous', 'dice'))).toBe('0.1.0');
+  });
+
+  it('refuses files that leave the module’s directory, or are not a module', () => {
+    const store = new ModuleStore(tempDir());
+    const file = (p: string) => ({ path: p, content: Buffer.from('{}') });
+    const ok = file('module.json');
+    for (const bad of ['../evil', 'src/../../evil', '/etc/passwd', '\\evil', 'C:/evil', 'c:evil'])
+      expect(() => store.install({ files: [ok, file(bad)] })).toThrow(
+        `${bad} leaves the module's directory`
+      );
+    expect(() => store.install({ files: [file('./')] })).toThrow('a file has no path');
+    expect(() => store.install({ files: [] })).toThrow(
+      'no module.json at the root, nor in a single directory'
+    );
+    expect(() => store.install({ files: [file('a/module.json'), file('b/module.json')] })).toThrow(
+      'no module.json at the root, nor in a single directory'
+    );
+    expect(() => store.install({ files: [file('a/module.json')] })).toThrow(/^module\.json: /u);
+    expect(fs.readdirSync(path.join(store.dir, '.staging'))).toEqual([]);
+    expect(fs.existsSync(path.join(store.dir, '..', 'evil'))).toBe(false);
+    expect(store.report().installed).toEqual([]);
+  });
+
   it('refuses what is not a module, and leaves nothing behind', () => {
     const store = new ModuleStore(tempDir());
     expect(() => store.install({ dir: path.join(store.dir, 'none') })).toThrow(

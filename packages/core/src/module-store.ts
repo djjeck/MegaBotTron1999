@@ -1,6 +1,7 @@
 /**
  * The modules installed in the data volume (docs/bot-os-api.md §7, bot-os.md D49), as the owner
- * changes them: install one (from a directory, or a tarball uploaded), roll one back, and list them.
+ * changes them: install one (from a directory, a tarball uploaded, or its files uploaded one by one),
+ * roll one back, and list them.
  * Installing replaces `<modules>/<id>/` and keeps the version it replaces as
  * `<modules>/.previous/<id>/`; a rollback swaps the two, so a second one goes forward again. A
  * change takes effect at the next start (P8). Only the owner reaches this, through the control API;
@@ -19,13 +20,22 @@ import {
   PREVIOUS_DIR,
   readModuleManifest,
 } from './modules.ts';
-import { extractTar } from './tar.ts';
+import { extractTar, insidePath } from './tar.ts';
 
 /** Where an install or a rollback is staged, under the modules' directory. */
 const STAGING_DIR = '.staging';
 
-/** What an install is made from: a directory of the container's, or a tarball's bytes. */
-export type ModuleSource = { dir: string } | { tarball: Uint8Array };
+/** A file of a module uploaded one by one: its path from the module's root, and its bytes. */
+export interface ModuleFile {
+  path: string;
+  content: Uint8Array;
+}
+
+/**
+ * What an install is made from: a directory of the container's, a tarball's bytes, or the files of
+ * a directory uploaded one by one (the web UI's folder picker).
+ */
+export type ModuleSource = { dir: string } | { tarball: Uint8Array } | { files: ModuleFile[] };
 
 export interface InstalledModule {
   id: string;
@@ -120,7 +130,8 @@ export class ModuleStore {
           recursive: true,
           filter: (src) => !SKIPPED.has(path.basename(src)),
         });
-      } else extractTar(source.tarball, staged);
+      } else if ('tarball' in source) extractTar(source.tarball, staged);
+      else writeFiles(source.files, staged);
       const root = moduleRoot(staged);
       const manifest: ModuleManifest = readModuleManifest(root);
       const target = path.join(this.dir, manifest.id);
@@ -161,6 +172,25 @@ export class ModuleStore {
     fs.renameSync(keep, target);
     if (fs.existsSync(aside)) fs.renameSync(aside, keep);
     return { id, version, ...(current === undefined ? {} : { previous: current }) };
+  }
+}
+
+/**
+ * Writes a module's files uploaded one by one into `dest`: each path relative to the module's root
+ * (or to its one directory, as a folder picked in a browser gives them), never leaving it. What is
+ * under `.git` or `node_modules` is left behind, as from a directory.
+ */
+function writeFiles(files: readonly ModuleFile[], dest: string): void {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const file of files) {
+    const rel = insidePath(file.path);
+    if (rel === undefined) throw new ModuleError(`${file.path} leaves the module's directory`);
+    if (rel === '') throw new ModuleError(`a file has no path`);
+    const parts = rel.split('/');
+    if (parts.some((p) => SKIPPED.has(p))) continue;
+    const target = path.join(dest, ...parts);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, file.content);
   }
 }
 

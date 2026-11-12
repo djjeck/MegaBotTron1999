@@ -23,10 +23,12 @@ that guards them.
   selected** kills each: its plugin's own safety stop, then paused until reinstated; a killed node
   is drawn disabled, with a **Reinstate** button, and its forms stay editable. Nodes start in
   columns (`layout.ts`) and can be moved. **Modules** (`#/modules`) lists the modules installed,
-  installs a `.tar.gz` and rolls one back; **Import** (`#/import`) shows an older data directory and
-  imports its event log with a table of type renames. The admin pages are a secondary menu (Admin),
-  one per area: **Instance** (on or off with its switch, uptime, memory, the plugins and accounts by
-  state, the kill switch), **Accounts** (each connector, its account and its connection's status),
+  installs one from its folder, chosen (**Choose folder**) or dropped on the page, after showing the
+  id, version and description its `module.json` gives (`src/ui/module-folder.ts`), or from a
+  `.tar.gz`, and rolls one back; **Import** (`#/import`) shows an older data directory and imports
+  its event log with a table of type renames. The admin pages are a secondary menu (Admin), one per
+  area: **Instance** (on or off with its switch, uptime, memory, the plugins and accounts by state,
+  the kill switch), **Accounts** (each connector, its account and its connection's status),
   **Plugins** (each plugin instance with its state, a mode control, a resume when paused, and,
   opened, its settings, its own status and the reads and actions it declares), **Drift** (each
   parser's counts and the latest reports) and **Events** (the event log's latest records, filtered

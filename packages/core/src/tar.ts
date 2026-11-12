@@ -42,12 +42,23 @@ function paxPath(data: Uint8Array): string | undefined {
   return out;
 }
 
+/**
+ * A path made relative to a root, with `/` between its parts ('' for the root itself), or undefined
+ * when it would leave the root: absolute, a drive's, or through `..`. For a tarball's members and
+ * for a module's files uploaded one by one (module-store.ts).
+ */
+export function insidePath(name: string): string | undefined {
+  const unix = name.replace(/\\/gu, '/');
+  const parts = unix.split('/');
+  if (unix.startsWith('/') || /^[A-Za-z]:/u.test(unix) || parts.includes('..')) return undefined;
+  return parts.filter((p) => p !== '' && p !== '.').join('/');
+}
+
 /** A member's path, relative and inside the archive's root; throws for any other. */
 function safePath(name: string): string {
-  const parts = name.replace(/\\/gu, '/').split('/');
-  if (name.startsWith('/') || /^[A-Za-z]:/u.test(name) || parts.includes('..'))
-    throw new Error(`tar: ${name} leaves the archive's directory`);
-  return parts.filter((p) => p !== '' && p !== '.').join('/');
+  const rel = insidePath(name);
+  if (rel === undefined) throw new Error(`tar: ${name} leaves the archive's directory`);
+  return rel;
 }
 
 /** Unpacks `archive` (a .tar or a .tar.gz) into `dest`, which it creates. */

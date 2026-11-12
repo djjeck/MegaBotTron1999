@@ -51,9 +51,11 @@
  * - `GET /modules`: the modules installed, with the version each had loaded, and those refused at
  *   the start with why.
  * - `POST /modules`: installs a module, from `{"dir": "/path/in/the/container"}`, from
- *   `{"tarball": "<base64 of a .tar.gz or .tar>"}`, or from the tarball itself as the body
- *   (`content-type: application/gzip`, `application/x-tar` or `application/octet-stream`); it is
- *   loaded at the next start. 400 with why for what is not a module.
+ *   `{"tarball": "<base64 of a .tar.gz or .tar>"}`, from its files one by one
+ *   (`{"files": [{"path": "module.json", "content": "<base64>"}, …]}`, as a folder picked in a
+ *   browser gives them), or from the tarball itself as the body (`content-type: application/gzip`,
+ *   `application/x-tar` or `application/octet-stream`); it is loaded at the next start. 400 with
+ *   why for what is not a module.
  * - `POST /modules/<id>/rollback`: puts the previous version back (409 when there is none).
  *
  * Ids and names in a path may be URL-encoded.
@@ -67,7 +69,7 @@ import { type GraphFileControls, GraphFileError } from './graph-file.ts';
 import { describeNodes } from './graph-view.ts';
 import { type InstanceInfo } from './instance-registry.ts';
 import { LegacyError } from './legacy.ts';
-import { type ModuleSource } from './module-store.ts';
+import { type ModuleFile, type ModuleSource } from './module-store.ts';
 import { ModuleError } from './modules.ts';
 import { PORT_TYPE_INFO } from './ports.ts';
 import { type SettingsRegistry } from './settings.ts';
@@ -94,15 +96,32 @@ async function body(req: http.IncomingMessage, max?: number): Promise<unknown> {
 
 const TARBALL = /^application\/(?:gzip|x-gzip|x-tar|octet-stream)\b/iu;
 
+/** A module's files uploaded one by one (`{"files": [{path, content}]}`), within `MAX_UPLOAD`. */
+function moduleFiles(files: unknown[]): ModuleFile[] {
+  let total = 0;
+  return files.map((f) => {
+    const p = field(f, 'path');
+    const content = field(f, 'content');
+    if (typeof p !== 'string' || typeof content !== 'string')
+      throw new ModuleError('files: each is {"path": "…", "content": "<base64>"}');
+    const bytes = Buffer.from(content, 'base64');
+    total += bytes.length;
+    if (total > MAX_UPLOAD) throw new ModuleError(`the files are over ${MAX_UPLOAD} bytes`);
+    return { path: p, content: bytes };
+  });
+}
+
 /** What `POST /modules` installs from. */
 async function moduleSource(req: http.IncomingMessage): Promise<ModuleSource> {
   if (TARBALL.test(req.headers['content-type'] ?? '')) return { tarball: await bytes(req) };
   const b = await body(req, Math.ceil(MAX_UPLOAD * 1.4));
   const dir = field(b, 'dir');
   const tarball = field(b, 'tarball');
+  const files = field(b, 'files');
   if (typeof dir === 'string') return { dir };
   if (typeof tarball === 'string') return { tarball: Buffer.from(tarball, 'base64') };
-  throw new ModuleError('give a dir, a tarball in base64, or the tarball as the body');
+  if (Array.isArray(files)) return { files: moduleFiles(files) };
+  throw new ModuleError('give a dir, a tarball in base64, files, or the tarball as the body');
 }
 
 /** The import from an older data directory (legacy.ts), as the wiring offers it. */

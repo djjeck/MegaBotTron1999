@@ -157,6 +157,7 @@ export {
 } from './module-loader.ts';
 export {
   type InstalledModule,
+  type ModuleFile,
   type ModuleSource,
   type ModulesReport,
   ModuleStore,

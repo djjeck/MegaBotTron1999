@@ -39,9 +39,14 @@ Then open `http://127.0.0.1:8082/` and log in with that password. The home page 
 a new instance starts empty, and offers to add its first node, a connector. Add each node from the
 plugins the image and the modules offer, wire its ports, set its config, review the changes and save
 them, then apply them with a restart (the page waits for the instance, and asks for the login
-again). The Modules page installs and rolls back modules; the Import page brings in an older data
-directory's event log ([docs/bot-os.md](docs/bot-os.md) D55). In a real deployment, use Docker or
-Compose secrets, and put the UI behind a reverse proxy with HTTPS rather than publishing the port.
+again). A module (a game, an automation) is a folder holding a `module.json`: get that folder onto
+your computer (clone its repository, or download it as a ZIP from GitHub and unzip it), open the
+Modules page, click **Choose folder** (or drop the folder on the page), pick the module's own folder
+(for example `modules/dice/`, not the whole repository), check the id and version it shows, install
+it, then click **Apply (restart)** to load it. The Modules page also installs a `.tar.gz` and rolls
+a module back to its previous version; the Import page brings in an older data directory's event log
+([docs/bot-os.md](docs/bot-os.md) D55). In a real deployment, use Docker or Compose secrets, and put
+the UI behind a reverse proxy with HTTPS rather than publishing the port.
 
 - **`/data`** is the instance's state: the graph (`graph.json`, and `graph.previous.json`), each
   plugin instance's state (`instances/<id>/`), the core's own (`core/`), the event log

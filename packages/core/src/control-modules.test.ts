@@ -140,9 +140,33 @@ describe('the control API’s modules', () => {
       409,
       { error: 'cards has no previous version' },
     ]);
+    const files = (v: string, ...more: { path: string; content: string }[]) =>
+      JSON.stringify({
+        files: [
+          {
+            path: 'dice/module.json',
+            content: Buffer.from(JSON.stringify(manifestOf('dice', { version: v }))).toString(
+              'base64'
+            ),
+          },
+          ...more,
+        ],
+      });
+    expect(await call('/modules', files('0.4.0'))).toEqual([
+      200,
+      { id: 'dice', version: '0.4.0', previous: '0.2.0' },
+    ]);
+    expect(await call('/modules', files('0.5.0', { path: 'dice/../../x', content: '' }))).toEqual([
+      400,
+      { error: "dice/../../x leaves the module's directory" },
+    ]);
+    expect(await call('/modules', JSON.stringify({ files: [{ path: 'module.json' }] }))).toEqual([
+      400,
+      { error: 'files: each is {"path": "…", "content": "<base64>"}' },
+    ]);
     expect(await call('/modules', JSON.stringify({}))).toEqual([
       400,
-      { error: 'give a dir, a tarball in base64, or the tarball as the body' },
+      { error: 'give a dir, a tarball in base64, files, or the tarball as the body' },
     ]);
     expect(await call('/modules', JSON.stringify({ dir: path.join(store.dir, 'x') }))).toEqual([
       400,
@@ -184,6 +208,15 @@ describe('the control API’s modules', () => {
       { error: 'Error: disk full' },
     ]);
     expect(await post('/modules/dice/rollback', '')).toEqual([400, { error: 'Error: disk full' }]);
+    const half = Buffer.alloc(32 * 2 ** 20 + 1).toString('base64');
+    const files = [
+      { path: 'a', content: half },
+      { path: 'b', content: half },
+    ];
+    expect(await post('/modules', JSON.stringify({ files }))).toEqual([
+      400,
+      { error: `the files are over ${64 * 2 ** 20} bytes` },
+    ]);
     const big = new Uint8Array(64 * 2 ** 20 + 1);
     expect(await post('/modules', big, 'application/octet-stream')).toEqual([
       400,

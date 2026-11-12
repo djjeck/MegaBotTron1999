@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { droppedFiles, manifestFile, readFolder } from '#src/ui/module-folder.ts';
 import { fakeApi } from '#test/fake-api.ts';
 import { ImportPage } from './ImportPage.tsx';
 import { base64, ModulesPage } from './ModulesPage.tsx';
@@ -90,6 +91,203 @@ describe('ModulesPage', () => {
     render(<ModulesPage loggedOut={vi.fn()} />);
     expect(await screen.findByText('no modules here')).toBeDefined();
     expect(base64(new TextEncoder().encode('hi'))).toBe('aGk=');
+  });
+});
+
+/** A file of a folder picked, at its path from the folder (its name first). */
+function picked(path: string, text: string): File {
+  const file = new File([text], path.split('/').pop() ?? path);
+  Object.defineProperty(file, 'webkitRelativePath', { value: path });
+  return file;
+}
+
+const manifest = (more: Record<string, unknown> = {}) =>
+  JSON.stringify({ id: 'quest', version: '1.2.0', description: 'A quest game', ...more });
+
+/** A dropped entry, as `webkitGetAsEntry` gives one: a file, or a directory of entries. */
+function entry(fullPath: string, content: string | FileSystemEntry[]): FileSystemEntry {
+  const name = fullPath.split('/').pop() ?? '';
+  if (typeof content === 'string')
+    return {
+      name,
+      fullPath,
+      isFile: true,
+      isDirectory: false,
+      file: (ok: (f: File) => void) => ok(new File([content], name)),
+    } as unknown as FileSystemEntry;
+  return {
+    name,
+    fullPath,
+    isFile: false,
+    isDirectory: true,
+    createReader: () => {
+      // Two batches, then the empty one that ends them.
+      const batches = [content.slice(0, 1), content.slice(1), []];
+      return { readEntries: (ok: (e: FileSystemEntry[]) => void) => ok(batches.shift() ?? []) };
+    },
+  } as unknown as FileSystemEntry;
+}
+
+const items = (...entries: (FileSystemEntry | null)[]) => ({
+  dataTransfer: { items: entries.map((e) => ({ webkitGetAsEntry: () => e })) },
+});
+
+describe('ModulesPage: a module’s folder', () => {
+  const routes = (post: (body: unknown) => [number, unknown]) =>
+    fakeApi({
+      'GET /modules': [200, { installed: [], failures: [], restart: false }],
+      'POST /modules': post,
+    });
+
+  it('shows the module picked, installs its files once confirmed, and says why it is refused', async () => {
+    let sent: { path: string; content: string }[] = [];
+    let refuse = false;
+    routes((body) => {
+      sent = (body as { files: typeof sent }).files;
+      return refuse
+        ? [400, { error: 'module.json: api: expected 1' }]
+        : [200, { id: 'quest', version: '1.2.0', previous: '1.1.0' }];
+    });
+    render(<ModulesPage loggedOut={vi.fn()} />);
+    expect(await screen.findByText('No module is installed.')).toBeDefined();
+    const input = screen.getByLabelText('module folder');
+    expect(input.hasAttribute('webkitdirectory')).toBe(true);
+    const click = vi.spyOn(input, 'click');
+    fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }));
+    expect(click).toHaveBeenCalled();
+    const files = [
+      picked('quest/module.json', manifest()),
+      picked('quest/src/game.ts', 'export {};'),
+      picked('quest/.git/HEAD', 'ref'),
+      picked('quest/node_modules/x/index.js', ''),
+    ];
+    fireEvent.change(input, { target: { files } });
+    const box = await screen.findByLabelText('module picked');
+    expect(within(box).getByText('quest')).toBeDefined();
+    expect(within(box).getByText('A quest game')).toBeDefined();
+    expect(within(box).getByText(/^2 from quest\/, /u)).toBeDefined();
+    fireEvent.click(within(box).getByRole('button', { name: 'Install quest 1.2.0' }));
+    expect(
+      await screen.findByText(
+        'quest 1.2.0 installed (1.1.0 kept for a rollback): restart to load it',
+        {},
+        slow
+      )
+    ).toBeDefined();
+    expect(sent).toEqual([
+      { path: 'quest/module.json', content: btoa(manifest()) },
+      { path: 'quest/src/game.ts', content: btoa('export {};') },
+    ]);
+    expect(screen.queryByLabelText('module picked')).toBeNull();
+    // Refused: the server's reason, and the module still there to try again or cancel.
+    refuse = true;
+    fireEvent.change(input, { target: { files: [picked('quest/module.json', manifest())] } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Install quest 1.2.0' }));
+    expect(
+      await screen.findByText('not installed: module.json: api: expected 1', {}, slow)
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByLabelText('module picked')).toBeNull();
+    // A choice of nothing changes nothing.
+    fireEvent.change(input, { target: { files: [] } });
+    expect(screen.queryByLabelText('module picked')).toBeNull();
+  });
+
+  it('takes a folder dropped, walking its directories, and a tarball dropped', async () => {
+    let sent: { path: string }[] = [];
+    routes((body) => {
+      sent = (body as { files: typeof sent }).files;
+      return [200, { id: 'quest', version: '1.2.0' }];
+    });
+    render(<ModulesPage loggedOut={vi.fn()} />);
+    const zone = await screen.findByRole('region', { name: 'install a module' });
+    fireEvent.dragOver(zone);
+    expect(zone.className).toBe('drop dragging');
+    fireEvent.dragLeave(zone);
+    expect(zone.className).toBe('drop');
+    const folder = entry('/quest', [
+      entry('/quest/module.json', manifest({ description: undefined })),
+      entry('/quest/src', [
+        entry('/quest/src/game.ts', 'export {};'),
+        entry('/quest/src/rules.ts', 'export {};'),
+      ]),
+      entry('/quest/node_modules', [entry('/quest/node_modules/x.js', '')]),
+      entry('/quest/.git', []),
+    ]);
+    fireEvent.drop(zone, items(folder, null));
+    const box = await screen.findByLabelText('module picked');
+    expect(within(box).queryByText('Description')).toBeNull();
+    fireEvent.click(within(box).getByRole('button', { name: 'Install quest 1.2.0' }));
+    expect(
+      await screen.findByText('quest 1.2.0 installed: restart to load it', {}, slow)
+    ).toBeDefined();
+    expect(sent.map((f) => f.path)).toEqual([
+      'quest/module.json',
+      'quest/src/game.ts',
+      'quest/src/rules.ts',
+    ]);
+    // Nothing usable dropped: nothing happens.
+    fireEvent.drop(zone, items(null));
+    // A tarball dropped goes to the tarball's form.
+    fireEvent.drop(zone, items(entry('/quest.tar.gz', 'x')));
+    expect(await screen.findByText('quest.tar.gz: install it below, from a .tar.gz')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Install' }).hasAttribute('disabled')).toBe(false);
+    // A folder that does not read says so.
+    const broken = {
+      name: 'quest',
+      fullPath: '/quest',
+      isFile: false,
+      isDirectory: true,
+      createReader: () => ({
+        readEntries: (_: unknown, fail: (e: Error) => void) => fail(new Error('not allowed')),
+      }),
+    } as unknown as FileSystemEntry;
+    fireEvent.drop(zone, items(broken));
+    expect(await screen.findByText('the folder does not read: not allowed')).toBeDefined();
+  });
+
+  it('says why a folder is not a module’s, before anything is sent', async () => {
+    const f = (path: string, text = '') => ({ path, file: new File([text], 'x') });
+    expect(await readFolder([])).toMatchObject({ error: 'the folder is empty' });
+    expect(await readFolder([f('repo/README.md')])).toMatchObject({
+      error:
+        "no module.json in repo: choose the module's own folder, the one that holds its module.json",
+    });
+    expect(
+      await readFolder([f('repo/modules/quest/module.json'), f('repo/modules/dice/module.json')])
+    ).toMatchObject({
+      error:
+        "repo is not a module's folder, but holds modules: choose one of repo/modules/quest, repo/modules/dice",
+    });
+    expect((await readFolder([f('quest/module.json', '{')])).error).toMatch(
+      /^quest\/module\.json is not JSON: /u
+    );
+    expect(await readFolder([f('quest/module.json', '[1]')])).toMatchObject({
+      error: 'quest/module.json has no id or version',
+    });
+    expect(await readFolder([f('quest/module.json', 'null')])).toMatchObject({
+      error: 'quest/module.json has no id or version',
+    });
+    const big = { path: 'quest/big.bin', file: new File(['x'], 'big.bin') };
+    Object.defineProperty(big.file, 'size', { value: 64 * 2 ** 20 });
+    expect(await readFolder([f('quest/module.json', manifest()), big])).toMatchObject({
+      manifest: { id: 'quest', version: '1.2.0' },
+      error: `the folder is over ${64 * 2 ** 20} bytes`,
+    });
+    // module.json at the root, as a tarball may have it; none where the files are in two directories.
+    expect(manifestFile([f('module.json'), f('src/a.ts')])?.path).toBe('module.json');
+    expect(manifestFile([f('a/module.json'), f('b/x.ts')])).toBeUndefined();
+    expect(await droppedFiles([entry('/a.ts', 'x')])).toMatchObject([{ path: 'a.ts' }]);
+
+    // Shown on the page, with no install offered.
+    routes(() => [500, {}]);
+    render(<ModulesPage loggedOut={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText('module folder'), {
+      target: { files: [picked('repo/README.md', 'hi')] },
+    });
+    const box = await screen.findByLabelText('module picked');
+    expect(within(box).getByRole('alert').textContent).toMatch(/^no module\.json in repo/u);
+    expect(within(box).queryByRole('button', { name: /^Install/u })).toBeNull();
   });
 });
 
