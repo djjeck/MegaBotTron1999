@@ -658,4 +658,44 @@ describe('a script node in the graph editor', () => {
       ])
     );
   });
+
+  it('moves the edges of a port renamed in its panel, in the same change', async () => {
+    const graph: Graph = {
+      version: 2,
+      nodes: [
+        { id: 'parser', plugin: 'parser' },
+        { id: 'look', plugin: 'script', config: CONFIG },
+        { id: 'chat', plugin: 'chat', config: { host: 'example.test' } },
+      ],
+      edges: [
+        { from: 'parser.events', to: 'look.game-events', type: 'events' },
+        { from: 'look.chat', to: 'chat.chat', type: 'chat-out', commands: ['/look'] },
+      ],
+    };
+    const core = fakeCore({
+      file: graph,
+      available: [...AVAILABLE, SCRIPT],
+      status: { off: false, plugins: [] },
+    });
+    core.running = graph;
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    fireEvent.click(await screen.findByLabelText('node look', {}, { timeout: 5000 }));
+    const panel = await screen.findByLabelText('details of look');
+    const rename = (label: string, to: string): void => {
+      const field = within(panel).getByLabelText(label);
+      fireEvent.change(field, { target: { value: to } });
+      fireEvent.keyDown(field, { key: 'Enter' });
+    };
+    rename('port of events input game-events', 'heard');
+    rename('port of chat-out output chat', 'say');
+    await waitFor(() =>
+      expect(core.checked.at(-1)?.edges).toEqual([
+        { from: 'parser.events', to: 'look.heard', type: 'events' },
+        { from: 'look.say', to: 'chat.chat', type: 'chat-out', commands: ['/look'] },
+      ])
+    );
+    const look = core.checked.at(-1)?.nodes.find((n) => n.id === 'look')?.config;
+    expect(Object.keys(look?.['inputs'] as object)).toEqual(['heard', 'board']);
+    expect(Object.keys(look?.['outputs'] as object)).toEqual(['say']);
+  });
 });

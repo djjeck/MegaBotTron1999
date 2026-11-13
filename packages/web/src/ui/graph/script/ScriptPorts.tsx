@@ -9,6 +9,7 @@
  */
 import { useRef, useState } from 'react';
 import type { PluginView } from '#src/ui/api.ts';
+import type { PortMove } from '#src/ui/graph/draft.ts';
 import { freeName } from '#src/ui/graph/draft.ts';
 import { portsOf } from './types.ts';
 
@@ -169,7 +170,8 @@ export function Picker(props: {
 
 export function ScriptPorts(props: {
   config: Config;
-  change: (config: Config) => void;
+  /** Its config changed; with a port renamed, its edges move with it, in the same change. */
+  change: (config: Config, moved?: PortMove) => void;
   /** The plugins and nodes it may use or hear, for the choices. */
   plugins: readonly PluginView[];
   /** The check's problems, by config key. */
@@ -219,7 +221,12 @@ export function ScriptPorts(props: {
         taken={Object.keys(r)}
         rename={(to) => {
           rows[kind].moved(name, to);
-          set(kind, renamed(r, name, to));
+          change(
+            { ...config, [kind]: renamed(r, name, to) },
+            kind === 'events'
+              ? undefined
+              : { side: kind === 'inputs' ? 'in' : 'out', from: name, to }
+          );
         }}
       />
     );

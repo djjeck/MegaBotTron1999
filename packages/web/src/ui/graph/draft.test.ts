@@ -16,6 +16,7 @@ import {
   idProblem,
   inputsOf,
   instanceOf,
+  movePort,
   placeProblems,
   removeEdge,
   removeNode,
@@ -108,6 +109,31 @@ describe('the draft', () => {
     expect(removeEdge(g, key).edges).toEqual([{ from: 'c', to: 'b.other' }]);
     expect(endOf('c')).toEqual({ node: 'c', port: undefined });
     expect(endOf('a.chat')).toEqual({ node: 'a', port: 'chat' });
+  });
+
+  it('moves the edges bound to a port renamed, an input’s or an output’s, and no other', () => {
+    const g: Graph = {
+      version: 2,
+      nodes: [],
+      edges: [
+        { from: 'parser.events', to: 'look.heard', type: 'events' },
+        { from: 'look.heard', to: 'other.in' },
+        { from: 'look.chat', to: 'chat.chat', type: 'chat-out', commands: ['/look'] },
+        { from: 'parser.events', to: 'lookout.heard' },
+      ],
+    };
+    expect(movePort(g, 'look', { side: 'in', from: 'heard', to: 'game' }).edges).toEqual([
+      { from: 'parser.events', to: 'look.game', type: 'events' },
+      { from: 'look.heard', to: 'other.in' },
+      { from: 'look.chat', to: 'chat.chat', type: 'chat-out', commands: ['/look'] },
+      { from: 'parser.events', to: 'lookout.heard' },
+    ]);
+    expect(movePort(g, 'look', { side: 'out', from: 'chat', to: 'say' }).edges).toEqual([
+      { from: 'parser.events', to: 'look.heard', type: 'events' },
+      { from: 'look.heard', to: 'other.in' },
+      { from: 'look.say', to: 'chat.chat', type: 'chat-out', commands: ['/look'] },
+      { from: 'parser.events', to: 'lookout.heard' },
+    ]);
   });
 
   it('makes an edge from an output dragged to an input, of the output’s type', () => {

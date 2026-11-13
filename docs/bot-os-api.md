@@ -1294,15 +1294,16 @@ rolls back to it after a confirmation repeating the diff, then restarts as Apply
 their namespace picked in a list of those offered or typed, a new one with none until picked, its
 interface inputs, their plugin picked the same way, with their members picked from what it offers,
 its chat-out outputs with their commands and spacing, its own events, its limits), each change a
-change of the draft, drawn as the check's `views` say; an edge dropped on its card from an output it
-has no input for adds one (§2, bot-os.md D80). **Edit script** opens its code in Monaco
-(`monaco-editor`, bundled by Vite in a chunk loaded only then), its TypeScript checked against
-ES2022 and a `.d.ts` made for the node from its ports (`script/types.ts`: the members' and the event
-types' JSON Schemas as TypeScript, each with its help), beside a panel listing its API; **Keep**
-writes the code to the draft, refused while it does not parse. **Export as plugin** (bot-os.md D79)
-shows and downloads the node as a module's plugin, `<id>.ts` (`script/export.ts`: a `definePlugin`
-of the node's id, its manifest built from its ports and own events, its `create` the script as typed
-on the script API given from the context, typed as the editor typed it) and a `module.json` for it.
+change of the draft, drawn as the check's `views` say (a port renamed takes its edges with it, in
+the same change: `movePort` in `draft.ts`); an edge dropped on its card from an output it has no
+input for adds one (§2, bot-os.md D80). **Edit script** opens its code in Monaco (`monaco-editor`,
+bundled by Vite in a chunk loaded only then), its TypeScript checked against ES2022 and a `.d.ts`
+made for the node from its ports (`script/types.ts`: the members' and the event types' JSON Schemas
+as TypeScript, each with its help), beside a panel listing its API; **Keep** writes the code to the
+draft, refused while it does not parse. **Export as plugin** (bot-os.md D79) shows and downloads the
+node as a module's plugin, `<id>.ts` (`script/export.ts`: a `definePlugin` of the node's id, its
+manifest built from its ports and own events, its `create` the script as typed on the script API
+given from the context, typed as the editor typed it) and a `module.json` for it.
 
 **Swimlanes** (bot-os.md D69): a draft whose nodes name groups is drawn in lanes (`layout.ts`'s
 `swimlanes`, `lanes.ts`, `LaneNode.tsx`). The columns stay global, as above, so a stage lines up

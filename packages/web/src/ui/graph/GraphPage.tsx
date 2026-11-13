@@ -84,6 +84,7 @@ import {
   EMPTY_GRAPH,
   endOf,
   instanceOf,
+  movePort,
   placeProblems,
   removeEdge,
   removeNode,
@@ -672,7 +673,12 @@ export function GraphPage({
         settingErrors={placed.settings.get(shownNode.id) ?? {}}
         secretNames={secrets.data?.names ?? []}
         groups={groupsOf(draft.nodes)}
-        change={(c) => change((g) => updateNode(g, shownNode.id, c))}
+        change={(c, moved) =>
+          change((g) => {
+            const next = updateNode(g, shownNode.id, c);
+            return moved === undefined ? next : movePort(next, shownNode.id, moved);
+          })
+        }
         remove={() => {
           const both = isSplit(view)
             ? ` Both its cards go, ${cardTitle(shownNode.id, 'in')} and ${cardTitle(shownNode.id, 'out')}: they are one node.`

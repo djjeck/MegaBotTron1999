@@ -122,6 +122,34 @@ export function updateNode(g: Graph, id: string, change: Partial<GraphNode>): Gr
   };
 }
 
+/** A node's port renamed: an input (`in`) or an output (`out`), from its old name to its new. */
+export interface PortMove {
+  side: 'in' | 'out';
+  from: string;
+  to: string;
+}
+
+/**
+ * The edges bound to a node's port moved to its new name, as its panel renames it (a script
+ * node's, D78): an input's at their `to` end, an output's at their `from`, the rest kept.
+ */
+export function movePort(g: Graph, node: string, move: PortMove): Graph {
+  const was = `${node}.${move.from}`;
+  const now = `${node}.${move.to}`;
+  return {
+    ...g,
+    edges: g.edges.map((e) =>
+      move.side === 'in'
+        ? e.to === was
+          ? { ...e, to: now }
+          : e
+        : e.from === was
+          ? { ...e, from: now }
+          : e
+    ),
+  };
+}
+
 /** An edge added, replacing one between the same two ends. */
 export function connect(g: Graph, edge: GraphEdge): Graph {
   return { ...g, edges: [...g.edges.filter((e) => edgeKey(e) !== edgeKey(edge)), edge] };

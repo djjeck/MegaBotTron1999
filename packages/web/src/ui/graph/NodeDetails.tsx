@@ -28,6 +28,7 @@ import type {
 } from '#src/ui/api.ts';
 import { isSplit } from './cards.ts';
 import { withDefaults } from './defaults.ts';
+import type { PortMove } from './draft.ts';
 import { instanceOf } from './draft.ts';
 import { ConnectorQueue } from './Queue.tsx';
 import { SchemaForm } from './SchemaForm.tsx';
@@ -200,7 +201,7 @@ function ScriptSection(props: {
   errors: Record<string, string[]>;
   editing: boolean;
   setEditing: (editing: boolean) => void;
-  change: (config: Record<string, unknown>) => void;
+  change: (config: Record<string, unknown>, moved?: PortMove) => void;
 }) {
   const { node, sources } = props;
   const config = withDefaults(props.schema, node.config);
@@ -358,7 +359,8 @@ export function NodeDetails(props: {
   secretNames: readonly string[];
   /** The draft's groups, in their lanes' order (D69). */
   groups: readonly string[];
-  change: (change: Partial<GraphNode>) => void;
+  /** The node changed; with a port renamed (a script node's), its edges move with it, at once. */
+  change: (change: Partial<GraphNode>, moved?: PortMove) => void;
   remove: () => void;
   kill: (ids: string[]) => void;
   /** Its stop cleared in the draft (D64), for the next Apply. */
@@ -523,7 +525,7 @@ export function NodeDetails(props: {
           errors={props.configErrors}
           editing={editing}
           setEditing={setEditing}
-          change={(config) => props.change({ config })}
+          change={(config, moved) => props.change({ config }, moved)}
         />
       )}
       <section hidden={scripted}>
