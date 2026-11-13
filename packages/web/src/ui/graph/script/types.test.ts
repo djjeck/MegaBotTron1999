@@ -268,6 +268,52 @@ describe('a script node’s API', () => {
     expect(diagnostics(dts, bad).length).toBeGreaterThanOrEqual(7);
   }, 30_000);
 
+  it('types several ports of a kind, each by its name (D84)', () => {
+    const many: GraphNode = {
+      id: 'many',
+      plugin: 'script',
+      config: {
+        inputs: {
+          changes: { type: 'events', namespace: 'quest-state' },
+          'changes-2': { type: 'events', namespace: 'quest-state' },
+          counts: { type: 'interface', plugin: 'quest-state', members: ['state.count'] },
+          reads: { type: 'interface', plugin: 'quest-state', members: ['state.get'] },
+        },
+        outputs: {
+          look: { type: 'chat-out', commands: ['/look'] },
+          use: { type: 'chat-out', commands: ['/use'] },
+        },
+      },
+    };
+    const api = scriptApi({
+      ...sources,
+      node: many,
+      nodes: [...nodes, many],
+      edges: [
+        { from: 'quest-state.events', to: 'many.changes' },
+        { from: 'quest-state.events', to: 'many.changes-2' },
+        { from: 'quest-state.interface', to: 'many.counts' },
+        { from: 'quest-state.interface', to: 'many.reads' },
+      ],
+    });
+    const dts = scriptDts(api, 'many');
+    // An event type two inputs bring is typed once, heard through both.
+    expect(dts.match(/"quest-state\.changed": \{/gu)).toHaveLength(1);
+    expect(dts).toContain('Heard through changes, changes-2.');
+    const good = `
+      on('quest-state.changed', async (e) => {
+        const n: number = await use('counts').state.count({ name: e.sections[0] ?? '' });
+        const whole: unknown = await use('reads').state.get({});
+        await enqueue('look', '@QuestBot', '/look ' + String(n));
+        await outbox('use').enqueue('@QuestBot', '/use ' + String(whole));
+      });
+      on('quest-state', (e) => log(e.type));
+    `;
+    expect(diagnostics(dts, good)).toEqual([]);
+    // Each interface input has its own members: one port's are not the other's.
+    expect(diagnostics(dts, `use('reads').state.count({ name: 'x' });`).length).toBe(1);
+  }, 30_000);
+
   it('types a script with no ports at all', () => {
     const dts = scriptDts(
       scriptApi({ ...sources, node: { id: 'bare', plugin: 'script' } }),

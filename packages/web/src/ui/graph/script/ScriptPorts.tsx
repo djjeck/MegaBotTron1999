@@ -5,12 +5,14 @@
  * event types (their help and fields), and its limits. Each change is a change of the draft's
  * config, which the core checks and turns into the node's manifest (D74), so the graph draws the
  * new ports at once. A port's name is renamed once typed (left, or Enter), not at each keystroke,
- * and each row keeps its identity across a rename, so that the field keeps the focus.
+ * and each row keeps its identity across a rename, so that the field keeps the focus. A node may
+ * have several ports of a kind, each its own name (D84); each row's Remove takes its port away, and
+ * the edges bound to it in the same change (asking first when there are any).
  */
 import { useRef, useState } from 'react';
-import type { PluginView } from '#src/ui/api.ts';
-import type { PortMove } from '#src/ui/graph/draft.ts';
-import { freeName } from '#src/ui/graph/draft.ts';
+import type { GraphEdge, PluginView } from '#src/ui/api.ts';
+import type { PortChange } from '#src/ui/graph/draft.ts';
+import { edgesOfPort, freeName } from '#src/ui/graph/draft.ts';
 import { portsOf } from './types.ts';
 
 type Config = Record<string, unknown>;
@@ -101,6 +103,7 @@ function PortName(props: {
 function useRowKeys(): {
   keyOf: (name: string) => string;
   moved: (from: string, to: string) => void;
+  dropped: (name: string) => void;
 } {
   const rows = useRef({ next: 0, keys: new Map<string, string>() });
   return {
@@ -118,6 +121,10 @@ function useRowKeys(): {
       const key = r.keys.get(from);
       r.keys.delete(from);
       if (key !== undefined) r.keys.set(to, key);
+    },
+    // A port removed: a new one of its name later is a new row, its fields empty.
+    dropped: (name) => {
+      rows.current.keys.delete(name);
     },
   };
 }
@@ -169,11 +176,18 @@ export function Picker(props: {
 }
 
 export function ScriptPorts(props: {
+  /** Its node's id, for the edges bound to its ports. */
+  id: string;
   config: Config;
-  /** Its config changed; with a port renamed, its edges move with it, in the same change. */
-  change: (config: Config, moved?: PortMove) => void;
+  /**
+   * Its config changed; with a port renamed or removed, its edges move with it or go, in the same
+   * change.
+   */
+  change: (config: Config, port?: PortChange) => void;
   /** The plugins and nodes it may use or hear, for the choices. */
   plugins: readonly PluginView[];
+  /** The draft's edges, to say which a removed port takes with it. */
+  edges: readonly GraphEdge[];
   /** The check's problems, by config key. */
   errors: Record<string, string[]>;
 }) {
@@ -231,20 +245,45 @@ export function ScriptPorts(props: {
       />
     );
   };
-  const remove = (kind: 'inputs' | 'outputs' | 'events', name: string, label: string) => (
-    <button
-      type="button"
-      className="link"
-      aria-label={`remove ${label}`}
-      onClick={() => {
-        const { [name]: _, ...rest } =
-          kind === 'inputs' ? inputs : kind === 'outputs' ? outputs : events;
-        set(kind, rest);
-      }}
-    >
-      ×
-    </button>
-  );
+  /**
+   * A port's Remove: its port gone from the config, and the edges bound to it with it, in one
+   * change of the draft (D84), once the owner says so when it has any.
+   */
+  const remove = (kind: 'inputs' | 'outputs' | 'events', name: string, label: string) => {
+    const side = kind === 'inputs' ? 'in' : 'out';
+    const bound = kind === 'events' ? [] : edgesOfPort(props.edges, props.id, side, name);
+    const other = (e: GraphEdge): string => (side === 'in' ? e.from : e.to);
+    return (
+      <button
+        type="button"
+        className="link danger port-remove"
+        aria-label={`remove ${label}`}
+        title={
+          bound.length === 0
+            ? `Remove ${label}`
+            : `Remove ${label} and its edge${bound.length === 1 ? '' : 's'} (${bound.map(other).join(', ')})`
+        }
+        onClick={() => {
+          if (
+            bound.length > 0 &&
+            !window.confirm(
+              `Remove ${label}? ${bound.length === 1 ? 'Its edge goes' : `Its ${bound.length} edges go`} with it: ${bound.map(other).join(', ')}.`
+            )
+          )
+            return;
+          rows[kind].dropped(name);
+          const { [name]: _, ...rest } =
+            kind === 'inputs' ? inputs : kind === 'outputs' ? outputs : events;
+          change(
+            { ...config, [kind]: rest },
+            kind === 'events' ? undefined : { side, removed: name }
+          );
+        }}
+      >
+        Remove
+      </button>
+    );
+  };
   return (
     <div className="script-ports">
       <fieldset>

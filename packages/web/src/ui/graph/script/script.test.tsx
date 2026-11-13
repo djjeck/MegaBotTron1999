@@ -203,7 +203,14 @@ describe('a script node’s ports, in its panel', () => {
       config = c;
     });
     const view = (errors: Record<string, string[]> = {}) => (
-      <ScriptPorts config={config} change={change} plugins={[parser, LOOK_VIEW]} errors={errors} />
+      <ScriptPorts
+        id="look"
+        edges={[]}
+        config={config}
+        change={change}
+        plugins={[parser, LOOK_VIEW]}
+        errors={errors}
+      />
     );
     const { rerender } = render(view({ inputs: ['input port x: bad'] }));
     const again = () => rerender(view());
@@ -354,6 +361,8 @@ describe('a script node’s ports, in its panel', () => {
     } as unknown as PluginView;
     const view = () => (
       <ScriptPorts
+        id="look"
+        edges={[]}
         config={config}
         change={(c) => (config = c)}
         plugins={[parser, LOOK_VIEW, other]}
@@ -405,6 +414,8 @@ describe('a script node’s ports, in its panel', () => {
     let config: Record<string, unknown> = { ...CONFIG };
     const view = () => (
       <ScriptPorts
+        id="look"
+        edges={[]}
         config={config}
         change={(c) => (config = c)}
         plugins={[parser, LOOK_VIEW]}
@@ -440,7 +451,16 @@ describe('a script node’s ports, in its panel', () => {
 
   it('starts from nothing when no plugin offers anything', () => {
     let config: Record<string, unknown> = {};
-    render(<ScriptPorts config={{}} change={(c) => (config = c)} plugins={[]} errors={{}} />);
+    render(
+      <ScriptPorts
+        id="look"
+        edges={[]}
+        config={{}}
+        change={(c) => (config = c)}
+        plugins={[]}
+        errors={{}}
+      />
+    );
     fireEvent.click(screen.getByRole('button', { name: '+ interface input' }));
     expect(config['inputs']).toEqual({ interface: { type: 'interface', members: [] } });
     fireEvent.click(screen.getByRole('button', { name: '+ events input' }));
@@ -697,5 +717,100 @@ describe('a script node in the graph editor', () => {
     const look = core.checked.at(-1)?.nodes.find((n) => n.id === 'look')?.config;
     expect(Object.keys(look?.['inputs'] as object)).toEqual(['heard', 'board']);
     expect(Object.keys(look?.['outputs'] as object)).toEqual(['say']);
+  });
+  it('removes a port in its panel with its edges, in the same change, once asked (D84)', async () => {
+    const graph: Graph = {
+      version: 2,
+      nodes: [
+        { id: 'parser', plugin: 'parser' },
+        { id: 'look', plugin: 'script', config: CONFIG },
+        { id: 'chat', plugin: 'chat', config: { host: 'example.test' } },
+      ],
+      edges: [
+        { from: 'parser.events', to: 'look.game-events', type: 'events' },
+        { from: 'parser.interface', to: 'look.board', type: 'interface' },
+        { from: 'look.chat', to: 'chat.chat', type: 'chat-out', commands: ['/look'] },
+      ],
+    };
+    const core = fakeCore({
+      file: graph,
+      available: [...AVAILABLE, SCRIPT],
+      status: { off: false, plugins: [] },
+    });
+    core.running = graph;
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    fireEvent.click(await screen.findByLabelText('node look', {}, { timeout: 5000 }));
+    const panel = await screen.findByLabelText('details of look');
+    const remove = within(panel).getByRole('button', { name: 'remove interface input board' });
+    expect(remove.textContent).toBe('Remove');
+    expect(remove.title).toBe('Remove interface input board and its edge (parser.interface)');
+    // Asked first, as it has an edge: refused, nothing changes.
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    fireEvent.click(remove);
+    expect(confirm).toHaveBeenCalledWith(
+      'Remove interface input board? Its edge goes with it: parser.interface.'
+    );
+    expect(within(panel).queryByRole('group', { name: 'interface input board' })).not.toBeNull();
+    vi.stubGlobal('confirm', () => true);
+    fireEvent.click(remove);
+    fireEvent.click(within(panel).getByRole('button', { name: 'remove chat-out output chat' }));
+    await waitFor(() =>
+      expect(core.checked.at(-1)?.edges).toEqual([
+        { from: 'parser.events', to: 'look.game-events', type: 'events' },
+      ])
+    );
+    const look = core.checked.at(-1)?.nodes.find((n) => n.id === 'look')?.config;
+    expect(Object.keys(look?.['inputs'] as object)).toEqual(['game-events']);
+    expect(look?.['outputs']).toEqual({});
+    // A port with no edge goes at once, unasked; one of the same name later is a new row.
+    const asked = vi.fn(() => true);
+    vi.stubGlobal('confirm', asked);
+    fireEvent.click(within(panel).getByRole('button', { name: '+ interface input' }));
+    fireEvent.click(
+      await within(panel).findByRole('button', { name: 'remove interface input interface' })
+    );
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it('asks which input takes an edge dropped on it when several would (D84)', async () => {
+    const graph: Graph = {
+      version: 2,
+      nodes: [
+        { id: 'parser', plugin: 'parser' },
+        {
+          id: 'look',
+          plugin: 'script',
+          config: {
+            inputs: {
+              moves: { type: 'events', namespace: 'game' },
+              wins: { type: 'events', namespace: 'game' },
+            },
+          },
+        },
+      ],
+      edges: [],
+    };
+    const core = fakeCore({
+      file: graph,
+      available: [
+        ...AVAILABLE,
+        { ...SCRIPT, configInputs: { key: 'inputs', types: ['events', 'interface'] } },
+      ],
+      status: { off: false, plugins: [] },
+    });
+    core.running = graph;
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    const look = await screen.findByLabelText('node look', {}, { timeout: 5000 });
+    const handle = within(screen.getByLabelText('node parser')).getByTestId('port out events');
+    const at = { clientX: 400, clientY: 300 };
+    vi.spyOn(document, 'elementFromPoint').mockReturnValue(look);
+    fireEvent.mouseDown(handle, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(document, at);
+    fireEvent.mouseUp(document, at);
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'look has several inputs that take parser.events: moves, wins; drop it on the port of one'
+    );
+    expect(core.checked.at(-1)?.edges ?? []).toEqual([]);
   });
 });

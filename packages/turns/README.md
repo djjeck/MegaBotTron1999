@@ -32,16 +32,16 @@ a game's player state, and the script node.
 
 - `scriptPlugin` (`src/script-plugin.ts`): the `script` node, TypeScript the owner types in the web
   UI (docs/bot-os.md D76), on the ports its config declares (events and interface inputs, chat-out
-  outputs with their commands, events of its own), its node's manifest made from them (D74); its
-  inputs are under `inputs` (`configInputs`), where the editor adds one for an edge dropped on the
-  node (D80). Its code, its types stripped, runs in a `vm` context holding the script API alone
-  (`src/script-runtime.ts`: `on`, `use`, `outbox`/`enqueue`, `publish`, `store`, `clock`, `log`, as
-  the plugin context has them), in a worker thread of its own (`src/script-worker.ts`) with a time
-  limit on each handler's run and a memory limit; a script that hangs (its thread spending its limit
-  on the CPU without answering the main thread's ping; one stalled with its host is waited for,
-  D81), runs out of memory or crashes is killed and its node failed.
-  `scriptPlugin({ isolation: 'in-process' })` runs it in the main thread instead, for the dev kit's
-  deterministic runs on its virtual clock.
+  outputs with their commands, events of its own; several of a kind, each its own name, D84), its
+  node's manifest made from them (D74); its inputs are under `inputs` (`configInputs`), where the
+  editor adds one for an edge dropped on the node (D80). Its code, its types stripped, runs in a
+  `vm` context holding the script API alone (`src/script-runtime.ts`: `on`, `use`,
+  `outbox`/`enqueue`, `publish`, `store`, `clock`, `log`, as the plugin context has them), in a
+  worker thread of its own (`src/script-worker.ts`) with a time limit on each handler's run and a
+  memory limit; a script that hangs (its thread spending its limit on the CPU without answering the
+  main thread's ping; one stalled with its host is waited for, D81), runs out of memory or crashes
+  is killed and its node failed. `scriptPlugin({ isolation: 'in-process' })` runs it in the main
+  thread instead, for the dev kit's deterministic runs on its virtual clock.
 
 Their chats run left to right (docs/bot-os.md D60): a parser has a chat-in input only, the reactor a
 chat-out output (and a chat-in only with `match`), and the turn-actor both, for now. Whether a send

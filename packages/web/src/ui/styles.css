@@ -1653,6 +1653,12 @@ label.block {
   flex: 0 1 9rem;
   font-family: ui-monospace, monospace;
 }
+/* A port's Remove (D84): plain to see, at the end of its row's first line. */
+.script-ports .port-row button.port-remove {
+  margin-left: auto;
+  font-size: 0.9rem;
+  text-decoration: underline;
+}
 .script-ports .port-row input.script-port-name.refused {
   border-color: var(--bad);
 }

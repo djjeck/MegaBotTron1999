@@ -28,7 +28,7 @@ import type {
 } from '#src/ui/api.ts';
 import { isSplit } from './cards.ts';
 import { withDefaults } from './defaults.ts';
-import type { PortMove } from './draft.ts';
+import type { PortChange } from './draft.ts';
 import { instanceOf } from './draft.ts';
 import { ConnectorQueue } from './Queue.tsx';
 import { SchemaForm } from './SchemaForm.tsx';
@@ -201,7 +201,7 @@ function ScriptSection(props: {
   errors: Record<string, string[]>;
   editing: boolean;
   setEditing: (editing: boolean) => void;
-  change: (config: Record<string, unknown>, moved?: PortMove) => void;
+  change: (config: Record<string, unknown>, moved?: PortChange) => void;
 }) {
   const { node, sources } = props;
   const config = withDefaults(props.schema, node.config);
@@ -243,7 +243,14 @@ function ScriptSection(props: {
           ))}
         </ul>
       )}
-      <ScriptPorts config={config} change={props.change} plugins={plugins} errors={props.errors} />
+      <ScriptPorts
+        id={node.id}
+        config={config}
+        change={props.change}
+        plugins={plugins}
+        edges={props.edges}
+        errors={props.errors}
+      />
       {!exporting ? null : (
         <ExportDialog
           id={node.id}
@@ -359,8 +366,11 @@ export function NodeDetails(props: {
   secretNames: readonly string[];
   /** The draft's groups, in their lanes' order (D69). */
   groups: readonly string[];
-  /** The node changed; with a port renamed (a script node's), its edges move with it, at once. */
-  change: (change: Partial<GraphNode>, moved?: PortMove) => void;
+  /**
+   * The node changed; with a port renamed or removed (a script node's), its edges move or go with
+   * it, at once.
+   */
+  change: (change: Partial<GraphNode>, moved?: PortChange) => void;
   remove: () => void;
   kill: (ids: string[]) => void;
   /** Its stop cleared in the draft (D64), for the next Apply. */

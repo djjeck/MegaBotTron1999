@@ -284,6 +284,80 @@ for (const isolation of ['in-process', 'worker'] as const)
       await kit.stop();
     });
 
+    it('has several ports of a kind, each told apart by its name (D84)', async () => {
+      const code = `
+        on('quest.gain', async (e: { name: string }) => {
+          const n = await use('counts').state.count({ name: e.name });
+          const all = await use('reads').state.get({});
+          log.info('heard', e.name, typeof n, typeof all);
+          await enqueue('look', '@QuestBot', '/look ' + e.name);
+          await outbox('use').enqueue('@QuestBot', '/use ' + e.name);
+        });
+      `;
+      const connector = new FakeConnector({ account: 'telegram:alice' });
+      const parser = questParser();
+      const lines: string[] = [];
+      const kit = new DevKit({
+        start: Date.parse('2026-11-12T10:00:00Z'),
+        plugins: [
+          fakeConnectorPlugin('tg', connector),
+          parser,
+          questState,
+          scriptPlugin({ isolation }),
+        ],
+        graph: {
+          version: 2,
+          nodes: [
+            { id: 'tg', plugin: 'tg' },
+            { id: 'quest', plugin: 'quest' },
+            { id: 'quest-state', plugin: 'quest-state' },
+            {
+              id: 'examine',
+              plugin: 'script',
+              config: {
+                // Two events inputs of one namespace, two interface inputs of one plugin, two
+                // chat-out outputs: each port its own name.
+                inputs: {
+                  'quest-a': { type: 'events', namespace: 'quest' },
+                  'quest-b': { type: 'events', namespace: 'quest' },
+                  counts: { type: 'interface', plugin: 'quest-state', members: ['state.count'] },
+                  reads: { type: 'interface', plugin: 'quest-state', members: ['state.get'] },
+                },
+                outputs: {
+                  look: { type: 'chat-out', commands: ['/look'] },
+                  use: { type: 'chat-out', commands: ['/use'] },
+                },
+                code,
+              },
+            },
+          ],
+          edges: [
+            { from: 'quest.events', to: 'quest-state.events' },
+            { from: 'quest.events', to: 'examine.quest-a' },
+            { from: 'quest.events', to: 'examine.quest-b' },
+            { from: 'quest-state.interface', to: 'examine.counts' },
+            { from: 'quest-state.interface', to: 'examine.reads' },
+            { from: 'examine.look', to: 'tg.chat', sends: ['@QuestBot'], commands: ['/look'] },
+            { from: 'examine.use', to: 'tg.chat', sends: ['@QuestBot'], commands: ['/use'] },
+          ],
+        },
+        print: (l) => lines.push(l),
+      });
+      await kit.start();
+      connector.open();
+      parser.publish?.('quest.gain', { name: 'lantern' });
+      await until(() => connector.sent.length > 1);
+      // Heard once, though two inputs bring its namespace; each send through its own output.
+      expect(lines.filter((l) => l.startsWith('examine: heard'))).toEqual([
+        'examine: heard lantern number object',
+      ]);
+      expect(connector.sent).toEqual([
+        { chat: '@QuestBot', text: '/look lantern' },
+        { chat: '@QuestBot', text: '/use lantern' },
+      ]);
+      await kit.stop();
+    });
+
     it('fails its node alone when a handler holds its thread past its limit', async () => {
       const code = `on('quest.tick', () => { for (;;) {} });`;
       const { kit, parser, lines } = await run(isolation, {

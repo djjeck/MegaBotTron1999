@@ -79,12 +79,14 @@ their inputs (`configInputs: { key, types }`, the script plugin's
 `{ key: 'inputs', types: ['events', 'interface'] }`), which `GET /available` passes on. An edge the
 owner drops on such a node, on its card rather than one of its ports, from an output of one of those
 types, is bound to an input of the node that takes it (an events input of the output's namespace; an
-interface input of the output's plugin, unbound), or else to a new one written under that key: an
-events input of the namespace, or an interface input of the plugin with no member, which the owner
-picks in the node's panel (the check says so until then); named after the namespace or the plugin,
-with `-2`, `-3`… when taken. A manifest that declares it without `node`, or on a key its config has
-not, is refused. Only inputs grow: an output the node declares (a script's chat-out) is the owner's
-to add.
+interface input of the output's plugin, unbound); when several take it, to the one bound to that
+output already, or else the only one not bound yet, and otherwise to none, the editor naming them
+for the owner to drop it on the port of one (bot-os.md D84). With none, it is bound to a new one
+written under that key: an events input of the namespace, or an interface input of the plugin with
+no member, which the owner picks in the node's panel (the check says so until then); named after the
+namespace or the plugin, with `-2`, `-3`… when taken. A manifest that declares it without `node`, or
+on a key its config has not, is refused. Only inputs grow: an output the node declares (a script's
+chat-out) is the owner's to add.
 
 `core.load()` checks the manifests, the graph, their order and their configuration, and makes the
 settings, before any plugin starts (`start` loads if it was not called). Each plugin instance's
@@ -1325,15 +1327,17 @@ their namespace picked in a list of those offered or typed, a new one with none 
 interface inputs, their plugin picked the same way, with their members picked from what it offers,
 its chat-out outputs with their commands and spacing, its own events, its limits), each change a
 change of the draft, drawn as the check's `views` say (a port renamed takes its edges with it, in
-the same change: `movePort` in `draft.ts`); an edge dropped on its card from an output it has no
-input for adds one (§2, bot-os.md D80). **Edit script** opens its code in Monaco (`monaco-editor`,
-bundled by Vite in a chunk loaded only then), its TypeScript checked against ES2022 and a `.d.ts`
-made for the node from its ports (`script/types.ts`: the members' and the event types' JSON Schemas
-as TypeScript, each with its help), beside a panel listing its API; **Keep** writes the code to the
-draft, refused while it does not parse. **Export as plugin** (bot-os.md D79) shows and downloads the
-node as a module's plugin, `<id>.ts` (`script/export.ts`: a `definePlugin` of the node's id, its
-manifest built from its ports and own events, its `create` the script as typed on the script API
-given from the context, typed as the editor typed it) and a `module.json` for it.
+the same change: `movePort` in `draft.ts`; a port removed with its row's **Remove** takes its edges
+away, in the same change and after a confirmation naming them: `removePort`, bot-os.md D84); it may
+have several ports of a kind, each told apart by its name (D84); an edge dropped on its card from an
+output it has no input for adds one (§2, bot-os.md D80). **Edit script** opens its code in Monaco
+(`monaco-editor`, bundled by Vite in a chunk loaded only then), its TypeScript checked against
+ES2022 and a `.d.ts` made for the node from its ports (`script/types.ts`: the members' and the event
+types' JSON Schemas as TypeScript, each with its help), beside a panel listing its API; **Keep**
+writes the code to the draft, refused while it does not parse. **Export as plugin** (bot-os.md D79)
+shows and downloads the node as a module's plugin, `<id>.ts` (`script/export.ts`: a `definePlugin`
+of the node's id, its manifest built from its ports and own events, its `create` the script as typed
+on the script API given from the context, typed as the editor typed it) and a `module.json` for it.
 
 **Swimlanes** (bot-os.md D69): a draft whose nodes name groups is drawn in lanes (`layout.ts`'s
 `swimlanes`, `lanes.ts`, `LaneNode.tsx`). The columns stay global, as above, so a stage lines up

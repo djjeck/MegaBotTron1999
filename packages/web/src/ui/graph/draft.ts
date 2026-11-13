@@ -150,6 +150,39 @@ export function movePort(g: Graph, node: string, move: PortMove): Graph {
   };
 }
 
+/** A node's port removed (a script node's, D84): an input (`in`) or an output (`out`). */
+export interface PortRemoval {
+  side: 'in' | 'out';
+  removed: string;
+}
+
+/** What a node's panel did to one of its ports, beside its config: renamed it, or removed it. */
+export type PortChange = PortMove | PortRemoval;
+
+/**
+ * The edges bound to a node's port removed with it, as its panel removes it (D84): an input's at
+ * their `to` end, an output's at their `from`, so that none is left dangling.
+ */
+export function removePort(g: Graph, node: string, removal: PortRemoval): Graph {
+  const end = `${node}.${removal.removed}`;
+  return {
+    ...g,
+    edges: g.edges.filter((e) => (removal.side === 'in' ? e.to : e.from) !== end),
+  };
+}
+
+/** The edges bound to a node's port, as its panel renames or removes it. */
+export const portChanged = (g: Graph, node: string, change: PortChange): Graph =>
+  'removed' in change ? removePort(g, node, change) : movePort(g, node, change);
+
+/** The edges bound to a node's port: an input's (`in`) at their `to` end, an output's at `from`. */
+export const edgesOfPort = (
+  edges: readonly GraphEdge[],
+  node: string,
+  side: 'in' | 'out',
+  port: string
+): GraphEdge[] => edges.filter((e) => (side === 'in' ? e.to : e.from) === `${node}.${port}`);
+
 /** An edge added, replacing one between the same two ends. */
 export function connect(g: Graph, edge: GraphEdge): Graph {
   return { ...g, edges: [...g.edges.filter((e) => edgeKey(e) !== edgeKey(edge)), edge] };
@@ -338,13 +371,16 @@ export function freeName(base: string, taken: Iterable<string>): string {
 }
 
 /**
- * An edge dropped on a node whose inputs its config declares (docs/bot-os.md D80): bound to an
- * input of the node that takes the output (an events input of its namespace; an interface input
- * of its plugin, unbound), or else to a new one, written in the node's config where its plugin
- * says (`configInputs`) and named after the namespace or the plugin, unique in the node: an events
- * input of the output's namespace, or an interface input of its node's plugin and no member, which
- * the owner picks in the node's panel (the check says so until then). Undefined when the node
- * declares no inputs of the output's type, or the output is unknown.
+ * An edge dropped on a node whose inputs its config declares (docs/bot-os.md D80, D84): bound to
+ * the input of the node that takes the output (an events input of its namespace; an interface
+ * input of its plugin, unbound) when there is one. When there are several: to the one bound to
+ * that output already, or else to the one not bound yet if only one is not; else to none, the
+ * inputs that would take it named (`choose`) for the owner to drop it on the port of one, as the
+ * editor cannot guess which a script means. With none, to a new one, written in the node's config
+ * where its plugin says (`configInputs`) and named after the namespace or the plugin, unique in
+ * the node: an events input of the output's namespace, or an interface input of its node's plugin
+ * and no member, which the owner picks in the node's panel (the check says so until then).
+ * Undefined when the node declares no inputs of the output's type, or the output is unknown.
  */
 export function dropOn(
   g: Graph,
@@ -353,7 +389,7 @@ export function dropOn(
   plugins: ReadonlyMap<string, PluginView>,
   /** The nodes whose ports their config declares, by id (`POST /graph/check`'s `views`, D74). */
   views: Readonly<Record<string, PluginView>> = {}
-): { graph: Graph; port: string; added: boolean } | undefined {
+): { graph: Graph; port: string; added: boolean } | { choose: string[] } | undefined {
   const target = g.nodes.find((n) => n.id === to);
   const source = g.nodes.find((n) => n.id === from.node);
   if (target === undefined || source === undefined || to === from.node) return undefined;
@@ -375,7 +411,16 @@ export function dropOn(
     (type === 'events'
       ? p['namespace'] === namespace
       : p['plugin'] === source.plugin && !bound.has(`${to}.${name}`));
-  const kept = Object.entries(declared).find(takes)?.[0];
+  const taking = Object.entries(declared)
+    .filter(takes)
+    .map(([name]) => name);
+  const free = taking.filter((name) => !bound.has(`${to}.${name}`));
+  // One bound to this very output already takes it again: dropping twice changes nothing.
+  const again = taking.find((name) =>
+    g.edges.some((e) => e.to === `${to}.${name}` && e.from === `${from.node}.${from.port}`)
+  );
+  const kept = again ?? (taking.length === 1 ? taking[0] : free.length === 1 ? free[0] : undefined);
+  if (kept === undefined && taking.length > 1) return { choose: taking };
   const port = kept ?? freeName(namespace ?? source.plugin, Object.keys(declared));
   const grown =
     kept !== undefined

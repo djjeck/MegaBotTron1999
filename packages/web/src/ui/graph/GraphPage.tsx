@@ -84,8 +84,8 @@ import {
   EMPTY_GRAPH,
   endOf,
   instanceOf,
-  movePort,
   placeProblems,
+  portChanged,
   removeEdge,
   removeNode,
   sameGraph,
@@ -514,6 +514,13 @@ export function GraphPage({
     const to = nodeOfCard(card);
     const dropped = dropOn(draft, from, to, plugins, declared);
     if (dropped === undefined) return;
+    // Several of its inputs would take it (D84): the owner says which, by its port.
+    if ('choose' in dropped) {
+      setSaid(
+        `${to} has several inputs that take ${from.node}.${from.port}: ${dropped.choose.join(', ')}; drop it on the port of one`
+      );
+      return;
+    }
     change(() => dropped.graph);
     const input = plugins.get(draft.nodes.find((n) => n.id === to)?.plugin ?? '')?.configInputs;
     const output = (
@@ -676,7 +683,7 @@ export function GraphPage({
         change={(c, moved) =>
           change((g) => {
             const next = updateNode(g, shownNode.id, c);
-            return moved === undefined ? next : movePort(next, shownNode.id, moved);
+            return moved === undefined ? next : portChanged(next, shownNode.id, moved);
           })
         }
         remove={() => {

@@ -159,7 +159,7 @@ export interface ApiEvent {
   type: string;
   help?: string;
   schema?: JsonSchema;
-  /** The input port it comes through, or its own. */
+  /** The input port it comes through, or its own; in the `.d.ts`, each it comes through. */
   port: string;
 }
 
@@ -296,7 +296,14 @@ const memberType = (m: ApiMember, indent: string): string => {
  * hears, the members of each interface input, its outputs, its own events), each with its help.
  */
 export function scriptDts(api: ScriptApi, id: string): string {
-  const all = api.events.flatMap((p) => p.types);
+  // An event type is typed once, though several inputs bring it (two of one namespace, D84):
+  // heard through each of them.
+  const byType = new Map<string, ApiEvent>();
+  for (const t of api.events.flatMap((p) => p.types)) {
+    const had = byType.get(t.type);
+    byType.set(t.type, had === undefined ? t : { ...had, port: `${had.port}, ${t.port}` });
+  }
+  const all = [...byType.values()];
   const own = api.own.map((e) => ({
     type: e.type,
     help: e.help,
