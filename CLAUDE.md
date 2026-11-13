@@ -98,6 +98,8 @@ Address every error before marking a sub-task complete.
   pre-release (a hyphen after the patch, as the old `v0.1.0-alpha.1`).
 - **Releases** (D51): no more pre-releases since `v0.1.0`; each release bumps the patch (`0.1.1`,
   `0.1.2`, …). The `version` of the root `package.json` and of each package's names the latest
-  release: a release that changes it does so in its own commit on `main`, then an annotated tag
-  `v<version>` on that commit, its message `v<version>: <what changed, in one line>`, is pushed, and
-  the Publish workflow is watched until it has pushed `<version>` and `latest`.
+  release, and so do the exact versions the packages require of each other (and their entries in
+  `package-lock.json`: `npm ci` looks for a missing one on the registry and fails): a release that
+  changes them does so in its own commit on `main`, then an annotated tag `v<version>` on that
+  commit, its message `v<version>: <what changed, in one line>`, is pushed, and the Publish workflow
+  is watched until it has pushed `<version>` and `latest`.
