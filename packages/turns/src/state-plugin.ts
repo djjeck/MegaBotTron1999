@@ -7,7 +7,8 @@
  * queries. The shell does the rest:
  *
  * - **Applies** each event of its types, heard live on the bus from the nodes its events edges
- *   bind, with the reducer; a reducer that throws, or makes a state its schema refuses, leaves the
+ *   bind (required: a parser disabled or stopped makes it inactive, and what requires it, D65),
+ *   with the reducer; a reducer that throws, or makes a state its schema refuses, leaves the
  *   state as it was, and the event is recorded as refused (`<id>.refused`) and passed.
  * - **Keeps** `{ state, updatedAt, cursor, freshness }` in its store (`state`), so that it
  *   survives restarts (P8).
@@ -66,7 +67,10 @@ export interface StateSpec<S extends Record<string, unknown>> {
   schema: z.ZodObject;
   /** The state a fresh instance starts from. */
   initial: S;
-  /** The event types it applies (`quest.inventory`), heard through an events input per namespace. */
+  /**
+   * The event types it applies (`quest.inventory`), heard through a required events input per
+   * namespace.
+   */
   consumes: readonly string[];
   /** The next state, from the state and an event of its types: pure, never changing its arguments. */
   reduce(state: S, event: BusEvent): S;
@@ -134,7 +138,6 @@ function inputsOf(consumes: readonly string[]) {
       {
         type: 'events' as const,
         namespace: ns,
-        optional: true,
         help: `The nodes whose ${consumes.filter((t) => t.startsWith(`${ns}.`)).join(', ')} it applies`,
       },
     ])
@@ -333,7 +336,7 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
           if (batch > announced && kept !== undefined) announce(kept.unannounced, batch);
           // Live and the catch-up in one step: nothing is published in between, so what the log
           // holds after the cursor is read now, and everything after it is heard live.
-          // By namespace, so that a node whose parser is not in the graph still runs, on its log.
+          // By namespace: its events inputs are bound to its parsers, each of a namespace.
           for (const ns of new Set(spec.consumes.map((t) => t.slice(0, t.indexOf('.')))))
             unsubscribe.push(
               ctx.bus.subscribe(ns, (e, at) => {

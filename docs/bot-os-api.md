@@ -1548,12 +1548,16 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
 
   - **The spec:** `schema`, a zod object whose keys are the state's **sections**, each value
     `.describe()`d (the viewer's labels); `initial`; `consumes`, the event types it applies, heard
-    through an optional events input per namespace (`events`, or `<ns>-events` for several), so it
-    runs, on its log, with its parser disabled; `reduce(state, event)`, pure;
-    `freshness(event, changed)`, what the event says of the sections it touches (`snapshot`, `delta`
-    or `uncertain`; by default each section it changed a `delta`); `queries`, reads of its interface
-    beside `get` and `freshness`; and `migrations` (§4.2) for a kept state whose schema changed (one
-    that does not fit fails the node, with why). Its kind is `stats`; its namespace is its id.
+    through a **required** events input per namespace (`events`, or `<ns>-events` for several): a
+    parser disabled or stopped makes it inactive, at once and at the next start, and with it every
+    node that requires it (§2.1, D65), since running on it would be frozen in time while the nodes
+    acting on it go on asking; on its parser's drift (§4.7) the actors that require it are stopped
+    through it, and it, of kind `stats`, goes on, as every node that does not act;
+    `reduce(state, event)`, pure; `freshness(event, changed)`, what the event says of the sections
+    it touches (`snapshot`, `delta` or `uncertain`; by default each section it changed a `delta`);
+    `queries`, reads of its interface beside `get` and `freshness`; and `migrations` (§4.2) for a
+    kept state whose schema changed (one that does not fit fails the node, with why). Its kind is
+    `stats`; its namespace is its id.
   - **Kept** in its store, one document, `state`:
     `{ state, updatedAt, cursor, freshness, batch, unannounced }`. **Freshness** per section:
     `{ snapshot?: { t, event }, deltas, uncertain, updated?: { t, event } }`, "a full snapshot at T,

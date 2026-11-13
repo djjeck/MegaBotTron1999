@@ -4,6 +4,7 @@ import {
   CoreEventLog,
   definePlugin,
   type Plugin,
+  type PluginContext,
   VirtualClock,
 } from '@megabottron1999/core';
 import fs from 'node:fs';
@@ -138,6 +139,20 @@ function questState(more: { reduce?: (s: QuestState, e: BusEvent) => QuestState 
         run: (s) => [...s.inventory.items].sort((a, b) => b.count - a.count)[0]?.name,
       },
     },
+  });
+}
+
+/** A made-up acting node that reads the state: it requires it (a required interface input). */
+function buyer(): Plugin {
+  return definePlugin({
+    manifest: {
+      id: 'buyer',
+      version: '0.1.0',
+      kinds: ['actor'],
+      description: 'Buys what the state says is missing',
+      requires: ['quest-state'],
+    },
+    create: () => ({}),
   });
 }
 
@@ -417,6 +432,47 @@ describe('statePlugin', () => {
     expect(plugins.find((p) => p.id === 'quest')?.summary).toBeUndefined();
     expect(run.core.controls.view('quest')).toBeUndefined();
     expect(run.core.controls.view('nobody')).toBeUndefined();
+    await run.core.stop();
+  });
+
+  it('requires its parsers: one stopped takes it down at once, and what requires it', async () => {
+    // A parser stopped (a protocol changed, the owner's Stop): a state node still running would be
+    // frozen in time while the nodes acting on it go on asking; it and they are inactive at once.
+    const run = await boot({ plugins: [questParser(), questState(), buyer()] });
+    expect(questState().manifest.inputs?.['events']?.optional).toBeUndefined();
+    expect(run.core.stopNode('quest', 'its protocol changed', 'owner')).toBe(true);
+    expect(run.core.state('quest-state')).toMatchObject({
+      state: 'inactive',
+      reason: 'needs quest (stopped)',
+    });
+    expect(run.core.state('buyer')).toMatchObject({
+      state: 'inactive',
+      reason: 'needs quest-state (inactive)',
+    });
+    await run.core.stop();
+    // At the next start too, until its stop is cleared; and a graph without its parser is refused.
+    const again = await boot({ plugins: [questParser(), questState(), buyer()] });
+    expect(again.core.state('quest-state')?.state).toBe('inactive');
+    await again.core.stop();
+    await expect(boot({ plugins: [questState()] })).rejects.toThrow(
+      /input port events \(events of quest\) is not bound/u
+    );
+  });
+
+  it('on its parser’s drift keeps running, and the actors that require it stop', async () => {
+    // Drift stops the actors that require the parser, through the state node too (P5, D65); the
+    // state node itself, kind stats, goes on, as any node that does not act.
+    let drift: PluginContext['drift'] | undefined;
+    const parser = definePlugin({
+      ...questParser(),
+      manifest: { ...questParser().manifest, drift: { unreadAt: 1, windowMin: 5 } },
+      create: (ctx) => ((drift = ctx.drift), {}),
+    });
+    const run = await boot({ plugins: [parser, questState(), buyer()] });
+    drift?.unread({ text: 'a new line' });
+    drift?.unread({ text: 'another' });
+    expect(run.core.state('buyer')).toMatchObject({ state: 'stopped', stop: { source: 'drift' } });
+    expect(run.core.state('quest-state')?.state).toBe('running');
     await run.core.stop();
   });
 
