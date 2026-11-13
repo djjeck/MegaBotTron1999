@@ -99,20 +99,23 @@ the server that guards them.
   is offered. **Import** (`#/import`) shows an older data directory and imports its event log with a
   table of type renames. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59) has
   one section per area, each reached by its route (`#/instance`, `#/graph-history`, `#/graph-text`,
-  `#/accounts`, `#/plugins`), which opens the page scrolled to it: **Instance** (on or off with its
-  switch, uptime, memory, the plugins and accounts by state, the kill switch), **Graph history**
-  (`GraphHistoryPage.tsx`, docs/bot-os.md D61: each version of the saved graph, newest first, with
-  its time, what changed and how the instance started on it, the last that ran marked "last good";
-  one opened shows what rolling back to it would change, as the review's diff (**Changes**) and as a
-  line diff of the two printouts (**As text**), and **Roll back to this** asks, repeating the diff,
-  then restarts on it), **Graph as text** (the saved graph printed, with a copy button),
-  **Accounts** (each connector, its account and its connection's status) and **Plugins** (each
-  plugin instance with its state, read-only (its reason and its stop), and, opened, its settings,
-  its own status and the reads and actions it declares). Beside it, **Drift** (each parser's counts
-  and the latest reports) and **Events** (the event log's latest records, filtered by type). Every
-  page reads the control API only; the app imports the core's types and nothing else of it, so its
-  bundle holds none of the shell's code. All the pages are in one menu, with no admin part apart:
-  the whole app is the owner's console. A page is a line of `PAGES` in `src/ui/App.tsx`.
+  `#/accounts`, `#/plugins`, `#/resources`), which opens the page scrolled to it: **Instance** (on
+  or off with its switch, uptime, memory, the plugins and accounts by state, the kill switch),
+  **Graph history** (`GraphHistoryPage.tsx`, docs/bot-os.md D61: each version of the saved graph,
+  newest first, with its time, what changed and how the instance started on it, the last that ran
+  marked "last good"; one opened shows what rolling back to it would change, as the review's diff
+  (**Changes**) and as a line diff of the two printouts (**As text**), and **Roll back to this**
+  asks, repeating the diff, then restarts on it), **Graph as text** (the saved graph printed, with a
+  copy button), **Accounts** (each connector, its account and its connection's status) and
+  **Plugins** (each plugin instance with its state, read-only (its reason and its stop), and,
+  opened, its settings, its own status and the reads and actions it declares) and **Resources**
+  (`ResourcesPage.tsx`, docs/bot-os.md D77: the nodes by cost since the start, a script's worker's
+  CPU or else the time in its handlers, sortable by any column, the top three marked). Beside it,
+  **Drift** (each parser's counts and the latest reports) and **Events** (the event log's latest
+  records, filtered by type). Every page reads the control API only; the app imports the core's
+  types and nothing else of it, so its bundle holds none of the shell's code. All the pages are in
+  one menu, with no admin part apart: the whole app is the owner's console. A page is a line of
+  `PAGES` in `src/ui/App.tsx`.
 - `src/server/web-server.ts`: the UI's own listener. It serves the built app, and the core's control
   API (`controlHandler` of `@megabottron1999/core`) under `/api/`, only to a logged-in owner.
   `startWebUi` starts it only when the `web_ui_password` Docker secret is provided (12 characters at

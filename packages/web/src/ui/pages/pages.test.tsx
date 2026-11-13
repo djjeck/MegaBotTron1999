@@ -42,6 +42,7 @@ describe('AdminPage', () => {
       'Graph as text',
       'Accounts',
       'Plugins',
+      'Resources',
     ]);
     expect(await screen.findByText('No graph has been applied yet.')).toBeDefined();
     expect(await screen.findByText('No graph is saved yet.')).toBeDefined();

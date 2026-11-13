@@ -68,6 +68,7 @@ export {
   STATES_DOC,
   STOP_DOC,
 } from './core.ts';
+export { Costs, type DispatchCost, type NodeCost, type OwnCost } from './costs.ts';
 export {
   defineSimulator,
   DevKit,

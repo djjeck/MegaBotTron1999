@@ -12,6 +12,7 @@ import {
   type ConnectorHandle,
   type ReadFilter,
 } from './connector.ts';
+import { type OwnCost } from './costs.ts';
 import { type DriftReporter } from './drift.ts';
 import { type LogCursor, type LogEntry, type LogTail } from './event-log.ts';
 import { type ManifestInput } from './manifest.ts';
@@ -243,6 +244,12 @@ export interface Instance {
   kill?(): string | { text: string; buttons?: Buttons } | undefined;
   /** One of its timers is due (§4.3). */
   onTimer?(name: string, payload: unknown): void;
+  /**
+   * What it costs of its own, beyond its handlers' time the core measures (bot-os.md D77): a
+   * script's worker thread, its CPU, heap and calls. Read for `GET /status`; cheap, from what it
+   * last sampled.
+   */
+  cost?(): OwnCost;
 }
 
 export interface Plugin {

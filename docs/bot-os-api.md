@@ -595,6 +595,7 @@ interface Instance {
   on?(): string | undefined; // back on: what came of it
   kill?(): string | { text: string; buttons?: Buttons } | undefined; // its safety stop
   onTimer?(name: string, payload: unknown): void; // §4.3
+  cost?(): OwnCost; // what it costs of its own: a script's worker (§4.11)
   settings?: { apply(key, value): void; read(key): SettingValue }; // its own in force (§2)
   interface?: {
     state?: Record<string, (input?) => unknown>; // a read's input, if it declares one (§2)
@@ -1108,6 +1109,14 @@ control API, the web UI and later the agents, whose grants will be subsets of it
   `status`, and, if it keeps a state (its instance's `view`, bot-os.md D72), one line of it
   (`summary`), for its card; a connector whose queue coalesced sends since the start says so there
   too (`2 sends coalesced: a + b (2)`, D73).
+- **What each node costs** (bot-os.md D77), its `cost` in `GET /status`, since the start:
+  `dispatch`, its handlers' `calls`, their time (`ms`) and the longest (`maxMs`), timed where the
+  core hands it a bus event, a message or a timer (the synchronous part, real time); and `own`, what
+  its instance says (`Instance.cost`): a script's `runs` (`worker` or `in-process`), its handlers'
+  `calls`, `errors`, `ms` and `maxMs` from each call to its end, and its worker's `cpuMs` and
+  `heapBytes`, sampled every 5 seconds. The Admin page's **Resources** (`#/resources`) lists the
+  nodes by cost, a worker's CPU or else its handlers' time, most first, sortable by any column, the
+  top three marked with their share. The timing costs about 0.16 µs a handler call.
 - **The owner's changes:** a declared read (`read`) and a declared action (`act`), whose input is
   checked against the action's schema (an error names the field) and which the plugin refuses by
   throwing, with why; a node's stop cleared (`clearStop`), for the next start. No control raises a

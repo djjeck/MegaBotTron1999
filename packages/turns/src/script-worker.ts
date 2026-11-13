@@ -66,7 +66,12 @@ port.on('message', (m: FromHost) => {
     case 'event':
       tick(m.now);
       try {
-        runtime.dispatch(m.pattern, m.event, (end) => post({ op: 'ended', end }), now);
+        runtime.dispatch(
+          m.pattern,
+          m.event,
+          (end) => post({ op: 'ended', end }),
+          () => performance.now()
+        );
       } catch (e) {
         post({ op: 'timeout', reason: message(e) });
       }

@@ -1510,3 +1510,28 @@ label.block {
 .details .spacing input[type='number'] {
   width: 6rem;
 }
+
+/* The nodes by cost (D77): a modest bar of each one's share, the top three marked. */
+.resources table {
+  width: 100%;
+}
+.resources td {
+  white-space: nowrap;
+}
+.resources tr.top-cost td {
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+}
+.cost-bar {
+  display: inline-block;
+  width: 3.5em;
+  height: 0.5em;
+  border-radius: 0.25em;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  vertical-align: middle;
+  overflow: hidden;
+}
+.cost-bar > span {
+  display: block;
+  height: 100%;
+  background: color-mix(in srgb, currentColor 55%, transparent);
+}

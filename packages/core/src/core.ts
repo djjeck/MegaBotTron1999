@@ -29,6 +29,7 @@ import {
 } from './commands.ts';
 import { type ChatSurface, type Connector, handleOf, type ReadFilter } from './connector.ts';
 import { Controls, type StopRecord, type StopSource } from './controls.ts';
+import { Costs, type NodeCost, type OwnCost } from './costs.ts';
 import { DEFAULT_DRIFT, type DriftCounts, DriftMonitor, type DriftRecord } from './drift.ts';
 import { type EventReader, type LogCursor, type LogEntry, type LogTail } from './event-log.ts';
 import {
@@ -291,6 +292,8 @@ export class Core {
   /** The instances, apart from the nodes (§2.2). */
   private readonly registry: InstanceRegistry;
   private sweepTimer?: ReturnType<Clock['setTimeout']>;
+  /** Each node's handlers' time, where the core dispatches to them (bot-os.md D77). */
+  private readonly costs = new Costs();
   /** The shutdowns a runtime stop's cascade started (D64, #29): `stop` waits for them. */
   private shutting: Promise<void> = Promise.resolve();
 
@@ -368,6 +371,7 @@ export class Core {
         };
       },
       drift: () => this.drift(),
+      cost: (id) => this.cost(id),
     });
     this.driftMonitor = new DriftMonitor({
       clock: options.clock,
@@ -384,6 +388,7 @@ export class Core {
       now: () => this.o.clock.now(),
       ...(this.o.record === undefined ? {} : { record: this.o.record }),
       validate: this.o.validateEvents ?? process.env['NODE_ENV'] !== 'production',
+      time: (plugin, fn) => this.costs.time(plugin, fn),
     });
   }
 
@@ -419,6 +424,22 @@ export class Core {
   /** Each plugin's state, in load order. */
   status(): PluginStatus[] {
     return [...this.entries.values()].map((e) => ({ ...e.status }));
+  }
+
+  /**
+   * What a node costs (bot-os.md D77): its handlers' time where the core dispatched to them, and
+   * what its instance says of its own while it is up (a script's worker).
+   */
+  cost(id: string): NodeCost | undefined {
+    const e = this.entries.get(id);
+    if (e === undefined) return undefined;
+    let own: OwnCost | undefined;
+    try {
+      own = e.up === true ? e.instance?.cost?.() : undefined;
+    } catch (err) {
+      this.logger(id).error(`cost: ${message(err)}`);
+    }
+    return { dispatch: this.costs.of(id), ...(own === undefined ? {} : { own }) };
   }
 
   /** One plugin's state, or undefined for an id not loaded. */
@@ -1336,7 +1357,7 @@ export class Core {
           return;
         }
         try {
-          onTimer.call(entry.instance, name, payload);
+          this.costs.time(id, () => onTimer.call(entry.instance, name, payload));
         } catch (e) {
           log.error(`timer ${name}: ${message(e)}`);
         }
@@ -1419,7 +1440,7 @@ export class Core {
           ...handle,
           onMessage: (h) =>
             handle.onMessage((m) => {
-              if (entry.up === true) h(m);
+              if (entry.up === true) this.costs.time(id, () => h(m));
             }),
         };
       },

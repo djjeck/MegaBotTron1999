@@ -164,6 +164,7 @@ describe('Controls', () => {
           reads: ['status', 'broken', 'absent'],
           actions: ['bump', 'refuse'],
           status: { count: 0 },
+          cost: { dispatch: { calls: 0, ms: 0, maxMs: 0 } },
         },
         expect.objectContaining({ id: 'broken', state: 'running' }),
       ],

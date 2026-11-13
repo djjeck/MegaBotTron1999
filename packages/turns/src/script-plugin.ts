@@ -250,14 +250,8 @@ export interface ScriptPluginOptions {
   isolation?: 'worker' | 'in-process';
 }
 
-/** What a script costs (D77): its handlers' calls and their time, its thread's CPU and memory. */
-export interface ScriptStats {
-  calls: number;
-  errors: number;
-  /** The handlers' time, from each call to its end, awaited parts included. */
-  totalMs: number;
-  maxMs: number;
-}
+/** How often a worker's CPU and heap are sampled. */
+const SAMPLE_MS = 5000;
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -265,6 +259,8 @@ const message = (e: unknown): string => (e instanceof Error ? e.message : String
 interface Runner {
   /** Loads the script: the patterns its handlers hear; refused with why. */
   load(): Promise<string[]>;
+  /** Its thread's CPU time and heap, as last sampled (a worker's; none in the main thread). */
+  usage(): { cpuMs?: number; heapBytes?: number };
   dispatch(pattern: string, event: unknown): void;
   close(): Promise<void>;
 }
@@ -276,7 +272,7 @@ export function scriptPlugin(options: ScriptPluginOptions = {}): Plugin {
     manifest: { ...BASE, node: scriptManifest },
     create: (ctx): Instance => {
       const c = ctx.config as ScriptConfig;
-      const stats: ScriptStats = { calls: 0, errors: 0, totalMs: 0, maxMs: 0 };
+      const stats = { calls: 0, errors: 0, ms: 0, maxMs: 0 };
       let failed = false;
       const fail = (why: string): void => {
         if (failed) return;
@@ -285,7 +281,7 @@ export function scriptPlugin(options: ScriptPluginOptions = {}): Plugin {
       };
       const ended = (end: CallEnd): void => {
         stats.calls += 1;
-        stats.totalMs += end.ms;
+        stats.ms += end.ms;
         stats.maxMs = Math.max(stats.maxMs, end.ms);
         if (end.error !== undefined) {
           stats.errors += 1;
@@ -318,9 +314,9 @@ export function scriptPlugin(options: ScriptPluginOptions = {}): Plugin {
           for (const u of unsubscribe.splice(0)) u();
           await runner.close();
         },
-        interface: {},
-        stats: () => ({ ...stats }),
-      } as Instance & { stats(): ScriptStats };
+        // What it costs (D77): its handlers' calls, from each to its end, and its thread's use.
+        cost: () => ({ runs: isolation, ...stats, ...runner.usage() }),
+      };
     },
   });
 }
@@ -411,12 +407,13 @@ function inProcessRunner(
     dispatch: (pattern, event) => {
       if (closed) return;
       try {
-        runtime.dispatch(pattern, event, ended, () => ctx.clock.now());
+        runtime.dispatch(pattern, event, ended, () => performance.now());
       } catch (e) {
         closed = true;
         fail(`its script hung: ${message(e)}`);
       }
     },
+    usage: () => ({}),
     close: () => {
       closed = true;
       return Promise.resolve();
@@ -446,11 +443,24 @@ function workerRunner(
   let refused: ((why: Error) => void) | undefined;
   let ping: ReturnType<typeof setTimeout> | undefined;
   let answered = true;
+  let usage: { cpuMs?: number; heapBytes?: number } = {};
+  let sampler: ReturnType<typeof setInterval> | undefined;
+  // Its CPU and heap, sampled every few seconds (real time, as the watchdog's), for its cost.
+  const sample = async (): Promise<void> => {
+    try {
+      const w = worker as Worker;
+      const [cpu, heap] = await Promise.all([w.cpuUsage(), w.getHeapStatistics()]);
+      usage = { cpuMs: (cpu.user + cpu.system) / 1000, heapBytes: heap.used_heap_size };
+    } catch {
+      // A worker ending: its last sample stands.
+    }
+  };
   const post = (m: FromHost): void => worker?.postMessage(m);
   const end = (why: string): void => {
     if (closing) return;
     closing = true;
     clearTimeout(ping);
+    clearInterval(sampler);
     void worker?.terminate();
     refused?.(new Error(`its script ${why}`));
     fail(`its script ${why}`);
@@ -480,6 +490,9 @@ function workerRunner(
       case 'ready':
         // Watched from its first word: its thread's start (Node's, its modules') is not its own.
         watch();
+        void sample();
+        sampler = setInterval(() => void sample(), SAMPLE_MS);
+        sampler.unref();
         return;
       case 'loaded':
         loaded?.(m.patterns);
@@ -557,9 +570,11 @@ function workerRunner(
     dispatch: (pattern, event) => {
       if (!closing) post({ op: 'event', pattern, event, now: ctx.clock.now() });
     },
+    usage: () => usage,
     close: async () => {
       closing = true;
       clearTimeout(ping);
+      clearInterval(sampler);
       await worker?.terminate();
     },
   };

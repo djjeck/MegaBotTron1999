@@ -240,7 +240,8 @@ export class ScriptRuntime {
   /**
    * Calls the handlers of `pattern` with an event, in turn: each one's synchronous run within the
    * limit (a ScriptTimeout past it, which ends the script), then what it awaits. Each call's end is
-   * told to `ended`, with its error if it threw or rejected.
+   * told to `ended`, with its error if it threw or rejected, its time by `now` (real time, for its
+   * cost: D77).
    */
   dispatch(
     pattern: string,

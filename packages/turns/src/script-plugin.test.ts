@@ -234,6 +234,15 @@ for (const isolation of ['in-process', 'worker'] as const)
           )
         )
       ).toBe(true);
+      // What it cost (D77): its handlers' calls, and a worker's CPU and heap.
+      await until(() => (kit.core.cost('examine')?.own?.calls ?? 0) >= 5);
+      if (isolation === 'worker')
+        await until(() => (kit.core.cost('examine')?.own?.heapBytes ?? 0) > 0);
+      const own = kit.core.cost('examine')?.own;
+      expect(own).toMatchObject({ runs: isolation, errors: 0 });
+      expect(own?.ms).toBeGreaterThan(0);
+      if (isolation === 'worker') expect(own?.cpuMs).toBeGreaterThan(0);
+      else expect(own?.cpuMs).toBeUndefined();
       await kit.stop();
       expect(kit.core.state('examine')?.state).toBe('stopped');
     });

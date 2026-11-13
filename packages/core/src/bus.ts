@@ -53,6 +53,8 @@ export interface BusOptions {
   record?: (event: BusEvent) => unknown;
   /** Whether payloads are checked against their schemas: outside production. */
   validate: boolean;
+  /** Runs a subscriber's handler, counting its time for its node (bot-os.md D77). */
+  time?: (plugin: string, fn: () => void) => void;
 }
 
 const namespaceOf = (type: string): string => type.slice(0, type.indexOf('.'));
@@ -131,7 +133,8 @@ export class Bus {
         for (const s of [...this.subscriptions])
           if ((s.pattern === type || s.pattern === namespaceOf(type)) && s.from.has(instance)) {
             try {
-              s.handler(event, at);
+              if (this.o.time === undefined) s.handler(event, at);
+              else this.o.time(s.plugin, () => s.handler(event, at));
             } catch (e) {
               s.log.error(`on ${type}: ${e instanceof Error ? e.message : String(e)}`);
             }

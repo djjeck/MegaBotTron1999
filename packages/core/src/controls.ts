@@ -23,6 +23,7 @@
  */
 import { type Buttons } from './commands.ts';
 import { type ConnectorStatus, type Surface, type SurfaceQuery } from './connector.ts';
+import { type NodeCost } from './costs.ts';
 import { type DriftCounts } from './drift.ts';
 import { type Manifest } from './manifest.ts';
 import { type CoalescedView, type QueueEntryView } from './outbox.ts';
@@ -85,6 +86,8 @@ export interface ControlsHost {
   account(id: string): { account?: string; connection?: Connection };
   /** Each parser's drift (§4.7). */
   drift(): DriftCounts[];
+  /** What a node costs (bot-os.md D77). */
+  cost?(id: string): NodeCost | undefined;
 }
 
 /** What the controls read of a running connector. */
@@ -148,6 +151,8 @@ export interface PluginControl {
   status?: unknown;
   /** One line of the state it keeps, for its card, if it offers a view (bot-os.md D72). */
   summary?: string;
+  /** What it costs, since the start (bot-os.md D77). */
+  cost?: NodeCost;
 }
 
 /** An action's outcome: its output, or why not (`refused`: the plugin's own refusal). */
@@ -197,6 +202,7 @@ export class Controls {
         const reads = Object.keys(m.interface.state ?? {});
         const status = reads.includes('status') ? this.read(id, 'status') : undefined;
         const summary = this.summary(id);
+        const cost = this.host.cost?.(id);
         return {
           id,
           plugin: m.id,
@@ -210,6 +216,7 @@ export class Controls {
           actions: Object.keys(m.interface.actions ?? {}),
           ...(status !== undefined && 'value' in status ? { status: status.value } : {}),
           ...(summary === undefined ? {} : { summary }),
+          ...(cost === undefined ? {} : { cost }),
         };
       }),
     };
