@@ -5,8 +5,9 @@
  *
  * It monitors the chats it is given and no other (a group by its id, `-100…`; a private chat by the
  * other's `@username`, or by their id when they have none), or, given none, every chat the account
- * has. Its surfaces (bot-os.md D63) list every chat of the account, monitored or not, so that the
- * owner can pick new ones. The account sees every chat of its owner, and the rest never leaves
+ * has. Its surfaces (bot-os.md D63) list the chats of the account active in the last week (and
+ * those it is given), monitored or not, so that the owner can pick new ones, and a search finds any
+ * of them. The account sees every chat of its owner, and the rest never leaves
  * this module. It sends any text to those chats, but only through the account's outbox,
  * which keeps each plugin to the chats and commands of its reach (§4.6).
  *
@@ -64,6 +65,8 @@ export interface RawDialog {
   title?: string | undefined;
   /** When its latest message was sent, in seconds. */
   date?: number | undefined;
+  /** Its folder: 1 for the archive (GramJS's `Dialog.folderId`); custom folders are not folders. */
+  folderId?: number | undefined;
   isUser?: boolean | undefined;
   isGroup?: boolean | undefined;
   isChannel?: boolean | undefined;
@@ -118,6 +121,10 @@ export const USER_CHAT = /^(?:-?\d+|@\w{4,})$/u;
 export const RETRY_MS = 60_000;
 /** How many of the latest chats the surfaces list without a search. */
 export const SURFACES_LIMIT = 50;
+/** How recent a chat's last message is for the surfaces to list it without a search. */
+export const SURFACES_ACTIVE_MS = 7 * 24 * 3_600_000;
+/** The archive's folder id. */
+const ARCHIVE_FOLDER = 1;
 /** How long the searches reuse the account's full list of chats, fetched once for a run of them. */
 export const DIALOGS_TTL_MS = 30_000;
 
@@ -279,29 +286,38 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
 
   /**
    * Its surfaces (bot-os.md D63): the account's chats, latest first, with their kind and title,
-   * whether it monitors them or not (the owner picks new ones to monitor from them), the archived
-   * ones too; with a search, those whose title, username or id has it, among all of them (the
-   * full list, fetched once for the searches of `DIALOGS_TTL_MS`). Each is named as the connector
-   * names it once its config lists it.
+   * whether it monitors them or not (the owner picks new ones to monitor from them). Without a
+   * search, those active in the last `SURFACES_ACTIVE_MS` (their latest message), from every folder
+   * but the archive, and those its config lists, whatever their activity; with a search, those whose
+   * title, username or id has it, among all of them, the archived and the inactive too. Both draw
+   * on the full list, fetched once for `DIALOGS_TTL_MS`: a fetch with a limit would return the
+   * pinned chats first, however old, and fill the list with them. The limit is applied last. Each
+   * is named as the connector names it once its config lists it.
    */
   async surfaces(query: SurfaceQuery = {}): Promise<Surface[]> {
     if (!this.connected) throw new Error('not connected');
     const search = query.search?.trim().toLowerCase() ?? '';
     const limit = query.limit ?? SURFACES_LIMIT;
-    const dialogs =
-      search === ''
-        ? [...(await this.o.client.getDialogs({ limit, ignoreMigrated: true }))]
-        : await this.allDialogs();
+    const since = this.o.clock.now() - SURFACES_ACTIVE_MS;
+    const dialogs = await this.allDialogs();
     return dialogs
       .map((d): Surface | undefined => {
         const id = this.surfaceName(d);
         if (id === undefined) return undefined;
+        const lastActive = d.date === undefined ? undefined : d.date * 1000;
+        const configured = this.chats?.has(id.toLowerCase()) === true;
+        if (
+          search === '' &&
+          !configured &&
+          (d.folderId === ARCHIVE_FOLDER || lastActive === undefined || lastActive < since)
+        )
+          return undefined;
         const title = d.title ?? id;
         return {
           id,
           title,
           kind: kindOf(d),
-          ...(d.date === undefined ? {} : { lastActive: d.date * 1000 }),
+          ...(lastActive === undefined ? {} : { lastActive }),
         };
       })
       .filter((x): x is Surface => x !== undefined)

@@ -17,6 +17,7 @@ import {
   type RawMessage,
   RETRY_MS,
   SEEN_ABOVE_DOC,
+  SURFACES_LIMIT,
   TelegramUserConnector,
 } from './telegram-user.ts';
 
@@ -285,8 +286,10 @@ describe('every chat, and the surfaces', () => {
     message: { id: 9 },
   });
 
+  /** A moment just after the fixtures' latest message. */
+  const NOW = 1_793_000_300_000;
   function make(f: ReturnType<typeof fake>, o: { chats?: string[] } = {}) {
-    const clock = new VirtualClock(0);
+    const clock = new VirtualClock(NOW);
     const messages: Inbound[] = [];
     const logs: string[] = [];
     const c = new TelegramUserConnector({
@@ -322,7 +325,7 @@ describe('every chat, and the surfaces', () => {
     expect(f.calls.filter((x) => x.startsWith('entity'))).toEqual(['entity 778']);
   });
 
-  it('lists its surfaces latest first, with their kind, and searches all of them', async () => {
+  it('lists its surfaces active this week, latest first, and searches all of them', async () => {
     const f = fake({
       dialogs: [
         dialog({}),
@@ -347,13 +350,15 @@ describe('every chat, and the surfaces', () => {
     await expect(c.surfaces()).rejects.toThrow('not connected');
     c.start();
     await flush();
+    // Without a search: those with a message this week; News, with none, is left out.
     expect(await c.surfaces()).toEqual([
       { id: '@Quiz_bot', title: 'Quiz Bot', kind: 'bot', lastActive: 1_793_000_200_000 },
       { id: GROUP, title: 'The Lobby', kind: 'group', lastActive: 1_793_000_100_000 },
       { id: '5000002', title: '5000002', kind: 'private', lastActive: 1_793_000_100_000 },
-      { id: '-1004', title: 'News', kind: 'channel' },
     ]);
-    expect(f.calls).toContain('dialogs 50');
+    // Fetched whole, never with a limit (which would put the pinned chats first).
+    expect(f.calls.filter((x) => x.startsWith('dialogs '))).toEqual([]);
+    expect((await c.surfaces({ search: 'news' })).map((x) => x.id)).toEqual(['-1004']);
     expect((await c.surfaces({ search: ' lobby ', limit: 5 })).map((x) => x.id)).toEqual([GROUP]);
     expect((await c.surfaces({ search: 'quiz' })).map((x) => x.id)).toEqual(['@Quiz_bot']);
     expect(await c.surfaces({ limit: 1 })).toHaveLength(1);
@@ -380,6 +385,7 @@ describe('every chat, and the surfaces', () => {
     c.start();
     await flush();
     expect((await c.surfaces()).map((x) => x.id)).toEqual(['@quiz_bot', GROUP, '-1005', '5000003']);
+    clock.advance(DIALOGS_TTL_MS);
     expect(await c.surfaces({ search: 'LOTTERY' })).toEqual([
       {
         id: '-1005',
@@ -389,13 +395,57 @@ describe('every chat, and the surfaces', () => {
       },
     ]);
     expect((await c.surfaces({ search: 'bob' })).map((x) => x.id)).toEqual(['5000003']);
-    // The searches share one fetch of every chat, until it is `DIALOGS_TTL_MS` old.
-    expect(f.calls.filter((x) => x === 'dialogs')).toHaveLength(2);
+    // The lists share one fetch of every chat, until it is `DIALOGS_TTL_MS` old.
+    const fetches = (): number => f.calls.filter((x) => x === 'dialogs').length;
+    const before = fetches();
+    await c.surfaces();
+    expect(fetches()).toBe(before);
     clock.advance(DIALOGS_TTL_MS);
     expect((await c.surfaces({ search: 'lobby' })).map((x) => x.id)).toEqual([GROUP]);
-    expect(f.calls.filter((x) => x === 'dialogs')).toHaveLength(3);
+    expect(fetches()).toBe(before + 1);
     // Still monitors only its chats: the others are listed, not read.
     expect(c.send(GROUP, 'hi')).toBe(false);
+  });
+
+  it('leaves the archived and the inactive out of its list, but not of a search', async () => {
+    const DAY = 86_400;
+    /** The archive's folder id, as GramJS gives it. */
+    const ARCHIVE = 1;
+    const at = (daysAgo: number): number => NOW / 1000 - daysAgo * DAY;
+    const chat = (id: string, title: string, date: number, over: Partial<RawDialog> = {}) =>
+      dialog({ id: { toString: () => id }, title, date, ...over });
+    // Pinned first, as Telegram returns them: old ones, then the recent ones.
+    const f = fake({
+      dialogs: [
+        chat('-1001', 'Pinned Old', at(90)),
+        chat('-1002', 'Watched Old', at(60)),
+        chat('-1003', 'Archived', at(1), { folderId: ARCHIVE }),
+        chat('-1004', 'Recent', at(1)),
+        chat('-1005', 'Edge Of The Week', at(7)),
+        chat('-1006', 'Just Too Old', at(7) - 1),
+        ...Array.from({ length: 60 }, (_, i) => chat(`-2${i}`, `Busy ${i}`, at(2) + i)),
+      ],
+    });
+    const { c } = make(f, { chats: ['-1002'] });
+    c.start();
+    await flush();
+    const listed = (await c.surfaces()).map((x) => x.title);
+    // The cap applies after the filter: 50 of the 63 active or monitored, latest first.
+    expect(listed).toHaveLength(SURFACES_LIMIT);
+    expect(listed.slice(0, 2)).toEqual(['Recent', 'Busy 59']);
+    const all = (await c.surfaces({ limit: 100 })).map((x) => x.title);
+    expect(all).toHaveLength(63);
+    expect(all.slice(-2)).toEqual(['Edge Of The Week', 'Watched Old']);
+    expect(all).not.toContain('Pinned Old');
+    expect(all).not.toContain('Archived');
+    expect(all).not.toContain('Just Too Old');
+    // A search finds any of them, the archived and the inactive too.
+    expect((await c.surfaces({ search: 'old' })).map((x) => x.title)).toEqual([
+      'Just Too Old',
+      'Watched Old',
+      'Pinned Old',
+    ]);
+    expect((await c.surfaces({ search: 'archived' })).map((x) => x.title)).toEqual(['Archived']);
   });
 });
 
