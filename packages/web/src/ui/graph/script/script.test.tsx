@@ -394,6 +394,43 @@ describe('a script node in the graph editor', () => {
         "on('game.win', () => log('again'));"
       )
     );
+    // Exported as a plugin (D79): its file and its module.json, downloaded or copied.
+    fireEvent.click(within(panel).getByRole('button', { name: 'Export as plugin' }));
+    const exported = await screen.findByRole('dialog', { name: 'export of look' });
+    const plugin = within(exported).getByRole('region', { name: 'look.ts' });
+    expect(plugin.textContent).toContain('id: "look"');
+    expect(plugin.textContent).toContain("on('game.win', () => log('again'));");
+    expect(within(exported).getByRole('region', { name: 'module.json' }).textContent).toContain(
+      '"provides": "@example/look"'
+    );
+    const urls: unknown[] = [];
+    vi.stubGlobal(
+      'URL',
+      Object.assign(URL, {
+        createObjectURL: (b: unknown) => (urls.push(b), 'blob:x'),
+        revokeObjectURL: () => {},
+      })
+    );
+    const copied: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: (t: string) => (copied.push(t), Promise.resolve()) },
+      configurable: true,
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    fireEvent.click(within(plugin).getByRole('button', { name: 'Download look.ts' }));
+    fireEvent.click(within(plugin).getByRole('button', { name: 'Copy' }));
+    expect(urls).toHaveLength(1);
+    expect(click).toHaveBeenCalled();
+    expect(copied[0]).toContain('definePlugin');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'export of look' })).toBeNull();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Export as plugin' }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: 'export of look' })).getByRole('button', {
+        name: 'Close',
+      })
+    );
+    expect(screen.queryByRole('dialog', { name: 'export of look' })).toBeNull();
     expect(status).toBeDefined();
   });
 });

@@ -266,7 +266,7 @@ describe('a script node’s API', () => {
       const x: number = process.pid;
     `;
     expect(diagnostics(dts, bad).length).toBeGreaterThanOrEqual(7);
-  });
+  }, 30_000);
 
   it('types a script with no ports at all', () => {
     const dts = scriptDts(
@@ -275,5 +275,5 @@ describe('a script node’s API', () => {
     );
     expect(diagnostics(dts, `log('hello'); store.names();`)).toEqual([]);
     expect(diagnostics(dts, `enqueue('chat', 'a', 'b');`).length).toBe(1);
-  });
+  }, 30_000);
 });

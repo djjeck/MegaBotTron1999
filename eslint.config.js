@@ -100,5 +100,11 @@ export default tseslint.config(
         },
       ],
     },
+  },
+  {
+    // The app's tests are not bundled: one may run what the app makes against the shell itself (a
+    // script's export, on the dev kit).
+    files: ['packages/web/src/ui/**/*.test.{ts,tsx}'],
+    rules: { '@typescript-eslint/no-restricted-imports': 'off' },
   }
 );

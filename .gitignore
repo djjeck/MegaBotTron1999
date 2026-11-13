@@ -9,3 +9,5 @@ dist/
 # A local data volume or secrets, for running the image by hand: never in git.
 data/
 secrets/
+# A script's export, written beside its test while it runs (packages/web/src/ui/graph/script).
+*.tmp.ts

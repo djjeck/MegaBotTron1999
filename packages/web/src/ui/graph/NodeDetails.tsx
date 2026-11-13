@@ -31,6 +31,8 @@ import { withDefaults } from './defaults.ts';
 import { instanceOf } from './draft.ts';
 import { ConnectorQueue } from './Queue.tsx';
 import { SchemaForm } from './SchemaForm.tsx';
+import { exportScript } from './script/export.ts';
+import { ExportDialog } from './script/ExportDialog.tsx';
 import { ScriptEditor } from './script/ScriptEditor.tsx';
 import { ScriptPorts } from './script/ScriptPorts.tsx';
 import { scriptApi } from './script/types.ts';
@@ -217,6 +219,7 @@ function ScriptSection(props: {
     ).values(),
   ];
   const code = typeof config['code'] === 'string' ? config['code'] : '';
+  const [exporting, setExporting] = useState(false);
   const lines = code === '' ? 0 : code.split('\n').length;
   return (
     <section className="script-section">
@@ -224,6 +227,9 @@ function ScriptSection(props: {
       <p>
         <button type="button" className="primary" onClick={() => props.setEditing(true)}>
           Edit script
+        </button>{' '}
+        <button type="button" onClick={() => setExporting(true)}>
+          Export as plugin
         </button>{' '}
         <span className="muted small">
           {lines} line{lines === 1 ? '' : 's'} of TypeScript, in a worker of its own
@@ -237,6 +243,13 @@ function ScriptSection(props: {
         </ul>
       )}
       <ScriptPorts config={config} change={props.change} plugins={plugins} errors={props.errors} />
+      {!exporting ? null : (
+        <ExportDialog
+          id={node.id}
+          exported={exportScript(node.id, config, api)}
+          close={() => setExporting(false)}
+        />
+      )}
       {!props.editing ? null : (
         <ScriptEditor
           id={node.id}

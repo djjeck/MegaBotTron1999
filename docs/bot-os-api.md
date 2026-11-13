@@ -1284,7 +1284,10 @@ drawn as the check's `views` say. **Edit script** opens its code in Monaco (`mon
 by Vite in a chunk loaded only then), its TypeScript checked against ES2022 and a `.d.ts` made for
 the node from its ports (`script/types.ts`: the members' and the event types' JSON Schemas as
 TypeScript, each with its help), beside a panel listing its API; **Keep** writes the code to the
-draft, refused while it does not parse.
+draft, refused while it does not parse. **Export as plugin** (bot-os.md D79) shows and downloads the
+node as a module's plugin, `<id>.ts` (`script/export.ts`: a `definePlugin` of the node's id, its
+manifest built from its ports and own events, its `create` the script as typed on the script API
+given from the context, typed as the editor typed it) and a `module.json` for it.
 
 **Swimlanes** (bot-os.md D69): a draft whose nodes name groups is drawn in lanes (`layout.ts`'s
 `swimlanes`, `lanes.ts`, `LaneNode.tsx`). The columns stay global, as above, so a stage lines up

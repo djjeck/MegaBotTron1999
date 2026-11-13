@@ -1670,3 +1670,35 @@ label.block {
 .script-ports fieldset > label input {
   width: 6rem;
 }
+
+/* A script node's export (D79): its two files, shown and downloaded. */
+.overlay .card.script-export {
+  max-width: 60rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+.script-export header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.script-export header h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 1.1rem;
+}
+.script-export h3 {
+  font-size: 1rem;
+  margin: 0.75rem 0 0.25rem;
+}
+.export-text {
+  max-height: 22rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-size: 0.8rem;
+}
