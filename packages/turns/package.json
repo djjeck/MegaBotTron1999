@@ -1,6 +1,6 @@
 {
   "name": "@megabottron1999/turns",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "description": "MegaBotTron1999's base plugins for automation: a game bot's turns (a parser of its answers and an actor at a person's pace), and the reactor",
   "license": "MIT",
@@ -17,8 +17,8 @@
     "node": ">=24"
   },
   "dependencies": {
-    "@megabottron1999/connectors": "0.1.5",
-    "@megabottron1999/core": "0.1.5",
+    "@megabottron1999/connectors": "0.1.6",
+    "@megabottron1999/core": "0.1.6",
     "zod": "4.6.7"
   }
 }
