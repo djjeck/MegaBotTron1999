@@ -52,6 +52,9 @@ describe('the graph editor', () => {
       'irc-main added, disabled, on the instance irc-main'
     );
     expect(screen.getByLabelText('node irc-main · in').className).toContain('state-disabled');
+    // It takes the selection: its panel opens on it.
+    expect(await screen.findByLabelText('details of irc-main')).toBeDefined();
+    expect(screen.getByLabelText('node irc-main · in').className).toContain('selected');
     expect(screen.queryByRole('region', { name: 'first step' })).toBeNull();
     // Reviewed: the diff the core gives, then applied: saved, and restarted at once.
     expect(screen.getByText('Changes not applied')).toBeDefined();
@@ -188,6 +191,7 @@ describe('the graph editor', () => {
     ]);
     fireEvent.click(within(add).getByRole('button', { name: 'Add actor-b' }));
     await screen.findByLabelText('node actor-b', {}, slow);
+    expect(await screen.findByLabelText('details of actor-b')).toBeDefined();
     await waitFor(() =>
       expect(core.checked.at(-1)?.nodes.at(-1)).toEqual({
         id: 'actor-b',
@@ -218,6 +222,10 @@ describe('the graph editor', () => {
     });
     fireEvent.click(within(again).getByRole('button', { name: 'Add actor' }));
     await screen.findByLabelText('node actor', {}, slow);
+    // The new node takes the selection from the one before, and its panel.
+    expect(await screen.findByLabelText('details of actor')).toBeDefined();
+    expect(screen.getByLabelText('node actor').className).toContain('selected');
+    expect(screen.getByLabelText('node actor-b').className).not.toContain('selected');
     expect(core.api.calls).toContain(
       'POST /instances/import {"from":"misc","instance":"actor-old","plugin":"actor"}'
     );

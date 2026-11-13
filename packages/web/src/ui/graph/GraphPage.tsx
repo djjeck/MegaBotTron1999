@@ -7,7 +7,7 @@
  *
  * - **Add a node** from the plugins the instance offers (`GET /available`), choosing its id and its
  *   instance: fresh, kept already, or imported from an older data directory. It starts disabled,
- *   for the owner to set it up first (D64).
+ *   for the owner to set it up first (D64), and selected, its panel open on it.
  * - **Wire it**: an edge dragged from an output to an input; a chat-in edge's chats, or a chat-out
  *   edge's chats and commands, set in its panel; a new chat-out edge is a dry run until the owner
  *   sends for real (D64). Every change is checked by the core as the load would
@@ -336,7 +336,9 @@ export function GraphPage({
             if (port in c.view.inputs || port in c.view.outputs) portProblems[port] = texts;
           }
         const kept = was.get(c.id);
-        const selectedHere = kept?.selected ?? false;
+        // A card new to the drawing is selected when its node is (a node just added); a connector,
+        // by its in card.
+        const selectedHere = kept?.selected ?? (chosen.has(c.node) && c.side !== 'out');
         // Its config and account are the panel's: a card draws its ports, not the values typed.
         const { config: _, account: __, ...view } = c.view;
         // Kept where it was moved, while it stays in the same lane (its position is the lane's).
@@ -499,6 +501,10 @@ export function GraphPage({
     const node = { ...n, disabled: true };
     change((g) => addNode(g, Object.keys(config).length === 0 ? node : { ...node, config }));
     setPanel(undefined);
+    // It takes the selection, so that its panel opens on it.
+    setNodes((ns) => ns.map((x) => (x.selected === true ? { ...x, selected: false } : x)));
+    setEdges((es) => es.map((e) => (e.selected === true ? { ...e, selected: false } : e)));
+    setSelected({ nodes: [n.id], edges: [] });
     setSaid(
       `${n.id} added, disabled, on the instance ${n.instance}: wire it, set it up, enable it, then review and apply`
     );
