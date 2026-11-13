@@ -8,13 +8,13 @@ connectors, the turn plugins, the reactor and the web UI, in one Docker image. I
 
 ## Development process
 
-- Implementation is handled by the AI agent; the author reviews and approves each change.
+- Implementation is handled by the AI agent, which commits and pushes once the checks pass; the
+  author follows the work and validates it live, rather than approving each commit.
 - Each completed sub-task is a self-contained, reviewable change, with tests and documentation
-  updated in the same commit. Commit only after the author has reviewed the change.
+  updated in the same commit.
 - **Commit on `main`.** No feature branches unless the author asks for one (bot-os.md D24: the
   author reviews alone, with no branch protection). One logical change per commit; the message says
   why, not only what.
-- After each sub-task, stop and wait for the author's approval before the next.
 
 ### Read the documentation first
 
