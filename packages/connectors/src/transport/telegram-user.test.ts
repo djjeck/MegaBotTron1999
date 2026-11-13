@@ -1,5 +1,7 @@
 import { FloodWait, type Inbound, type ReadFilter, VirtualClock } from '@megabottron1999/core';
+import { Api } from 'telegram';
 import { type UserAuthParams } from 'telegram/client/auth.js';
+import { returnBigInt } from 'telegram/Helpers.js';
 import { type StringSession } from 'telegram/sessions/index.js';
 import { describe, expect, it } from 'vitest';
 import {
@@ -514,6 +516,119 @@ describe('every chat, and the surfaces', () => {
       'Pinned Old',
     ]);
     expect((await c.surfaces({ search: 'archived' })).map((x) => x.title)).toEqual(['Archived']);
+  });
+});
+
+describe('the surfaces, on GramJS’s own list of chats', () => {
+  // GramJS's `getDialogs` itself, on a made-up answer of Telegram's: its `ignoreMigrated` kept
+  // the basic groups alone (it tests that `migratedTo` exists, which only they have), and every
+  // user, bot, channel and supergroup was missing from the list and the search.
+  it('finds a chat of every kind, archived or not, but a migrated group', async () => {
+    const big = (n: number) => returnBigInt(n);
+    const photo = new Api.ChatPhotoEmpty();
+    const users = [
+      new Api.User({ id: big(11), firstName: 'Alice', accessHash: big(1) }),
+      new Api.User({
+        id: big(12),
+        firstName: 'Quest',
+        bot: true,
+        username: 'QuestBot',
+        accessHash: big(2),
+      }),
+    ];
+    const chats = [
+      new Api.Chat({
+        id: big(21),
+        title: 'Lobby',
+        participantsCount: 3,
+        date: 1,
+        version: 1,
+        photo,
+      }),
+      new Api.Chat({
+        id: big(22),
+        title: 'Guild (old)',
+        participantsCount: 3,
+        date: 1,
+        version: 1,
+        photo,
+        migratedTo: new Api.InputChannel({ channelId: big(32), accessHash: big(4) }),
+      }),
+      new Api.Channel({
+        id: big(31),
+        title: 'Loot News',
+        broadcast: true,
+        date: 1,
+        photo,
+        accessHash: big(3),
+      }),
+      new Api.Channel({
+        id: big(32),
+        title: 'Guild',
+        megagroup: true,
+        date: 1,
+        photo,
+        accessHash: big(4),
+      }),
+    ];
+    const peers = [
+      new Api.PeerUser({ userId: big(11) }),
+      new Api.PeerUser({ userId: big(12) }),
+      new Api.PeerChat({ chatId: big(21) }),
+      new Api.PeerChat({ chatId: big(22) }),
+      new Api.PeerChannel({ channelId: big(31) }),
+      new Api.PeerChannel({ channelId: big(32) }),
+    ];
+    const at = 1_793_000_000;
+    const answer = new Api.messages.Dialogs({
+      dialogs: peers.map(
+        (peer, i) =>
+          new Api.Dialog({
+            peer,
+            topMessage: i + 1,
+            readInboxMaxId: 0,
+            readOutboxMaxId: 0,
+            unreadCount: 0,
+            unreadMentionsCount: 0,
+            unreadReactionsCount: 0,
+            notifySettings: new Api.PeerNotifySettings({}),
+            // The archive's, but for Alice: an owner's folders are filters over these two.
+            ...(i === 0 ? {} : { folderId: 1 }),
+          })
+      ),
+      messages: peers.map(
+        (peerId, i) => new Api.Message({ id: i + 1, peerId, date: at - i, message: 'hi' })
+      ),
+      chats,
+      users,
+    });
+    const gram = createTelegramClient({ apiId: 1, apiHash: 'x', session: '' });
+    gram.invoke = (() => Promise.resolve(answer)) as unknown as typeof gram.invoke;
+    const f = fake();
+    f.client.getDialogs = (p) => gram.getDialogs(p) as unknown as Promise<Iterable<RawDialog>>;
+    const clock = new VirtualClock(at * 1000);
+    const c = new TelegramUserConnector({
+      account: 'telegram:alice',
+      client: f.client,
+      clock,
+      log: () => {},
+    });
+    c.start();
+    // GramJS's own awaits, a few turns of the loop.
+    for (let i = 0; i < 10; i++) await flush();
+    const found = [];
+    for (const search of ['alice', 'quest', 'lobby', 'loot', 'guild'])
+      found.push(...(await c.surfaces({ search })).map((x) => [x.id, x.title, x.kind]));
+    expect(found).toEqual([
+      ['11', 'Alice', 'private'],
+      ['@QuestBot', 'Quest', 'bot'],
+      ['-21', 'Lobby', 'group'],
+      ['-10031', 'Loot News', 'channel'],
+      ['-10032', 'Guild', 'group'],
+    ]);
+    // Without a search, the archived are left out.
+    expect((await c.surfaces()).map((x) => x.title)).toEqual(['Alice']);
+    await c.stop();
   });
 });
 

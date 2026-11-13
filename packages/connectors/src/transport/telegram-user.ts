@@ -94,8 +94,12 @@ export interface RawDialog {
 export interface GramClient {
   connect(): Promise<boolean>;
   disconnect(): Promise<void>;
-  /** The account's chats, latest first (and fills the entity cache, so a group's id resolves). */
-  getDialogs(params: { limit?: number; ignoreMigrated?: boolean }): Promise<Iterable<RawDialog>>;
+  /**
+   * The account's chats, latest first (and fills the entity cache, so a group's id resolves). No
+   * `ignoreMigrated`: GramJS's filter keeps the chats it should drop (only basic groups have a
+   * `migratedTo`), so the connector drops a migrated group itself (`migrated`).
+   */
+  getDialogs(params: { limit?: number }): Promise<Iterable<RawDialog>>;
   getInputEntity(id: number | string): Promise<unknown>;
   /** The logged-in user. */
   getMe(): Promise<unknown>;
@@ -117,8 +121,8 @@ export interface GramClient {
   downloadMedia(message: never, params: object): Promise<unknown>;
 }
 
-/** A string field of an entity GramJS returned, if it has one. */
-function field(entity: unknown, key: 'username' | 'bot'): unknown {
+/** A field of an entity GramJS returned, if it has one. */
+function field(entity: unknown, key: 'username' | 'bot' | 'migratedTo'): unknown {
   if (typeof entity !== 'object' || entity === null || !(key in entity)) return undefined;
   return (entity as Record<string, unknown>)[key];
 }
@@ -176,6 +180,17 @@ function isText(m: object): boolean {
 }
 
 /** The kind of a dialog's chat. */
+/**
+ * Whether a dialog is a basic group upgraded to a supergroup (its `migratedTo` set): left behind,
+ * its supergroup a dialog of its own. GramJS's `ignoreMigrated` meant to drop these, but keeps them
+ * alone (it tests that the field exists, which only basic groups have), and with them every user,
+ * bot, channel and supergroup was gone from the surfaces.
+ */
+function migrated(d: RawDialog): boolean {
+  const to = field(d.entity, 'migratedTo');
+  return to !== undefined && to !== null;
+}
+
 function kindOf(d: RawDialog): Surface['kind'] {
   if (d.isUser === true) return field(d.entity, 'bot') === true ? 'bot' : 'private';
   return d.isChannel === true && d.isGroup !== true ? 'channel' : 'group';
@@ -361,11 +376,15 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       .slice(0, limit);
   }
 
-  /** Every chat of the account (folders and the archive included), kept for `DIALOGS_TTL_MS`. */
+  /**
+   * Every chat of the account, of every kind, in the archive or not (a folder of the owner's is a
+   * filter over these, not a place of its own), kept for `DIALOGS_TTL_MS`; but a basic group
+   * upgraded to a supergroup, which is listed itself.
+   */
   private async allDialogs(): Promise<RawDialog[]> {
     const now = this.o.clock.now();
     if (this.all !== undefined && now - this.all.at < DIALOGS_TTL_MS) return this.all.dialogs;
-    const dialogs = [...(await this.o.client.getDialogs({ ignoreMigrated: true }))];
+    const dialogs = [...(await this.o.client.getDialogs({}))].filter((d) => !migrated(d));
     this.all = { at: now, dialogs };
     return dialogs;
   }

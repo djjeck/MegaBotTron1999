@@ -887,13 +887,16 @@ or not (so that the owner can pick new ones), each named as its `chats` config w
 without a search, those whose latest message is at most 7 days old (by the core's clock), from every
 folder but the archive (folder 1), and those its `chats` config lists whatever their activity,
 latest first, at most 50 once filtered; a search, by title, username or id, finds any of them,
-archived and inactive ones too. Both draw on the account's full list of dialogs, fetched once for 30
-s: a fetch with a limit returns the pinned dialogs first, however old, and filled the list with
-them; `telegram-bot` the chats it has seen in updates, kept in its store (`surfaces`), and one
-searched by its id or `@username`, asked of Telegram (`getChat`) and kept, since the Bot API cannot
-list a bot's chats; `irc` its channel. A connector's `chats` config (the two Telegram ones) is what
-it **monitors**: unset, every chat it has; each chat-in edge reads a subset (`reads`, `"*"` for all
-of them). A connector not running lists nothing.
+archived and inactive ones too, of every kind. Both draw on the account's full list of dialogs,
+every kind and both folders (the owner's own folders are filters over them), fetched once for 30 s:
+a fetch with a limit returns the pinned dialogs first, however old, and filled the list with them; a
+basic group upgraded to a supergroup is left out (its supergroup is listed), by the connector:
+GramJS's `ignoreMigrated` keeps those alone, and dropped every user, bot, channel and supergroup;
+`telegram-bot` the chats it has seen in updates, kept in its store (`surfaces`), and one searched by
+its id or `@username`, asked of Telegram (`getChat`) and kept, since the Bot API cannot list a bot's
+chats; `irc` its channel. A connector's `chats` config (the two Telegram ones) is what it
+**monitors**: unset, every chat it has; each chat-in edge reads a subset (`reads`, `"*"` for all of
+them). A connector not running lists nothing.
 
 **Missed messages** (bot-os.md D62): what was said while the instance was down is the connector's to
 deliver once, marked `playback` (so nothing acts on it: the reactor skips it, and the replies'
