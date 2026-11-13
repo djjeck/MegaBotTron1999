@@ -517,6 +517,13 @@ export function GraphPage({
 
   const closeReview = useCallback(() => setPanel(undefined), []);
 
+  /** Selects one edge alone, as a click on it does, so that its panel opens. */
+  const openEdge = (key: string): void => {
+    setNodes((ns) => ns.map((n) => (n.selected === true ? { ...n, selected: false } : n)));
+    setEdges((es) => es.map((e) => ({ ...e, selected: e.id === key })));
+    setSelected({ nodes: [], edges: [key] });
+  };
+
   if (draft === undefined) return <p className="muted">{file.error ?? 'Loading…'}</p>;
   const dirty = saved === undefined || !sameGraph(draft, saved) || clears.size > 0;
   const refused = status.data?.graph?.refused ?? [];
@@ -602,6 +609,9 @@ export function GraphPage({
           setSelected({ nodes: [], edges: [] });
         }}
         kill={kill}
+        saved={saved?.nodes.find((n) => n.id === shownNode.id)}
+        edges={draft.edges}
+        openEdge={openEdge}
         cleared={clears.has(shownNode.id)}
         clearStop={(clear) => {
           setRefusedApply(undefined);

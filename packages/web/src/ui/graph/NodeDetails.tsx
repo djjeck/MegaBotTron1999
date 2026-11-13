@@ -3,8 +3,9 @@
  * editable for the draft, whether it is enabled (D64), its account (a connector's), its config
  * and the settings its instance starts with, in forms made from their schemas, each field with the
  * check's errors; a config key that names a secret (`configSecrets`) is a choice of the secrets'
- * names; a connector's `chats` (what it monitors) is picked from its surfaces (D63). Then the
- * interface it declares (P11) and its removal, which keeps its instance. A stopped node (D64)
+ * names; a connector's `chats` (what it monitors) is picked from its surfaces (D63), and once the
+ * draft changes them, a reminder names its chat-in edges to update, each opening its panel. Then
+ * the interface it declares (P11) and its removal, which keeps its instance. A stopped node (D64)
  * says why, when and by what, with **Clear stop**, a change of the draft that Apply makes; a
  * running one can be killed (D44). Its forms stay editable whatever its state. Its group (D69),
  * the lane it is drawn in, is picked among the draft's, or named anew. Its outputs say what they
@@ -15,6 +16,7 @@ import { useState } from 'react';
 import type {
   DriftCounts,
   EventTypeView,
+  GraphEdge,
   GraphNode,
   InstanceInfo,
   JsonSchema,
@@ -253,6 +255,12 @@ export function NodeDetails(props: {
   cleared: boolean;
   /** Clears its stop in the draft, or keeps it again. */
   clearStop: (clear: boolean) => void;
+  /** The node as the saved graph has it; undefined: new in the draft. */
+  saved?: GraphNode | undefined;
+  /** The draft's edges, for the chat-in edges to update when its chats change. */
+  edges?: readonly GraphEdge[];
+  /** Selects an edge, by its key, opening its panel. */
+  openEdge?: (key: string) => void;
 }) {
   const { node, view, live, drift } = props;
   const enabled = node.disabled !== true;
@@ -263,6 +271,7 @@ export function NodeDetails(props: {
   // A connector's monitored chats are picked from its surfaces, not typed (D63).
   const picked = connector ? withoutChats(view.configSchema) : undefined;
   const chats = node.config?.[CHATS_KEY];
+  const savedChats = props.saved?.config?.[CHATS_KEY];
   return (
     <aside className="details" aria-label={`details of ${view.id}`}>
       <h2>{view.id}</h2>
@@ -407,6 +416,9 @@ export function NodeDetails(props: {
           <MonitoredChats
             connector={view.id}
             value={Array.isArray(chats) ? (chats as string[]) : undefined}
+            saved={Array.isArray(savedChats) ? (savedChats as string[]) : undefined}
+            edges={props.edges ?? []}
+            {...(props.openEdge === undefined ? {} : { openEdge: props.openEdge })}
             set={(v) => {
               const { [CHATS_KEY]: _, ...rest } = node.config ?? {};
               props.change({ config: v === undefined ? rest : { ...rest, [CHATS_KEY]: v } });

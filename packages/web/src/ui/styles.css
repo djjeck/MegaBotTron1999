@@ -1411,6 +1411,21 @@ label.block {
   font-weight: 600;
 }
 
+/* A connector's chats changed in the draft: its chat-in edges to update (Surfaces.tsx). */
+.chats-reminder {
+  font-weight: normal;
+  border-left: 3px solid var(--warn);
+  padding-left: 0.5rem;
+  margin: 0.3rem 0;
+}
+.chats-reminder p {
+  margin: 0.2rem 0;
+}
+.chats-reminder button.link {
+  font-family: monospace;
+  text-align: left;
+}
+
 /* Swimlanes (D69): each group a tinted band in its colour (`--lane`, r g b), its label a button at
    its top left, which zooms to it; the ungrouped nodes' band, unlabelled. */
 .react-flow__node.react-flow__node-lane {

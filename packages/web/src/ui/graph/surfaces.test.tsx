@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Surface } from '#src/ui/api.ts';
+import type { GraphEdge, Surface } from '#src/ui/api.ts';
 import { fakeCore } from '#test/fake-core.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
 import { GraphPage } from './GraphPage.tsx';
-import { monitoredSurfaces, unlistedNote } from './Surfaces.tsx';
+import { edgesToUpdate, monitoredSurfaces, sameChats, unlistedNote } from './Surfaces.tsx';
 
 let restore: () => void;
 beforeEach(() => {
@@ -110,6 +110,57 @@ describe('chats picked from lists', () => {
     const sends = within(out).getByRole('group', { name: 'sends' });
     fireEvent.click(await within(sends).findByLabelText('The Lobby'));
     await waitFor(() => expect(core.checked.at(-1)?.edges[1]).toMatchObject({ sends: [] }));
+  });
+
+  it('reminds the owner of the edges to update once the draft changes the chats', async () => {
+    fakeCore({ routes: { 'GET /accounts/chat/surfaces': [...listed([LOBBY, QUEST])] } });
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    fireEvent.click(await screen.findByLabelText('node chat · in', {}, slow));
+    const details = await screen.findByLabelText('details of chat');
+    const picker = within(details).getByRole('group', { name: 'chats it monitors' });
+    const lobby = await within(picker).findByLabelText('The Lobby');
+    // As saved: no reminder.
+    expect(within(picker).queryByRole('note', { name: 'edges to update' })).toBeNull();
+    // The Lobby dropped: the edge that still reads it is named, and opens its panel.
+    fireEvent.click(lobby);
+    const note = await within(picker).findByRole('note', { name: 'edges to update' });
+    expect(note.textContent).toContain('update the edges that should read them too');
+    fireEvent.click(within(note).getByRole('button', { name: 'chat.chat → actor-a.chat' }));
+    const edge = await screen.findByLabelText('details of edge chat.chat → actor-a.chat');
+    expect(within(edge).getByRole('group', { name: 'reads' })).toBeDefined();
+    expect(screen.queryByLabelText('details of chat')).toBeNull();
+    // Back to the node, back to every chat, as saved: the reminder goes.
+    fireEvent.click(screen.getByLabelText('node chat · in'));
+    const again = await screen.findByLabelText('details of chat');
+    const picker2 = within(again).getByRole('group', { name: 'chats it monitors' });
+    expect(within(picker2).getByRole('note', { name: 'edges to update' })).toBeDefined();
+    fireEvent.click(within(picker2).getByLabelText('every chat'));
+    await waitFor(() =>
+      expect(within(picker2).queryByRole('note', { name: 'edges to update' })).toBeNull()
+    );
+  });
+
+  it('names the chat-in edges with a list that a change of the chats leaves behind', () => {
+    const edges: GraphEdge[] = [
+      { from: 'chat.chat', to: 'a.chat', type: 'chat-in', reads: ['#a'] },
+      { from: 'chat.chat', to: 'b.chat', type: 'chat-in', reads: ['#a', '#B'] },
+      { from: 'chat.chat', to: 'c.chat', type: 'chat-in', reads: '*' },
+      { from: 'other.chat', to: 'd.chat', type: 'chat-in', reads: ['#a'] },
+      { from: 'a.chat', to: 'chat.chat', type: 'chat-out', sends: ['#a'] },
+    ];
+    const to = (saved: string[] | undefined, draft: string[] | undefined) =>
+      edgesToUpdate('chat', saved, draft, edges).map((e) => e.to);
+    // A chat added: the lists without it.
+    expect(to(['#a'], ['#a', '#b'])).toEqual(['a.chat']);
+    // A chat removed: the lists that still read it.
+    expect(to(['#a', '#b'], ['#b'])).toEqual(['a.chat', 'b.chat']);
+    // Every chat now: every list; from every chat to a list, those reading beyond it.
+    expect(to(['#a'], undefined)).toEqual(['a.chat', 'b.chat']);
+    expect(to(undefined, ['#a'])).toEqual(['b.chat']);
+    expect(sameChats(['#a', '#B'], ['#b', '#A'])).toBe(true);
+    expect(sameChats(['#a'], ['#a', '#b'])).toBe(false);
+    expect(sameChats(undefined, [])).toBe(false);
+    expect(sameChats(undefined, undefined)).toBe(true);
   });
 
   it('says why there is no list', () => {

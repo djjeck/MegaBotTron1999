@@ -6,8 +6,9 @@
  * owner applies first. Lists of words (commands, senders) are rows to add and remove, not JSON.
  */
 import { useEffect, useState } from 'react';
-import type { Surface, SurfacesView } from '#src/ui/api.ts';
+import type { GraphEdge, Surface, SurfacesView } from '#src/ui/api.ts';
 import { api, ApiError, seg } from '#src/ui/api.ts';
+import { edgeKey, endOf } from './draft.ts';
 
 /** The config key of a connector that lists the chats it monitors. */
 export const CHATS_KEY = 'chats';
@@ -175,14 +176,85 @@ const others = (list: readonly string[], surfaces: readonly Surface[]): Surface[
     .filter((c) => !surfaces.some((s) => s.id.toLowerCase() === c.toLowerCase()))
     .map((c) => ({ id: c, title: c, kind: 'group' as const }));
 
+/** The same monitored chats, without case or order; undefined (every chat) only equals itself. */
+export function sameChats(
+  a: readonly string[] | undefined,
+  b: readonly string[] | undefined
+): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return a.every((c) => has(b, c)) && b.every((c) => has(a, c));
+}
+
+/**
+ * The connector's chat-in edges to update after its monitored chats change from `saved` to `draft`
+ * (P6, D62, D63: the edges filter again): those with a `reads` list (not `'*'`) that miss a chat
+ * added (any, when it now monitors every chat) or still read one it no longer monitors.
+ */
+export function edgesToUpdate(
+  connector: string,
+  saved: readonly string[] | undefined,
+  draft: readonly string[] | undefined,
+  edges: readonly GraphEdge[]
+): GraphEdge[] {
+  const added = draft === undefined ? undefined : draft.filter((c) => !has(saved ?? draft, c));
+  return edges.filter((e) => {
+    if (e.type !== 'chat-in' || endOf(e.from).node !== connector || !Array.isArray(e.reads))
+      return false;
+    const reads = e.reads;
+    const misses = added === undefined || added.some((c) => !has(reads, c));
+    return misses || (draft !== undefined && reads.some((c) => !has(draft, c)));
+  });
+}
+
+/**
+ * The reminder beside a connector's monitored chats once the draft changes them: its chat-in edges
+ * filter again (P6, D62, D63), so a chat added is read only by those that tick it (or read `'*'`),
+ * and one removed should leave their lists; the edges to update named, each opening its panel.
+ */
+function ChatsReminder(props: { edges: readonly GraphEdge[]; open?: (key: string) => void }) {
+  const { open } = props;
+  return (
+    <div className="chats-reminder warning small" role="note" aria-label="edges to update">
+      <p>
+        Its chats changed: update the edges that should read them too, in each edge’s panel (an edge
+        that reads all of them, <code>*</code>, needs nothing).
+      </p>
+      {props.edges.length === 0 ? null : (
+        <p>
+          To check:{' '}
+          {props.edges.map((e, i) => (
+            <span key={edgeKey(e)}>
+              {i === 0 ? null : ', '}
+              {open === undefined ? (
+                <code>{edgeKey(e)}</code>
+              ) : (
+                <button type="button" className="link" onClick={() => open(edgeKey(e))}>
+                  {edgeKey(e)}
+                </button>
+              )}
+            </span>
+          ))}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /**
  * A connector's monitored chats (its config's `chats`): every chat while unset; else the ticked
- * ones. Its latest surfaces as checkboxes, and a search to find and tick others.
+ * ones. Its latest surfaces as checkboxes, and a search to find and tick others. Changed from
+ * `saved`, a reminder that its chat-in edges filter again, naming those of `edges` to update.
  */
 export function MonitoredChats(props: {
   connector: string;
   value: readonly string[] | undefined;
   set: (v: string[] | undefined) => void;
+  /** The saved graph's `chats` of this connector (undefined: every chat, or a new node). */
+  saved?: readonly string[] | undefined;
+  /** The draft's edges. */
+  edges?: readonly GraphEdge[];
+  /** Opens an edge's panel, by its key. */
+  openEdge?: (key: string) => void;
 }) {
   const [search, setSearch] = useState('');
   const latest = useSurfaces(props.connector);
@@ -201,6 +273,12 @@ export function MonitoredChats(props: {
       <legend>
         <code>{CHATS_KEY}</code>: the chats it monitors
       </legend>
+      {sameChats(props.saved, props.value) ? null : (
+        <ChatsReminder
+          edges={edgesToUpdate(props.connector, props.saved, props.value, props.edges ?? [])}
+          {...(props.openEdge === undefined ? {} : { open: props.openEdge })}
+        />
+      )}
       {note === undefined ? (
         <>
           <label>
