@@ -246,7 +246,9 @@ sources and updates, D67; the older event log's import).
 
 Next, in order:
 
-1. **Agents** (P11, D14) and plugin widgets (P16); the Admin page's features moved into the editor.
-2. **Launch:** the API locked (P13), and a plugin author's guide.
+1. **Agents** (P11, D14, #51) and plugin widgets (P16, #50); the Admin page's features moved into
+   the editor (#53).
+2. **Launch:** the API locked (P13), and a plugin author's guide (#52).
 
-Built ahead of the launch, at the owner's ask: script nodes (D28, D76).
+Built ahead of the launch, at the owner's ask (0.1.3): script nodes (D28, D76), their editor (D78)
+and their export as a plugin (D79), and what each node costs (D77).
