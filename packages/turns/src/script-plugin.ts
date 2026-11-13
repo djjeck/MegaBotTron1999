@@ -471,22 +471,41 @@ function workerRunner(
     refused?.(new Error(`its script ${why}`));
     fail(`its script ${why}`);
   };
-  // The watchdog: a worker that does not answer within its limit holds its thread (a loop after
-  // an await, which vm's limit does not see). Its time is the thread's, real time, never the
-  // node's clock (the dev kit's is virtual, and moves by leaps): the one timer here not of
-  // `ctx.clock`, and it keeps no process alive.
-  const watch = (): void => {
-    if (closing) return;
-    if (!answered) {
-      end(`hung: it held its thread past its limit of ${c.limits.callMs} ms`);
-      return;
-    }
-    answered = false;
-    post({ op: 'ping', now: ctx.clock.now() });
+  // The watchdog: a worker that does not answer within its limit may hold its thread (a loop after
+  // an await, which vm's limit does not see). Its time is real time, never the node's clock (the
+  // dev kit's is virtual, and moves by leaps): the one timer here not of `ctx.clock`, and it keeps
+  // no process alive. A ping unanswered is not enough to kill it: a host short of memory or CPU
+  // stalls the whole process, its threads waiting on the disk or the scheduler, and a ping then
+  // waits for seconds behind an idle script (D81). It is hung once its thread has spent its limit
+  // on the CPU since the ping, which a loop does and a stall does not; until then it is waited for.
+  let cpuAtPing = 0;
+  const cpuMs = async (): Promise<number> => {
+    const c = await (worker as Worker).cpuUsage();
+    return (c.user + c.system) / 1000;
+  };
+  const rearm = (): void => {
     // Twice the limit: a ping that lands as a run starts is answered once that run, limited by
     // vm, has ended.
-    ping = setTimeout(watch, 2 * c.limits.callMs);
+    ping = setTimeout(() => void watch(), 2 * c.limits.callMs);
     ping.unref();
+  };
+  const watch = async (): Promise<void> => {
+    if (closing) return;
+    if (!answered) {
+      const spent = (await cpuMs().catch(() => cpuAtPing)) - cpuAtPing;
+      if (closing) return;
+      if (!answered && spent >= c.limits.callMs) {
+        end(`hung: it held its thread past its limit of ${c.limits.callMs} ms`);
+        return;
+      }
+      // Its thread stalled, not running: the ping still stands.
+      if (!answered) return rearm();
+    }
+    cpuAtPing = await cpuMs().catch(() => cpuAtPing);
+    if (closing) return;
+    answered = false;
+    post({ op: 'ping', now: ctx.clock.now() });
+    rearm();
   };
   const onMessage = (m: FromWorker): void => {
     switch (m.op) {
@@ -495,7 +514,7 @@ function workerRunner(
         return;
       case 'ready':
         // Watched from its first word: its thread's start (Node's, its modules') is not its own.
-        watch();
+        void watch();
         void sample();
         sampler = setInterval(() => void sample(), SAMPLE_MS);
         sampler.unref();

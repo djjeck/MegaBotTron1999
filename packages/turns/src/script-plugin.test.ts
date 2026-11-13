@@ -352,6 +352,22 @@ describe('a script node in a worker', () => {
     await kit.stop();
   });
 
+  it('is not killed while its thread is stalled, not running, past its limit', async () => {
+    // A host short of memory stalls the whole process, its threads waiting on the disk: a ping
+    // then waits behind an idle script. A wait that burns no CPU stands in for that stall here.
+    const code = `on('quest.tick', async () => { await null; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 600); log.info('woke'); });`;
+    const { kit, parser, lines } = await run('worker', {
+      ...examineConfig(code),
+      limits: { callMs: 50, memoryMb: 64 },
+    });
+    parser.publish?.('quest.tick', {});
+    await until(() => lines.some((l) => l.includes('woke')));
+    // A few more of its watchdog's rounds, answered.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(kit.core.state('examine')?.state).toBe('running');
+    await kit.stop();
+  });
+
   it('is killed past its memory limit, its node failed with why', async () => {
     const code = `on('quest.tick', () => { const a = []; for (;;) a.push(new Array(100_000).fill(Math.random())); });`;
     const { kit, parser } = await run('worker', {
