@@ -30,8 +30,9 @@ a game's player state, and the script node.
 
 - `scriptPlugin` (`src/script-plugin.ts`): the `script` node, TypeScript the owner types in the web
   UI (docs/bot-os.md D76), on the ports its config declares (events and interface inputs, chat-out
-  outputs with their commands, events of its own), its node's manifest made from them (D74). Its
-  code, its types stripped, runs in a `vm` context holding the script API alone
+  outputs with their commands, events of its own), its node's manifest made from them (D74); its
+  inputs are under `inputs` (`configInputs`), where the editor adds one for an edge dropped on the
+  node (D80). Its code, its types stripped, runs in a `vm` context holding the script API alone
   (`src/script-runtime.ts`: `on`, `use`, `outbox`/`enqueue`, `publish`, `store`, `clock`, `log`, as
   the plugin context has them), in a worker thread of its own (`src/script-worker.ts`) with a time
   limit on each handler's run and a memory limit; a script that hangs, runs out of memory or crashes

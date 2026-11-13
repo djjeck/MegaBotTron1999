@@ -129,6 +129,18 @@ export const manifestSchema = z
      */
     node: nodeFn.optional(),
     /**
+     * Where its nodes' own inputs are declared, for a plugin whose ports its node's config declares
+     * (`node`, bot-os.md D80): the key of its config that holds them, a record of input ports by
+     * name written as a manifest's, and the types of input it takes there. The editor adds one
+     * there when the owner drops an edge on such a node from an output it has no input for.
+     */
+    configInputs: z
+      .strictObject({
+        key: z.string().min(1),
+        types: z.array(z.enum(['events', 'interface'])).min(1),
+      })
+      .optional(),
+    /**
      * Keys of its config whose every change a save of the graph records in the event log
      * (`core.config`, bot-os.md D75): who saved it, when, and its SHA-256, never its value (a
      * script node's code).
@@ -185,6 +197,18 @@ export const manifestSchema = z
         code: 'custom',
         path: ['account'],
         message: 'only a connector has an account',
+      });
+    if (m.configInputs !== undefined && m.node === undefined)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['configInputs'],
+        message: 'only a plugin whose nodes make their own manifest (node) declares them',
+      });
+    if (m.configInputs !== undefined && !Object.hasOwn(m.config?.shape ?? {}, m.configInputs.key))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['configInputs', 'key'],
+        message: `its config has no key ${m.configInputs.key}`,
       });
     if (m.requires.includes(m.id))
       ctx.addIssue({

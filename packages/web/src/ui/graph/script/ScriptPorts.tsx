@@ -9,6 +9,7 @@
  */
 import { useRef, useState } from 'react';
 import type { PluginView } from '#src/ui/api.ts';
+import { freeName } from '#src/ui/graph/draft.ts';
 import { portsOf } from './types.ts';
 
 type Config = Record<string, unknown>;
@@ -16,15 +17,6 @@ type Config = Record<string, unknown>;
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 const recordOf = (v: unknown): Record<string, unknown> => (isRecord(v) ? v : {});
-
-/** A free port name: `base`, then `base-2`, `base-3`… */
-export function freeName(base: string, taken: Iterable<string>): string {
-  const t = new Set(taken);
-  if (!t.has(base)) return base;
-  let n = 2;
-  while (t.has(`${base}-${n}`)) n++;
-  return `${base}-${n}`;
-}
 
 /** A record with one key renamed in place, its order kept. */
 export function renamed(

@@ -279,6 +279,8 @@ export interface PluginView {
   configSecrets: string[];
   /** The event types it registers (§4.4). */
   events: string[];
+  /** Where its nodes declare their own inputs in their config, and of which types (D80). */
+  configInputs?: { key: string; types: ('events' | 'interface')[] };
 }
 
 /** One node of the graph, as the graph view shows it: its plugin's declarations, and its own. */
@@ -403,6 +405,9 @@ export function describePlugin(m: Manifest): PluginView {
     secrets: [...m.secrets],
     configSecrets: [...m.configSecrets],
     events: Object.keys(m.events).sort(),
+    ...(m.configInputs === undefined
+      ? {}
+      : { configInputs: { key: m.configInputs.key, types: [...m.configInputs.types] } }),
   };
 }
 

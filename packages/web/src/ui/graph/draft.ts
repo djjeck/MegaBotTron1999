@@ -299,3 +299,76 @@ export function viewOf(node: GraphNode, plugin: PluginView | undefined): NodeVie
     ...(node.config === undefined ? {} : { config: node.config }),
   };
 }
+
+/** A free port name: `base`, then `base-2`, `base-3`… */
+export function freeName(base: string, taken: Iterable<string>): string {
+  const t = new Set(taken);
+  if (!t.has(base)) return base;
+  let n = 2;
+  while (t.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
+/**
+ * An edge dropped on a node whose inputs its config declares (docs/bot-os.md D80): bound to an
+ * input of the node that takes the output (an events input of its namespace; an interface input
+ * of its plugin, unbound), or else to a new one, written in the node's config where its plugin
+ * says (`configInputs`) and named after the namespace or the plugin, unique in the node: an events
+ * input of the output's namespace, or an interface input of its node's plugin and no member, which
+ * the owner picks in the node's panel (the check says so until then). Undefined when the node
+ * declares no inputs of the output's type, or the output is unknown.
+ */
+export function dropOn(
+  g: Graph,
+  from: { node: string; port: string },
+  to: string,
+  plugins: ReadonlyMap<string, PluginView>,
+  /** The nodes whose ports their config declares, by id (`POST /graph/check`'s `views`, D74). */
+  views: Readonly<Record<string, PluginView>> = {}
+): { graph: Graph; port: string; added: boolean } | undefined {
+  const target = g.nodes.find((n) => n.id === to);
+  const source = g.nodes.find((n) => n.id === from.node);
+  if (target === undefined || source === undefined || to === from.node) return undefined;
+  const spec = plugins.get(target.plugin)?.configInputs;
+  const output = (views[source.id] ?? plugins.get(source.plugin))?.outputs[from.port];
+  if (spec === undefined || output === undefined) return undefined;
+  const type = output.type;
+  if (type !== 'events' && type !== 'interface') return undefined;
+  if (!spec.types.includes(type)) return undefined;
+  const namespace = type === 'events' ? output.namespace : undefined;
+  if (type === 'events' && namespace === undefined) return undefined;
+  const declared = isRecord(target.config?.[spec.key])
+    ? (target.config[spec.key] as Record<string, unknown>)
+    : {};
+  const bound = new Set(g.edges.map((e) => e.to));
+  const takes = ([name, p]: [string, unknown]): boolean =>
+    isRecord(p) &&
+    p['type'] === type &&
+    (type === 'events'
+      ? p['namespace'] === namespace
+      : p['plugin'] === source.plugin && !bound.has(`${to}.${name}`));
+  const kept = Object.entries(declared).find(takes)?.[0];
+  const port = kept ?? freeName(namespace ?? source.plugin, Object.keys(declared));
+  const grown =
+    kept !== undefined
+      ? g
+      : updateNode(g, to, {
+          config: {
+            ...target.config,
+            [spec.key]: {
+              ...declared,
+              [port]:
+                type === 'events'
+                  ? { type, namespace }
+                  : { type, plugin: source.plugin, members: [] },
+            },
+          },
+        });
+  const edge = edgeOf(
+    { source: from.node, sourceHandle: from.port, target: to, targetHandle: port },
+    plugins,
+    grown,
+    views
+  );
+  return { graph: connect(grown, edge), port, added: kept === undefined };
+}

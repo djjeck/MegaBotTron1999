@@ -42,7 +42,7 @@
  * a band, a React Flow group node holding its cards, the connectors' cards outside every band. A
  * lane's label zooms to it; resting on a node or a lane's label dims what it does not reach.
  */
-import type { Connection, Node } from '@xyflow/react';
+import type { Connection, FinalConnectionState, Node } from '@xyflow/react';
 import {
   Background,
   Controls,
@@ -78,6 +78,7 @@ import {
   addNode,
   asGraph,
   connect,
+  dropOn,
   edgeKey,
   edgeOf,
   EMPTY_GRAPH,
@@ -494,6 +495,37 @@ export function GraphPage({
   const onConnect = (c: Connection): void =>
     change((g) => connect(g, edgeOf(c, plugins, g, declared)));
 
+  /**
+   * An edge dropped on a node rather than on one of its ports: a node whose inputs its config
+   * declares (D80) takes it, on an input it has or one added for it (`dropOn`).
+   */
+  const onConnectEnd = (event: MouseEvent | TouchEvent, state: FinalConnectionState): void => {
+    const handle = state.fromHandle;
+    if (state.isValid === true || handle?.type !== 'source' || handle.id == null) return;
+    const point = 'changedTouches' in event ? event.changedTouches[0] : event;
+    if (point === undefined || draft === undefined) return;
+    const card = document
+      .elementFromPoint(point.clientX, point.clientY)
+      ?.closest('.react-flow__node')
+      ?.getAttribute('data-id');
+    if (card == null || isLaneId(card)) return;
+    const from = { node: nodeOfCard(handle.nodeId), port: handle.id };
+    const to = nodeOfCard(card);
+    const dropped = dropOn(draft, from, to, plugins, declared);
+    if (dropped === undefined) return;
+    change(() => dropped.graph);
+    const input = plugins.get(draft.nodes.find((n) => n.id === to)?.plugin ?? '')?.configInputs;
+    const output = (
+      declared?.[from.node] ??
+      plugins.get(draft.nodes.find((n) => n.id === from.node)?.plugin ?? '')
+    )?.outputs[from.port];
+    setSaid(
+      dropped.added
+        ? `${to}: input ${dropped.port} added to its ${input?.key ?? 'config'} for ${from.node}.${from.port}${output?.type === 'interface' ? ': pick the members it uses in its panel' : ''}`
+        : `${from.node}.${from.port} bound to ${to}.${dropped.port}`
+    );
+  };
+
   const added = (n: NewNode): void => {
     // Its config starts filled with its defaults, written as if the owner had typed them; the node
     // starts disabled, for the owner to set it up first (D64).
@@ -750,6 +782,7 @@ export function GraphPage({
             onEdgesChange={onEdgesChange}
             onSelectionChange={selectionChanged}
             onConnect={onConnect}
+            onConnectEnd={onConnectEnd}
             onNodeMouseEnter={hoverNode}
             onNodeMouseLeave={leaveNode}
             deleteKeyCode={null}

@@ -6,11 +6,13 @@ import {
   addNode,
   asGraph,
   connect,
+  dropOn,
   edgeKey,
   edgeOf,
   EMPTY_GRAPH,
   endOf,
   freeId,
+  freeName,
   idProblem,
   inputsOf,
   instanceOf,
@@ -278,5 +280,111 @@ describe('the cards', () => {
     );
     expect(targetCard({ from: 'x', to: 'chat.other' }, views)).toBe('chat');
     expect(targetCard({ from: 'x', to: 'gone.y' }, views)).toBe('gone');
+  });
+});
+
+describe('an edge dropped on a node whose inputs its config declares (D80)', () => {
+  const grows: PluginView = {
+    plugin: 'grows',
+    version: '0.1.0',
+    description: 'inputs from its config',
+    kinds: ['actor'],
+    inputs: {},
+    outputs: {
+      chat: { type: 'chat-out', label: 'chat-out', optional: false },
+      events: { type: 'events', namespace: 'watch', label: 'events of watch', optional: false },
+    },
+    interface: { reads: [], actions: [], commands: [] },
+    secrets: [],
+    configSecrets: [],
+    events: [],
+    configInputs: { key: 'inputs', types: ['events', 'interface'] },
+  };
+  const all = new Map([...plugins, ['grows', grows]]);
+  const g: Graph = {
+    version: 2,
+    nodes: [
+      { id: 'parser', plugin: 'parser' },
+      { id: 'chat', plugin: 'chat' },
+      {
+        id: 'watch',
+        plugin: 'grows',
+        config: { code: 'x', inputs: { game: { type: 'interface' } } },
+      },
+    ],
+    edges: [],
+  };
+  const inputs = (r: ReturnType<typeof dropOn>) =>
+    r?.graph.nodes.find((n) => n.id === 'watch')?.config?.['inputs'];
+
+  it('adds an events input of the output’s namespace, named after it, and binds the edge', () => {
+    const r = dropOn(g, { node: 'parser', port: 'events' }, 'watch', all);
+    // `game` is taken (by an interface input): the next free name.
+    expect(r?.port).toBe('game-2');
+    expect(r?.added).toBe(true);
+    expect(inputs(r)).toEqual({
+      game: { type: 'interface' },
+      'game-2': { type: 'events', namespace: 'game' },
+    });
+    expect(r?.graph.nodes.find((n) => n.id === 'watch')?.config?.['code']).toBe('x');
+    expect(r?.graph.edges).toEqual([{ from: 'parser.events', to: 'watch.game-2', type: 'events' }]);
+    // Dropped again: the input it has takes it.
+    const again = dropOn(r?.graph as Graph, { node: 'parser', port: 'events' }, 'watch', all);
+    expect(again).toMatchObject({ port: 'game-2', added: false });
+    expect(inputs(again)).toEqual(inputs(r));
+  });
+
+  it('adds an interface input of the output’s plugin with no member, for the owner to pick', () => {
+    const r = dropOn(g, { node: 'parser', port: 'interface' }, 'watch', all);
+    expect(r?.port).toBe('parser');
+    expect((inputs(r) as Record<string, unknown>)['parser']).toEqual({
+      type: 'interface',
+      plugin: 'parser',
+      members: [],
+    });
+    expect(r?.graph.edges).toEqual([
+      { from: 'parser.interface', to: 'watch.parser', type: 'interface' },
+    ]);
+    // Bound, it takes no second edge: another input is added.
+    const second = dropOn(r?.graph as Graph, { node: 'parser', port: 'interface' }, 'watch', all);
+    expect(second).toMatchObject({ port: 'parser-2', added: true });
+    // A node with no config yet starts one.
+    const bare: Graph = { ...g, nodes: [...g.nodes.slice(0, 2), { id: 'watch', plugin: 'grows' }] };
+    expect(inputs(dropOn(bare, { node: 'parser', port: 'interface' }, 'watch', all))).toEqual({
+      parser: { type: 'interface', plugin: 'parser', members: [] },
+    });
+  });
+
+  it('takes nothing it does not declare, nor its own outputs, nor a node that declares none', () => {
+    // A chat-in output: no input of its type is declared in its config.
+    expect(dropOn(g, { node: 'chat', port: 'chat' }, 'watch', all)).toBeUndefined();
+    expect(dropOn(g, { node: 'watch', port: 'events' }, 'watch', all)).toBeUndefined();
+    expect(dropOn(g, { node: 'parser', port: 'events' }, 'chat', all)).toBeUndefined();
+    expect(dropOn(g, { node: 'parser', port: 'nope' }, 'watch', all)).toBeUndefined();
+    expect(dropOn(g, { node: 'parser', port: 'events' }, 'gone', all)).toBeUndefined();
+    const eventsOnly = new Map([
+      ...all,
+      ['grows', { ...grows, configInputs: { key: 'inputs', types: ['events' as const] } }],
+    ]);
+    expect(dropOn(g, { node: 'parser', port: 'interface' }, 'watch', eventsOnly)).toBeUndefined();
+    // An events output whose namespace is not known yet.
+    const unknown = new Map([
+      ...all,
+      [
+        'parser',
+        {
+          ...(plugins.get('parser') as PluginView),
+          outputs: { events: { type: 'events', label: 'events', optional: false } },
+        } as PluginView,
+      ],
+    ]);
+    expect(dropOn(g, { node: 'parser', port: 'events' }, 'watch', unknown)).toBeUndefined();
+    // A node whose ports its config declares is read from the check's views.
+    const views = { parser: { ...grows, plugin: 'parser' } };
+    expect(dropOn(g, { node: 'parser', port: 'events' }, 'watch', all, views)?.port).toBe('watch');
+  });
+
+  it('names a port free in the node', () => {
+    expect(freeName('chat', ['chat', 'chat-2'])).toBe('chat-3');
   });
 });

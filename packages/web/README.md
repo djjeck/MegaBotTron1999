@@ -25,28 +25,32 @@ the server that guards them.
   names them. An empty graph offers its first node, a connector. **Add a node** lists the plugins
   offered, by the image and each module (`Palette.tsx`), and asks its id and its instance: fresh,
   kept, or imported from an older data directory (`AddNode.tsx`); the node added is selected, its
-  panel open on it. An edge is dragged from an output to an input; a rhombus at its midpoint, in its
-  port type's colour (`PortEdge.tsx`), is a button that selects it and opens its panel
-  (`EdgeDetails.tsx`), where a chat-in edge's `reads` (or all the chats its connector monitors) and
-  its `senders` (anyone, or a list with _me_), or a chat-out edge's `sends` and `commands`, are set,
-  the chats ticked among its connector's monitored chats and the words as rows (`Surfaces.tsx`, D62,
-  D63); a connector's own `chats`, what it monitors, are ticked from its surfaces, with a search;
-  once the draft changes them, a reminder beside them says that the edges which should read a chat
-  need it ticked too (P6: the edges filter again), naming the chat-in edges with a `reads` list that
-  miss a chat added or still read one removed, each a link that opens its panel. A connector not
-  running yet says to apply first. A new node starts **disabled** and a new chat-out edge a **dry
-  run**: its rhombus hollow and its part from the rhombus to the connector greyed and dashed; its
-  panel's **Dry-run / Send for real** switch, and a node's **Enabled** switch, are changes of the
-  draft, applied with Apply. A node's config, settings and account are forms made from its schemas,
-  each field's description as its help; a new node's config starts filled with its schema's
-  defaults, and an opened node shows its unset ones filled in, written with its first change
-  (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a secret a choice
-  of the secrets' names. Its outputs say what they carry (docs/bot-os.md D71): an events output its
-  event types, each with its description; an interface output its members, folded, each with its
-  signature (`signature.ts`) and help when opened. A node up that keeps a state (docs/bot-os.md D72)
-  has a **State** section, drawn from its schema alone (`StateViewer.tsx`): its pinned paths first,
-  then each section with its freshness; a list of objects as a sortable, searchable table, a map as
-  a table of keys and values, an object folded, a value as a labelled line; its card shows a line of
+  panel open on it. An edge is dragged from an output to an input; dropped on the card of a node
+  whose inputs its config declares (a script node, docs/bot-os.md D80), not on a port, it is bound
+  to an input of the node that takes it, or to one added to its config for it (`draft.ts`'s
+  `dropOn`: an events input of the output's namespace, or an interface input of its plugin with no
+  member, to pick in its panel); a rhombus at its midpoint, in its port type's colour
+  (`PortEdge.tsx`), is a button that selects it and opens its panel (`EdgeDetails.tsx`), where a
+  chat-in edge's `reads` (or all the chats its connector monitors) and its `senders` (anyone, or a
+  list with _me_), or a chat-out edge's `sends` and `commands`, are set, the chats ticked among its
+  connector's monitored chats and the words as rows (`Surfaces.tsx`, D62, D63); a connector's own
+  `chats`, what it monitors, are ticked from its surfaces, with a search; once the draft changes
+  them, a reminder beside them says that the edges which should read a chat need it ticked too (P6:
+  the edges filter again), naming the chat-in edges with a `reads` list that miss a chat added or
+  still read one removed, each a link that opens its panel. A connector not running yet says to
+  apply first. A new node starts **disabled** and a new chat-out edge a **dry run**: its rhombus
+  hollow and its part from the rhombus to the connector greyed and dashed; its panel's **Dry-run /
+  Send for real** switch, and a node's **Enabled** switch, are changes of the draft, applied with
+  Apply. A node's config, settings and account are forms made from its schemas, each field's
+  description as its help; a new node's config starts filled with its schema's defaults, and an
+  opened node shows its unset ones filled in, written with its first change (`defaults.ts`)
+  (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a secret a choice of the secrets'
+  names. Its outputs say what they carry (docs/bot-os.md D71): an events output its event types,
+  each with its description; an interface output its members, folded, each with its signature
+  (`signature.ts`) and help when opened. A node up that keeps a state (docs/bot-os.md D72) has a
+  **State** section, drawn from its schema alone (`StateViewer.tsx`): its pinned paths first, then
+  each section with its freshness; a list of objects as a sortable, searchable table, a map as a
+  table of keys and values, an object folded, a value as a labelled line; its card shows a line of
   it. A running connector's panel lists its **Queue** (`Queue.tsx`, D73): each send waiting, until
   when, and the nodes that asked for it with what cancels them, a send several share marked so, and
   the sends coalesced since the start with the pairs of nodes that shared them; a chat-out edge's

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { DevKit, FakeConnector, fakeConnectorPlugin } from './devkit.ts';
 import { GraphError, type GraphInput, nodeManifest, resolveGraph } from './graph.ts';
 import { type GraphFile, graphFileControls } from './graph-file.ts';
+import { describePlugin } from './graph-view.ts';
 import { type Manifest, type ManifestInput, parseManifest } from './manifest.ts';
 import { definePlugin, type Instance, type Plugin, type PluginContext } from './plugin.ts';
 
@@ -132,6 +133,39 @@ describe('a node’s own manifest', () => {
     const { manifest, problem } = nodeManifest(base, 'x', { hears: 'game', spacing: 'soon' });
     expect(problem).toBeUndefined();
     expect(Object.keys(manifest.inputs)).toEqual(['heard']);
+  });
+});
+
+describe('where a node declares its own inputs (D80)', () => {
+  const base: ManifestInput = {
+    id: 'grows',
+    version: '0.1.0',
+    kinds: ['stats'],
+    description: 'Inputs from its config',
+    config: z.object({ ins: z.record(z.string(), z.unknown()).default({}) }),
+  };
+
+  it('is told the editor, with the key and the types', () => {
+    const m = parseManifest({
+      ...base,
+      node: () => base,
+      configInputs: { key: 'ins', types: ['events', 'interface'] },
+    });
+    expect(describePlugin(m).configInputs).toEqual({ key: 'ins', types: ['events', 'interface'] });
+    expect(describePlugin(parseManifest(base))).not.toHaveProperty('configInputs');
+  });
+
+  it('is refused without a node manifest, or on a key its config has not', () => {
+    expect(() =>
+      parseManifest({ ...base, configInputs: { key: 'ins', types: ['events'] } })
+    ).toThrow(/configInputs: only a plugin whose nodes make their own manifest/u);
+    expect(() =>
+      parseManifest({
+        ...base,
+        node: () => base,
+        configInputs: { key: 'nope', types: ['events'] },
+      })
+    ).toThrow(/configInputs\.key: its config has no key nope/u);
   });
 });
 

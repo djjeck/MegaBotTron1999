@@ -2,12 +2,13 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AvailablePlugin, Graph, PluginView } from '#src/ui/api.ts';
+import { freeName } from '#src/ui/graph/draft.ts';
 import { GraphPage } from '#src/ui/graph/GraphPage.tsx';
 import { fakeCore } from '#test/fake-core.ts';
 import { AVAILABLE, status } from '#test/graph-view.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
 import { ApiPanel, ScriptEditor } from './ScriptEditor.tsx';
-import { fieldsOf, freeName, listOf, renamed, ScriptPorts } from './ScriptPorts.tsx';
+import { fieldsOf, listOf, renamed, ScriptPorts } from './ScriptPorts.tsx';
 import { scriptApi } from './types.ts';
 
 // Monaco needs a browser: a text area stands in for it, its diagnostics read from the text.
@@ -583,5 +584,78 @@ describe('a script node in the graph editor', () => {
     );
     expect(screen.queryByRole('dialog', { name: 'export of look' })).toBeNull();
     expect(status).toBeDefined();
+  });
+
+  it('takes an edge dropped on it from an output it has no input for, adding one (D80)', async () => {
+    const graph: Graph = {
+      version: 2,
+      nodes: [
+        { id: 'parser', plugin: 'parser' },
+        { id: 'look', plugin: 'script', config: { inputs: {} } },
+      ],
+      edges: [],
+    };
+    const core = fakeCore({
+      file: graph,
+      available: [
+        ...AVAILABLE,
+        { ...SCRIPT, configInputs: { key: 'inputs', types: ['events', 'interface'] } },
+      ],
+      status: { off: false, plugins: [] },
+    });
+    core.running = graph;
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    const look = await screen.findByLabelText('node look', {}, { timeout: 5000 });
+    const parserCard = screen.getByLabelText('node parser');
+    const handle = within(parserCard).getByTestId('port out interface');
+    // Dragged from the parser's interface output, dropped on the script's card, not a port.
+    const at = { clientX: 400, clientY: 300 };
+    vi.spyOn(document, 'elementFromPoint').mockReturnValue(look);
+    fireEvent.mouseDown(handle, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(document, at);
+    fireEvent.mouseUp(document, at);
+    await waitFor(() =>
+      expect(core.checked.at(-1)?.nodes.find((n) => n.id === 'look')?.config).toEqual({
+        inputs: { parser: { type: 'interface', plugin: 'parser', members: [] } },
+      })
+    );
+    expect(core.checked.at(-1)?.edges).toEqual([
+      { from: 'parser.interface', to: 'look.parser', type: 'interface' },
+    ]);
+    expect(screen.getByRole('status').textContent).toBe(
+      'look: input parser added to its inputs for parser.interface: pick the members it uses in its panel'
+    );
+    // An events input of the namespace it has takes the edge; dropped elsewhere, nothing.
+    core.file = {
+      ...graph,
+      nodes: [
+        { id: 'parser', plugin: 'parser' },
+        {
+          id: 'look',
+          plugin: 'script',
+          config: { inputs: { g: { type: 'events', namespace: 'game' } } },
+        },
+      ],
+    };
+    cleanup();
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    await screen.findByLabelText('node look', {}, { timeout: 5000 });
+    const drag = (): void => {
+      const events = within(screen.getByLabelText('node parser')).getByTestId('port out events');
+      fireEvent.mouseDown(events, { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.mouseMove(document, at);
+      fireEvent.mouseUp(document, at);
+    };
+    vi.spyOn(document, 'elementFromPoint').mockReturnValue(null);
+    drag();
+    expect(screen.queryByRole('status')).toBeNull();
+    vi.spyOn(document, 'elementFromPoint').mockReturnValue(screen.getByLabelText('node look'));
+    drag();
+    expect((await screen.findByRole('status')).textContent).toBe('parser.events bound to look.g');
+    await waitFor(() =>
+      expect(core.checked.at(-1)?.edges).toEqual([
+        { from: 'parser.events', to: 'look.g', type: 'events' },
+      ])
+    );
   });
 });

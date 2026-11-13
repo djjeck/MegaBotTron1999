@@ -269,7 +269,13 @@ interface Runner {
 export function scriptPlugin(options: ScriptPluginOptions = {}): Plugin {
   const isolation = options.isolation ?? 'worker';
   return definePlugin({
-    manifest: { ...BASE, node: scriptManifest },
+    // Its inputs are its config's: an edge dropped on it from an output it has no input for adds
+    // one there (D80).
+    manifest: {
+      ...BASE,
+      node: scriptManifest,
+      configInputs: { key: 'inputs', types: ['events', 'interface'] },
+    },
     create: (ctx): Instance => {
       const c = ctx.config as ScriptConfig;
       const stats = { calls: 0, errors: 0, ms: 0, maxMs: 0 };

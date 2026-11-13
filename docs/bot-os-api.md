@@ -59,6 +59,7 @@ instance does not start.
 | `drift`         | The parser's threshold for an unrecoverable rate of unread messages (§4.7)                                                                                                                                                                                                                                                            |
 | `interface`     | What it offers people, commands and agents (P11): `commands` (chat commands: name, help, arguments), `actions` (typed calls that change something: zod input and output) and `state` (typed reads, by name: zod output). The web UI, the chat commands and the agent interface are all made from these descriptions, and nothing else |
 | `node`          | Optional: each node's own manifest, from its config and its id, for a plugin whose ports its node's config declares (below, bot-os.md D74)                                                                                                                                                                                            |
+| `configInputs`  | Optional, with `node`: where its nodes declare their own inputs, `{ key, types }`: the key of its `config` holding a record of input ports by name, written as a manifest's, and the types it takes there (`events`, `interface`); the editor adds one there for an edge dropped on such a node (below, bot-os.md D80)                |
 | `audit`         | Optional: keys of its `config` whose every change a save or rollback of the graph records in the event log (`core.config`: who, when, the value's SHA-256, never the value; §2.3, bot-os.md D75)                                                                                                                                      |
 
 A connector's manifest also names its **account** (§4.5): the network and the identity it holds.
@@ -72,6 +73,18 @@ stands in for it. The node's ports, kinds, registered namespaces and event types
 everywhere: the check and its edges, the bus, the drift, the queue, the log's reads, `GET /status`,
 and the editor, which draws the node as `POST /graph/check`'s `views` say its draft config declares
 it (§2.3). `core.available()` (`GET /available`) describes the plugin's own.
+
+**Its inputs grown by the editor** (bot-os.md D80): such a plugin may say where its nodes declare
+their inputs (`configInputs: { key, types }`, the script plugin's
+`{ key: 'inputs', types: ['events', 'interface'] }`), which `GET /available` passes on. An edge the
+owner drops on such a node, on its card rather than one of its ports, from an output of one of those
+types, is bound to an input of the node that takes it (an events input of the output's namespace; an
+interface input of the output's plugin, unbound), or else to a new one written under that key: an
+events input of the namespace, or an interface input of the plugin with no member, which the owner
+picks in the node's panel (the check says so until then); named after the namespace or the plugin,
+with `-2`, `-3`… when taken. A manifest that declares it without `node`, or on a key its config has
+not, is refused. Only inputs grow: an output the node declares (a script's chat-out) is the owner's
+to add.
 
 `core.load()` checks the manifests, the graph, their order and their configuration, and makes the
 settings, before any plugin starts (`start` loads if it was not called). Each plugin instance's
@@ -1281,7 +1294,8 @@ rolls back to it after a confirmation repeating the diff, then restarts as Apply
 their namespace picked in a list of those offered or typed, a new one with none until picked, its
 interface inputs, their plugin picked the same way, with their members picked from what it offers,
 its chat-out outputs with their commands and spacing, its own events, its limits), each change a
-change of the draft, drawn as the check's `views` say. **Edit script** opens its code in Monaco
+change of the draft, drawn as the check's `views` say; an edge dropped on its card from an output it
+has no input for adds one (§2, bot-os.md D80). **Edit script** opens its code in Monaco
 (`monaco-editor`, bundled by Vite in a chunk loaded only then), its TypeScript checked against
 ES2022 and a `.d.ts` made for the node from its ports (`script/types.ts`: the members' and the event
 types' JSON Schemas as TypeScript, each with its help), beside a panel listing its API; **Keep**
