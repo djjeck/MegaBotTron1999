@@ -3,7 +3,8 @@
 # - every push to main: the tag `edge`;
 # - every pushed tag `v<version>`: the tag `<version>` (without the `v`), and `latest` unless the
 #   version is a pre-release (`v0.1.0-alpha.1`: a hyphen after the patch), which `latest` never
-#   follows, so that whoever runs `latest` only gets releases.
+#   follows, so that whoever runs `latest` only gets releases. Since `v0.1.0` there are no
+#   pre-releases: each release bumps the patch (`v0.1.1`, `v0.1.2`, …).
 # The checks of ci.yml run first, on the same commit.
 name: Publish
 

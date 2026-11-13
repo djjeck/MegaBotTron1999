@@ -17,10 +17,10 @@ dry run, logged as sent (D64).
 
 It knows no game. Games, and what plays them, are plugins on top of it.
 
-**Status: v1-alpha.** The core, the connectors, the turn plugins, the reactor, the module loader,
-the graph read from the data volume (`/data/graph.json`) with each node's state in an instance apart
-from it, and the web UI's graph editor, where the graph is built node by node, work. The plugin API
-changes freely until the launch ([docs/bot-os.md](docs/bot-os.md) P13).
+**Status: 0.1.x, before the launch.** The core, the connectors, the turn plugins, the reactor, the
+module loader, the graph read from the data volume (`/data/graph.json`) with each node's state in an
+instance apart from it, and the web UI's graph editor, where the graph is built node by node, work.
+The plugin API changes freely until the launch ([docs/bot-os.md](docs/bot-os.md) P13).
 
 > **Plugins run with the shell's full rights.** There is no sandbox. A plugin can read every secret
 > the process holds and send as every account it is connected to. Run only plugins you have read.
@@ -28,8 +28,9 @@ changes freely until the launch ([docs/bot-os.md](docs/bot-os.md) P13).
 ## Running it
 
 The image is `ghcr.io/djjeck/megabottron1999`, for `linux/amd64` and `linux/arm64`. `edge` follows
-`main`; each release `v<version>` is tagged `<version>` and `latest`, and a pre-release
-(`v0.1.0-alpha.1`) `<version>` alone.
+`main`; each release `v<version>` (`v0.1.0`, then a patch at a time: `v0.1.1`, `v0.1.2`, …) is
+tagged `<version>` and `latest`. The pre-releases before `v0.1.0` (`v0.1.0-alpha.1` to
+`v0.1.0-alpha.17`) are tagged `<version>` alone.
 
 ```sh
 mkdir -p secrets
