@@ -8,6 +8,7 @@ import {
   CATCH_UP_PAUSE_MS,
   CATCH_UP_RETRY_MAX_MS,
   createTelegramClient,
+  DIALOGS_TTL_MS,
   type GramClient,
   LAST_SEEN_DOC,
   login,
@@ -356,6 +357,45 @@ describe('every chat, and the surfaces', () => {
     expect((await c.surfaces({ search: ' lobby ', limit: 5 })).map((x) => x.id)).toEqual([GROUP]);
     expect((await c.surfaces({ search: 'quiz' })).map((x) => x.id)).toEqual(['@Quiz_bot']);
     expect(await c.surfaces({ limit: 1 })).toHaveLength(1);
+  });
+
+  it('given chats, lists the chats it does not monitor too, named as they would be given', async () => {
+    const lottery = dialog({
+      id: { toString: () => '-1005' },
+      title: 'Lottery Announcements',
+      date: 1_793_000_050,
+      isGroup: false,
+      isChannel: true,
+    });
+    const nobody = dialog({
+      id: { toString: () => '5000003' },
+      title: 'Bob',
+      date: 1_793_000_010,
+      isUser: true,
+      isGroup: false,
+      entity: {},
+    });
+    const f = fake({ dialogs: [dialog({}), quiz, lottery, nobody] });
+    const { c, clock } = make(f, { chats: ['@quiz_bot'] });
+    c.start();
+    await flush();
+    expect((await c.surfaces()).map((x) => x.id)).toEqual(['@quiz_bot', GROUP, '-1005', '5000003']);
+    expect(await c.surfaces({ search: 'LOTTERY' })).toEqual([
+      {
+        id: '-1005',
+        title: 'Lottery Announcements',
+        kind: 'channel',
+        lastActive: 1_793_000_050_000,
+      },
+    ]);
+    expect((await c.surfaces({ search: 'bob' })).map((x) => x.id)).toEqual(['5000003']);
+    // The searches share one fetch of every chat, until it is `DIALOGS_TTL_MS` old.
+    expect(f.calls.filter((x) => x === 'dialogs')).toHaveLength(2);
+    clock.advance(DIALOGS_TTL_MS);
+    expect((await c.surfaces({ search: 'lobby' })).map((x) => x.id)).toEqual([GROUP]);
+    expect(f.calls.filter((x) => x === 'dialogs')).toHaveLength(3);
+    // Still monitors only its chats: the others are listed, not read.
+    expect(c.send(GROUP, 'hi')).toBe(false);
   });
 });
 

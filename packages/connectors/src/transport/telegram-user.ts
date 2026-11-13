@@ -5,8 +5,9 @@
  *
  * It monitors the chats it is given and no other (a group by its id, `-100…`; a private chat by the
  * other's `@username`, or by their id when they have none), or, given none, every chat the account
- * has (its surfaces, bot-os.md D63). The account sees every chat of its owner, and the rest never
- * leaves this module. It sends any text to those chats, but only through the account's outbox,
+ * has. Its surfaces (bot-os.md D63) list every chat of the account, monitored or not, so that the
+ * owner can pick new ones. The account sees every chat of its owner, and the rest never leaves
+ * this module. It sends any text to those chats, but only through the account's outbox,
  * which keeps each plugin to the chats and commands of its reach (§4.6).
  *
  * **Catch-up** (docs/bot-os.md D62, D66): GramJS 2.26.22 has no update catch-up (`client.catchUp()`
@@ -78,7 +79,7 @@ export interface GramClient {
   connect(): Promise<boolean>;
   disconnect(): Promise<void>;
   /** The account's chats, latest first (and fills the entity cache, so a group's id resolves). */
-  getDialogs(params: { limit?: number }): Promise<Iterable<RawDialog>>;
+  getDialogs(params: { limit?: number; ignoreMigrated?: boolean }): Promise<Iterable<RawDialog>>;
   getInputEntity(id: number | string): Promise<unknown>;
   /** The logged-in user. */
   getMe(): Promise<unknown>;
@@ -117,6 +118,8 @@ export const USER_CHAT = /^(?:-?\d+|@\w{4,})$/u;
 export const RETRY_MS = 60_000;
 /** How many of the latest chats the surfaces list without a search. */
 export const SURFACES_LIMIT = 50;
+/** How long the searches reuse the account's full list of chats, fetched once for a run of them. */
+export const DIALOGS_TTL_MS = 30_000;
 
 /** How many messages the catch-up fetches back in a chat, at most. */
 export const CATCH_UP_CAP = 1000;
@@ -182,6 +185,8 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
   private readonly o: UserConnectorOptions;
   /** Each chat's peer, by the chat in lower case, once started. */
   private readonly peers = new Map<string, unknown>();
+  /** The account's full list of chats, for the surfaces' searches, and when it was fetched. */
+  private all: { at: number; dialogs: RawDialog[] } | undefined;
   /** The chats as given, by their lower case; undefined: every chat. */
   private readonly chats: Map<string, string> | undefined;
   private started = false;
@@ -273,17 +278,23 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
   }
 
   /**
-   * Its surfaces (bot-os.md D63): the account's chats, latest first, with their kind and title;
-   * with a search, those whose title, username or id has it, among all of them.
+   * Its surfaces (bot-os.md D63): the account's chats, latest first, with their kind and title,
+   * whether it monitors them or not (the owner picks new ones to monitor from them), the archived
+   * ones too; with a search, those whose title, username or id has it, among all of them (the
+   * full list, fetched once for the searches of `DIALOGS_TTL_MS`). Each is named as the connector
+   * names it once its config lists it.
    */
   async surfaces(query: SurfaceQuery = {}): Promise<Surface[]> {
     if (!this.connected) throw new Error('not connected');
     const search = query.search?.trim().toLowerCase() ?? '';
     const limit = query.limit ?? SURFACES_LIMIT;
-    const dialogs = [...(await this.o.client.getDialogs(search === '' ? { limit } : {}))];
+    const dialogs =
+      search === ''
+        ? [...(await this.o.client.getDialogs({ limit, ignoreMigrated: true }))]
+        : await this.allDialogs();
     return dialogs
       .map((d): Surface | undefined => {
-        const id = this.nameOf(d);
+        const id = this.surfaceName(d);
         if (id === undefined) return undefined;
         const title = d.title ?? id;
         return {
@@ -302,6 +313,15 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       )
       .sort((a, b) => (b.lastActive ?? 0) - (a.lastActive ?? 0))
       .slice(0, limit);
+  }
+
+  /** Every chat of the account (folders and the archive included), kept for `DIALOGS_TTL_MS`. */
+  private async allDialogs(): Promise<RawDialog[]> {
+    const now = this.o.clock.now();
+    if (this.all !== undefined && now - this.all.at < DIALOGS_TTL_MS) return this.all.dialogs;
+    const dialogs = [...(await this.o.client.getDialogs({ ignoreMigrated: true }))];
+    this.all = { at: now, dialogs };
+    return dialogs;
   }
 
   /** Whether it monitors `chat`: one of its chats, or any when it was given none. */
@@ -606,6 +626,16 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
 
   private nameOf(d: RawDialog): string | undefined {
     return this.chatName(d.id?.toString(), d.isUser === true ? username(d.entity) : undefined);
+  }
+
+  /**
+   * A dialog's name as a surface, monitored or not: as its config gives it, else as it would be
+   * named once given (a private chat's `@username`, else its id).
+   */
+  private surfaceName(d: RawDialog): string | undefined {
+    const id = d.id?.toString();
+    const other = d.isUser === true ? username(d.entity) : undefined;
+    return this.chatName(id, other) ?? (other === undefined ? id : `@${other}`);
   }
 
   /** The chat of a message, as given, or undefined for a chat it does not monitor. */

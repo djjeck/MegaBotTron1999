@@ -789,12 +789,14 @@ no plugin holds a way to send that skips it.
 
 **Surfaces** (bot-os.md D63): a connector may list the chats it can see,
 `surfaces({ search?, limit? })`, most recently active first, for the owner to pick from (the control
-API's `GET /accounts/<id>/surfaces`, §4.11): `telegram-user` its dialogs, searched by title,
-username or id among all of them; `telegram-bot` the chats it has seen in updates, kept in its store
-(`surfaces`), and one searched by its id or `@username`, asked of Telegram (`getChat`) and kept,
-since the Bot API cannot list a bot's chats; `irc` its channel. A connector's `chats` config (the
-two Telegram ones) is what it **monitors**: unset, every chat it has; each chat-in edge reads a
-subset (`reads`, `"*"` for all of them). A connector not running lists nothing.
+API's `GET /accounts/<id>/surfaces`, §4.11): `telegram-user` every dialog of the account, archived
+ones too, monitored or not (so that the owner can pick new ones), each named as its `chats` config
+would name it, searched by title, username or id among all of them (fetched once for the searches of
+30 s); `telegram-bot` the chats it has seen in updates, kept in its store (`surfaces`), and one
+searched by its id or `@username`, asked of Telegram (`getChat`) and kept, since the Bot API cannot
+list a bot's chats; `irc` its channel. A connector's `chats` config (the two Telegram ones) is what
+it **monitors**: unset, every chat it has; each chat-in edge reads a subset (`reads`, `"*"` for all
+of them). A connector not running lists nothing.
 
 **Missed messages** (bot-os.md D62): what was said while the instance was down is the connector's to
 deliver once, marked `playback` (so nothing acts on it: the reactor skips it, and the replies'
@@ -1418,13 +1420,13 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   (`telegram_user_api_id`, `telegram_user_api_hash`, `telegram_user_session`). It monitors the chats
   of its configuration (`chats`: a group by its id, a private chat by the other's `@username`, or
   their id when they have none), or every chat of the account when `chats` is unset (a new
-  connection), each edge reading a subset (§2.1); it lists its dialogs as its surfaces (§4.5), and
-  catches up at each connection on what its readers' chats said while it was down, each message once
-  (§4.5, D62, D66). It starts without waiting, retries every minute, and tells the owner of the
-  first failure; a message carries its id, the one it replies to, and `own` for the owner's own from
-  any device. It sends only through the account's outbox (`deliver`, with the message's id), its
-  queue's default interval between two sends of a command its config's `commandIntervalS` (D73);
-  GramJS's flood waits become `FloodWait`.
+  connection), each edge reading a subset (§2.1); it lists all its dialogs, monitored or not, as its
+  surfaces (§4.5), and catches up at each connection on what its readers' chats said while it was
+  down, each message once (§4.5, D62, D66). It starts without waiting, retries every minute, and
+  tells the owner of the first failure; a message carries its id, the one it replies to, and `own`
+  for the owner's own from any device. It sends only through the account's outbox (`deliver`, with
+  the message's id), its queue's default interval between two sends of a command its config's
+  `commandIntervalS` (D73); GramJS's flood waits become `FloodWait`.
 - **`ServiceConnector`** (`packages/connectors/src/plugins/service.ts`): for a connector plugin that
   holds an account's secrets and offers what it makes from them through its declared interface, but
   has no chat: it reads and sends nothing. The `anthropic` connector is one.
