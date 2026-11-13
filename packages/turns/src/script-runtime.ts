@@ -69,8 +69,13 @@ export interface ScriptBridge {
 
 /** The runtime's limits. */
 export interface ScriptLimits {
-  /** How long a handler's run may hold the thread at a stretch, and the script's first run. */
-  callMs: number;
+  /**
+   * How long a handler's synchronous run, and the script's first run, may hold the thread, in real
+   * time (vm's `timeout`): the main thread's, in the dev kit, where nothing else could stop a loop.
+   * None in a worker: its host's watchdog limits the CPU its thread spends instead, which a stalled
+   * host does not spend (docs/bot-os.md D85).
+   */
+  callMs?: number;
 }
 
 /** A handler call's end: how long it took, and its error, if it threw. */
@@ -121,6 +126,7 @@ const CALL = new vm.Script('__handler(__event)', { filename: 'script-call' });
 export class ScriptRuntime {
   private readonly bridge: ScriptBridge;
   private readonly limits: ScriptLimits;
+  private readonly running: (what: string | undefined) => void;
   private readonly context: vm.Context;
   /** Its handlers, by the pattern each was registered for, in the order registered. */
   private readonly handlers: { pattern: string; fn: (e: unknown) => unknown }[] = [];
@@ -140,9 +146,15 @@ export class ScriptRuntime {
     publishes: readonly string[];
     /** Its node's id, for its file name in errors. */
     id: string;
+    /**
+     * Told what synchronous run holds the thread (`its first run`, `a handler of <pattern>`) as it
+     * starts, and `undefined` as it ends: for the worker's host to name what it kills.
+     */
+    running?: (what: string | undefined) => void;
   }) {
     this.bridge = o.bridge;
     this.limits = o.limits;
+    this.running = o.running ?? (() => {});
     this.docs = new Map(Object.entries(o.documents));
     this.own = new Set(o.publishes);
     const log =
@@ -214,19 +226,27 @@ export class ScriptRuntime {
     return [...new Set(this.handlers.map((h) => h.pattern))];
   }
 
+  /** vm's options for a synchronous run: its limit in real time, when it has one. */
+  private runOptions(): vm.RunningScriptOptions {
+    return this.limits.callMs === undefined ? {} : { timeout: this.limits.callMs };
+  }
+
   /**
    * Runs the script (JavaScript, its types stripped), its handlers registered as it goes: its
-   * synchronous run within the limit (a ScriptTimeout past it), then what it awaits at its top
-   * level. A script that throws is refused, with why.
+   * synchronous run within the limit, if it has one (a ScriptTimeout past it), then what it awaits
+   * at its top level. A script that throws is refused, with why.
    */
   async load(js: string, file: string): Promise<void> {
     let run: Promise<unknown>;
     try {
       const script = new vm.Script(wrap(js), { filename: file, lineOffset: -1 });
-      run = script.runInContext(this.context, { timeout: this.limits.callMs }) as Promise<unknown>;
+      this.running('its first run');
+      run = script.runInContext(this.context, this.runOptions()) as Promise<unknown>;
     } catch (e) {
       if (timedOut(e)) throw new ScriptTimeout(`its first run took over ${this.limits.callMs} ms`);
       throw new Error(message(e));
+    } finally {
+      this.running(undefined);
     }
     try {
       await run;
@@ -239,7 +259,7 @@ export class ScriptRuntime {
 
   /**
    * Calls the handlers of `pattern` with an event, in turn: each one's synchronous run within the
-   * limit (a ScriptTimeout past it, which ends the script), then what it awaits. Each call's end is
+   * limit, if it has one (a ScriptTimeout past it, which ends the script), then what it awaits. Each call's end is
    * told to `ended`, with its error if it threw or rejected, its time by `now` (real time, for its
    * cost: D77).
    */
@@ -256,13 +276,15 @@ export class ScriptRuntime {
       this.context['__handler'] = h.fn;
       this.context['__event'] = plain(event);
       try {
-        result = CALL.runInContext(this.context, { timeout: this.limits.callMs });
+        this.running(`a handler of ${pattern}`);
+        result = CALL.runInContext(this.context, this.runOptions());
       } catch (e) {
         if (timedOut(e))
           throw new ScriptTimeout(`a handler of ${pattern} took over ${this.limits.callMs} ms`);
         ended({ ms: now() - started, error: message(e) });
         continue;
       } finally {
+        this.running(undefined);
         delete this.context['__handler'];
         delete this.context['__event'];
       }

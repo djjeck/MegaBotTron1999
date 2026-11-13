@@ -30,12 +30,15 @@ export type FromHost =
   | { op: 'sent'; send: number; result: SendOutcome }
   | { op: 'ping'; now: number };
 
-/** From the worker: its load, its calls' ends, its calls to the main thread, a pong. */
+/**
+ * From the worker: its load, the synchronous run that holds its thread, its calls' ends, its calls
+ * to the main thread, a pong.
+ */
 export type FromWorker =
   | { op: 'ready' }
   | { op: 'loaded'; patterns: string[] }
   | { op: 'refused'; reason: string }
-  | { op: 'timeout'; reason: string }
+  | { op: 'running'; what: string | undefined }
   | { op: 'ended'; end: CallEnd }
   | { op: 'use'; id: number; port: string; member: string; input: unknown }
   | { op: 'cancel'; id: number; send: number }

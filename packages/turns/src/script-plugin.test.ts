@@ -366,8 +366,11 @@ for (const isolation of ['in-process', 'worker'] as const)
       });
       parser.publish?.('quest.tick', {});
       await until(() => kit.core.state('examine')?.state === 'failed');
+      // In a worker, its limit is the CPU it spends (D85); in process, vm's, in real time.
       expect(kit.core.state('examine')?.reason).toBe(
-        'its script hung: a handler of quest.tick took over 50 ms'
+        isolation === 'worker'
+          ? 'its script hung: a handler of quest.tick spent over 50 ms of CPU'
+          : 'its script hung: a handler of quest.tick took over 50 ms'
       );
       expect(kit.core.state('quest-state')?.state).toBe('running');
       expect(lines.some((l) => l.startsWith('examine: error: failed: its script hung'))).toBe(true);
@@ -377,7 +380,12 @@ for (const isolation of ['in-process', 'worker'] as const)
     it('fails its node at start when its script throws, or hears what no input brings', async () => {
       for (const [code, why] of [
         ['throw new Error("broken");', 'its script failed: broken'],
-        ['for (;;) {}', 'its script hung: its first run took over 50 ms'],
+        [
+          'for (;;) {}',
+          isolation === 'worker'
+            ? 'its script hung: its first run spent over 50 ms of CPU'
+            : 'its script hung: its first run took over 50 ms',
+        ],
         [
           `on('cards.deal', () => {});`,
           'examine does not consume cards: add an events input of it',
@@ -437,6 +445,21 @@ describe('a script node in a worker', () => {
     parser.publish?.('quest.tick', {});
     await until(() => lines.some((l) => l.includes('woke')));
     // A few more of its watchdog's rounds, answered.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(kit.core.state('examine')?.state).toBe('running');
+    await kit.stop();
+  });
+
+  it('lets a handler’s run outlast its limit in real time while it spends no CPU (D85)', async () => {
+    // A host stalled in the middle of a run: the run is slow by the clock, light on the CPU. A wait
+    // that burns no CPU stands in for that stall here, in the handler's synchronous run itself.
+    const code = `on('quest.tick', () => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400); log.info('woke'); });`;
+    const { kit, parser, lines } = await run('worker', {
+      ...examineConfig(code),
+      limits: { callMs: 50, memoryMb: 64 },
+    });
+    parser.publish?.('quest.tick', {});
+    await until(() => lines.some((l) => l.includes('woke')));
     await new Promise((r) => setTimeout(r, 300));
     expect(kit.core.state('examine')?.state).toBe('running');
     await kit.stop();

@@ -13,12 +13,15 @@
  *   `outbox`/`enqueue`, `publish`, `store`, `clock` and `log`, as the plugin context has them. A
  *   config whose code does not parse is refused by the check.
  * - **Isolation:** in an instance, each node's script runs in a worker thread of its own, with its
- *   memory limited (`resourceLimits`) and a time limit on each handler's run; a script that holds
- *   its thread past it, runs out of memory or crashes is killed, and its node failed with why
- *   (`ctx.fail`), the instance up. Its calls to the main thread (interfaces, the queue, its store,
- *   its events, its log) are messages. In the dev kit (`isolation: 'in-process'`), the same
- *   runtime runs in the main thread on the kit's virtual clock, so that tests and simulations stay
- *   deterministic: each handler's synchronous run is limited still, its memory not.
+ *   memory limited (`resourceLimits`) and a limit on the CPU it spends at a stretch (`callMs`,
+ *   D81, D85): a script that holds its thread past it (a loop, in a handler's run or after an
+ *   await), runs out of memory or crashes is killed, and its node failed with why (`ctx.fail`),
+ *   the instance up; a thread stalled with its host, spending no CPU, is not. Its calls to the
+ *   main thread (interfaces, the queue, its store, its events, its log) are messages. In the dev
+ *   kit (`isolation: 'in-process'`), the same runtime runs in the main thread on the kit's virtual
+ *   clock, so that tests and simulations stay deterministic: there is no worker to kill, so each
+ *   synchronous run is cut by vm's limit, `callMs` of real time; a loop after an await is not
+ *   caught, nor its memory limited.
  * - **It reaches** its node's ports, its own store, its queue, the clock and a logger: never a
  *   secret, nor the files, nor the network. The `vm` context is no security boundary: the code is
  *   the owner's own (D28, D75).
@@ -172,7 +175,9 @@ export const scriptConfig = z.object({
         .min(10)
         .max(60_000)
         .default(1000)
-        .describe('How long a handler may hold its thread at a stretch, in milliseconds'),
+        .describe(
+          'How much CPU a handler may spend holding its thread at a stretch, in milliseconds'
+        ),
       memoryMb: z
         .number()
         .int()
@@ -438,7 +443,8 @@ function workerRunner(
   const data: WorkerData = {
     id: ctx.id,
     js: strip(c.code),
-    limits: { callMs: c.limits.callMs },
+    // No limit of vm's, real time: the watchdog's, on its CPU, is its limit (D85).
+    limits: {},
     documents: documentsOf(ctx),
     publishes: publishesOf(ctx, c),
     now: ctx.clock.now(),
@@ -449,6 +455,8 @@ function workerRunner(
   let refused: ((why: Error) => void) | undefined;
   let ping: ReturnType<typeof setTimeout> | undefined;
   let answered = true;
+  // The synchronous run holding its thread, as the worker last said: named when it is killed.
+  let running: string | undefined;
   let usage: { cpuMs?: number; heapBytes?: number } = {};
   let sampler: ReturnType<typeof setInterval> | undefined;
   // Its CPU and heap, sampled every few seconds (real time, as the watchdog's), for its cost.
@@ -471,21 +479,22 @@ function workerRunner(
     refused?.(new Error(`its script ${why}`));
     fail(`its script ${why}`);
   };
-  // The watchdog: a worker that does not answer within its limit may hold its thread (a loop after
-  // an await, which vm's limit does not see). Its time is real time, never the node's clock (the
-  // dev kit's is virtual, and moves by leaps): the one timer here not of `ctx.clock`, and it keeps
-  // no process alive. A ping unanswered is not enough to kill it: a host short of memory or CPU
+  // The watchdog, the one limit on its time: a worker that does not answer its ping may hold its
+  // thread, in a handler's run or in a loop after an await (vm has no limit here: its limit is
+  // real time, which a stalled host trips). Its time is real time, never the node's clock (the dev
+  // kit's is virtual, and moves by leaps): the one timer here not of `ctx.clock`, and it keeps no
+  // process alive. A ping unanswered is not enough to kill it: a host short of memory or CPU
   // stalls the whole process, its threads waiting on the disk or the scheduler, and a ping then
-  // waits for seconds behind an idle script (D81). It is hung once its thread has spent its limit
-  // on the CPU since the ping, which a loop does and a stall does not; until then it is waited for.
+  // waits for seconds behind an idle script, or one in the middle of a short run (D81, D85). It is
+  // hung once its thread has spent its limit on the CPU since the ping, which a loop does and a
+  // stall does not; until then it is waited for.
   let cpuAtPing = 0;
   const cpuMs = async (): Promise<number> => {
     const c = await (worker as Worker).cpuUsage();
     return (c.user + c.system) / 1000;
   };
   const rearm = (): void => {
-    // Twice the limit: a ping that lands as a run starts is answered once that run, limited by
-    // vm, has ended.
+    // Twice the limit: a ping that lands as a run starts is answered once that run has ended.
     ping = setTimeout(() => void watch(), 2 * c.limits.callMs);
     ping.unref();
   };
@@ -495,7 +504,11 @@ function workerRunner(
       const spent = (await cpuMs().catch(() => cpuAtPing)) - cpuAtPing;
       if (closing) return;
       if (!answered && spent >= c.limits.callMs) {
-        end(`hung: it held its thread past its limit of ${c.limits.callMs} ms`);
+        end(
+          running === undefined
+            ? `hung: it held its thread past its limit of ${c.limits.callMs} ms`
+            : `hung: ${running} spent over ${c.limits.callMs} ms of CPU`
+        );
         return;
       }
       // Its thread stalled, not running: the ping still stands.
@@ -525,8 +538,8 @@ function workerRunner(
       case 'refused':
         refused?.(new Error(`its script failed: ${m.reason}`));
         return;
-      case 'timeout':
-        end(`hung: ${m.reason}`);
+      case 'running':
+        running = m.what;
         return;
       case 'ended':
         ended(m.end);

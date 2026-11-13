@@ -1710,18 +1710,21 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   cannot cross a thread. A member, an output or an event type its ports do not declare is refused,
   with why (`state offers it state.count, not state.get`); a handler that throws is logged, and the
   others go on. **It runs** in a worker thread of its own, its environment empty, its heap limited
-  (`limits.memoryMb`, 16–2048, 64 by default), and each handler's synchronous run limited
-  (`limits.callMs`, 10–60000, 1000 by default, vm's timeout), as is any stretch it holds its thread
-  (a ping from the main thread unanswered for twice the limit while the worker's thread spends the
-  limit on the CPU, as a loop after an `await` does; a thread stalled with its host, not running, is
-  waited for, bot-os.md D81): past either, or if it crashes, the worker is killed and the node
-  failed with why (`its script hung: a handler of quest.tick took over 1000 ms`,
+  (`limits.memoryMb`, 16–2048, 64 by default), and the CPU it spends at a stretch limited
+  (`limits.callMs`, 10–60000, 1000 by default): a ping from the main thread unanswered for twice the
+  limit while the worker's thread spends the limit on the CPU, as a loop does in a handler's run or
+  after an `await`, is a hang; a thread stalled with its host, not running, is waited for, even in
+  the middle of a run (bot-os.md D81, D85). Past either, or if it crashes, the worker is killed and
+  the node failed with why (`its script hung: a handler of quest.tick spent over 1000 ms of CPU`,
   `its script ran out of memory (its limit is 64 MB)`), the instance up. Its calls to the main
   thread are messages: an interface's member called there, a send queued there, its store's writes
   (read from a copy beside it), its events and its log lines; its clock is the main thread's time as
   the event was handed over. **In the dev kit** (§4.10), `scriptPlugin({ isolation: 'in-process' })`
   runs the same runtime in the main thread, on the kit's virtual clock, its calls direct, so that a
-  run is deterministic; its handlers' synchronous runs are limited still, not its memory.
+  run is deterministic. There is no worker to kill there, so its limit is vm's `timeout` on each
+  synchronous run, `callMs` of real time
+  (`its script hung: a handler of quest.tick took over 1000 ms`); a loop after an `await` is not
+  caught, nor its memory limited.
 
 - **`statePlugin`** (`packages/turns/src/state-plugin.ts`, bot-os.md D72): a game's player state (an
   inventory, a profile), kept by the shell from the events its parsers publish, one plugin per

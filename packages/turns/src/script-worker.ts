@@ -5,7 +5,7 @@
  * main thread, and this file through the worker's tests.
  */
 import { parentPort, workerData } from 'node:worker_threads';
-import { ScriptRuntime, ScriptTimeout, type SendOutcome } from './script-runtime.ts';
+import { ScriptRuntime, type SendOutcome } from './script-runtime.ts';
 import { type FromHost, type FromWorker, type WorkerData } from './script-worker-messages.ts';
 
 const port = parentPort;
@@ -37,6 +37,9 @@ const runtime = new ScriptRuntime({
   limits: data.limits,
   documents: data.documents,
   publishes: data.publishes,
+  // No limit of vm's here, real time, which a stalled host would trip: its host's watchdog limits
+  // the CPU this thread spends (D85), and names the run it kills by what is told it here.
+  running: (what) => post({ op: 'running', what }),
   bridge: {
     use: (p, member, input) => call((id) => ({ op: 'use', id, port: p, member, input })),
     enqueue: (send, p, chat, text, cancel, done) => {
@@ -65,16 +68,12 @@ port.on('message', (m: FromHost) => {
       return;
     case 'event':
       tick(m.now);
-      try {
-        runtime.dispatch(
-          m.pattern,
-          m.event,
-          (end) => post({ op: 'ended', end }),
-          () => performance.now()
-        );
-      } catch (e) {
-        post({ op: 'timeout', reason: message(e) });
-      }
+      runtime.dispatch(
+        m.pattern,
+        m.event,
+        (end) => post({ op: 'ended', end }),
+        () => performance.now()
+      );
       return;
     case 'answer': {
       const c = calls.get(m.id);
@@ -93,10 +92,5 @@ port.on('message', (m: FromHost) => {
 post({ op: 'ready' });
 runtime.load(data.js, `${data.id}.ts`).then(
   () => post({ op: 'loaded', patterns: runtime.patterns() }),
-  (e: unknown) =>
-    post(
-      e instanceof ScriptTimeout
-        ? { op: 'timeout', reason: message(e) }
-        : { op: 'refused', reason: message(e) }
-    )
+  (e: unknown) => post({ op: 'refused', reason: message(e) })
 );
