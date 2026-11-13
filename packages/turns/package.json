@@ -17,8 +17,8 @@
     "node": ">=24"
   },
   "dependencies": {
-    "@megabottron1999/connectors": "0.1.0",
-    "@megabottron1999/core": "0.1.0",
+    "@megabottron1999/connectors": "0.1.1",
+    "@megabottron1999/core": "0.1.1",
     "zod": "4.6.7"
   }
 }

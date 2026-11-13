@@ -20,7 +20,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@megabottron1999/core": "0.1.0"
+    "@megabottron1999/core": "0.1.1"
   },
   "devDependencies": {
     "@xyflow/react": "12.12.0",
