@@ -23,6 +23,7 @@ import {
   ConnectorBase,
   FloodWait,
   type InboundDocument,
+  LIVE_GRACE_S,
   readDocument,
   type Surface,
   type SurfaceQuery,
@@ -163,6 +164,11 @@ export interface BotConnectorOptions {
   /** Polling waits for this: the app installs its handlers on the bot first. */
   listen?: Promise<unknown>;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * How old a message Telegram kept while it was down may be and still count as news, in ms (D83):
+   * from its own time to its delivery. Older, it is played back. `LIVE_GRACE_S` by default.
+   */
+  liveGraceMs?: number;
   /** Downloads a file by its id (D82); by default, `getFile` and its URL on the Bot API. */
   download?: (fileId: string) => Promise<Uint8Array>;
 }
@@ -208,6 +214,9 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
       const m = ctx.message;
       this.saw(m.chat, m.date * 1000);
       const missed = m.date < this.since;
+      // News still within its grace (D83): a quick restart costs nothing.
+      const grace = this.o.liveGraceMs ?? LIVE_GRACE_S * 1000;
+      const old = missed && (this.o.now ?? Date.now)() - m.date * 1000 > grace;
       const key = String(m.chat.id);
       // Accounted for before it is delivered, once (D66); the app's handlers still hear it.
       const again = this.ledger.covered(key, m.message_id);
@@ -230,7 +239,7 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
             ...(m.reply_to_message === undefined
               ? {}
               : { replyTo: String(m.reply_to_message.message_id) }),
-            playback: missed,
+            playback: old,
             ...(missed ? { missed } : {}),
             ...(document === undefined ? {} : { document }),
           });

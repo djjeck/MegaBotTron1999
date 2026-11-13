@@ -9,6 +9,7 @@
  * through the outbox (§4.6).
  */
 
+import { z } from 'zod';
 import { type Buttons, type ChatCommand } from './commands.ts';
 import { type Limits, type TextFormat } from './outbox.ts';
 
@@ -33,6 +34,21 @@ export interface InboundDocument {
    */
   skipped?: 'type' | 'size' | 'encoding' | 'failed';
 }
+
+/**
+ * How old a message delivered by a connector's catch-up may be and still count as news, in
+ * seconds (bot-os.md D83): from its own time to its delivery. Older, it is played back (history);
+ * a quick restart so costs nothing.
+ */
+export const LIVE_GRACE_S = 120;
+/** A connector's config field for it. */
+export const liveGraceS = z
+  .number()
+  .min(0)
+  .default(LIVE_GRACE_S)
+  .describe(
+    'How many seconds old a message caught up after a restart may be and still count as live, not history'
+  );
 
 /** The largest file a connector reads the text of (D82): 256 KiB. */
 export const DOCUMENT_MAX_BYTES = 256 * 1024;
@@ -110,11 +126,15 @@ export interface Inbound {
   replyTo?: string;
   /**
    * Not news: history replayed at connection (ZNC's buffer), or a message said while the instance
-   * was down and delivered once by the connector's catch-up (`missed`). Parsers read it; nothing
-   * acts on it.
+   * was down and delivered once by the connector's catch-up (`missed`) more than its grace
+   * (`liveGraceS`, 2 minutes by default, D83) after it was said. Parsers read it; nothing acts on
+   * it, nor on the events read from it (`playback: true` in theirs).
    */
   playback: boolean;
-  /** Said while the instance was down, delivered once by the connector's catch-up (§4.5). */
+  /**
+   * Said while the instance was down, delivered once by the connector's catch-up (§4.5); news
+   * still (`playback` false) within its grace.
+   */
   missed?: boolean;
   /** Sent by the account itself, from any of its devices (a Telegram user's own messages). */
   own?: boolean;

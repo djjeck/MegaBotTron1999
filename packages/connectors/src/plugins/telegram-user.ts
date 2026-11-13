@@ -9,7 +9,7 @@
  * catches up on what its readers' chats said while it was down (D62), keeping the last message id
  * seen in each chat in its store.
  */
-import { commandIntervalS, definePlugin, type Plugin } from '@megabottron1999/core';
+import { commandIntervalS, definePlugin, liveGraceS, type Plugin } from '@megabottron1999/core';
 import { z } from 'zod';
 import {
   createTelegramClient,
@@ -38,6 +38,7 @@ export const telegramUserConfig = z.object({
       'The chats it monitors: a group by its id (-100…), a private chat by @username; unset: every chat'
     ),
   commandIntervalS,
+  liveGraceS,
 });
 export type TelegramUserConfig = z.infer<typeof telegramUserConfig>;
 
@@ -92,6 +93,7 @@ export function telegramUserPlugin(
         record: (type, fields) => ctx.record(type, fields),
         store: ctx.store,
         readers: () => ctx.readers?.() ?? [],
+        liveGraceMs: (ctx.config as TelegramUserConfig).liveGraceS * 1000,
       });
       connector.limits = {
         commandIntervalMs: (ctx.config as TelegramUserConfig).commandIntervalS * 1000,

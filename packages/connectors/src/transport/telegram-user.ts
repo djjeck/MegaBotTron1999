@@ -30,6 +30,7 @@ import {
   FloodWait,
   type Inbound,
   type InboundDocument,
+  LIVE_GRACE_S,
   readDocument,
   type ReadFilter,
   type Surface,
@@ -201,6 +202,11 @@ export interface UserConnectorOptions {
    * catch-up.
    */
   readers?: () => readonly ReadFilter[];
+  /**
+   * How old a caught-up message may be and still count as news, in ms (D83): from its own time to
+   * its delivery. Older, it is played back. `LIVE_GRACE_S` by default.
+   */
+  liveGraceMs?: number;
 }
 
 /** A chat to catch up on: its dialog, its name, its marked id, up to which message; its failures. */
@@ -595,7 +601,10 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       if (generation !== this.generation) return;
       this.ledger.advance(gap.key, m.id);
       if (inbound === undefined || !this.remember(gap.key, m.id)) continue;
-      this.received({ ...inbound, playback: true, missed: true });
+      // News still within its grace (D83): a quick restart costs nothing.
+      const grace = this.o.liveGraceMs ?? LIVE_GRACE_S * 1000;
+      const old = this.o.clock.now() - inbound.time > grace;
+      this.received({ ...inbound, playback: old, missed: true });
     }
     this.ledger.advance(gap.key, gap.upTo);
   }

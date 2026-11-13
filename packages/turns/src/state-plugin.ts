@@ -19,6 +19,10 @@
  * - **Announces** each applied event that changed something as `<id>.changed` (the sections whose
  *   value changed, and those whose freshness did), after the state is kept: a crash between the
  *   two announces it again at the next start, so a change is announced at least once, never lost.
+ * - **Tells what happened** in the spec's own events (`events`, `announce`: an item gained, a level
+ *   reached, D83), for an event applied live and not played back alone: news, never history. Each
+ *   is checked against its schema and published after the state is kept, with its event's time;
+ *   kept nowhere, so a crash before it loses it, and the catch-up at start makes none.
  * - **Offers** its interface: `state.get({ path? })`, `state.freshness({ section? })` and the
  *   spec's queries; and its view, for the node panel's generic viewer and its card's line, from
  *   its node's `pin` (`config.pin`, dotted paths drawn first).
@@ -83,6 +87,19 @@ export interface StateSpec<S extends Record<string, unknown>> {
   /** Named queries, offered beside `get` and `freshness` as reads of its interface. */
   queries?: Record<string, StateQuery<S>>;
   /**
+   * Its own events (D83), by name (`gained`: `<id>.gained`), each with its payload's schema,
+   * declared beside `<id>.changed`; `changed` and `refused` are its own already.
+   */
+  events?: Record<string, z.ZodObject>;
+  /**
+   * What an applied event means, in its own events (D83): pure, from the state before it, the
+   * state after it and the event. Called only for news: an event applied live (not one refused,
+   * nor one the catch-up at start reads from the log) that is not played back (`playback: true`,
+   * derived from a message of history). Each is published once the state is kept, in order, with
+   * the event's time; best effort: never kept, never published again after a crash.
+   */
+  announce?(before: S, after: S, event: BusEvent): readonly Announcement[];
+  /**
    * The store's migrations (§4.2, the manifest's `state`), in order, for a kept state whose schema
    * changed: one that does not fit the schema fails the node, with why.
    */
@@ -103,6 +120,19 @@ export interface Changed {
   event?: { type: string; t: number };
 }
 
+/** One of the spec's own events (D83): its name (`gained`), and its payload. */
+export interface Announcement {
+  type: string;
+  payload: Record<string, unknown>;
+}
+
+/** An announcement of the spec's, checked and waiting: its full type, its payload, its time. */
+interface Announced {
+  type: string;
+  payload: Record<string, unknown>;
+  t: number;
+}
+
 /** What the store keeps. */
 interface Kept<S> {
   state: S;
@@ -118,6 +148,8 @@ interface Kept<S> {
 const TYPE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\.[a-z][A-Za-z0-9]*$/u;
 const ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const RESERVED = new Set(['get', 'freshness']);
+const OWN_EVENTS = new Set(['changed', 'refused']);
+const EVENT_NAME = /^[a-z][A-Za-z0-9]*$/u;
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -157,6 +189,12 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
   }
   for (const q of Object.keys(spec.queries ?? {}))
     if (RESERVED.has(q)) fail(`a query cannot be named ${q}`);
+  const own = Object.entries(spec.events ?? {});
+  for (const [name] of own) {
+    if (!EVENT_NAME.test(name)) fail(`${name} is not an event's name, as gained`);
+    if (OWN_EVENTS.has(name)) fail(`an event cannot be named ${name}`);
+  }
+  if (spec.announce !== undefined && own.length === 0) fail('it announces, but declares no event');
   const initial = spec.schema.safeParse(spec.initial);
   if (!initial.success) fail(`its initial state does not fit its schema: ${initial.error.message}`);
   const sections = Object.keys(spec.schema.shape);
@@ -190,6 +228,7 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
             event: z.object({ type: z.string(), t: z.number() }).optional(),
           })
           .describe('Its state changed: the sections whose value or freshness did, and the event'),
+        ...Object.fromEntries(own.map(([name, schema]) => [`${spec.id}.${name}`, schema])),
       },
       inputs: inputsOf(spec.consumes),
       config,
@@ -237,6 +276,8 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
       const announced = ctx.store.read<{ batch: number }>(ANNOUNCED_DOC)?.batch ?? 0;
       /** The announcements of what was applied since the last save. */
       let pending: Changed[] = [];
+      /** The spec's own events of the news applied since the last save (D83): never kept. */
+      let news: Announced[] = [];
       let dirty = false;
       let scheduled = false;
       let live = false;
@@ -258,6 +299,9 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
           unannounced: out,
         } satisfies Kept<S>);
         announce(out, batch);
+        const said = news;
+        news = [];
+        for (const a of said) ctx.bus.publish(a.type, a.payload, a.t);
       };
       const announce = (out: readonly Changed[], n: number): void => {
         if (out.length === 0) return;
@@ -294,7 +338,7 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
        * while another is delivered reaches it first, so the cursor only grows: it is kept once
        * the delivery is over, when everything behind it is applied.
        */
-      const apply = (event: BusEvent, at: LogPosition | undefined): void => {
+      const apply = (event: BusEvent, at: LogPosition | undefined, heard = false): void => {
         if (at !== undefined)
           cursor = { ...cursor, [at.day]: Math.max(cursor[at.day] ?? 0, at.end) };
         dirty = true;
@@ -316,10 +360,44 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
         const refreshed = Object.entries(marks).flatMap(([s, how]) =>
           how === undefined || !sections.includes(s) ? [] : (mark(s, how, stamp), [s])
         );
+        const before = state;
         state = next;
         if (changed.length > 0) updatedAt = ctx.clock.now();
         if (changed.length > 0 || refreshed.length > 0)
           pending.push({ sections: changed, refreshed, event: { type: event.type, t: event.t } });
+        if (heard && event['playback'] !== true) news.push(...told(before, next, event));
+      };
+
+      /**
+       * The spec's own events for an applied event (D83), each checked against its schema: one
+       * not declared, or whose payload its schema refuses, is warned of and dropped, as are all
+       * of an event's when `announce` throws; the state stays applied.
+       */
+      const told = (before: S, after: S, event: BusEvent): Announced[] => {
+        if (spec.announce === undefined) return [];
+        let made: readonly Announcement[];
+        try {
+          made = spec.announce(before, after, event);
+        } catch (e) {
+          ctx.log.warn(`${event.type} at ${event.t} announced nothing: ${message(e)}`);
+          return [];
+        }
+        return made.flatMap((a): Announced[] => {
+          const schema = spec.events?.[a.type];
+          const checked = schema?.safeParse(a.payload);
+          if (checked?.success !== true) {
+            const why = checked === undefined ? 'no such event' : checked.error.message;
+            ctx.log.warn(`${event.type} at ${event.t}: ${a.type} not announced: ${why}`);
+            return [];
+          }
+          return [
+            {
+              type: `${spec.id}.${a.type}`,
+              payload: checked.data,
+              t: event.t,
+            },
+          ];
+        });
       };
 
       const unsubscribe: (() => void)[] = [];
@@ -342,7 +420,7 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
               ctx.bus.subscribe(ns, (e, at) => {
                 if (!live || !spec.consumes.includes(e.type)) return;
                 if (at !== undefined && behind(at, caught)) return;
-                apply(e, at);
+                apply(e, at, true);
                 later();
               })
             );
@@ -351,7 +429,8 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
           cursor = tail.cursor;
           caught = tail.cursor;
           live = true;
-          // The catch-up announced as one change, its sections summed.
+          // The catch-up announced as one change, its sections summed; it tells nothing of what
+          // happened (D83): history, not news.
           const applied = pending;
           pending =
             applied.length === 0

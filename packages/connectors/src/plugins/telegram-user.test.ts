@@ -152,7 +152,7 @@ describe('the telegram-user plugin', () => {
 
   it('catches up on the chats its readers read, through their filters, from its store', async () => {
     const heard: string[] = [];
-    const clock = new VirtualClock();
+    const clock = new VirtualClock(3_600_000);
     const said = (id: number, sender: string): RawMessage => ({
       id,
       date: 1,

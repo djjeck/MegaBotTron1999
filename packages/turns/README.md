@@ -25,8 +25,10 @@ a game's player state, and the script node.
   required events input per namespace, so that its parser stopped takes it down), a pure reducer,
   the freshness each event gives its sections, and named queries (docs/bot-os.md D72). The shell
   keeps it in its store with a cursor into the event log, so that each event is applied once across
-  restarts, announces each change (`<id>.changed`), offers `get`, `freshness` and the queries, and
-  its view, which the web UI draws from the schema alone. It never sends.
+  restarts, announces each change (`<id>.changed`) and, in the spec's own events (`events`,
+  `announce`: an item gained), what each live event did, never what the catch-up or a played-back
+  event did (D83), offers `get`, `freshness` and the queries, and its view, which the web UI draws
+  from the schema alone. It never sends.
 
 - `scriptPlugin` (`src/script-plugin.ts`): the `script` node, TypeScript the owner types in the web
   UI (docs/bot-os.md D76), on the ports its config declares (events and interface inputs, chat-out

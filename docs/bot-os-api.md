@@ -802,6 +802,13 @@ true across restarts; a file found shorter than it (a backup put back) is not re
 that subscribes and reads after its cursor in one synchronous step misses nothing and reads nothing
 twice: what was published before is in the log, what comes after is heard live.
 
+**History, not news** (bot-os.md D83): an event read from a message played back (`Inbound.playback`:
+missed while the instance was down and delivered by a connector's catch-up more than its grace,
+`liveGraceS`, 2 minutes by default, after it was said; or a bouncer's buffer) carries
+`playback: true` in its payload, as a turn parser's `<id>.turn` does. It is applied like any (a
+state keeps it), but nothing acts on it: a reaction skips it, a state plugin tells nothing of it in
+its own events, and a script node should check it before it sends.
+
 Two plugins registering one type is an error of the deployment; two instances of one plugin share
 its types, and each subscriber hears only the instances its edges bind. A subscriber that throws is
 logged and the others still get the event.
@@ -822,7 +829,7 @@ interface Inbound {
   time: number;
   id?: string; // the network's message id, where it has one
   replyTo?: string;
-  playback: boolean; // not news: ZNC's buffer at connection, or missed while down
+  playback: boolean; // not news: ZNC's buffer at connection, or missed while down past its grace
   missed?: boolean; // said while the instance was down, delivered once by the connector
   own?: boolean; // sent by the account itself, from any of its devices
   document?: InboundDocument; // the file it carries; `text` is then its caption ('' without one)
@@ -1469,8 +1476,9 @@ interface Reaction {
 
 - **On an event:** `on` is an event type (`quest.turn`) or a namespace on the bus, one its events
   inputs consume or its own (§4.4), heard from the nodes its edges bind. Its payload is the event as
-  published, `{ type, t, instance, ...payload }`. An event older than `maxAgeMs` (a parser's replay
-  of its history at `ready`) is skipped, and recorded, so that history is not acted on again.
+  published, `{ type, t, instance, ...payload }`. An event played back (`playback: true`, D83) is
+  skipped, and recorded; so is an event older than `maxAgeMs` (a parser's replay of its history at
+  `ready`) is skipped, and recorded, so that history is not acted on again.
 - **On a message:** `on` is `{ port, chats, match }`: the messages read on the chat-in input `port`
   (`chat` by default), in `chats` (compared without case; every chat its edge reads without), whose
   text contains `match` (a string) or matches it (a `RegExp`). Messages played back and the
@@ -1528,9 +1536,10 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   auto-retry waits out becomes `FloodWait`); `commandIntervalS` in its config is its queue's default
   interval between two sends of a command (D73). With `chats` in its config (ids or `@username`s) it
   monitors only those for the plugins; its surfaces are the chats it has seen (§4.5), and the
-  updates Telegram kept while it was down come marked `missed`. Configured with the owner's Telegram
-  user id and optionally a group (`owner`, `group`, in its node's config), it is the instance's chat
-  surface, and the owner's chat that the core sends the owner's notices to (§4.8, bot-os.md D56)
+  updates Telegram kept while it was down come marked `missed` (and `playback` once older than its
+  config's `liveGraceS`, 120 s by default, D83). Configured with the owner's Telegram user id and
+  optionally a group (`owner`, `group`, in its node's config), it is the instance's chat surface,
+  and the owner's chat that the core sends the owner's notices to (§4.8, bot-os.md D56)
   (`telegram-surface.ts`): the switchboard on its bot (`telegram-switchboard.ts`, on
   grammy-switchboard), the plugins' commands answered in the group, the owner's chat and any other
   private chat (`telegram-commands.ts`), the menus kept registered, and the owner's notices carried
@@ -1542,12 +1551,14 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   their id when they have none), or every chat of the account when `chats` is unset (a new
   connection), each edge reading a subset (§2.1); it lists its dialogs, monitored or not, as its
   surfaces (§4.5: those active this week by default, any by a search), and catches up at each
-  connection on what its readers' chats said while it was down, each message once (§4.5, D62, D66).
-  It starts without waiting, retries every minute, and tells the owner of the first failure; a
-  message carries its id, the one it replies to, and `own` for the owner's own from any device. It
-  sends only through the account's outbox (`deliver`, with the message's id), its queue's default
-  interval between two sends of a command its config's `commandIntervalS` (D73); GramJS's flood
-  waits become `FloodWait`.
+  connection on what its readers' chats said while it was down, each message once (§4.5, D62, D66),
+  marked `missed`, and `playback` too once older than its config's `liveGraceS` (120 s by default,
+  from the message's time to its delivery, D83): a message missed by a quick restart is news. It
+  starts without waiting, retries every minute, and tells the owner of the first failure; a message
+  carries its id, the one it replies to, and `own` for the owner's own from any device. It sends
+  only through the account's outbox (`deliver`, with the message's id), its queue's default interval
+  between two sends of a command its config's `commandIntervalS` (D73); GramJS's flood waits become
+  `FloodWait`.
 - **`ServiceConnector`** (`packages/connectors/src/plugins/service.ts`): for a connector plugin that
   holds an account's secrets and offers what it makes from them through its declared interface, but
   has no chat: it reads and sends nothing. The `anthropic` connector is one.
@@ -1567,20 +1578,20 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   bare or addressed to its bot, sent by hand from any device; and those its actor sends, told
   through its action `sent`, since the account never sees its own sends come back), and which of its
   bot's messages answer one: a reply to it or, in the private chat, the first message within two
-  minutes of it. What it reads it publishes as `<id>.turn` (`{ chat, outcome }`); a message it
-  claims and cannot read goes to drift (§4.7) and is published as an `unknown` outcome. Its read
-  `rest` says until when the bot rests, from its last answer. It resumes from what it parsed (D62):
-  the owner's recent turns and its bot's rest are kept in its store (`parsed`) as they change and
-  read back at its start; it never re-reads the chat, and reads missed messages as any other. Its
-  game gives it a spec (`TurnParserSpec`): its `id`, its `bot`, its `description`, its grammar
-  (`read`, given each of its bot's messages as a `BotMessage`: `text`, `private`, `answers`,
-  `replies`, `self`, and `document`, the file it carries with its text when it has one, such as the
-  bot's export of the player's state, beside the caption in `text`, D82) and its `turnCommands`, the
-  bot's turn commands by first word (`["/play"]`, at least one): which commands are turns is a fact
-  of the game, so it has no config (bot-os.md D70). A node saved while it had one
-  (`"config": { "commands": [...] }`) still loads and runs: a plugin with no config schema ignores
-  its node's config, which the file keeps as written until the owner takes it out. The tests play a
-  made-up @QuestBot (`packages/turns/test/quest.ts`).
+  minutes of it. What it reads it publishes as `<id>.turn` (`{ chat, outcome, playback? }`,
+  `playback: true` for a message played back, D83); a message it claims and cannot read goes to
+  drift (§4.7) and is published as an `unknown` outcome. Its read `rest` says until when the bot
+  rests, from its last answer. It resumes from what it parsed (D62): the owner's recent turns and
+  its bot's rest are kept in its store (`parsed`) as they change and read back at its start; it
+  never re-reads the chat, and reads missed messages as any other. Its game gives it a spec
+  (`TurnParserSpec`): its `id`, its `bot`, its `description`, its grammar (`read`, given each of its
+  bot's messages as a `BotMessage`: `text`, `private`, `answers`, `replies`, `self`, and `document`,
+  the file it carries with its text when it has one, such as the bot's export of the player's state,
+  beside the caption in `text`, D82) and its `turnCommands`, the bot's turn commands by first word
+  (`["/play"]`, at least one): which commands are turns is a fact of the game, so it has no config
+  (bot-os.md D70). A node saved while it had one (`"config": { "commands": [...] }`) still loads and
+  runs: a plugin with no config schema ignores its node's config, which the file keeps as written
+  until the owner takes it out. The tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
 - **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
   (P3, P17), each with its own id, configuration, store, timer and state. Its ports: `chat`, a
   chat-in input on `telegram`, which reads the private chat with its bot (for the turns the owner
@@ -1750,9 +1761,9 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
     through it, and it, of kind `stats`, goes on, as every node that does not act;
     `reduce(state, event)`, pure; `freshness(event, changed)`, what the event says of the sections
     it touches (`snapshot`, `delta` or `uncertain`; by default each section it changed a `delta`);
-    `queries`, reads of its interface beside `get` and `freshness`; and `migrations` (§4.2) for a
-    kept state whose schema changed (one that does not fit fails the node, with why). Its kind is
-    `stats`; its namespace is its id.
+    `queries`, reads of its interface beside `get` and `freshness`; `events` and `announce`, its own
+    events (below); and `migrations` (§4.2) for a kept state whose schema changed (one that does not
+    fit fails the node, with why). Its kind is `stats`; its namespace is its id.
   - **Kept** in its store, one document, `state`:
     `{ state, updatedAt, cursor, freshness, batch, unannounced }`. **Freshness** per section:
     `{ snapshot?: { t, event }, deltas, uncertain, updated?: { t, event } }`, "a full snapshot at T,
@@ -1771,6 +1782,19 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
     sections summed, with no event. A crash between the write and the announcement: the batch kept
     with the state is announced at the next start (a note, `announced`, says the last done), so a
     change is announced at least once, and never lost.
+  - **What happened, in its own events** (bot-os.md D83): `events`, by name, each a zod object
+    (`{ gained: z.object({ name: z.string(), count: z.number() }) }`), declared in its manifest as
+    `<id>.<name>` beside `<id>.changed` (so the editor and a script node's types know them;
+    `changed` and `refused` are taken), and `announce(before, after, event)`, pure, which gives
+    `{ type: '<name>', payload }[]` for an event applied. So a script reacts to `quest-state.gained`
+    instead of comparing states. They are **news only, and best effort**: `announce` is called for
+    an event applied live alone, never for one refused, one the catch-up at start reads from the
+    log, or one played back (`playback: true`), so that nothing acts again on what happened while
+    the instance was down; each payload is checked against its schema (one refused, one of an
+    undeclared name, or all of an event's when `announce` throws, are logged and dropped, the event
+    applied all the same), then published, in order, with its event's time, once the state is kept
+    and its `<id>.changed` announced. They are kept nowhere: a crash between the write and them
+    loses them, and a restart never publishes them again.
   - **Its interface:** `state.get({ path? })` (the state, or the value at a dotted path: a copy),
     `state.freshness({ section? })` and the spec's queries (each given a copy of the state), each
     with its `help` and schemas, which the panel lists (bot-os.md D71).

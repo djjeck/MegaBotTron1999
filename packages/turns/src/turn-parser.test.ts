@@ -73,6 +73,21 @@ describe('a turn parser', () => {
     ]);
   });
 
+  it('marks what it reads of a message played back as history (D83)', async () => {
+    const p = await run(questPlugin());
+    p.hear({ ...own, chat: PRIVATE, text: '/play' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Found a fig.', playback: true, missed: true });
+    p.hear({ ...own, chat: PRIVATE, text: '/play' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Something odd.', playback: true });
+    p.hear({ ...own, chat: PRIVATE, text: '/play' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Found a pear.' });
+    expect(p.events.map((e) => [e['outcome'], e['playback']])).toEqual([
+      [{ kind: 'gain', bot: QUESTBOT, item: 'a fig' }, true],
+      [{ kind: 'unknown', bot: QUESTBOT, text: 'Something odd.' }, true],
+      [{ kind: 'gain', bot: QUESTBOT, item: 'a pear' }, undefined],
+    ]);
+  });
+
   it('resumes from what it parsed, kept in its store, and reads missed messages as any', async () => {
     const plugin = questPlugin();
     const stores: Store[] = [];

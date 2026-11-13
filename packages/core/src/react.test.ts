@@ -216,6 +216,17 @@ describe('react on an event', () => {
     ]);
   });
 
+  it('skips an event read from history, played back (D83)', async () => {
+    const { quest, on, account, records } = await run();
+    on({ on: 'quest.turn', chat: BOT, send: '/drop {outcome.item}' });
+    quest.bus.publish('quest.turn', { ...gain('rope'), playback: true });
+    await flush();
+    expect(account.sent).toEqual([]);
+    expect(records()).toEqual([
+      expect.objectContaining({ outcome: 'skipped', reason: 'played back: history, not news' }),
+    ]);
+  });
+
   it('is refused for a namespace its plugin does not consume', async () => {
     const { on } = await run();
     expect(() => on({ on: 'dice.roll', chat: BOT, send: '/look' })).toThrow(

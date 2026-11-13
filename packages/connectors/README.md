@@ -24,7 +24,9 @@ account's queue its default interval between two queued sends of a command in on
 (`commandIntervalS`, 0 by default, D73), where a chat-out edge names none. A message's file comes as
 its `document` (D82): both Telegram connectors download a text file of at most 256 KiB, in UTF-8,
 and give its text beside the caption; any other file, its name, type and size only. The catch-up
-downloads it as live.
+downloads it as live. A message the Telegram connectors catch up on is `missed`, and played back
+(`playback`: history, which nothing acts on) only once older than their config's `liveGraceS` (120 s
+by default, D83), so that a quick restart costs nothing.
 
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
   structured output by a zod schema.

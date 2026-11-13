@@ -124,6 +124,8 @@ describe('TelegramBotConnector', () => {
       listen?: Promise<unknown>;
       chats?: string[];
       download?: (fileId: string) => Promise<Uint8Array>;
+      /** The time, in ms: what came before its connection was missed. */
+      now?: number;
     } = {}
   ) {
     const stub = stubBot();
@@ -154,7 +156,7 @@ describe('TelegramBotConnector', () => {
           docs[name] = structuredClone(value);
         },
       },
-      now: () => 10_000,
+      now: () => o.now ?? 10_000,
       sleep: () => Promise.resolve(),
       ...(o.download === undefined ? {} : { download: o.download }),
     });
@@ -286,7 +288,7 @@ describe('TelegramBotConnector', () => {
   });
 
   it('marks what Telegram kept while it was down as missed, and monitors only its chats', async () => {
-    const { c, stub } = connector({ chats: ['-100123', '@lobby_chat'] });
+    const { c, stub } = connector({ chats: ['-100123', '@lobby_chat'], now: 1_000_000 });
     const heard: Inbound[] = [];
     c.onMessage((m) => heard.push(m));
     c.start();
@@ -299,11 +301,14 @@ describe('TelegramBotConnector', () => {
       return u;
     };
     await stub.bot.handleUpdate(at(stub.command(-100123, 5, '/map'), 9));
-    await stub.bot.handleUpdate(at(stub.command(-100123, 5, '/map'), 10));
-    await stub.bot.handleUpdate(at(stub.command(-100777, 5, '/map'), 10, 'Lobby_Chat'));
-    await stub.bot.handleUpdate(at(stub.command(-100999, 5, '/map'), 10));
+    // Missed, but within its grace (D83): news still.
+    await stub.bot.handleUpdate(at(stub.command(-100123, 5, '/map'), 900));
+    await stub.bot.handleUpdate(at(stub.command(-100123, 5, '/map'), 1000));
+    await stub.bot.handleUpdate(at(stub.command(-100777, 5, '/map'), 1000, 'Lobby_Chat'));
+    await stub.bot.handleUpdate(at(stub.command(-100999, 5, '/map'), 1000));
     expect(heard.map((m) => [m.chat, m.playback, m.missed])).toEqual([
       ['-100123', true, true],
+      ['-100123', false, true],
       ['-100123', false, undefined],
       ['-100777', false, undefined],
     ]);

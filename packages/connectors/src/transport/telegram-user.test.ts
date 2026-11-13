@@ -22,6 +22,8 @@ import {
 } from './telegram-user.ts';
 
 const GROUP = '-1001000000001';
+/** When the test's messages were said, in ms. */
+const SAID = 1_793_000_000_000;
 
 function raw(over: Partial<RawMessage> & { sender?: unknown; chat?: unknown } = {}): RawMessage {
   const { sender, chat, ...rest } = {
@@ -603,9 +605,12 @@ describe('the catch-up', () => {
       readers?: ReadFilter[] | (() => ReadFilter[]) | undefined;
       /** The store's documents, kept from a run before. */
       docs?: Map<string, unknown>;
+      /** When it runs: an hour after the messages were said, by default. */
+      at?: number;
+      liveGraceMs?: number;
     } = {}
   ) {
-    const clock = new VirtualClock(0);
+    const clock = new VirtualClock(o.at ?? SAID + 3_600_000);
     const messages: Inbound[] = [];
     const logs: string[] = [];
     const warnings: string[] = [];
@@ -628,6 +633,7 @@ describe('the catch-up', () => {
       ...(readers === undefined
         ? {}
         : { readers: typeof readers === 'function' ? readers : () => readers }),
+      ...(o.liveGraceMs === undefined ? {} : { liveGraceMs: o.liveGraceMs }),
     });
     c.onMessage((m) => messages.push(m));
     const seen = () => docs.get(LAST_SEEN_DOC);
@@ -682,6 +688,40 @@ describe('the catch-up', () => {
       ['16', 'm16', true, undefined],
       ['17', 'Your pouch', true, { name: 'pouch.txt', mime: 'text/plain', size: 22, text: list }],
     ]);
+  });
+
+  it('delivers a missed message within its grace as news, older as played back (D83)', async () => {
+    const at = (id: number, ago: number) =>
+      raw({ id, message: `m${id}`, date: (SAID - ago) / 1000 });
+    const f = fake({
+      dialogs: [group(18)],
+      history: { [GROUP]: [at(16, 600_000), at(17, 120_000), at(18, 60_000)] },
+    });
+    const { c, clock, messages } = make(f, {
+      chats: [GROUP],
+      seen: { [GROUP]: 15 },
+      readers: [{ reads: [GROUP] }],
+      at: SAID,
+    });
+    c.start();
+    // The catch-up's pauses: its messages are some seconds older when delivered.
+    await settle(clock, 3);
+    expect(messages.map((m) => [m.id, m.missed, m.playback])).toEqual([
+      ['16', true, true],
+      ['17', true, true],
+      ['18', true, false],
+    ]);
+    const g = fake({ dialogs: [group(16)], history: { [GROUP]: [at(16, 600_000)] } });
+    const wide = make(g, {
+      chats: [GROUP],
+      seen: { [GROUP]: 15 },
+      readers: [{ reads: [GROUP] }],
+      at: SAID,
+      liveGraceMs: 3_600_000,
+    });
+    wide.c.start();
+    await settle(wide.clock, 3);
+    expect(wide.messages.map((m) => m.playback)).toEqual([false]);
   });
 
   it('fetches only the chats its readers read, all monitored ones for *, skipping the others', async () => {

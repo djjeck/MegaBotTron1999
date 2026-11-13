@@ -11,7 +11,8 @@
  *   never sees its own sends come back);
  * - tells which of its bot's messages answer one: a reply to it, or, in the private chat, where
  *   every message is the owner's, the first message within two minutes of it;
- * - publishes what it reads as `<id>.turn`, the outcome, and reports to drift (P5) a message it
+ * - publishes what it reads as `<id>.turn`, the outcome (marked `playback` when the message was
+ *   history: missed while down, bot-os.md D83), and reports to drift (P5) a message it
  *   claims and cannot read, which pauses the turn-actor that requires it past the threshold;
  * - offers `state.rest`: until when its bot rests, as its last answer said (the bot's rest after a
  *   turn, or the wait of a "too soon"), for the actor to wait out.
@@ -145,7 +146,14 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       games: { registers: [spec.id] },
       events: {
         [`${spec.id}.turn`]: z
-          .object({ chat: z.string(), outcome: outcomeSchema })
+          .object({
+            chat: z.string(),
+            outcome: outcomeSchema,
+            playback: z
+              .literal(true)
+              .optional()
+              .describe('Read from history (a message missed while down), not news: act on none'),
+          })
           .describe(`What @${spec.bot} answered to a turn of the owner's, as its grammar reads it`),
       },
       inputs: {
@@ -217,11 +225,17 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
           ...(m.document === undefined ? {} : { document: m.document }),
         });
         if (reading === undefined) return;
+        // History, not news (bot-os.md D83): a message missed while down, or played back.
+        const old = m.playback ? { playback: true } : {};
         if ('unread' in reading) {
           ctx.drift.unread({ text: m.text, t: m.time });
           ctx.bus.publish(
             `${spec.id}.turn`,
-            { chat: m.chat, outcome: { kind: 'unknown', bot: spec.bot, text: m.text.trim() } },
+            {
+              chat: m.chat,
+              outcome: { kind: 'unknown', bot: spec.bot, text: m.text.trim() },
+              ...old,
+            },
             m.time
           );
           return;
@@ -234,7 +248,11 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
             keep();
           }
         }
-        ctx.bus.publish(`${spec.id}.turn`, { chat: m.chat, outcome: reading.outcome }, m.time);
+        ctx.bus.publish(
+          `${spec.id}.turn`,
+          { chat: m.chat, outcome: reading.outcome, ...old },
+          m.time
+        );
       });
       const iface: TurnParserInterface = {
         state: {

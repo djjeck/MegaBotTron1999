@@ -29,6 +29,8 @@ export {
   type Inbound,
   type InboundDocument,
   isTextDocument,
+  LIVE_GRACE_S,
+  liveGraceS,
   readDocument,
   type ReadFilter,
   type Surface,

@@ -190,6 +190,12 @@ export function react(ctx: PluginContext, reaction: Reaction): () => void {
   let unsubscribe: () => void;
   if (typeof reaction.on === 'string') {
     unsubscribe = ctx.bus.subscribe(reaction.on, (event) => {
+      // History, not news (bot-os.md D83): an event read from a message missed while down.
+      if (event['playback'] === true) {
+        if (live && matches(event, reaction.when))
+          trace({ outcome: 'skipped', reason: 'played back: history, not news' });
+        return;
+      }
       if (ctx.clock.now() - event.t > maxAgeMs) {
         if (live && matches(event, reaction.when))
           trace({

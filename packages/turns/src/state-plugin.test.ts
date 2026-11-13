@@ -12,7 +12,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { ANNOUNCED_DOC, type Mark, STATE_DOC, statePlugin } from '#src/state-plugin.ts';
+import {
+  ANNOUNCED_DOC,
+  type Announcement,
+  type Mark,
+  STATE_DOC,
+  statePlugin,
+} from '#src/state-plugin.ts';
 
 const DAY = 86_400_000;
 const T0 = Date.parse('2026-11-10T12:00:00Z');
@@ -85,8 +91,32 @@ const QuestState = z.object({
 });
 type QuestState = z.output<typeof QuestState>;
 
-function questState(more: { reduce?: (s: QuestState, e: BusEvent) => QuestState } = {}): Plugin {
+/** What the made-up state tells of an event: an item it gained, and a level reached. */
+const questEventsOwn = {
+  gained: z.object({ name: z.string(), count: z.number() }),
+  levelled: z.object({ level: z.number() }),
+};
+function questAnnounce(before: QuestState, after: QuestState): Announcement[] {
+  const out: Announcement[] = after.inventory.items.flatMap((i) => {
+    const had = before.inventory.items.find((b) => b.name === i.name)?.count ?? 0;
+    return i.count > had
+      ? [{ type: 'gained', payload: { name: i.name, count: i.count - had } }]
+      : [];
+  });
+  if (after.profile.level > before.profile.level)
+    out.push({ type: 'levelled', payload: { level: after.profile.level } });
+  return out;
+}
+
+function questState(
+  more: {
+    reduce?: (s: QuestState, e: BusEvent) => QuestState;
+    announce?: (before: QuestState, after: QuestState, e: BusEvent) => Announcement[];
+  } = {}
+): Plugin {
   return statePlugin<QuestState>({
+    events: questEventsOwn,
+    announce: more.announce ?? questAnnounce,
     id: 'quest-state',
     description: "The player's inventory and profile in the made-up game",
     schema: QuestState,
@@ -176,13 +206,18 @@ async function boot(
   const clock = new VirtualClock(o.at ?? T0);
   const log = new CoreEventLog(path.join(dir, 'events'));
   const changed: BusEvent[] = [];
+  /** What it told of what happened: its own events but `changed` (D83). */
+  const told: BusEvent[] = [];
+  const lines: string[] = [];
   const core = new Core({
     clock,
     dataDir: path.join(dir, 'data'),
     events: log,
-    print: () => undefined,
+    print: (l) => lines.push(l),
     record: (r) => {
       if (r.type === 'quest-state.changed') changed.push(r as BusEvent);
+      if (r.type === 'quest-state.gained' || r.type === 'quest-state.levelled')
+        told.push(r as BusEvent);
       o.onRecord?.(r as BusEvent);
       return log.write(r);
     },
@@ -215,7 +250,7 @@ async function boot(
         'utf8'
       )
     ) as Record<string, unknown>;
-  return { core, clock, log, emit, read, kept, changed };
+  return { core, clock, log, emit, read, kept, changed, told, lines };
 }
 
 describe('statePlugin', () => {
@@ -482,6 +517,96 @@ describe('statePlugin', () => {
     );
   });
 
+  describe('its own events (D83)', () => {
+    const said = (run: { told: BusEvent[] }) =>
+      run.told.map(({ type, t, instance: _, ...payload }) => [type, t, payload]);
+
+    it('tells what each live event did, after the change, with its time, declared', async () => {
+      const run = await boot();
+      expect(Object.keys(questState().manifest.events ?? {})).toEqual([
+        'quest-state.changed',
+        'quest-state.gained',
+        'quest-state.levelled',
+      ]);
+      await run.emit('quest.inventory', { items: [{ name: 'rope', count: 2 }], gold: 0 }, T0 - 5);
+      await run.emit('quest.gain', { name: 'rope' }, T0 - 4);
+      await run.emit('quest.level', { level: 2 }, T0 - 3);
+      await run.emit('quest.loss', {}, T0 - 2);
+      expect(said(run)).toEqual([
+        ['quest-state.gained', T0 - 5, { name: 'rope', count: 2 }],
+        ['quest-state.gained', T0 - 4, { name: 'rope', count: 1 }],
+        ['quest-state.levelled', T0 - 3, { level: 2 }],
+      ]);
+      // Never kept: nothing of them waits in the store.
+      expect(run.kept()['unannounced']).toEqual([
+        expect.objectContaining({ sections: [], refreshed: ['inventory'] }),
+      ]);
+      await run.core.stop();
+    });
+
+    it('tells nothing of history: an event played back, or read by the catch-up', async () => {
+      const first = await boot();
+      await first.emit('quest.gain', { name: 'rope', playback: true });
+      expect(first.read('count', { name: 'rope' })).toBe(1);
+      expect(first.told).toEqual([]);
+      await first.core.stop();
+      // Published while it was down: applied at the next start, its change announced, no news.
+      const log = new CoreEventLog(path.join(dir, 'events'));
+      log.write({ type: 'quest.gain', t: T0 + 1000, instance: 'quest', name: 'lamp' });
+      log.write({ type: 'quest.level', t: T0 + 2000, instance: 'quest', level: 5 });
+      const second = await boot({ at: T0 + 60_000 });
+      expect(second.read('get', { path: 'profile.level' })).toBe(5);
+      expect(second.changed).toHaveLength(1);
+      expect(second.told).toEqual([]);
+      await second.emit('quest.gain', { name: 'lamp' });
+      expect(said(second)).toEqual([
+        ['quest-state.gained', T0 + 60_000, { name: 'lamp', count: 1 }],
+      ]);
+      await second.core.stop();
+    });
+
+    it('is not told again after a crash: best effort', async () => {
+      const first = await boot();
+      await first.emit('quest.level', { level: 4 });
+      expect(first.told).toHaveLength(1);
+      await first.core.stop();
+      fs.writeFileSync(
+        path.join(dir, 'data', 'instances', 'quest-state', `${ANNOUNCED_DOC}.json`),
+        JSON.stringify({ batch: 0 })
+      );
+      const second = await boot();
+      expect(second.changed.map((c) => c['sections'])).toEqual([['profile']]);
+      expect(second.told).toEqual([]);
+      await second.core.stop();
+    });
+
+    it('drops, warned, what it cannot tell; the event stays applied', async () => {
+      const announce = (_b: QuestState, a: QuestState, e: BusEvent): Announcement[] => {
+        if (e['name'] === 'boom') throw new Error('no idea');
+        return [
+          { type: 'gained', payload: { name: String(e['name']), count: 'many' } },
+          { type: 'lost', payload: {} },
+          { type: 'levelled', payload: { level: a.profile.level } },
+        ];
+      };
+      const run = await boot({ plugins: [questParser(), questState({ announce })] });
+      await run.emit('quest.gain', { name: 'boom' });
+      await run.emit('quest.gain', { name: 'rope' });
+      expect(run.read('get', { path: 'inventory.items' })).toEqual([
+        { name: 'boom', count: 1 },
+        { name: 'rope', count: 1 },
+      ]);
+      expect(said(run)).toEqual([['quest-state.levelled', T0, { level: 1 }]]);
+      const warned = run.lines.filter((l) => l.includes('announced'));
+      expect(warned).toEqual([
+        expect.stringContaining(`quest.gain at ${T0} announced nothing: no idea`),
+        expect.stringContaining('gained not announced: '),
+        expect.stringContaining('lost not announced: no such event'),
+      ]);
+      await run.core.stop();
+    });
+  });
+
   it('refuses a spec that cannot work, naming why', () => {
     const base = {
       id: 'quest-state',
@@ -504,6 +629,13 @@ describe('statePlugin', () => {
         initial: { inventory: { items: [], gold: 'x' }, profile: { level: 1 } } as never,
       })
     ).toThrow(/initial state does not fit/u);
+    expect(() => statePlugin({ ...base, events: { changed: z.object({}) } })).toThrow(
+      /cannot be named changed/u
+    );
+    expect(() => statePlugin({ ...base, events: { 'Item-Gained': z.object({}) } })).toThrow(
+      /not an event's name/u
+    );
+    expect(() => statePlugin({ ...base, announce: () => [] })).toThrow(/declares no event/u);
   });
 
   it('fails a node whose kept state its schema refuses, and reads its namespaces apart', async () => {
