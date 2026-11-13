@@ -916,9 +916,11 @@ q.cancel(); // true if it still waited
 ```
 
 - **One queue per (connector, chat),** side by side in the account's outbox, in the order queued.
-  The same text waiting for the same chat is **coalesced**: one send, a handle per node, each with
-  its own cancel; logged once (`core.send` of the first node that sends for real, with `with`, the
-  others).
+  The same text waiting for the same chat, anywhere in its queue, is **coalesced** across nodes: one
+  send, a handle per node, each with its own cancel; logged once (`core.send` of the first node that
+  sends for real, with `with`, the others). Only **different nodes'** sends coalesce: a node's own
+  same text queued again (buying several of an item with one command) is a send of its own, and
+  another node's same send joins the first of them it is not in yet.
 - **In its turn:** what can never go now is refused at once (the reach, a stop), as `send` refuses
   it. A send goes when its command's interval in its chat has passed since that command last went
   (by `send`, `deliver` or the queue; a dry run counted), within the account's pace: the oldest such

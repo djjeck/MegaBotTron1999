@@ -171,6 +171,53 @@ describe('the outbox’s queue (bot-os.md D73)', () => {
     ]);
   });
 
+  it('coalesces another node’s same send wherever it waits in the queue, not only the last', async () => {
+    const { k, queue, account } = await kit();
+    queue('a', '/inventory');
+    const a = queue('a', '/inventory');
+    queue('a', '/adventure');
+    queue('b', '/roll 1');
+    // Two sends wait after a's inventory: b's same inventory still joins it.
+    const b = queue('b', '/inventory');
+    const entries = () => k.core.controls.queue('chat')?.entries ?? [];
+    expect(entries().map((e) => [e.text, e.nodes.map((n) => n.plugin)])).toEqual([
+      ['/inventory', ['a', 'b']],
+      ['/adventure', ['a']],
+      ['/roll 1', ['b']],
+    ]);
+    k.runUntil(T0 + 300 * S);
+    expect([(await a).outcome, (await b).outcome]).toEqual(['sent', 'sent']);
+    expect(account.sent.filter((x) => x.text === '/inventory')).toHaveLength(2);
+  });
+
+  it('keeps a node’s own repeated sends apart: each goes, and another node joins one each', async () => {
+    const buys = { commands: ['/buy'], minIntervalS: {} };
+    const { k, queue, account, steps } = await kit({ edge: buys, edgeB: buys });
+    // Three copies of the same item, three sends: the first at once, the others at the pace.
+    const mine = [queue('a', '/buy rope'), queue('a', '/buy rope'), queue('a', '/buy rope')];
+    const entries = () => k.core.controls.queue('chat')?.entries ?? [];
+    expect(entries().map((e) => e.nodes.map((n) => n.plugin))).toEqual([['a'], ['a']]);
+    // Another node's same buys join a's, one send each, never two of b's in one.
+    const theirs = [queue('b', '/buy rope'), queue('b', '/buy rope')];
+    expect(entries().map((e) => e.nodes.map((n) => n.plugin))).toEqual([
+      ['a', 'b'],
+      ['a', 'b'],
+    ]);
+    k.runUntil(T0 + 4 * S);
+    expect((await Promise.all([...mine, ...theirs])).map((r) => r.outcome)).toEqual([
+      'sent',
+      'sent',
+      'sent',
+      'sent',
+      'sent',
+    ]);
+    expect(account.sent.map((x) => x.text)).toEqual(['/buy rope', '/buy rope', '/buy rope']);
+    expect(steps().filter((x) => x.endsWith('coalesced'))).toEqual([
+      'b /buy rope coalesced',
+      'b /buy rope coalesced',
+    ]);
+  });
+
   it('cancels a waiting send when an event of its cancel arrives, or its deadline passes', async () => {
     const { k, queue, publish, steps } = await kit();
     queue('a', '/inventory');

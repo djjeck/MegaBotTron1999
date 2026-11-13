@@ -243,8 +243,8 @@ export interface OutboxHandle {
   send(chat: string, text: string, options?: SendOptions): SendResult;
   /**
    * Queues a send (bot-os.md D73): in its turn, spaced within the account's limits and its
-   * command's interval in that chat, coalesced with the same text waiting for the same chat, and
-   * dropped if its `cancel` holds before it goes. Awaited, its outcome.
+   * command's interval in that chat, coalesced with the same text another node has waiting for the
+   * same chat, and dropped if its `cancel` holds before it goes. Awaited, its outcome.
    */
   enqueue(chat: string, text: string, options?: QueueOptions): QueuedSend;
   /** Sends now or refuses, and waits for the network's answer: the message's id. */
@@ -472,7 +472,9 @@ export class Outbox {
 
   /**
    * Queues a send (bot-os.md D73). Refused at once, as `send` refuses, what can never go now. The
-   * same text waiting for the same chat takes this node too (coalesced: one send, a handle each).
+   * same text waiting for the same chat, anywhere in the queue, takes this node too if another
+   * node queued it (coalesced: one send, a handle each); a node's own same send again is a send of
+   * its own.
    * It goes in its turn: the oldest send whose command's interval in its chat has passed since that
    * command last went (the edges', the connector's by default), within the account's pace; a send
    * of another command does not wait behind it. Until then, its cancel may drop it.
@@ -516,7 +518,11 @@ export class Outbox {
         ? cancel?.deadline
         : Math.min(cancel.deadline ?? Infinity, this.o.clock.now() + cancel.withinMs);
     if (deadline !== undefined) member.deadline = deadline;
-    const same = this.waitingList.find((w) => w.chat === chat && w.text === text);
+    // Coalesced with the same text for the same chat, wherever it waits, but only another node's:
+    // a node's own repeated send (buying an item twice) stays a send of its own.
+    const same = this.waitingList.find(
+      (w) => w.chat === chat && w.text === text && !w.members.some((m) => m.plugin === plugin)
+    );
     if (same === undefined)
       this.waitingList.push({
         chat,

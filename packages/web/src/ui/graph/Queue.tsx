@@ -60,8 +60,9 @@ export function ConnectorQueue(props: { id: string }) {
         <p className="muted">Nothing waits.</p>
       ) : (
         <ol className="queue">
-          {entries.map((e) => (
-            <li key={`${e.chat} ${e.text}`}>
+          {entries.map((e, i) => (
+            // A node's own same send queued twice waits twice: the text is no key.
+            <li key={i}>
               <code>{e.text}</code> <span className="muted">to {e.chat}</span>
               <div className="small">
                 {e.waitingUntil <= now ? 'goes now' : `waits until ${when(e.waitingUntil)} UTC`}
