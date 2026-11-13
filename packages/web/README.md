@@ -117,6 +117,9 @@ the server that guards them.
   API (`controlHandler` of `@megabottron1999/core`) under `/api/`, only to a logged-in owner.
   `startWebUi` starts it only when the `web_ui_password` Docker secret is provided (12 characters at
   least); without it there is no listener at all, and the instance runs as without a UI.
+- **A trusted network.** The login is meant for one: behind it, the owner installs modules and edits
+  script nodes, code that runs with the bot's accounts. A UI exposed to the internet needs another
+  layer of authentication in front of it, such as a reverse proxy with two-factor authentication.
 - `src/server/auth.ts`: the login. One owner and one password, compared in constant time; a session
   is a random token in an `HttpOnly`, `SameSite=Strict` cookie, `Secure` when the request came over
   HTTPS (directly or through a proxy's `X-Forwarded-Proto`), lasting 30 days from its login (the

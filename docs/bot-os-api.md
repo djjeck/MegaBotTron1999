@@ -1086,6 +1086,9 @@ public API (`packages/core/src/devkit.ts`):
   memory, every record of the run added (`MemoryEventLog`). An archived plugin runs on a kit only
   when the run says so (`allowArchived`). `start` refuses a setting refused and a run with a plugin
   failed; `runUntil(t)` runs the clock. The core is the instance's own, unchanged.
+- **Script nodes** (§5, bot-os.md D76) run on a kit in the main thread
+  (`scriptPlugin({ isolation: 'in-process' })`), on its virtual clock, so that a test of one stays
+  deterministic.
 - **`defineSimulator({ manifest, run })`**: a simulator plugin (bot-os.md D13), a model of a game
   that runs other plugins on a kit. It is not registered in an instance: its manifest (kind
   `simulator`) names it, the game it plays (`games.consumes`) and the plugins it runs (`requires`),
@@ -1167,11 +1170,13 @@ their values, for a connector's config to name (§4.9; the wiring leaves out `we
 control API is the owner's alone: no agent is ever given it (P11), so no agent installs a module
 (P1).
 
-**The web UI's login** (`packages/web/src/server/auth.ts`, bot-os.md D45): one password, the
-`web_ui_password` secret; a session is a random token in an `HttpOnly`, `SameSite=Strict` cookie
-(`Secure` over HTTPS) that lasts 30 days from its login, the cookie's `Max-Age` to match. The
-sessions outlive a restart, kept in the core's own store as `<data>/core/web-sessions.json`, written
-atomically:
+**The web UI's login** (`packages/web/src/server/auth.ts`, bot-os.md D45) is meant for a trusted
+network: behind it the owner installs modules and edits script nodes (§5), code that runs with the
+bot's accounts, so a UI exposed to the internet needs another layer of authentication in front of
+it, such as a reverse proxy with two-factor authentication. One password, the `web_ui_password`
+secret; a session is a random token in an `HttpOnly`, `SameSite=Strict` cookie (`Secure` over HTTPS)
+that lasts 30 days from its login, the cookie's `Max-Age` to match. The sessions outlive a restart,
+kept in the core's own store as `<data>/core/web-sessions.json`, written atomically:
 `{"version": 1, "password": {"salt", "hash"}, "sessions": {"<sha256 of a token>": <expiry in ms>}}`,
 never a token nor the password (`hash` is a salted scrypt of it). A start with another password ends
 every session; `POST /api/logout` ends its own; expired ones are pruned. `GET /api/session` answers
@@ -1433,17 +1438,18 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
 
 ## 5. The shell's own plugins
 
-| Plugin          | Kinds     | Package                       | What it is                                                                                       |
-| --------------- | --------- | ----------------------------- | ------------------------------------------------------------------------------------------------ |
-| `irc`           | connector | `@megabottron1999/connectors` | An IRC account through a ZNC bouncer, with its flood limits and a health endpoint                |
-| `telegram-bot`  | connector | `@megabottron1999/connectors` | A Telegram bot (grammY), and the owner's chat surface                                            |
-| `telegram-user` | connector | `@megabottron1999/connectors` | A Telegram user account (GramJS), reading and sending in the chats it monitors                   |
-| `anthropic`     | connector | `@megabottron1999/connectors` | The Claude API: `ask`, with structured output (§4.13)                                            |
-| (service)       | connector | `@megabottron1999/connectors` | `ServiceConnector`: the connector of a plugin that holds secrets for an API client, no chat      |
-| (turn parsers)  | parser    | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives     |
-| `turn-actor`    | actor     | `@megabottron1999/turns`      | One game bot's turns, at a person's pace, run as one instance per bot                            |
-| `reactor`       | actor     | `@megabottron1999/turns`      | One reaction (§4.15) from its config: a command sent when an event is heard or a message matches |
-| (states)        | stats     | `@megabottron1999/turns`      | `statePlugin`: a game's player state, kept from its parsers' events, from a spec a game gives    |
+| Plugin          | Kinds        | Package                       | What it is                                                                                       |
+| --------------- | ------------ | ----------------------------- | ------------------------------------------------------------------------------------------------ |
+| `irc`           | connector    | `@megabottron1999/connectors` | An IRC account through a ZNC bouncer, with its flood limits and a health endpoint                |
+| `telegram-bot`  | connector    | `@megabottron1999/connectors` | A Telegram bot (grammY), and the owner's chat surface                                            |
+| `telegram-user` | connector    | `@megabottron1999/connectors` | A Telegram user account (GramJS), reading and sending in the chats it monitors                   |
+| `anthropic`     | connector    | `@megabottron1999/connectors` | The Claude API: `ask`, with structured output (§4.13)                                            |
+| (service)       | connector    | `@megabottron1999/connectors` | `ServiceConnector`: the connector of a plugin that holds secrets for an API client, no chat      |
+| (turn parsers)  | parser       | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives     |
+| `turn-actor`    | actor        | `@megabottron1999/turns`      | One game bot's turns, at a person's pace, run as one instance per bot                            |
+| `reactor`       | actor        | `@megabottron1999/turns`      | One reaction (§4.15) from its config: a command sent when an event is heard or a message matches |
+| `script`        | actor, stats | `@megabottron1999/turns`      | TypeScript typed in the editor, on the ports its config declares, in a worker thread of its own  |
+| (states)        | stats        | `@megabottron1999/turns`      | `statePlugin`: a game's player state, kept from its parsers' events, from a spec a game gives    |
 
 - **`irc`** (`packages/connectors/src/plugins/irc.ts`, on the IRC client of
   `packages/connectors/src/transport/irc-client.ts`): one IRC account through ZNC, its configuration
@@ -1579,6 +1585,64 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
     ]
   }
   ```
+
+- **`script`** (`packages/turns/src/script-plugin.ts`, bot-os.md D76): a node whose code the owner
+  types in the editor, on the ports its config declares; its node's manifest is made from them (§2,
+  D74). Its config:
+
+  ```json
+  {
+    "inputs": {
+      "state-events": { "type": "events", "namespace": "quest-state" },
+      "state": { "type": "interface", "plugin": "quest-state", "members": ["state.count"] }
+    },
+    "outputs": {
+      "chat": { "type": "chat-out", "commands": ["/look"], "minIntervalS": { "/look": 30 } }
+    },
+    "events": { "looked": { "help": "An item looked at", "fields": { "item": "string" } } },
+    "code": "on('quest-state.changed', async (e) => { … });",
+    "limits": { "callMs": 1000, "memoryMb": 64 }
+  }
+  ```
+
+  `inputs` are events inputs (a `namespace`) and interface inputs (a `plugin`, or none for a
+  contract, and the `members` used), each `optional` or required; `outputs`, chat-out outputs, each
+  with the `commands` it sends (by first word: its edge may allow only those, §2.1) and their
+  spacing; `events`, its own event types, published as `<its id>.<name>`, each with its `help` and
+  its fields' types (`string`, `number`, `boolean`, `unknown`). An `actor` when it has an output,
+  else `stats`. Its `code` is audited (§2.3): each save records its hash. **Its code** is
+  TypeScript, its types stripped (`stripTypeScriptTypes`, as Node strips the sources: only erasable
+  syntax), run as the body of an async function (it may `await` at its top level) in a `vm` context
+  that holds the script API alone and allows no code from text:
+
+  ```ts
+  on(type: string, fn: (event) => void | Promise<void>): void; // while it loads; ctx.bus.subscribe
+  use(port).state.<read>(input?): Promise<output>; // ctx.use(port), the members its input uses
+  use(port).actions.<action>(input): Promise<output>;
+  outbox(port).enqueue(chat, text, { cancel? }): QueuedSend; // ctx.outbox(port).enqueue
+  enqueue(port, chat, text, { cancel? }): QueuedSend; // the same, shorter
+  publish(type, payload): void; // its own events: ctx.bus.publish
+  store.read(name); store.write(name, value); store.remove(name); store.names(); // ctx.store
+  clock.now(): number; // ctx.clock; `Date.now()` and `new Date()` read it too
+  log(...values); log.info(...); log.warn(...); log.error(...); // ctx.log; `console` too
+  ```
+
+  A queued send's handle is awaited for its outcome (§4.6), with `status()` and `cancel()` (a
+  promise); its cancel takes `on`, `when`, `deadline` and `withinMs`, not `test`, a function that
+  cannot cross a thread. A member, an output or an event type its ports do not declare is refused,
+  with why (`state offers it state.count, not state.get`); a handler that throws is logged, and the
+  others go on. **It runs** in a worker thread of its own, its environment empty, its heap limited
+  (`limits.memoryMb`, 16–2048, 64 by default), and each handler's synchronous run limited
+  (`limits.callMs`, 10–60000, 1000 by default, vm's timeout), as is any stretch it holds its thread
+  (a ping from the main thread unanswered for twice the limit, as a loop after an `await` does):
+  past either, or if it crashes, the worker is killed and the node failed with why
+  (`its script hung: a handler of quest.tick took over 1000 ms`,
+  `its script ran out of memory (its limit is 64 MB)`), the instance up. Its calls to the main
+  thread are messages: an interface's member called there, a send queued there, its store's writes
+  (read from a copy beside it), its events and its log lines; its clock is the main thread's time as
+  the event was handed over. **In the dev kit** (§4.10), `scriptPlugin({ isolation: 'in-process' })`
+  runs the same runtime in the main thread, on the kit's virtual clock, its calls direct, so that a
+  run is deterministic; its handlers' synchronous runs are limited still, not its memory.
 
 - **`statePlugin`** (`packages/turns/src/state-plugin.ts`, bot-os.md D72): a game's player state (an
   inventory, a profile), kept by the shell from the events its parsers publish, one plugin per

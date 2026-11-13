@@ -27,7 +27,14 @@ export default defineConfig({
       include: ['src/**/*.ts', ...workspaces().map((w) => `${w}/src/**/*.{ts,tsx}`)],
       // The container's entry point and the web UI's mount in the browser are wiring (network,
       // clock, files, the DOM's root); what they call is tested.
-      exclude: ['**/*.test.{ts,tsx}', 'packages/web/src/ui/main.tsx', 'src/main.ts'],
+      // A script node's worker thread is plumbing V8's coverage does not reach; its runtime is
+      // tested in the main thread, and it through the worker's tests.
+      exclude: [
+        '**/*.test.{ts,tsx}',
+        'packages/web/src/ui/main.tsx',
+        'src/main.ts',
+        'packages/turns/src/script-worker.ts',
+      ],
       // The rule holds for the whole and for each package (CLAUDE.md), so that a package's own
       // tests keep it covered on its own.
       thresholds: {

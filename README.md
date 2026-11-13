@@ -17,13 +17,19 @@ dry run, logged as sent (D64).
 
 It knows no game. Games, and what plays them, are plugins on top of it.
 
-**Status: 0.1.x, before the launch.** The core, the connectors, the turn plugins, the reactor, the
-module loader, the graph read from the data volume (`/data/graph.json`) with each node's state in an
-instance apart from it, and the web UI's graph editor, where the graph is built node by node, work.
-The plugin API changes freely until the launch ([docs/bot-os.md](docs/bot-os.md) P13).
+**Status: 0.1.x, before the launch.** The core, the connectors, the turn plugins, the reactor,
+script nodes, the module loader, the graph read from the data volume (`/data/graph.json`) with each
+node's state in an instance apart from it, and the web UI's graph editor, where the graph is built
+node by node, work. The plugin API changes freely until the launch ([docs/bot-os.md](docs/bot-os.md)
+P13).
 
 > **Plugins run with the shell's full rights.** There is no sandbox. A plugin can read every secret
 > the process holds and send as every account it is connected to. Run only plugins you have read.
+
+> **The web UI's login is meant for a trusted network.** Behind it, the owner installs modules and
+> edits script nodes: they run code with the bot's accounts. Anyone who exposes the UI to the
+> internet should put an extra layer of authentication in front of it, such as a reverse proxy with
+> two-factor authentication.
 
 ## Running it
 
@@ -61,9 +67,11 @@ installs it. Nothing is installed or restarted but by you. The Modules page also
 directory's event log ([docs/bot-os.md](docs/bot-os.md) D55); the Admin page shows the instance
 (with its off and kill switches), the graph's history (each version applied in the last 7 days, what
 changed, whether the instance started on it, and a rollback to it) and the graph as text, its
-accounts and their connections, and its plugins with their states (D59, D61, D64). In a real
-deployment, use Docker or Compose secrets, and put the UI behind a reverse proxy with HTTPS rather
-than publishing the port.
+accounts and their connections, and its plugins with their states (D59, D61, D64). A **script** node
+runs TypeScript typed in its panel, on the ports its panel declares, each in a worker thread of its
+own ([docs/bot-os.md](docs/bot-os.md) D76). In a real deployment, use Docker or Compose secrets, and
+put the UI behind a reverse proxy with HTTPS, and on the internet with its own authentication,
+rather than publishing the port.
 
 - **`/data`** is the instance's state: the graph (`graph.json`, and its versions in
   `graph-history/`), each plugin instance's state (`instances/<id>/`), the core's own (`core/`), the
