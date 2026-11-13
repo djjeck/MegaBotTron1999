@@ -19,6 +19,7 @@
  * cookie is `Secure` when the request came over HTTPS (TLS here, or `X-Forwarded-Proto: https`
  * from the proxy in front).
  */
+import { ACTOR_HEADER } from '@megabottron1999/core';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -214,6 +215,8 @@ export function webHandler(o: WebOptions): Handler {
 
   return (req, res) => {
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
+    // Only this server says who asks (D75): never the browser.
+    delete req.headers[ACTOR_HEADER];
     const handle = async (): Promise<void> => {
       const url = new URL(req.url ?? '/', 'http://web');
       const route = url.pathname;
@@ -233,6 +236,13 @@ export function webHandler(o: WebOptions): Handler {
       }
       if (!sessions.valid(token)) return json(res, 401, { error: 'log in first' });
       req.url = `${route.slice('/api'.length) || '/'}${url.search}`;
+      // Who asks, for the records of what the owner changes (bot-os.md D75): this session, by the
+      // start of its token's hash (the store keeps the hash, never the token).
+      const hash = crypto
+        .createHash('sha256')
+        .update(token ?? '')
+        .digest('hex');
+      req.headers[ACTOR_HEADER] = `the web UI (session ${hash.slice(0, 8)})`;
       o.api(req, res);
     };
     handle().catch((err: unknown) => {

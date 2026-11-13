@@ -1,4 +1,5 @@
 import {
+  ACTOR_HEADER,
   controlHandler,
   Core,
   CORE_STORE,
@@ -7,6 +8,7 @@ import {
   Stores,
 } from '@megabottron1999/core';
 import { VirtualClock } from '@megabottron1999/core/clock.ts';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -64,6 +66,29 @@ function browser(base: string) {
 }
 
 describe('webHandler', () => {
+  it('says who asks to the control API, its session’s, never what the browser says (D75)', async () => {
+    const seen: (string | undefined)[] = [];
+    const base = await serve(
+      webHandler({
+        password: PASSWORD,
+        dist: dist(),
+        api: (req, res) => {
+          seen.push(req.headers[ACTOR_HEADER] as string | undefined);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end('{}');
+        },
+      })
+    );
+    const b = browser(base);
+    await b.call('/api/login', { json: { password: PASSWORD } });
+    await b.call('/api/status', { headers: { [ACTOR_HEADER]: 'someone else' } });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatch(/^the web UI \(session [0-9a-f]{8}\)$/u);
+    const token = decodeURIComponent(b.cookie().split('=')[1] ?? '');
+    const h = crypto.createHash('sha256').update(token).digest('hex').slice(0, 8);
+    expect(seen[0]).toBe(`the web UI (session ${h})`);
+  });
+
   it('serves the control API only behind the login, with the session in a strict cookie', async () => {
     const seen: string[] = [];
     const base = await serve(

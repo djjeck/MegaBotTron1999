@@ -16,6 +16,7 @@
  *   load). A stop made while it runs holds it until the owner clears it in the editor and applies,
  *   and shuts down at once every node it makes inactive by that same rule (#29).
  */
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { type z } from 'zod';
 import { Bus, type BusEvent } from './bus.ts';
@@ -52,8 +53,9 @@ import {
   type GraphProblem,
   locateProblem,
   sameGraph,
+  type SaveBy,
 } from './graph-file.ts';
-import { describePlugin, type PluginView } from './graph-view.ts';
+import { describePlugin, type PluginView, stableJson } from './graph-view.ts';
 import { type InstanceInfo, InstanceRegistry } from './instance-registry.ts';
 import { type Manifest, parseManifest, SECRET_NAME } from './manifest.ts';
 import {
@@ -1082,6 +1084,58 @@ export class Core {
   }
 
   /**
+   * Records what a graph written to the file (a save or a rollback) changed of the config keys its
+   * nodes' manifests audit (bot-os.md D75: a script node's code), against the graph before it: for
+   * each such key that changed, `core.config`, with its node, plugin and key, its SHA-256 (none
+   * once removed), who wrote it (`by`) and how (`source`), and the history's version; never its
+   * value.
+   */
+  written(before: unknown, after: Graph, o: SaveBy & { source: string; version?: string }): void {
+    const nodesOf = (g: unknown): Record<string, unknown>[] =>
+      isObject(g) && Array.isArray(g['nodes']) ? (g['nodes'] as unknown[]).filter(isObject) : [];
+    const old = new Map(nodesOf(before).map((n) => [n['id'], n]));
+    const now = new Map(nodesOf(after).map((n) => [n['id'], n]));
+    const configOf = (n: Record<string, unknown> | undefined): Record<string, unknown> =>
+      isObject(n?.['config']) ? n['config'] : {};
+    for (const id of new Set([...old.keys(), ...now.keys()])) {
+      if (typeof id !== 'string') continue;
+      const [was, is] = [old.get(id), now.get(id)];
+      const node = is ?? was;
+      const keys = this.auditOf(node as Record<string, unknown>);
+      for (const key of keys) {
+        const [a, b] = [configOf(was)[key], configOf(is)[key]];
+        const changed = was?.['plugin'] !== is?.['plugin'] || stableJson(a) !== stableJson(b);
+        if (!changed || (a === undefined && b === undefined)) continue;
+        this.o.record?.({
+          type: 'core.config',
+          t: this.o.clock.now(),
+          event: is === undefined || b === undefined ? 'removed' : 'saved',
+          node: id,
+          plugin: String(node?.['plugin']),
+          key,
+          ...(is === undefined || b === undefined ? {} : { sha256: sha256Of(b) }),
+          by: o.by ?? 'the control API (loopback)',
+          source: o.source,
+          ...(o.version === undefined ? {} : { version: o.version }),
+        });
+      }
+    }
+  }
+
+  /** The config keys a node's manifest audits (D75): its own, for one that declares its ports. */
+  private auditOf(n: Record<string, unknown>): string[] {
+    const plugin = this.plugins.find((p) => p.manifest.id === n['plugin']);
+    if (plugin === undefined) return [];
+    try {
+      const base = parseManifest(plugin.manifest);
+      const config = isObject(n['config']) ? n['config'] : undefined;
+      return nodeManifest(base, String(n['id']), config).manifest.audit;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * A graph file of version 1 as version 2 (§2.3, bot-os.md D60), against the plugins the
    * instance offers; any other as it is. Nothing is checked.
    */
@@ -1703,6 +1757,13 @@ function interfaceOf(
   }
   return out as PluginInterface;
 }
+
+/** A config value's SHA-256, in hex: a text's of its UTF-8, anything else's of its stable JSON. */
+const sha256Of = (v: unknown): string =>
+  crypto
+    .createHash('sha256')
+    .update(typeof v === 'string' ? v : stableJson(v))
+    .digest('hex');
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);

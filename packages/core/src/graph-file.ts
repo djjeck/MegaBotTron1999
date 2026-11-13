@@ -80,6 +80,16 @@ export interface GraphChecker {
   graphProblems(): GraphProblem[];
   /** The nodes whose ports their config declares, as the editor draws them (bot-os.md D74). */
   nodeViews?(raw: unknown): Record<string, unknown>;
+  /**
+   * A graph written to the file (a save or a rollback), after the one before it: the audited
+   * config keys it changed are recorded, with who wrote it (bot-os.md D75).
+   */
+  written?(before: unknown, after: Graph, o: SaveBy & { source: string; version?: string }): void;
+}
+
+/** Who writes the graph: the web UI's session, or the loopback's control API (bot-os.md D75). */
+export interface SaveBy {
+  by?: string;
 }
 
 /** A change to the graph's file refused, with why; `status`, the HTTP status it answers with. */
@@ -488,9 +498,9 @@ export interface GraphFileControls {
   /** A proposed graph checked, not saved: its problems, its text, how it differs from the file. */
   check(raw: unknown): unknown;
   /** A graph checked and saved; refused (GraphFileError) with its problems. */
-  save(raw: unknown): unknown;
+  save(raw: unknown, by?: string): unknown;
   /** The version before the current one back; refused (GraphFileError) when there is none. */
-  rollback(): unknown;
+  rollback(by?: string): unknown;
   /** Why the saved graph was not run at start: none when it was. */
   problems(): GraphProblem[];
   /** The history's versions, newest first, without their graphs. */
@@ -498,7 +508,7 @@ export interface GraphFileControls {
   /** One version: its graph, its text, and how the current graph would change to it. */
   version(id: string): unknown;
   /** One version written as the current graph, kept as a new version that names it. */
-  rollbackTo(id: string): unknown;
+  rollbackTo(id: string, by?: string): unknown;
 }
 
 /**
@@ -525,7 +535,16 @@ export function graphFileControls(
     if (v === undefined) throw new GraphFileError(`there is no version ${id}`, [], 404);
     return v;
   };
-  const rollbackTo = (id: string): unknown => {
+  /** Who wrote it, and what it changed of the audited keys (D75), recorded once written. */
+  const written = (before: unknown, after: Graph, source: string, by: string | undefined): void => {
+    const version = file.history.latest()?.id;
+    core.written?.(before, after, {
+      source,
+      ...(by === undefined ? {} : { by }),
+      ...(version === undefined ? {} : { version }),
+    });
+  };
+  const rollbackTo = (id: string, by?: string): unknown => {
     const target = current(version(id).graph);
     const checked = core.check(target);
     const graph = checked.ok ? checked.graph : (target as Graph);
@@ -533,6 +552,7 @@ export function graphFileControls(
     if (now !== undefined && sameGraph(current(now), graph))
       throw new GraphFileError(`version ${id} is the current graph already`, [], 409);
     file.save(graph, { source: 'rollback', restores: id, upgrade: current });
+    written(now === undefined ? EMPTY : current(now), graph, 'rollback', by);
     return redact({
       rolledBack: true,
       version: file.history.latest()?.id,
@@ -568,20 +588,22 @@ export function graphFileControls(
         ...(core.nodeViews === undefined ? {} : { views: core.nodeViews(current(raw)) }),
       });
     },
-    save: (raw) => {
+    save: (raw, by) => {
       const checked = core.check(raw);
       if (!checked.ok) throw new GraphFileError('the graph is refused', checked.problems);
+      const before = current(saved() ?? EMPTY);
       const changed = file.save(checked.graph, { upgrade: current });
+      if (changed) written(before, checked.graph, 'save', by);
       return { saved: changed, restart: !sameGraph(checked.graph, core.graph()) };
     },
-    rollback: () => {
+    rollback: (by) => {
       // The version before the current one: the second newest, or the newest when the file is
       // not it (written by hand since), which the rollback keeps first.
       const versions = file.history.list();
       const target = file.current(current) === undefined ? versions[0] : versions[1];
       if (target === undefined)
         throw new GraphFileError('there is no version before the current one to roll back to');
-      return rollbackTo(target.id);
+      return rollbackTo(target.id, by);
     },
     problems: () => core.graphProblems(),
     history: () => {

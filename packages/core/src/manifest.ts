@@ -128,6 +128,12 @@ export const manifestSchema = z
      * everywhere: the check, the edges, the bus, the drift, the queue and the editor.
      */
     node: nodeFn.optional(),
+    /**
+     * Keys of its config whose every change a save of the graph records in the event log
+     * (`core.config`, bot-os.md D75): who saved it, when, and its SHA-256, never its value (a
+     * script node's code).
+     */
+    audit: z.array(z.string().min(1)).default([]),
     interface: z
       .strictObject({
         commands: z.record(

@@ -224,6 +224,17 @@ export interface ModuleControls {
   checkUpdates?(): Promise<unknown>;
 }
 
+/**
+ * The header by which the web UI's server says who asks (its session, bot-os.md D75); a request
+ * without it came through the container's loopback. The server drops the one a browser sends.
+ */
+export const ACTOR_HEADER = 'x-megabottron-by';
+/** Who asks, as a save of the graph records it. */
+const actorOf = (req: http.IncomingMessage): string => {
+  const h = req.headers[ACTOR_HEADER];
+  return typeof h === 'string' && h !== '' ? h : 'the control API (loopback)';
+};
+
 const field = (v: unknown, key: string): unknown =>
   typeof v === 'object' && v !== null ? (v as Record<string, unknown>)[key] : undefined;
 
@@ -296,7 +307,7 @@ export function controlHandler(
       if (gf !== undefined && route === '/graph/file' && (put || !post)) {
         if (!put) return reply(200, gf.file());
         try {
-          return reply(200, gf.save(await body(req)));
+          return reply(200, gf.save(await body(req), actorOf(req)));
         } catch (e) {
           if (e instanceof GraphFileError)
             return reply(400, { error: e.message, problems: e.problems });
@@ -310,10 +321,11 @@ export function controlHandler(
         const id = history?.[1] === undefined ? undefined : decodeURIComponent(history[1]);
         const rollingBack = history?.[2] !== undefined;
         try {
-          if (route === '/graph/rollback') return reply(200, gf.rollback());
+          if (route === '/graph/rollback') return reply(200, gf.rollback(actorOf(req)));
           if (id === undefined && !post) return reply(200, gf.history());
           if (id !== undefined && !post && !rollingBack) return reply(200, gf.version(id));
-          if (id !== undefined && post && rollingBack) return reply(200, gf.rollbackTo(id));
+          if (id !== undefined && post && rollingBack)
+            return reply(200, gf.rollbackTo(id, actorOf(req)));
         } catch (e) {
           if (e instanceof GraphFileError) return reply(e.status ?? 409, { error: e.message });
           throw e;

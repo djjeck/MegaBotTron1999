@@ -32,6 +32,7 @@ export {
   type SurfaceQuery,
 } from './connector.ts';
 export {
+  ACTOR_HEADER,
   controlHandler,
   type ControlOptions,
   controlServer,
@@ -134,6 +135,7 @@ export {
   locateProblem,
   printable,
   sameGraph,
+  type SaveBy,
 } from './graph-file.ts';
 export {
   GRAPH_HISTORY_DIR,

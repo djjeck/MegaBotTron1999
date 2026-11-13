@@ -59,6 +59,7 @@ instance does not start.
 | `drift`         | The parser's threshold for an unrecoverable rate of unread messages (§4.7)                                                                                                                                                                                                                                                            |
 | `interface`     | What it offers people, commands and agents (P11): `commands` (chat commands: name, help, arguments), `actions` (typed calls that change something: zod input and output) and `state` (typed reads, by name: zod output). The web UI, the chat commands and the agent interface are all made from these descriptions, and nothing else |
 | `node`          | Optional: each node's own manifest, from its config and its id, for a plugin whose ports its node's config declares (below, bot-os.md D74)                                                                                                                                                                                            |
+| `audit`         | Optional: keys of its `config` whose every change a save or rollback of the graph records in the event log (`core.config`: who, when, the value's SHA-256, never the value; §2.3, bot-os.md D75)                                                                                                                                      |
 
 A connector's manifest also names its **account** (§4.5): the network and the identity it holds.
 
@@ -462,6 +463,29 @@ at each new one. The history replaces `graph.previous.json`, which earlier relea
 start with no history takes `graph.previous.json` and then `graph.json` in as `migrated` versions,
 at their files' times (one, if they are the same graph), and removes `graph.previous.json`; nothing
 writes it again.
+
+**Audited config** (bot-os.md D75): a save or a rollback that changes a config key its node's
+manifest audits (`audit`: a script node's `code`) records it in the event log, one record a key:
+
+```json
+{
+  "type": "core.config",
+  "t": 1794477600000,
+  "event": "saved",
+  "node": "examine",
+  "plugin": "script",
+  "key": "code",
+  "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "by": "the web UI (session 1a2b3c4d)",
+  "source": "save",
+  "version": "2026-11-12T10-00-00.000Z"
+}
+```
+
+`event` is `saved`, or `removed` (the node, or the key, gone; no hash); `by` is the web UI's
+session, by the first 8 hex digits of its token's SHA-256, or `the control API (loopback)`; the
+value itself is the history's (above). The web UI's server says who asks in a header of its own
+(`x-megabottron-by`, `ACTOR_HEADER`), dropping the one a browser sends.
 
 **A problem** (`GraphProblem`) is its words as the load says them (`text`) and, where it can be
 told, the `node`, the `edge` (`{ from, to }`), the `port`, and the `config` or `setting` key it is
