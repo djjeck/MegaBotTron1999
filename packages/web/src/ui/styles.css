@@ -1644,7 +1644,8 @@ label.block {
   gap: 0.35rem;
   margin: 0.25rem 0 0.5rem;
 }
-.script-ports .port-row input:not([type='checkbox']) {
+.script-ports .port-row input:not([type='checkbox']),
+.script-ports .port-row select {
   min-width: 0;
   flex: 1 1 7rem;
 }
@@ -1702,7 +1703,8 @@ label.block {
   padding: 0.5rem;
   font-size: 0.8rem;
 }
-.details .script-ports .port-row input:not([type='checkbox']):not([type='radio']) {
+.details .script-ports .port-row input:not([type='checkbox']):not([type='radio']),
+.details .script-ports .port-row select {
   display: inline-block;
   width: auto;
   margin: 0;

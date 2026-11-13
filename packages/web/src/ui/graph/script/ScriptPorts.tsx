@@ -1,11 +1,12 @@
 /**
  * A script node's ports, edited in its panel (docs/bot-os.md D76, D78): its events inputs (the
- * namespaces it hears), its interface inputs (a plugin, and the members it uses, picked from what
- * the plugin offers), its chat-out outputs (the commands each sends, and their spacing), its own
+ * namespaces it hears, picked from those offered or typed), its interface inputs (a plugin, picked
+ * the same way, and the members it uses, from what the plugin offers), its chat-out outputs (the commands each sends, and their spacing), its own
  * event types (their help and fields), and its limits. Each change is a change of the draft's
  * config, which the core checks and turns into the node's manifest (D74), so the graph draws the
  * new ports at once.
  */
+import { useState } from 'react';
 import type { PluginView } from '#src/ui/api.ts';
 import { portsOf } from './types.ts';
 
@@ -50,6 +51,57 @@ export function fieldsOf(text: string): Record<string, string> {
   );
 }
 
+/** The choice that opens the text box, for a value not (yet) offered. */
+const OTHER = '\u0000other';
+
+/**
+ * A value picked from those offered, or typed: a plugin not installed yet offers nothing, yet may
+ * be named. A `<select>` rather than a datalist, which a browser filters by the value already typed,
+ * so that every offered value shows whatever the field holds.
+ */
+export function Picker(props: {
+  label: string;
+  value: string;
+  offered: readonly string[];
+  /** The first choice's text, for no value. */
+  none: string;
+  /** The text box's placeholder. */
+  placeholder: string;
+  set: (value: string) => void;
+}) {
+  const [other, setOther] = useState(false);
+  const typed = other || !(props.value === '' || props.offered.includes(props.value));
+  return (
+    <>
+      <select
+        aria-label={props.label}
+        value={typed ? OTHER : props.value}
+        onChange={(e) => {
+          const v = e.target.value;
+          setOther(v === OTHER);
+          if (v !== OTHER) props.set(v);
+        }}
+      >
+        <option value="">{props.none}</option>
+        {props.offered.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+        <option value={OTHER}>other…</option>
+      </select>
+      {typed ? (
+        <input
+          aria-label={`${props.label}, typed`}
+          placeholder={props.placeholder}
+          value={props.value}
+          onChange={(e) => props.set(e.target.value.trim())}
+        />
+      ) : null}
+    </>
+  );
+}
+
 export function ScriptPorts(props: {
   config: Config;
   change: (config: Config) => void;
@@ -76,9 +128,10 @@ export function ScriptPorts(props: {
       )
     ),
   ].sort();
-  const offered = props.plugins.filter(
-    (p) => p.interface.reads.length + p.interface.actions.length > 0
-  );
+  const offered = props.plugins
+    .filter((p) => p.interface.reads.length + p.interface.actions.length > 0)
+    .map((p) => p.plugin)
+    .sort();
   const errors = (key: string) =>
     (props.errors[key] ?? []).length === 0 ? null : (
       <ul className="problems" aria-label={`problems of its ${key}`}>
@@ -115,16 +168,6 @@ export function ScriptPorts(props: {
   );
   return (
     <div className="script-ports">
-      <datalist id="script-namespaces">
-        {namespaces.map((n) => (
-          <option key={n} value={n} />
-        ))}
-      </datalist>
-      <datalist id="script-plugins">
-        {offered.map((p) => (
-          <option key={p.plugin} value={p.plugin} />
-        ))}
-      </datalist>
       <fieldset>
         <legend>Events it hears</legend>
         {Object.entries(ports.inputs).flatMap(([name, p]) =>
@@ -138,17 +181,13 @@ export function ScriptPorts(props: {
                   aria-label={`events input ${name}`}
                 >
                   {portName('inputs', name, `port of events input ${name}`)}
-                  <input
-                    aria-label={`namespace of ${name}`}
-                    list="script-namespaces"
-                    placeholder="namespace"
+                  <Picker
+                    label={`namespace of ${name}`}
                     value={p.namespace}
-                    onChange={(e) =>
-                      setInput(name, {
-                        ...recordOf(inputs[name]),
-                        namespace: e.target.value.trim(),
-                      })
-                    }
+                    offered={namespaces}
+                    none="pick a namespace"
+                    placeholder="namespace"
+                    set={(namespace) => setInput(name, { ...recordOf(inputs[name]), namespace })}
                   />
                   <label className="choice">
                     <input
@@ -168,10 +207,7 @@ export function ScriptPorts(props: {
         <button
           type="button"
           onClick={() =>
-            setInput(freeName('events', Object.keys(inputs)), {
-              type: 'events',
-              namespace: namespaces[0] ?? '',
-            })
+            setInput(freeName('events', Object.keys(inputs)), { type: 'events', namespace: '' })
           }
         >
           + events input
@@ -199,14 +235,14 @@ export function ScriptPorts(props: {
               aria-label={`interface input ${name}`}
             >
               {portName('inputs', name, `port of interface input ${name}`)}
-              <input
-                aria-label={`plugin of ${name}`}
-                list="script-plugins"
-                placeholder="plugin"
+              <Picker
+                label={`plugin of ${name}`}
                 value={p.plugin ?? ''}
-                onChange={(e) => {
+                offered={offered}
+                none="any plugin"
+                placeholder="plugin"
+                set={(v) => {
                   const { plugin: _, ...rest } = recordOf(inputs[name]);
-                  const v = e.target.value.trim();
                   setInput(name, v === '' ? rest : { ...rest, plugin: v });
                 }}
               />
@@ -251,15 +287,9 @@ export function ScriptPorts(props: {
         })}
         <button
           type="button"
-          onClick={() => {
-            const first = offered[0];
-            const read = first?.interface.reads[0]?.name;
-            setInput(freeName(first?.plugin ?? 'interface', Object.keys(inputs)), {
-              type: 'interface',
-              ...(first === undefined ? {} : { plugin: first.plugin }),
-              members: read === undefined ? [] : [`state.${read}`],
-            });
-          }}
+          onClick={() =>
+            setInput(freeName('interface', Object.keys(inputs)), { type: 'interface', members: [] })
+          }
         >
           + interface input
         </button>

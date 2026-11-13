@@ -224,7 +224,7 @@ describe('a script node’s ports, in its panel', () => {
     again();
     expect((config['inputs'] as Record<string, unknown>)['events']).toEqual({
       type: 'events',
-      namespace: 'game',
+      namespace: '',
     });
     fireEvent.click(screen.getByLabelText('remove events input events'));
     again();
@@ -242,7 +242,13 @@ describe('a script node’s ports, in its panel', () => {
     again();
     fireEvent.click(screen.getByLabelText('board is optional'));
     again();
-    fireEvent.change(screen.getByLabelText('plugin of board'), { target: { value: 'elsewhere' } });
+    fireEvent.change(screen.getByLabelText('plugin of board'), {
+      target: { value: '\u0000other' },
+    });
+    again();
+    fireEvent.change(screen.getByLabelText('plugin of board, typed'), {
+      target: { value: ' elsewhere ' },
+    });
     again();
     fireEvent.blur(screen.getByLabelText('members of board, by name'), {
       target: { value: 'state.x, actions.y' },
@@ -259,10 +265,9 @@ describe('a script node’s ports, in its panel', () => {
     expect((config['inputs'] as Record<string, unknown>)['board']).not.toHaveProperty('plugin');
     fireEvent.click(screen.getByRole('button', { name: '+ interface input' }));
     again();
-    expect((config['inputs'] as Record<string, unknown>)['parser']).toEqual({
+    expect((config['inputs'] as Record<string, unknown>)['interface']).toEqual({
       type: 'interface',
-      plugin: 'parser',
-      members: ['state.board'],
+      members: [],
     });
     // Outputs: commands, spacing, added and removed.
     fireEvent.blur(screen.getByLabelText('commands of chat'), { target: { value: '/look, /inv' } });
@@ -318,6 +323,66 @@ describe('a script node’s ports, in its panel', () => {
     fireEvent.change(screen.getByLabelText('memory limit in MB'), { target: { value: '32' } });
     again();
     expect(config['limits']).toEqual({ callMs: 250, memoryMb: 32 });
+  });
+
+  it('offers every namespace and plugin to a new input, none picked, and takes one typed', () => {
+    let config: Record<string, unknown> = {};
+    const other: PluginView = {
+      ...LOOK_VIEW,
+      id: 'other',
+      plugin: 'other',
+      outputs: {
+        events: { type: 'events', namespace: 'arena', types: [], label: 'events of arena' },
+      },
+      interface: { reads: [{ name: 'score' }], actions: [], commands: [] },
+    } as unknown as PluginView;
+    const view = () => (
+      <ScriptPorts
+        config={config}
+        change={(c) => (config = c)}
+        plugins={[parser, LOOK_VIEW, other]}
+        errors={{}}
+      />
+    );
+    const { rerender } = render(view());
+    fireEvent.click(screen.getByRole('button', { name: '+ events input' }));
+    rerender(view());
+    fireEvent.click(screen.getByRole('button', { name: '+ interface input' }));
+    rerender(view());
+    const choices = (label: string) =>
+      [...(screen.getByLabelText(label) as HTMLSelectElement).options].map((o) => o.textContent);
+    const namespace = screen.getByLabelText('namespace of events') as HTMLSelectElement;
+    expect(namespace.value).toBe('');
+    expect(choices('namespace of events')).toEqual([
+      'pick a namespace',
+      'arena',
+      'game',
+      'look',
+      'other…',
+    ]);
+    expect(choices('plugin of interface')).toEqual(['any plugin', 'other', 'parser', 'other…']);
+    // One picked; then one no plugin offers yet, typed.
+    fireEvent.change(namespace, { target: { value: 'look' } });
+    rerender(view());
+    expect((config['inputs'] as Record<string, unknown>)['events']).toEqual({
+      type: 'events',
+      namespace: 'look',
+    });
+    expect(screen.queryByLabelText('namespace of events, typed')).toBeNull();
+    fireEvent.change(namespace, { target: { value: '\u0000other' } });
+    rerender(view());
+    fireEvent.change(screen.getByLabelText('namespace of events, typed'), {
+      target: { value: 'dungeon' },
+    });
+    rerender(view());
+    expect((config['inputs'] as Record<string, unknown>)['events']).toEqual({
+      type: 'events',
+      namespace: 'dungeon',
+    });
+    // Picked again from the list, the text box goes.
+    fireEvent.change(namespace, { target: { value: 'arena' } });
+    rerender(view());
+    expect(screen.queryByLabelText('namespace of events, typed')).toBeNull();
   });
 
   it('starts from nothing when no plugin offers anything', () => {
