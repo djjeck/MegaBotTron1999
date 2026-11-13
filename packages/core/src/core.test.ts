@@ -611,6 +611,59 @@ describe('Core', () => {
   });
 });
 
+describe('a node failed at runtime (ctx.fail)', () => {
+  it('is cut at once, stopped, told to the owner, and fails the nodes that require it', async () => {
+    const seen: string[] = [];
+    const { core: c, told } = core();
+    let fail: ((why: string) => void) | undefined;
+    const failing = definePlugin({
+      manifest: { id: 'a', version: '0.1.0', kinds: ['stats'], description: 'fails' },
+      create: (ctx) => {
+        fail = (why) => ctx.fail(why);
+        return { stop: () => void seen.push('stop a') };
+      },
+    });
+    c.register(failing, plugin('b', seen, { requires: ['a'] }), plugin('d', seen));
+    await c.start();
+    fail?.('it hung for 2000 ms');
+    expect(c.status()).toEqual([
+      { id: 'a', state: 'failed', reason: 'it hung for 2000 ms' },
+      { id: 'b', state: 'failed', reason: 'requires a, which failed' },
+      { id: 'd', state: 'running' },
+    ]);
+    // Failed once: a second call changes nothing.
+    fail?.('again');
+    await c.stop();
+    expect(seen.filter((x) => x.startsWith('stop'))).toEqual(['stop a', 'stop b', 'stop d']);
+    expect(told).toEqual([
+      'Plugin a failed: it hung for 2000 ms',
+      'Plugin b failed: requires a, which failed',
+    ]);
+  });
+
+  it('logs a stop that throws as it fails', async () => {
+    const { core: c, lines } = core();
+    let fail: ((why: string) => void) | undefined;
+    c.register(
+      definePlugin({
+        manifest: { id: 'a', version: '0.1.0', kinds: ['stats'], description: 'fails' },
+        create: (ctx) => {
+          fail = (why) => ctx.fail(why);
+          return {
+            stop: () => {
+              throw new Error('stuck');
+            },
+          };
+        },
+      })
+    );
+    await c.start();
+    fail?.('out of memory');
+    await c.stop();
+    expect(lines).toContain('a: error: stop failed: stuck');
+  });
+});
+
 describe('archived plugins (bot-os.md D32)', () => {
   const archive = (id: string, seen: string[]): Plugin =>
     definePlugin({

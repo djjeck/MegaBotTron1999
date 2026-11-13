@@ -101,6 +101,13 @@ export interface PluginContext {
    * editor.
    */
   stop(reason: string): void;
+  /**
+   * Fails its node at runtime (§3), for what it cannot run on (a script that hung, or ran out of
+   * memory): its events, messages and timers cut at once, its sends refused, its `stop` called,
+   * and the nodes that require it failed too; the owner is told, with why. A failure is not kept
+   * across restarts: the next start starts it again.
+   */
+  fail(reason: string): void;
   /** Whether the owner turned the instance off (§4.11). */
   off(): boolean;
   /**

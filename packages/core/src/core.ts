@@ -1404,6 +1404,7 @@ export class Core {
       stop: (reason) => {
         this.stopNode(id, reason, 'safety');
       },
+      fail: (reason) => this.failAtRuntime(entry, reason),
       off: () => this.controls.off,
       resume: () => {
         log.warn('ctx.resume refused: a stop is cleared only in the editor');
@@ -1559,6 +1560,27 @@ export class Core {
     const e = other === undefined ? undefined : this.entries.get(other);
     if (e?.up !== true) return undefined;
     return interfaceOf(e.id, e.instance?.interface ?? {}, input.members);
+  }
+
+  /**
+   * Fails a node up at runtime (`ctx.fail`): cut at once (its events, messages and timers; its
+   * sends refused, its queue dropped), then its `stop` called, as a cascade's shutdown is; and every
+   * node up that requires it, through a required port, fails with it.
+   */
+  private failAtRuntime(entry: Entry, why: string): void {
+    if (entry.up !== true) return;
+    const { instance } = entry;
+    this.fail(entry, why);
+    this.shutting = this.shutting.then(async () => {
+      try {
+        await this.withTimeout(() => instance?.stop?.(), entry.id);
+      } catch (e) {
+        this.logger(entry.id).error(`stop failed: ${message(e)}`);
+      }
+    });
+    for (const other of this.entries.values())
+      if (other.up === true && requiredOf(other.node).includes(entry.id))
+        this.failAtRuntime(other, `requires ${entry.id}, which failed`);
   }
 
   private fail(entry: Entry, why: string): void {

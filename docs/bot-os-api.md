@@ -515,8 +515,8 @@ registered ─ manifests, graph and config valid ─▶ starting ─ create(), s
    running ─ every plugin started: ready() ─▶ running
    running ─ a safety stop, drift, the owner's kill or stop ─▶ stopped (kept in its instance)
    running, stopped ─ serialise(), stop() ─▶ stopping ─▶ stopped
-   create(), start(), ready() or a migration fails ─▶ failed (with why), and so do the plugins
-   requiring it
+   create(), start(), ready() or a migration fails, or ctx.fail() ─▶ failed (with why), and so
+   do the plugins requiring it
    at load: disabled in the graph, stopped in its instance, or inactive ─▶ never started
 ```
 
@@ -528,9 +528,12 @@ and the reason.
   plugin and what is wrong: a bad manifest, two plugins with one id, a bad graph, a cycle, a bad
   configuration value, a secret declared but not provided, an archived plugin in the graph (unless
   `CoreOptions.allowArchived`).
-- **Errors at runtime** fail one plugin: `create` or `start` throws, or a migration fails. That
-  plugin is `failed`, with why; the plugins that require it (a required edge, §2.1) are `failed`
-  too; every other plugin starts. The owner is told, and the failure is logged (`core.plugin`).
+- **Errors at runtime** fail one plugin: `create` or `start` throws, a migration fails, or the
+  plugin fails its node itself (`ctx.fail(reason)`, for what it cannot run on: a script that hung or
+  ran out of memory, bot-os.md D28; its events, messages and timers cut at once, its sends refused,
+  then its `stop` called). That plugin is `failed`, with why; the plugins that require it (a
+  required edge, §2.1) are `failed` too; every other plugin starts. The owner is told, and the
+  failure is logged (`core.plugin`).
 - **Start** runs in load order (requirements first), each plugin's `start` awaited before the next
   begins. **Stop** runs in the reverse order, at `SIGTERM` or the owner's restart (§2.3), each
   plugin's `stop` awaited for up to 5 seconds (a stop that fails or takes longer is logged, and the
@@ -607,6 +610,7 @@ interface PluginContext<Config, Settings> {
   drift: DriftReporter; // §4.7, parsers only
   notify(text: string, buttons?: Buttons): void; // the owner (§4.8); nothing while off
   stop(reason: string): void; // its safety stop: its node stopped, kept (§2.1, Node states)
+  fail(reason: string): void; // its node failed at runtime, not kept (§3)
   off(): boolean; // the instance is off (§4.11)
   mode: { get(); set(mode, by?: 'owner' | 'safety'); onChange(listener) }; // module API 1, derived
   resume(): boolean; // module API 1, deprecated: refused, false
