@@ -825,6 +825,15 @@ interface Inbound {
   playback: boolean; // not news: ZNC's buffer at connection, or missed while down
   missed?: boolean; // said while the instance was down, delivered once by the connector
   own?: boolean; // sent by the account itself, from any of its devices
+  document?: InboundDocument; // the file it carries; `text` is then its caption ('' without one)
+}
+
+interface InboundDocument {
+  name: string; // its file name, '' without one
+  mime: string; // its media type, lower case, without parameters; '' if unknown
+  size: number; // bytes
+  text?: string; // its content, UTF-8 decoded: a text file of at most 256 KiB
+  skipped?: 'type' | 'size' | 'encoding' | 'failed'; // why it has no text
 }
 
 interface Surface {
@@ -843,6 +852,20 @@ interface ConnectorHandle {
   isAdmin?(chat: string): Promise<boolean>; // where the network can say
 }
 ```
+
+**Files** (bot-os.md D82): a message that carries a file has its `document`. The Telegram connectors
+download a text file (`text/*`, `application/json`, `application/xml`, `application/csv`, or no type
+or `application/octet-stream` under a `.txt`, `.csv`, `.tsv`, `.json`, `.md` or `.log` name) of at
+most `DOCUMENT_MAX_BYTES` (256 KiB, by the size Telegram states and by the bytes read), and decode
+it as UTF-8, strictly, a byte-order mark taken off: its `text` is the content as is. Any other file
+comes with its name, type and size only, and `skipped` says why: not text (`type`), too large
+(`size`), not UTF-8 or holding a NUL (`encoding`), or a failed download (`failed`, warned of; the
+message still goes). The core's `readDocument(file, download, warn?)` applies that rule for any
+connector, and `isTextDocument(name, mime)` says which files it reads. The core keeps no message: a
+file missed while the instance was down is downloaded again by the catch-up (`telegram-user`) or
+Telegram's redelivery (`telegram-bot`), and each connector accounts for a message only once its file
+is read. A bot never hears another bot, so a bot's export reaches `telegram-user` alone;
+`telegram-bot` reads a file a person sends or forwards it.
 
 The connector itself also implements `send(chat, text)`, and, for a network whose sends answer later
 (Telegram), `deliver(chat, text)`, which resolves with the message's id; only the outbox calls them:
@@ -1451,9 +1474,9 @@ interface Reaction {
 - **On a message:** `on` is `{ port, chats, match }`: the messages read on the chat-in input `port`
   (`chat` by default), in `chats` (compared without case; every chat its edge reads without), whose
   text contains `match` (a string) or matches it (a `RegExp`). Messages played back and the
-  account's own are never reacted to. Its payload is `{ chat, sender, text, time, id?, replyTo? }`,
-  with the regular expression's named groups beside them (`(?<item>\w+)` is `{item}`; a group of one
-  of those names is shadowed).
+  account's own are never reacted to. Its payload is
+  `{ chat, sender, text, time, id?, replyTo?, document? }`, with the regular expression's named
+  groups beside them (`(?<item>\w+)` is `{item}`; a group of one of those names is shadowed).
 - **When:** each field of `when`, by dotted path (`outcome.kind`, `outcome.tags.0`), must equal
   (`===`) its value; without it, every payload.
 - **Send:** `chat` and `send` are texts whose `{path}`s are replaced by the payload's values there,
@@ -1550,11 +1573,14 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   the owner's recent turns and its bot's rest are kept in its store (`parsed`) as they change and
   read back at its start; it never re-reads the chat, and reads missed messages as any other. Its
   game gives it a spec (`TurnParserSpec`): its `id`, its `bot`, its `description`, its grammar
-  (`read`) and its `turnCommands`, the bot's turn commands by first word (`["/play"]`, at least
-  one): which commands are turns is a fact of the game, so it has no config (bot-os.md D70). A node
-  saved while it had one (`"config": { "commands": [...] }`) still loads and runs: a plugin with no
-  config schema ignores its node's config, which the file keeps as written until the owner takes it
-  out. The tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
+  (`read`, given each of its bot's messages as a `BotMessage`: `text`, `private`, `answers`,
+  `replies`, `self`, and `document`, the file it carries with its text when it has one, such as the
+  bot's export of the player's state, beside the caption in `text`, D82) and its `turnCommands`, the
+  bot's turn commands by first word (`["/play"]`, at least one): which commands are turns is a fact
+  of the game, so it has no config (bot-os.md D70). A node saved while it had one
+  (`"config": { "commands": [...] }`) still loads and runs: a plugin with no config schema ignores
+  its node's config, which the file keeps as written until the owner takes it out. The tests play a
+  made-up @QuestBot (`packages/turns/test/quest.ts`).
 - **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
   (P3, P17), each with its own id, configuration, store, timer and state. Its ports: `chat`, a
   chat-in input on `telegram`, which reads the private chat with its bot (for the turns the owner

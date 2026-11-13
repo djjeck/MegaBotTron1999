@@ -42,6 +42,7 @@ function client(): GramClient {
     sendMessage: () => Promise.resolve({ id: 1 }),
     addEventHandler: () => {},
     getMessages: () => Promise.resolve([]),
+    downloadMedia: () => Promise.resolve(undefined),
   };
 }
 

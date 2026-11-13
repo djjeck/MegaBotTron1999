@@ -6,6 +6,7 @@ import { BOT_INFO, stubBot } from '#test/telegram.ts';
 import {
   adminIn,
   createBot,
+  downloadFile,
   type Startable,
   startBotWithRetry,
   surfaceOf,
@@ -118,7 +119,13 @@ describe('startBotWithRetry', () => {
 describe('TelegramBotConnector', () => {
   const flush = () => new Promise((r) => setImmediate(r));
 
-  function connector(o: { listen?: Promise<unknown>; chats?: string[] } = {}) {
+  function connector(
+    o: {
+      listen?: Promise<unknown>;
+      chats?: string[];
+      download?: (fileId: string) => Promise<Uint8Array>;
+    } = {}
+  ) {
     const stub = stubBot();
     const docs: Record<string, unknown> = {};
     const logs: string[] = [];
@@ -149,6 +156,7 @@ describe('TelegramBotConnector', () => {
       },
       now: () => 10_000,
       sleep: () => Promise.resolve(),
+      ...(o.download === undefined ? {} : { download: o.download }),
     });
     c.onStatus((s) => states.push(`${s.state} ${s.phase}`));
     return { c, stub, logs, states, docs, polls: () => polls };
@@ -206,6 +214,75 @@ describe('TelegramBotConnector', () => {
       playback: false,
     });
     expect(heard[1]?.sender).toBe('');
+  });
+
+  describe('a file (D82)', () => {
+    const LIST = 'Crate\n- 4 x Wooden Peg\n';
+    /** A message with a file, from user 5 in `chatId`, its caption if any. */
+    const withFile = (
+      stub: ReturnType<typeof stubBot>,
+      document: Record<string, unknown>,
+      caption?: string
+    ) => {
+      const u = stub.command(5, 5, 'x') as unknown as { message: Record<string, unknown> };
+      delete u.message['text'];
+      delete u.message['entities'];
+      u.message['document'] = document;
+      if (caption !== undefined) u.message['caption'] = caption;
+      return u as unknown as ReturnType<typeof stub.command>;
+    };
+
+    it('downloads a text file, and passes it on with its caption, or none', async () => {
+      const ids: string[] = [];
+      const { c, stub } = connector({
+        download: (id) => (ids.push(id), Promise.resolve(new TextEncoder().encode(LIST))),
+      });
+      const heard: Inbound[] = [];
+      c.onMessage((m) => heard.push(m));
+      const file = { file_id: 'f1', file_unique_id: 'u1', file_name: 'crate.txt' };
+      await stub.bot.handleUpdate(
+        withFile(stub, { ...file, mime_type: 'text/plain', file_size: 23 }, 'Your crate')
+      );
+      await stub.bot.handleUpdate(withFile(stub, { file_id: 'f2', file_unique_id: 'u2' }));
+      expect(ids).toEqual(['f1']);
+      expect(heard.map((m) => [m.text, m.document])).toEqual([
+        ['Your crate', { name: 'crate.txt', mime: 'text/plain', size: 23, text: LIST }],
+        ['', { name: '', mime: '', size: 0, skipped: 'type' }],
+      ]);
+    });
+
+    it('downloads through the Bot API, saying only the status of a failure', async () => {
+      const { stub } = connector();
+      stub.bot.api.getFile = (id) =>
+        Promise.resolve({ file_id: id, file_unique_id: 'u', file_path: 'documents/file_1.txt' });
+      const urls: string[] = [];
+      const ok = (url: string | URL | Request) => (
+        urls.push(String(url)),
+        Promise.resolve(new Response(LIST))
+      );
+      expect(new TextDecoder().decode(await downloadFile(stub.bot, 'f1', ok as never))).toBe(LIST);
+      expect(urls).toEqual([
+        'https://api.telegram.org/file/bot123456:test-token/documents/file_1.txt',
+      ]);
+      const missing = () => Promise.resolve(new Response('', { status: 404 }));
+      await expect(downloadFile(stub.bot, 'f1', missing as never)).rejects.toThrow('HTTP 404');
+      stub.bot.api.getFile = (id) => Promise.resolve({ file_id: id, file_unique_id: 'u' });
+      await expect(downloadFile(stub.bot, 'f1', ok as never)).rejects.toThrow(
+        'Telegram gave no path for the file'
+      );
+    });
+
+    it('downloads by default through its bot, and logs a failure', async () => {
+      const { c, stub, logs } = connector();
+      stub.bot.api.getFile = () => Promise.reject(new Error('Bad Request: file is too big'));
+      const heard: Inbound[] = [];
+      c.onMessage((m) => heard.push(m));
+      await stub.bot.handleUpdate(
+        withFile(stub, { file_id: 'f1', file_unique_id: 'u1', file_name: 'crate.txt' })
+      );
+      expect(heard.map((m) => m.document?.skipped)).toEqual(['failed']);
+      expect(logs.at(-1)).toBe('download of crate.txt failed: Error: Bad Request: file is too big');
+    });
   });
 
   it('marks what Telegram kept while it was down as missed, and monitors only its chats', async () => {

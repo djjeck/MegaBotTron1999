@@ -138,6 +138,7 @@ function messagePayload(m: Inbound, match: string | RegExp): ReactionPayload | u
     time: m.time,
     ...(m.id === undefined ? {} : { id: m.id }),
     ...(m.replyTo === undefined ? {} : { replyTo: m.replyTo }),
+    ...(m.document === undefined ? {} : { document: m.document }),
   };
 }
 

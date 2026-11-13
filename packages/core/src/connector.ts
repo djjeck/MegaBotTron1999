@@ -12,6 +12,85 @@
 import { type Buttons, type ChatCommand } from './commands.ts';
 import { type Limits, type TextFormat } from './outbox.ts';
 
+/**
+ * A file attached to a message (docs/bot-os.md D82): what it is, and its text when the connector
+ * read it. A text file (`text/*`, JSON, XML, CSV, or a generic type with a `.txt`, `.csv`,
+ * `.tsv`, `.json`, `.md` or `.log` name) of at most `DOCUMENT_MAX_BYTES`, in UTF-8, comes with
+ * its text; any other, with why not (`skipped`).
+ */
+export interface InboundDocument {
+  /** Its file name, as sent; `''` when it has none. */
+  name: string;
+  /** Its media type, in lower case, without parameters; `''` when the network does not say. */
+  mime: string;
+  /** Its size, in bytes, as the network says (as read, when it was). */
+  size: number;
+  /** Its content, decoded as UTF-8, a byte-order mark taken off; nothing else changed. */
+  text?: string;
+  /**
+   * Why it has no `text`: not a text type (`type`), larger than the limit (`size`), not UTF-8
+   * text (`encoding`), or its download failed (`failed`).
+   */
+  skipped?: 'type' | 'size' | 'encoding' | 'failed';
+}
+
+/** The largest file a connector reads the text of (D82): 256 KiB. */
+export const DOCUMENT_MAX_BYTES = 256 * 1024;
+
+/** The media types read as text, beside `text/*`. */
+const TEXT_TYPES = new Set(['application/json', 'application/xml', 'application/csv']);
+/** The generic types a file of a text name is read under. */
+const GENERIC_TYPES = new Set(['', 'application/octet-stream']);
+const TEXT_NAME = /\.(?:txt|csv|tsv|json|md|log)$/iu;
+
+/** A media type in lower case, without its parameters (`text/plain; charset=utf-8`). */
+const bareType = (mime: string): string => (mime.split(';')[0] ?? '').trim().toLowerCase();
+
+/** Whether a file is read as text (D82): by its media type, or by its name under a generic one. */
+export function isTextDocument(name: string, mime: string): boolean {
+  const type = bareType(mime);
+  if (type.startsWith('text/') || TEXT_TYPES.has(type)) return true;
+  return GENERIC_TYPES.has(type) && TEXT_NAME.test(name);
+}
+
+/**
+ * A message's file, for its `Inbound` (D82): its text, downloaded (`download`, the network's) and
+ * decoded, if it is a text file of at most `DOCUMENT_MAX_BYTES` in UTF-8; else what it is, and
+ * why not. Never throws: a failed download is `skipped: 'failed'`, told to `warn`, and the message
+ * goes on with it.
+ */
+export async function readDocument(
+  file: { name?: string | undefined; mime?: string | undefined; size?: number | undefined },
+  download: () => Promise<Uint8Array | undefined>,
+  warn: (line: string) => void = () => {}
+): Promise<InboundDocument> {
+  const name = file.name ?? '';
+  const mime = bareType(file.mime ?? '');
+  const meta = { name, mime, size: file.size ?? 0 };
+  if (!isTextDocument(name, mime)) return { ...meta, skipped: 'type' };
+  if (meta.size > DOCUMENT_MAX_BYTES) return { ...meta, skipped: 'size' };
+  let bytes: Uint8Array | undefined;
+  try {
+    bytes = await download();
+  } catch (e) {
+    warn(`download of ${name || 'a file'} failed: ${String(e)}`);
+    return { ...meta, skipped: 'failed' };
+  }
+  if (bytes === undefined) return { ...meta, skipped: 'failed' };
+  const read = { ...meta, size: bytes.byteLength };
+  if (read.size > DOCUMENT_MAX_BYTES) return { ...read, skipped: 'size' };
+  let text: string;
+  try {
+    // `ignoreBOM: false` (the default) takes a leading byte-order mark off.
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return { ...read, skipped: 'encoding' };
+  }
+  // A NUL is valid UTF-8, but no text file's: a binary file under a text name.
+  if (text.includes('\0')) return { ...read, skipped: 'encoding' };
+  return { ...read, text };
+}
+
 /** One message a connector read. */
 export interface Inbound {
   /** The account that saw it. */
@@ -39,6 +118,8 @@ export interface Inbound {
   missed?: boolean;
   /** Sent by the account itself, from any of its devices (a Telegram user's own messages). */
   own?: boolean;
+  /** The file it carries, if any (D82); `text` is then its caption, `''` without one. */
+  document?: InboundDocument;
 }
 
 export type ConnectorState = 'connecting' | 'connected' | 'closed';

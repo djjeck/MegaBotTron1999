@@ -247,6 +247,15 @@ describe('react on a message', () => {
     expect(records()[0]).toMatchObject({ on: 'message', outcome: 'sent' });
   });
 
+  it("gives a message's file in its payload (D82)", async () => {
+    const { account, on } = await run();
+    on({ on: { match: 'Your map' }, chat: BOT, send: '/look {document.name} {document.size}' });
+    const document = { name: 'map.txt', mime: 'text/plain', size: 5, text: 'x→y' };
+    account.hear({ chat: BOT, sender: 'QuestBot', text: 'Your map', time: T0, document });
+    await flush();
+    expect(account.sent).toEqual([{ chat: BOT, text: '/look map.txt 5' }]);
+  });
+
   it('matches a text it contains, in every chat its edge reads, its fields winning over groups', async () => {
     const { account, on } = await run();
     on({ on: { match: 'the draw opens' }, chat: BOT, send: '/look {chat}{replyTo}' });

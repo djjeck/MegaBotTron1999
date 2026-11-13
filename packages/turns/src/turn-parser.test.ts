@@ -13,7 +13,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runParser as run, T0 } from '#test/parser-run.ts';
 import { QUEST, QUESTBOT, questPlugin } from '#test/quest.ts';
-import { isTurnCommand, PARSED_DOC, turnParserPlugin } from './turn-parser.ts';
+import { type BotMessage, isTurnCommand, PARSED_DOC, turnParserPlugin } from './turn-parser.ts';
 
 const GROUP = '-1001000000001';
 const MIN = 60_000;
@@ -52,6 +52,25 @@ describe('a turn parser', () => {
     ]);
     expect(p.iface.rest()).toMatchObject({ until: T0 + 15 * MIN, why: 'its rest after a turn' });
     expect(p.drift()).toMatchObject({ read: 1, unread: 0 });
+  });
+
+  it("hands its grammar a message's file with its caption (D82)", async () => {
+    const seen: BotMessage[] = [];
+    const plugin = turnParserPlugin({
+      id: QUEST,
+      bot: QUESTBOT,
+      description: 'x',
+      turnCommands: ['/play'],
+      read: (m) => (seen.push(m), undefined),
+    });
+    const p = await run(plugin);
+    const document = { name: 'bag.txt', mime: 'text/plain', size: 12, text: '- 1 x Pebble' };
+    p.hear({ ...bot, chat: PRIVATE, text: 'Your bag', document });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Hello' });
+    expect(seen.map((m) => [m.text, m.document])).toEqual([
+      ['Your bag', document],
+      ['Hello', undefined],
+    ]);
   });
 
   it('resumes from what it parsed, kept in its store, and reads missed messages as any', async () => {

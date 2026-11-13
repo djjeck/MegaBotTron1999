@@ -3,9 +3,12 @@ import { VirtualClock } from './clock.ts';
 import {
   type Connector,
   ConnectorBase,
+  DOCUMENT_MAX_BYTES,
   handleOf,
   hears,
   type Inbound,
+  isTextDocument,
+  readDocument,
   type ReadFilter,
 } from './connector.ts';
 import { Core } from './core.ts';
@@ -276,5 +279,91 @@ describe('connectors', () => {
     expect(atCreate).toEqual([{ reads: ['#lobby'] }]);
     expect(readers?.()).toEqual([{ reads: ['#lobby'] }]);
     await core.stop();
+  });
+});
+
+describe('documents (D82)', () => {
+  const bytes = (text: string) => new TextEncoder().encode(text);
+  const LIST = 'Backpack\n- 3 x Rusty Spoon\n- 1 x Paper Hat\n';
+
+  it('reads text by its type, or by its name under a generic one', () => {
+    expect(isTextDocument('list.bin', 'text/plain; charset=utf-8')).toBe(true);
+    expect(isTextDocument('', 'Text/CSV')).toBe(true);
+    expect(isTextDocument('', 'application/json')).toBe(true);
+    expect(isTextDocument('list.TXT', 'application/octet-stream')).toBe(true);
+    expect(isTextDocument('list.csv', '')).toBe(true);
+    expect(isTextDocument('list.exe', 'application/octet-stream')).toBe(false);
+    expect(isTextDocument('list.txt', 'image/png')).toBe(false);
+    expect(isTextDocument('', '')).toBe(false);
+  });
+
+  it('downloads a small text file, its byte-order mark taken off', async () => {
+    const withBom = new Uint8Array([0xef, 0xbb, 0xbf, ...bytes(LIST)]);
+    expect(
+      await readDocument(
+        { name: 'backpack.txt', mime: 'Text/Plain; charset=UTF-8', size: 40 },
+        () => Promise.resolve(withBom)
+      )
+    ).toEqual({ name: 'backpack.txt', mime: 'text/plain', size: withBom.byteLength, text: LIST });
+  });
+
+  it('gives the rest as metadata only, with why', async () => {
+    let downloads = 0;
+    const download = () => (downloads++, Promise.resolve(bytes(LIST)));
+    expect(await readDocument({ name: 'hat.png', mime: 'image/png', size: 9 }, download)).toEqual({
+      name: 'hat.png',
+      mime: 'image/png',
+      size: 9,
+      skipped: 'type',
+    });
+    expect(await readDocument({}, download)).toEqual({
+      name: '',
+      mime: '',
+      size: 0,
+      skipped: 'type',
+    });
+    expect(
+      await readDocument(
+        { name: 'big.txt', mime: 'text/plain', size: DOCUMENT_MAX_BYTES + 1 },
+        download
+      )
+    ).toMatchObject({ skipped: 'size', size: DOCUMENT_MAX_BYTES + 1 });
+    expect(downloads).toBe(0);
+  });
+
+  it('checks what it downloaded: its size, and that it is UTF-8 text', async () => {
+    const meta = { name: 'list.txt', mime: 'text/plain', size: 10 };
+    const big = new Uint8Array(DOCUMENT_MAX_BYTES + 1).fill(0x61);
+    expect(await readDocument(meta, () => Promise.resolve(big))).toEqual({
+      ...meta,
+      size: DOCUMENT_MAX_BYTES + 1,
+      skipped: 'size',
+    });
+    expect(
+      await readDocument(meta, () => Promise.resolve(new Uint8Array([0x61, 0xff, 0x62])))
+    ).toEqual({ ...meta, size: 3, skipped: 'encoding' });
+    expect(
+      await readDocument(meta, () => Promise.resolve(new Uint8Array([0x61, 0x00, 0x62])))
+    ).toEqual({ ...meta, size: 3, skipped: 'encoding' });
+  });
+
+  it('delivers a failed download as metadata, told', async () => {
+    const warned: string[] = [];
+    const meta = { name: 'list.txt', mime: 'text/plain', size: 10 };
+    expect(
+      await readDocument(
+        meta,
+        () => Promise.reject(new Error('timeout')),
+        (l) => warned.push(l)
+      )
+    ).toEqual({ ...meta, skipped: 'failed' });
+    expect(await readDocument({ ...meta, name: '' }, () => Promise.reject(new Error('x')))).toEqual(
+      { ...meta, name: '', skipped: 'failed' }
+    );
+    expect(await readDocument(meta, () => Promise.resolve(undefined))).toEqual({
+      ...meta,
+      skipped: 'failed',
+    });
+    expect(warned).toEqual(['download of list.txt failed: Error: timeout']);
   });
 });

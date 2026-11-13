@@ -23,13 +23,24 @@
  * reads as any other.
  */
 import { TELEGRAM_USER } from '@megabottron1999/connectors/plugins/telegram-user.ts';
-import { definePlugin, type Inbound, ME, type Plugin } from '@megabottron1999/core';
+import {
+  definePlugin,
+  type Inbound,
+  type InboundDocument,
+  ME,
+  type Plugin,
+} from '@megabottron1999/core';
 import { z } from 'zod';
 
 /** A message of the bot, as its grammar reads it. */
 export interface BotMessage {
-  /** Its text, as the bot wrote it. */
+  /** Its text, as the bot wrote it: a file's caption, `''` without one. */
   text: string;
+  /**
+   * The file it carries, if any (bot-os.md D82): a text file's `text` with it, under the limit,
+   * such as the bot's export of the player's state; any other's name, type and size only.
+   */
+  document?: InboundDocument;
   /** In the private chat with the bot, where everything is the owner's. */
   private: boolean;
   /** It answers one of the owner's turns (a reply to it, or the first after it in private). */
@@ -203,6 +214,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
           answers: answered(m),
           replies: m.replyTo !== undefined,
           self: handle.self(),
+          ...(m.document === undefined ? {} : { document: m.document }),
         });
         if (reading === undefined) return;
         if ('unread' in reading) {

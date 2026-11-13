@@ -22,12 +22,14 @@ import {
   type Connector,
   ConnectorBase,
   FloodWait,
+  type InboundDocument,
+  readDocument,
   type Surface,
   type SurfaceQuery,
   type TextFormat,
 } from '@megabottron1999/core';
 import { Bot, GrammyError } from 'grammy';
-import { type Chat, type UserFromGetMe } from 'grammy/types';
+import { type Chat, type Document, type UserFromGetMe } from 'grammy/types';
 import { markdownToTelegramHtml } from 'grammy-switchboard';
 import { SeenLedger } from './seen-ledger.ts';
 
@@ -161,6 +163,24 @@ export interface BotConnectorOptions {
   /** Polling waits for this: the app installs its handlers on the bot first. */
   listen?: Promise<unknown>;
   sleep?: (ms: number) => Promise<void>;
+  /** Downloads a file by its id (D82); by default, `getFile` and its URL on the Bot API. */
+  download?: (fileId: string) => Promise<Uint8Array>;
+}
+
+/**
+ * Downloads a file the bot was sent, through the Bot API (`getFile`, then its URL). The URL holds
+ * the bot's token, so an error says only the HTTP status, never the URL.
+ */
+export async function downloadFile(
+  bot: Pick<Bot, 'api' | 'token'>,
+  fileId: string,
+  fetcher: typeof fetch = fetch
+): Promise<Uint8Array> {
+  const file = await bot.api.getFile(fileId);
+  if (file.file_path === undefined) throw new Error('Telegram gave no path for the file');
+  const res = await fetcher(`https://api.telegram.org/file/bot${bot.token}/${file.file_path}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 export class TelegramBotConnector extends ConnectorBase implements Connector {
@@ -186,14 +206,20 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
     // First in the bot's chain, so it hears every message before the app's handlers.
     this.bot.on('message', async (ctx, next) => {
       const m = ctx.message;
-      const text = m.text ?? m.caption;
       this.saw(m.chat, m.date * 1000);
       const missed = m.date < this.since;
       const key = String(m.chat.id);
       // Accounted for before it is delivered, once (D66); the app's handlers still hear it.
       const again = this.ledger.covered(key, m.message_id);
-      if (!again && this.monitors(m.chat)) this.ledger.advance(key, m.message_id);
-      if (text !== undefined && !again && this.monitors(m.chat))
+      const heard = !again && this.monitors(m.chat);
+      // Its file is read before it is accounted for: a stop in between, and Telegram delivers it
+      // again (D82).
+      const document =
+        heard && m.document !== undefined ? await this.document(m.document) : undefined;
+      // A file without a caption has no text: its text is then ''.
+      const text = m.text ?? m.caption ?? (document === undefined ? undefined : '');
+      if (heard) this.ledger.advance(key, m.message_id);
+      if (text !== undefined && heard)
         try {
           this.received({
             chat: String(m.chat.id),
@@ -206,12 +232,23 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
               : { replyTo: String(m.reply_to_message.message_id) }),
             playback: missed,
             ...(missed ? { missed } : {}),
+            ...(document === undefined ? {} : { document }),
           });
         } catch (e) {
           this.o.log(`a listener failed on message ${m.message_id}: ${String(e)}`);
         }
       await next();
     });
+  }
+
+  /** A message's file (D82): a text file under the limit with its text, any other described. */
+  private document(d: Document): Promise<InboundDocument> {
+    const download = this.o.download ?? ((id: string) => downloadFile(this.bot, id));
+    return readDocument(
+      { name: d.file_name, mime: d.mime_type, size: d.file_size },
+      () => download(d.file_id),
+      this.o.log
+    );
   }
 
   /** Connects and polls, once the app is listening; retried as `startBotWithRetry` does. */

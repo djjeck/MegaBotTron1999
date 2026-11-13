@@ -50,6 +50,8 @@ function fake(
     history?: Record<string, RawMessage[]>;
     /** Fails the history's next requests with these, in turn. */
     historyFails?: Error[];
+    /** Each message's file, by its id: its bytes, or the download's error. */
+    files?: Record<number, Uint8Array | string | Error>;
   } = {}
 ) {
   const calls: string[] = [];
@@ -89,6 +91,11 @@ function fake(
           .sort((a, b) => b.id - a.id)
           .slice(0, limit)
       );
+    },
+    downloadMedia: (message: RawMessage) => {
+      calls.push(`download ${message.id}`);
+      const file = o.files?.[message.id];
+      return file instanceof Error ? Promise.reject(file) : Promise.resolve(file);
     },
   };
   const deliver = (message: RawMessage) => handler?.({ message }) ?? Promise.resolve();
@@ -228,6 +235,65 @@ describe('TelegramUserConnector', () => {
     await f.deliver(raw({ id: 4, getSender: () => Promise.reject(new Error('flood')) }));
     expect(messages).toEqual([]);
     expect(logs.at(-1)).toBe('message 4 dropped: Error: flood');
+  });
+
+  describe('a file (D82)', () => {
+    const LIST = 'Satchel\n- 2 x Tin Whistle\n- 5 x Glass Marble\n';
+    const textFile = (name = 'satchel.txt', mimeType = 'text/plain', size: unknown = 45) => ({
+      mimeType,
+      size: { toString: () => String(size) },
+      attributes: [
+        { className: 'DocumentAttributeImageSize' },
+        null,
+        { className: 'DocumentAttributeFilename', fileName: name },
+      ],
+    });
+
+    it('downloads a text file, and passes it on with its caption', async () => {
+      const f = fake({ files: { 8: new TextEncoder().encode(LIST) } });
+      const { messages } = await connector(f);
+      await f.deliver(raw({ id: 8, message: 'Your satchel', document: textFile() }));
+      expect(f.calls.at(-1)).toBe('download 8');
+      expect(messages).toEqual([
+        expect.objectContaining({
+          id: '8',
+          text: 'Your satchel',
+          document: { name: 'satchel.txt', mime: 'text/plain', size: 45, text: LIST },
+        }),
+      ]);
+    });
+
+    it('describes any other file, without downloading it', async () => {
+      const f = fake();
+      const { messages } = await connector(f);
+      await f.deliver(
+        raw({ id: 8, message: '', document: { mimeType: 'image/webp', size: 900, attributes: [] } })
+      );
+      await f.deliver(
+        raw({ id: 9, message: '', document: textFile('big.txt', 'text/plain', 1e7) })
+      );
+      await f.deliver(raw({ id: 10, message: '', document: {} }));
+      expect(f.calls.filter((x) => x.startsWith('download'))).toEqual([]);
+      expect(messages.map((m) => m.document)).toEqual([
+        { name: '', mime: 'image/webp', size: 900, skipped: 'type' },
+        { name: 'big.txt', mime: 'text/plain', size: 1e7, skipped: 'size' },
+        { name: '', mime: '', size: 0, skipped: 'type' },
+      ]);
+    });
+
+    it('passes the message on when its download fails, or gives no bytes, and warns', async () => {
+      const f = fake({ files: { 8: new Error('FILE_REFERENCE_EXPIRED'), 9: '/tmp/saved' } });
+      const { messages, logs } = await connector(f);
+      await f.deliver(raw({ id: 8, message: 'Your satchel', document: textFile() }));
+      await f.deliver(raw({ id: 9, message: 'Your satchel', document: textFile() }));
+      expect(messages.map((m) => [m.text, m.document?.skipped])).toEqual([
+        ['Your satchel', 'failed'],
+        ['Your satchel', 'failed'],
+      ]);
+      expect(logs.at(-1)).toBe(
+        'message 8: download of satchel.txt failed: Error: FILE_REFERENCE_EXPIRED'
+      );
+    });
   });
 
   it("sends any text to its chats, with the message's id", async () => {
@@ -590,6 +656,32 @@ describe('the catch-up', () => {
     await settle(clock);
     expect(history(f)).toHaveLength(1);
     expect(messages).toHaveLength(5);
+  });
+
+  it('downloads the text file of a missed message, as a live one (D82)', async () => {
+    const list = 'Pouch\n- 1 x Brass Key\n';
+    const file = {
+      mimeType: 'text/plain',
+      size: 22,
+      attributes: [{ className: 'DocumentAttributeFilename', fileName: 'pouch.txt' }],
+    };
+    const history = [...said(16, 16), raw({ id: 17, message: 'Your pouch', document: file })];
+    const f = fake({
+      dialogs: [group(17)],
+      history: { [GROUP]: history },
+      files: { 17: new TextEncoder().encode(list) },
+    });
+    const { c, clock, messages } = make(f, {
+      chats: [GROUP],
+      seen: { [GROUP]: 15 },
+      readers: [{ reads: [GROUP] }],
+    });
+    c.start();
+    await settle(clock);
+    expect(messages.map((m) => [m.id, m.text, m.missed, m.document])).toEqual([
+      ['16', 'm16', true, undefined],
+      ['17', 'Your pouch', true, { name: 'pouch.txt', mime: 'text/plain', size: 22, text: list }],
+    ]);
   });
 
   it('fetches only the chats its readers read, all monitored ones for *, skipping the others', async () => {

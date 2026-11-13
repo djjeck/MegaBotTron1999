@@ -29,6 +29,8 @@ import {
   ConnectorBase,
   FloodWait,
   type Inbound,
+  type InboundDocument,
+  readDocument,
   type ReadFilter,
   type Surface,
   type SurfaceQuery,
@@ -54,6 +56,16 @@ export interface RawMessage {
   chatId?: { toString(): string } | undefined;
   /** A private chat (with a user or a bot), not a group. */
   isPrivate?: boolean | undefined;
+  /** The file it carries (GramJS's `Message.document`): a sticker, a voice note, a text file… */
+  document?:
+    | {
+        mimeType?: string | undefined;
+        /** In bytes (a `BigInteger` in GramJS). */
+        size?: number | { toString(): string } | undefined;
+        /** Its file name is a `DocumentAttributeFilename`'s `fileName`. */
+        attributes?: readonly unknown[] | undefined;
+      }
+    | undefined;
   getSender(): Promise<unknown>;
   getChat(): Promise<unknown>;
 }
@@ -100,6 +112,8 @@ export interface GramClient {
     handler: (event: { message: RawMessage }) => Promise<void>,
     builder: NewMessage
   ): void;
+  /** A message's file, downloaded whole (a `Buffer`). */
+  downloadMedia(message: never, params: object): Promise<unknown>;
 }
 
 /** A string field of an entity GramJS returned, if it has one. */
@@ -143,6 +157,16 @@ const RECENT = 200;
 function floodMs(e: unknown): number | undefined {
   if (!(e instanceof Error) || !('seconds' in e) || typeof e.seconds !== 'number') return undefined;
   return e.seconds * 1000;
+}
+
+/** A document's file name, from its attributes; undefined without one. */
+function fileName(attributes: readonly unknown[] | undefined): string | undefined {
+  for (const a of attributes ?? []) {
+    if (typeof a !== 'object' || a === null) continue;
+    const { className, fileName: name } = a as { className?: unknown; fileName?: unknown };
+    if (className === 'DocumentAttributeFilename' && typeof name === 'string') return name;
+  }
+  return undefined;
 }
 
 /** A message with text (perhaps empty, under a photo), not a service message (a join, a pin). */
@@ -618,6 +642,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
   ): Promise<Omit<Inbound, 'account' | 'network'>> {
     const sender = username(await m.getSender());
     const replyTo = m.replyTo?.replyToMsgId;
+    const document = await this.document(m);
     return {
       chat,
       sender: sender ?? '',
@@ -627,7 +652,26 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       ...(replyTo === undefined ? {} : { replyTo: String(replyTo) }),
       playback: false,
       own: m.out === true,
+      ...(document === undefined ? {} : { document }),
     };
+  }
+
+  /**
+   * A message's file (D82): a text file under the limit downloaded, with its text; any other
+   * described. Live and in the catch-up alike, so that one missed while down comes with its text.
+   */
+  private async document(m: RawMessage): Promise<InboundDocument | undefined> {
+    const d = m.document;
+    if (d === undefined) return undefined;
+    const size = d.size === undefined ? undefined : Number(d.size.toString());
+    return readDocument(
+      { name: fileName(d.attributes), mime: d.mimeType, size },
+      async () => {
+        const got = await this.o.client.downloadMedia(m as never, {});
+        return got instanceof Uint8Array ? got : undefined;
+      },
+      (line) => this.warn(`message ${m.id}: ${line}`)
+    );
   }
 
   /** The name a chat is delivered by: as given, else a group's id, a private chat's @username. */
