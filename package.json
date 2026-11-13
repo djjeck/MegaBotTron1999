@@ -1,6 +1,6 @@
 {
   "name": "megabottron1999",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "A plugin-based bot shell for chat networks, with a node-graph web UI",
   "license": "MIT",
