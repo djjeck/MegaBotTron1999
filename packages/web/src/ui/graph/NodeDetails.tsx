@@ -23,6 +23,7 @@ import type {
   MemberView,
   NodeView,
   PluginControl,
+  PluginView,
   PortView,
 } from '#src/ui/api.ts';
 import { isSplit } from './cards.ts';
@@ -30,6 +31,9 @@ import { withDefaults } from './defaults.ts';
 import { instanceOf } from './draft.ts';
 import { ConnectorQueue } from './Queue.tsx';
 import { SchemaForm } from './SchemaForm.tsx';
+import { ScriptEditor } from './script/ScriptEditor.tsx';
+import { ScriptPorts } from './script/ScriptPorts.tsx';
+import { scriptApi } from './script/types.ts';
 import { signature } from './signature.ts';
 import { NodeState } from './StateViewer.tsx';
 import { CHATS_KEY, MonitoredChats } from './Surfaces.tsx';
@@ -179,6 +183,77 @@ function Members(props: { title: string; members: MemberView[] }) {
   );
 }
 
+/** The script plugin's id (D76): its nodes' config is edited as ports and code. */
+const SCRIPT = 'script';
+
+/**
+ * A script node's ports, in a form, and its code, opened in its editor (D76, D78), its API typed
+ * from the draft.
+ */
+function ScriptSection(props: {
+  node: GraphNode;
+  schema: JsonSchema | undefined;
+  sources: NonNullable<Parameters<typeof NodeDetails>[0]['script']>;
+  edges: readonly GraphEdge[];
+  errors: Record<string, string[]>;
+  editing: boolean;
+  setEditing: (editing: boolean) => void;
+  change: (config: Record<string, unknown>) => void;
+}) {
+  const { node, sources } = props;
+  const config = withDefaults(props.schema, node.config);
+  const api = scriptApi({
+    node,
+    nodes: sources.nodes,
+    edges: props.edges,
+    viewOf: sources.viewOf,
+    available: sources.available,
+  });
+  const plugins = [
+    ...new Map(
+      [...sources.available, ...sources.nodes.filter((n) => n.id !== node.id).map(sources.viewOf)]
+        .filter((v): v is PluginView => v !== undefined)
+        .map((v) => [`${v.plugin}`, v])
+    ).values(),
+  ];
+  const code = typeof config['code'] === 'string' ? config['code'] : '';
+  const lines = code === '' ? 0 : code.split('\n').length;
+  return (
+    <section className="script-section">
+      <h3>Script</h3>
+      <p>
+        <button type="button" className="primary" onClick={() => props.setEditing(true)}>
+          Edit script
+        </button>{' '}
+        <span className="muted small">
+          {lines} line{lines === 1 ? '' : 's'} of TypeScript, in a worker of its own
+        </span>
+      </p>
+      {(props.errors['code'] ?? []).length === 0 ? null : (
+        <ul className="problems" aria-label="problems of its code">
+          {(props.errors['code'] ?? []).map((e) => (
+            <li key={e}>{e}</li>
+          ))}
+        </ul>
+      )}
+      <ScriptPorts config={config} change={props.change} plugins={plugins} errors={props.errors} />
+      {!props.editing ? null : (
+        <ScriptEditor
+          id={node.id}
+          code={code}
+          api={api}
+          problems={props.errors['code'] ?? []}
+          keep={(c) => {
+            props.change({ ...config, code: c });
+            props.setEditing(false);
+          }}
+          close={() => props.setEditing(false)}
+        />
+      )}
+    </section>
+  );
+}
+
 /** The choice of a new group, in the Group field. */
 const NEW_GROUP = '\u0000new';
 
@@ -283,6 +358,12 @@ export function NodeDetails(props: {
   edges?: readonly GraphEdge[];
   /** Selects an edge, by its key, opening its panel. */
   openEdge?: (key: string) => void;
+  /** For a script node (D76, D78): the draft's nodes, each one's view, and the plugins offered. */
+  script?: {
+    nodes: readonly GraphNode[];
+    viewOf: (node: GraphNode) => PluginView | undefined;
+    available: readonly PluginView[];
+  };
 }) {
   const { node, view, live, drift } = props;
   const enabled = node.disabled !== true;
@@ -294,6 +375,8 @@ export function NodeDetails(props: {
   const picked = connector ? withoutChats(view.configSchema) : undefined;
   const chats = node.config?.[CHATS_KEY];
   const savedChats = props.saved?.config?.[CHATS_KEY];
+  const [editing, setEditing] = useState(false);
+  const scripted = view.plugin === SCRIPT && props.script !== undefined;
   return (
     <aside className="details" aria-label={`details of ${view.id}`}>
       <h2>{view.id}</h2>
@@ -418,7 +501,19 @@ export function NodeDetails(props: {
           </div>
         </section>
       )}
-      <section>
+      {!scripted || props.script === undefined ? null : (
+        <ScriptSection
+          node={node}
+          schema={view.configSchema}
+          sources={props.script}
+          edges={props.edges ?? []}
+          errors={props.configErrors}
+          editing={editing}
+          setEditing={setEditing}
+          change={(config) => props.change({ config })}
+        />
+      )}
+      <section hidden={scripted}>
         <h3>Config</h3>
         {view.configSchema === undefined ? (
           <p className="muted">no config</p>

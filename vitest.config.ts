@@ -34,6 +34,8 @@ export default defineConfig({
         'packages/web/src/ui/main.tsx',
         'src/main.ts',
         'packages/turns/src/script-worker.ts',
+        // Monaco needs a browser's layout and workers, which happy-dom has not: seen in a browser.
+        'packages/web/src/ui/graph/script/ScriptCode.tsx',
       ],
       // The rule holds for the whole and for each package (CLAUDE.md), so that a package's own
       // tests keep it covered on its own.

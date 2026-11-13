@@ -12,6 +12,9 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // Monaco's chunks (the script editor, docs/bot-os.md D78) are large, and loaded only when a
+    // script is opened; the app's own stays small.
+    chunkSizeWarningLimit: 8000,
     rolldownOptions: {
       // React Flow marks its modules "use client", for React's server components, which this app
       // does not use: the directive means nothing in a client bundle.

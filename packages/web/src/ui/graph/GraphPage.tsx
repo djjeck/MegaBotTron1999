@@ -621,6 +621,7 @@ export function GraphPage({
         saved={saved?.nodes.find((n) => n.id === shownNode.id)}
         edges={draft.edges}
         openEdge={openEdge}
+        script={{ nodes: draft.nodes, viewOf: pluginOf, available: available.data ?? [] }}
         cleared={clears.has(shownNode.id)}
         clearStop={(clear) => {
           setRefusedApply(undefined);

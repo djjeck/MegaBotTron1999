@@ -1277,6 +1277,15 @@ it is the admin page's **Graph history** (`#/graph-history`), which lists the ve
 rolls back to it after a confirmation repeating the diff, then restarts as Apply does; beside it,
 **Graph as text**, the saved graph printed.
 
+**A script node** (bot-os.md D76, D78, §5) has its ports in a form in its panel (its events inputs,
+its interface inputs with their members picked from what the plugin offers, its chat-out outputs
+with their commands and spacing, its own events, its limits), each change a change of the draft,
+drawn as the check's `views` say. **Edit script** opens its code in Monaco (`monaco-editor`, bundled
+by Vite in a chunk loaded only then), its TypeScript checked against ES2022 and a `.d.ts` made for
+the node from its ports (`script/types.ts`: the members' and the event types' JSON Schemas as
+TypeScript, each with its help), beside a panel listing its API; **Keep** writes the code to the
+draft, refused while it does not parse.
+
 **Swimlanes** (bot-os.md D69): a draft whose nodes name groups is drawn in lanes (`layout.ts`'s
 `swimlanes`, `lanes.ts`, `LaneNode.tsx`). The columns stay global, as above, so a stage lines up
 across lanes; each group is a horizontal band across them, a tinted rounded box with its name at its

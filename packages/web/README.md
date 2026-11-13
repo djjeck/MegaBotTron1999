@@ -58,8 +58,12 @@ the server that guards them.
   **Revert** drops the draft, back to the graph saved, once confirmed. Its × (or Escape) only closes
   it, the draft kept. When the saved graph is not what runs (changed through the API, rolled back,
   or a restart that did not happen), a banner offers **Apply (restart)**; a saved graph refused at
-  the last start is shown first. The **Text** tab, on the page's right edge, opens a side sheet from
-  the right (sliding, unless the browser asks for reduced motion) with the draft printed
+  the last start is shown first. A **script** node (docs/bot-os.md D76, D78, `src/ui/graph/script/`)
+  has its ports in a form in its panel (`ScriptPorts.tsx`), and **Edit script** opens its code in
+  Monaco (`ScriptEditor.tsx`, `ScriptCode.tsx`: `monaco-editor`, bundled, its chunk loaded only
+  then), typed by a `.d.ts` made from its ports (`types.ts`), beside a panel of its API; **Keep** is
+  refused while the code does not parse. The **Text** tab, on the page's right edge, opens a side
+  sheet from the right (sliding, unless the browser asks for reduced motion) with the draft printed
   (`graphText`), read-only, with a copy button (`GraphText.tsx`); the tab rides on the sheet's edge
   and closes it; the rollback is Admin's, with the history. Select one node or several (Shift, Ctrl
   or Cmd with a click; Shift and drag for a box) and **Kill selected** kills each: its plugin's own
