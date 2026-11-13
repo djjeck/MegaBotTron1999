@@ -106,9 +106,33 @@ import { nodeHeight, PluginNode } from './PluginNode.tsx';
 import type { PortEdgeData, PortEdgeType } from './PortEdge.tsx';
 import { PortEdge } from './PortEdge.tsx';
 import { Review } from './Review.tsx';
+import { keepSame } from './stable.ts';
 import '@xyflow/react/dist/style.css';
 
 const NODE_TYPES = { plugin: PluginNode, lane: LaneNode };
+
+/** What a node or an edge of the canvas draws, compared to keep the one drawn (`stable.ts`). */
+const NODE_KEYS = [
+  'type',
+  'position',
+  'parentId',
+  'extent',
+  'selected',
+  'width',
+  'height',
+  'data',
+] as const;
+const EDGE_KEYS = [
+  'type',
+  'source',
+  'sourceHandle',
+  'target',
+  'targetHandle',
+  'className',
+  'style',
+  'data',
+  'selected',
+] as const;
 
 /** What the canvas draws: the cards, and the lanes that hold them (D69). */
 type CanvasNode = PluginNodeType | LaneNodeType;
@@ -313,6 +337,8 @@ export function GraphPage({
           }
         const kept = was.get(c.id);
         const selectedHere = kept?.selected ?? false;
+        // Its config and account are the panel's: a card draws its ports, not the values typed.
+        const { config: _, account: __, ...view } = c.view;
         // Kept where it was moved, while it stays in the same lane (its position is the lane's).
         const position =
           kept !== undefined && kept.parentId === lane
@@ -325,7 +351,7 @@ export function GraphPage({
           ...(lane === undefined ? {} : { parentId: lane, extent: 'parent' as const }),
           selected: selectedHere,
           data: {
-            view: c.view,
+            view,
             live: live.get(c.node),
             drift: drifts.get(c.node),
             portTypes,
@@ -338,8 +364,9 @@ export function GraphPage({
           },
         };
       });
-      // The lanes before their cards, as React Flow asks of parents.
-      return [...lanes, ...cardNodes];
+      // The lanes before their cards, as React Flow asks of parents; each one that draws as before
+      // kept, so that a keystroke in the panel draws nothing again.
+      return keepSame<CanvasNode>(before, [...lanes, ...cardNodes], NODE_KEYS);
     });
   }, [
     draft,
@@ -401,7 +428,11 @@ export function GraphPage({
     });
     setEdges((before) => {
       const was = new Set(before.filter((e) => e.selected === true).map((e) => e.id));
-      return drawn.map((e) => ({ ...e, selected: was.has(e.id) }));
+      return keepSame(
+        before,
+        drawn.map((e) => ({ ...e, selected: was.has(e.id) })),
+        EDGE_KEYS
+      );
     });
   }, [draft, views, viewsById, placed, portTypes, setEdges]);
 

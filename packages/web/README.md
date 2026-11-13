@@ -51,53 +51,55 @@ the server that guards them.
   what cancels them, a send several share marked so, and the sends coalesced since the start with
   the pairs of nodes that shared them; a chat-out edge's panel sets each command's spacing
   (`minIntervalS`, empty for the connector's default). Every change is checked by the core, and each
-  refusal shown on its edge, port, node or field (`draft.ts`, the draft's pure changes). **Review
-  changes** opens a dialog with the diff and two actions (`Review.tsx`): **Apply** saves the graph
-  (`PUT /graph/file`) and restarts the instance on it, waiting for it and coming back to the page,
-  still logged in (`src/ui/Restart.tsx`), or says why the core refused it and restarts nothing;
-  **Revert** drops the draft, back to the graph saved, once confirmed. Its × (or Escape) only closes
-  it, the draft kept. When the saved graph is not what runs (changed through the API, rolled back,
-  or a restart that did not happen), a banner offers **Apply (restart)**; a saved graph refused at
-  the last start is shown first. A **script** node (docs/bot-os.md D76, D78, `src/ui/graph/script/`)
-  has its ports in a form in its panel (`ScriptPorts.tsx`), and **Edit script** opens its code in
-  Monaco (`ScriptEditor.tsx`, `ScriptCode.tsx`: `monaco-editor`, bundled, its chunk loaded only
-  then), typed by a `.d.ts` made from its ports (`types.ts`), beside a panel of its API; **Keep** is
-  refused while the code does not parse; **Export as plugin** (`ExportDialog.tsx`, `export.ts`,
-  docs/bot-os.md D79) downloads it as a module's plugin file and its `module.json`. The **Text**
-  tab, on the page's right edge, opens a side sheet from the right (sliding, unless the browser asks
-  for reduced motion) with the draft printed (`graphText`), read-only, with a copy button
-  (`GraphText.tsx`); the tab rides on the sheet's edge and closes it; the rollback is Admin's, with
-  the history. Select one node or several (Shift, Ctrl or Cmd with a click; Shift and drag for a
-  box) and **Kill selected** kills each: its plugin's own safety stop, then stopped, kept across
-  restarts; a stopped node's panel has **Clear stop**, a change of the draft that Review lists and
-  Apply makes (`clear-stop`, then the restart), and its forms stay editable. Nodes start in columns
-  (`layout.ts`) and can be moved. **Swimlanes** (docs/bot-os.md D69): a node's panel sets its
-  **Group** (none, one of the draft's, or **new group…**, named and set), a change of the draft like
-  any other; a draft with groups is drawn in lanes (`layout.ts`'s `swimlanes`, `lanes.ts`,
-  `LaneNode.tsx`): the same global columns, each group a tinted band with its name at its top left,
-  in the order of its first node, the ungrouped nodes in an unlabelled band last, and the
-  connectors' in and out cards outside every band, at the left and the right (a connector's group is
-  ignored, which its panel says). A card is its lane's child in React Flow, and stays in its lane
-  when dragged. A lane's label zooms to fit it; resting on a node dims what it does not reach, and
-  on a lane's label everything outside the lane but its edges and the connectors they reach; the
-  minimap tints each lane. Its colour comes from a fixed palette, by a hash of its name, the next
-  free one when an earlier lane has it. **Modules** (`#/modules`, `ModulesPage.tsx`, docs/bot-os.md
-  D67) lists the modules installed, each with its version, its source (a folder upload, a tarball,
-  or a GitHub repository linked at its commit) and when it was installed. It installs modules from a
-  folder, chosen (**Choose folder**) or dropped on the page, or from a public GitHub link
-  (`https://github.com/<owner>/<repo>` or `…/tree/<ref>/<path>`): a module's own folder or a
-  repository's that holds several. The folder's paths and its `module.json` files go to
-  `POST /modules/plan` (`src/ui/module-folder.ts`), a link to `POST /modules/github`; the modules
-  found, but those under `vendor/`, are a checklist (`ModuleChecklist.tsx`): each with its path,
-  version, status against the one installed (`new`, `update x → y`, `same version`, `older x → y`),
-  its files and those left out (its tests, unless its `module.json` lists `files`), all checked but
-  downgrades and those refused. **Install** sends each checked module on its own (a folder's files,
-  only that module's, as base64; a GitHub module as its source at the commit looked up), with its
-  progress, and lists how each went; the restart is then offered once. A module from GitHub with a
-  newer commit (the shell checks every 6 hours, or **Check for updates**) says `update available`
-  with the commit and its date, linked to GitHub's comparison, and **Update** or **Update all**
-  installs it. It also installs a `.tar.gz` and rolls a module back. **Remove** (D68) asks first, in
-  a dialog that names the module, then moves it aside as its previous version
+  refusal shown on its edge, port, node or field (`draft.ts`, the draft's pure changes); typing in a
+  panel keeps its field focused, and the cards and edges that draw as before are kept as drawn
+  (`stable.ts`), so the map does not redraw at each keystroke. **Review changes** opens a dialog
+  with the diff and two actions (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`) and
+  restarts the instance on it, waiting for it and coming back to the page, still logged in
+  (`src/ui/Restart.tsx`), or says why the core refused it and restarts nothing; **Revert** drops the
+  draft, back to the graph saved, once confirmed. Its × (or Escape) only closes it, the draft kept.
+  When the saved graph is not what runs (changed through the API, rolled back, or a restart that did
+  not happen), a banner offers **Apply (restart)**; a saved graph refused at the last start is shown
+  first. A **script** node (docs/bot-os.md D76, D78, `src/ui/graph/script/`) has its ports in a form
+  in its panel (`ScriptPorts.tsx`), a port renamed once its name is typed (left, or Enter; a name
+  empty or taken refused), and **Edit script** opens its code in Monaco (`ScriptEditor.tsx`,
+  `ScriptCode.tsx`: `monaco-editor`, bundled, its chunk loaded only then), typed by a `.d.ts` made
+  from its ports (`types.ts`), beside a panel of its API; **Keep** is refused while the code does
+  not parse; **Export as plugin** (`ExportDialog.tsx`, `export.ts`, docs/bot-os.md D79) downloads it
+  as a module's plugin file and its `module.json`. The **Text** tab, on the page's right edge, opens
+  a side sheet from the right (sliding, unless the browser asks for reduced motion) with the draft
+  printed (`graphText`), read-only, with a copy button (`GraphText.tsx`); the tab rides on the
+  sheet's edge and closes it; the rollback is Admin's, with the history. Select one node or several
+  (Shift, Ctrl or Cmd with a click; Shift and drag for a box) and **Kill selected** kills each: its
+  plugin's own safety stop, then stopped, kept across restarts; a stopped node's panel has **Clear
+  stop**, a change of the draft that Review lists and Apply makes (`clear-stop`, then the restart),
+  and its forms stay editable. Nodes start in columns (`layout.ts`) and can be moved. **Swimlanes**
+  (docs/bot-os.md D69): a node's panel sets its **Group** (none, one of the draft's, or **new
+  group…**, named and set), a change of the draft like any other; a draft with groups is drawn in
+  lanes (`layout.ts`'s `swimlanes`, `lanes.ts`, `LaneNode.tsx`): the same global columns, each group
+  a tinted band with its name at its top left, in the order of its first node, the ungrouped nodes
+  in an unlabelled band last, and the connectors' in and out cards outside every band, at the left
+  and the right (a connector's group is ignored, which its panel says). A card is its lane's child
+  in React Flow, and stays in its lane when dragged. A lane's label zooms to fit it; resting on a
+  node dims what it does not reach, and on a lane's label everything outside the lane but its edges
+  and the connectors they reach; the minimap tints each lane. Its colour comes from a fixed palette,
+  by a hash of its name, the next free one when an earlier lane has it. **Modules** (`#/modules`,
+  `ModulesPage.tsx`, docs/bot-os.md D67) lists the modules installed, each with its version, its
+  source (a folder upload, a tarball, or a GitHub repository linked at its commit) and when it was
+  installed. It installs modules from a folder, chosen (**Choose folder**) or dropped on the page,
+  or from a public GitHub link (`https://github.com/<owner>/<repo>` or `…/tree/<ref>/<path>`): a
+  module's own folder or a repository's that holds several. The folder's paths and its `module.json`
+  files go to `POST /modules/plan` (`src/ui/module-folder.ts`), a link to `POST /modules/github`;
+  the modules found, but those under `vendor/`, are a checklist (`ModuleChecklist.tsx`): each with
+  its path, version, status against the one installed (`new`, `update x → y`, `same version`,
+  `older x → y`), its files and those left out (its tests, unless its `module.json` lists `files`),
+  all checked but downgrades and those refused. **Install** sends each checked module on its own (a
+  folder's files, only that module's, as base64; a GitHub module as its source at the commit looked
+  up), with its progress, and lists how each went; the restart is then offered once. A module from
+  GitHub with a newer commit (the shell checks every 6 hours, or **Check for updates**) says
+  `update available` with the commit and its date, linked to GitHub's comparison, and **Update** or
+  **Update all** installs it. It also installs a `.tar.gz` and rolls a module back. **Remove** (D68)
+  asks first, in a dialog that names the module, then moves it aside as its previous version
   (`DELETE /modules/<id>`, sent JSON-typed as the server's same-origin rule asks of every change);
   it is disabled, its reason shown beside it on hover, while a node of the saved graph (disabled
   ones too) uses one of its plugins or another module imports it. A module removed is listed as

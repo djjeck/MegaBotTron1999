@@ -4,9 +4,10 @@
  * the same way, and the members it uses, from what the plugin offers), its chat-out outputs (the commands each sends, and their spacing), its own
  * event types (their help and fields), and its limits. Each change is a change of the draft's
  * config, which the core checks and turns into the node's manifest (D74), so the graph draws the
- * new ports at once.
+ * new ports at once. A port's name is renamed once typed (left, or Enter), not at each keystroke,
+ * and each row keeps its identity across a rename, so that the field keeps the focus.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { PluginView } from '#src/ui/api.ts';
 import { portsOf } from './types.ts';
 
@@ -59,6 +60,75 @@ const OTHER = '\u0000other';
  * be named. A `<select>` rather than a datalist, which a browser filters by the value already typed,
  * so that every offered value shows whatever the field holds.
  */
+/**
+ * A port's name, typed in place: kept as typed while the owner types, then renamed once left or on
+ * Enter; a name empty or taken is refused, marked so, and the name put back when left or on Escape.
+ */
+function PortName(props: {
+  label: string;
+  name: string;
+  taken: readonly string[];
+  rename: (to: string) => void;
+}) {
+  const [text, setText] = useState<string>();
+  const to = (text ?? props.name).trim();
+  const why =
+    to === props.name
+      ? undefined
+      : to === ''
+        ? 'a name is needed'
+        : props.taken.includes(to)
+          ? `${to} is taken`
+          : undefined;
+  const done = (): void => {
+    setText(undefined);
+    if (why === undefined && to !== props.name) props.rename(to);
+  };
+  return (
+    <input
+      aria-label={props.label}
+      aria-invalid={why !== undefined}
+      className={`script-port-name${why === undefined ? '' : ' refused'}`}
+      {...(why === undefined ? {} : { title: why })}
+      value={text ?? props.name}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={done}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') done();
+        else if (e.key === 'Escape') setText(undefined);
+      }}
+    />
+  );
+}
+
+/**
+ * Keys for rows named by their ports, which a rename keeps: a row renamed is the same row, its
+ * field focused still.
+ */
+function useRowKeys(): {
+  keyOf: (name: string) => string;
+  moved: (from: string, to: string) => void;
+} {
+  const rows = useRef({ next: 0, keys: new Map<string, string>() });
+  return {
+    keyOf: (name) => {
+      const r = rows.current;
+      let key = r.keys.get(name);
+      if (key === undefined) {
+        key = `row-${r.next++}`;
+        r.keys.set(name, key);
+      }
+      return key;
+    },
+    moved: (from, to) => {
+      const r = rows.current;
+      const key = r.keys.get(from);
+      r.keys.delete(from);
+      if (key !== undefined) r.keys.set(to, key);
+    },
+  };
+}
+
 export function Picker(props: {
   label: string;
   value: string;
@@ -69,7 +139,10 @@ export function Picker(props: {
   placeholder: string;
   set: (value: string) => void;
 }) {
-  const [other, setOther] = useState(false);
+  // Shown typed, the text box stays while the owner types, even through a value offered.
+  const [other, setOther] = useState(
+    () => !(props.value === '' || props.offered.includes(props.value))
+  );
   const typed = other || !(props.value === '' || props.offered.includes(props.value));
   return (
     <>
@@ -140,18 +213,25 @@ export function ScriptPorts(props: {
         ))}
       </ul>
     );
-  const portName = (kind: 'inputs' | 'outputs' | 'events', name: string, label: string) => (
-    <input
-      aria-label={label}
-      className="script-port-name"
-      value={name}
-      onChange={(e) => {
-        const to = e.target.value.trim();
-        const r = kind === 'inputs' ? inputs : kind === 'outputs' ? outputs : events;
-        if (to !== '' && !(to in r)) set(kind, renamed(r, name, to));
-      }}
-    />
-  );
+  const rows = {
+    inputs: useRowKeys(),
+    outputs: useRowKeys(),
+    events: useRowKeys(),
+  };
+  const portName = (kind: 'inputs' | 'outputs' | 'events', name: string, label: string) => {
+    const r = kind === 'inputs' ? inputs : kind === 'outputs' ? outputs : events;
+    return (
+      <PortName
+        label={label}
+        name={name}
+        taken={Object.keys(r)}
+        rename={(to) => {
+          rows[kind].moved(name, to);
+          set(kind, renamed(r, name, to));
+        }}
+      />
+    );
+  };
   const remove = (kind: 'inputs' | 'outputs' | 'events', name: string, label: string) => (
     <button
       type="button"
@@ -176,7 +256,7 @@ export function ScriptPorts(props: {
             : [
                 <div
                   className="port-row"
-                  key={name}
+                  key={rows.inputs.keyOf(name)}
                   role="group"
                   aria-label={`events input ${name}`}
                 >
@@ -230,7 +310,7 @@ export function ScriptPorts(props: {
           return [
             <div
               className="port-row"
-              key={name}
+              key={rows.inputs.keyOf(name)}
               role="group"
               aria-label={`interface input ${name}`}
             >
@@ -298,7 +378,12 @@ export function ScriptPorts(props: {
       <fieldset>
         <legend>What it sends</legend>
         {Object.entries(ports.outputs).map(([name, p]) => (
-          <div className="port-row" key={name} role="group" aria-label={`chat-out output ${name}`}>
+          <div
+            className="port-row"
+            key={rows.outputs.keyOf(name)}
+            role="group"
+            aria-label={`chat-out output ${name}`}
+          >
             {portName('outputs', name, `port of chat-out output ${name}`)}
             <input
               aria-label={`commands of ${name}`}
@@ -358,7 +443,12 @@ export function ScriptPorts(props: {
       <fieldset>
         <legend>Its own events</legend>
         {Object.entries(ports.events).map(([name, e]) => (
-          <div className="port-row" key={name} role="group" aria-label={`event ${name}`}>
+          <div
+            className="port-row"
+            key={rows.events.keyOf(name)}
+            role="group"
+            aria-label={`event ${name}`}
+          >
             {portName('events', name, `name of event ${name}`)}
             <input
               aria-label={`help of event ${name}`}

@@ -103,6 +103,27 @@ describe('the graph editor', () => {
     expect(core.restarted).toBe(true);
   });
 
+  it('keeps the focus in a config field while the owner types, each keystroke checked', async () => {
+    const core = fakeCore();
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    fireEvent.click(await screen.findByLabelText('node chat · in', {}, slow));
+    const chat = await screen.findByLabelText('details of chat');
+    const host = within(chat).getByLabelText('host') as HTMLInputElement;
+    const card = screen.getByLabelText('node chat · in');
+    host.focus();
+    for (const ch of '.example') {
+      const checks = core.checked.length;
+      fireEvent.change(host, { target: { value: host.value + ch } });
+      // The check comes back between two keystrokes, and redraws nothing that takes the focus.
+      await waitFor(() => expect(core.checked.length).toBeGreaterThan(checks));
+      expect(document.activeElement).toBe(host);
+      expect(host.isConnected).toBe(true);
+    }
+    expect(host.value).toBe('example.test.example');
+    expect(screen.getByLabelText('node chat · in')).toBe(card);
+    expect(core.checked.at(-1)?.nodes[0]?.config?.['host']).toBe('example.test.example');
+  });
+
   it('adds a node on an instance kept, or imported from an older directory, and says what it cannot', async () => {
     const core = fakeCore({
       instances: [

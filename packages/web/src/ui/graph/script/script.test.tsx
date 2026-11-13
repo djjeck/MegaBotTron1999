@@ -218,6 +218,9 @@ describe('a script node’s ports, in its panel', () => {
     fireEvent.change(screen.getByLabelText('port of events input game-events'), {
       target: { value: 'heard' },
     });
+    // Renamed once left, not at each keystroke.
+    expect(Object.keys(config['inputs'] as object)).toEqual(['game-events', 'board']);
+    fireEvent.blur(screen.getByLabelText('port of events input game-events'));
     again();
     expect(Object.keys(config['inputs'] as object)).toEqual(['heard', 'board']);
     fireEvent.click(screen.getByRole('button', { name: '+ events input' }));
@@ -290,9 +293,18 @@ describe('a script node’s ports, in its panel', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: '+ chat-out output' }));
     again();
-    fireEvent.change(screen.getByLabelText('port of chat-out output chat-2'), {
-      target: { value: 'chat' },
-    });
+    // A name taken is refused, marked, and put back.
+    const taken = screen.getByLabelText('port of chat-out output chat-2') as HTMLInputElement;
+    fireEvent.change(taken, { target: { value: 'chat' } });
+    expect(taken.getAttribute('aria-invalid')).toBe('true');
+    expect(taken.title).toBe('chat is taken');
+    fireEvent.keyDown(taken, { key: 'Enter' });
+    expect(taken.value).toBe('chat-2');
+    fireEvent.change(taken, { target: { value: ' ' } });
+    expect(taken.title).toBe('a name is needed');
+    fireEvent.keyDown(taken, { key: 'Escape' });
+    expect(taken.value).toBe('chat-2');
+    expect(Object.keys(config['outputs'] as object)).toEqual(['chat', 'chat-2']);
     fireEvent.click(screen.getByLabelText('remove chat-out output chat-2'));
     again();
     expect(Object.keys(config['outputs'] as object)).toEqual(['chat']);
@@ -310,6 +322,7 @@ describe('a script node’s ports, in its panel', () => {
     fireEvent.change(screen.getByLabelText('name of event done'), {
       target: { value: 'finished' },
     });
+    fireEvent.keyDown(screen.getByLabelText('name of event done'), { key: 'Enter' });
     again();
     expect(config['events']).toEqual({
       looked: { help: 'Looked at', fields: { item: 'string', n: 'number' } },
@@ -383,6 +396,43 @@ describe('a script node’s ports, in its panel', () => {
     fireEvent.change(namespace, { target: { value: 'arena' } });
     rerender(view());
     expect(screen.queryByLabelText('namespace of events, typed')).toBeNull();
+  });
+
+  it('keeps the focus in a port’s name, and in a namespace typed, while the owner types', () => {
+    let config: Record<string, unknown> = { ...CONFIG };
+    const view = () => (
+      <ScriptPorts
+        config={config}
+        change={(c) => (config = c)}
+        plugins={[parser, LOOK_VIEW]}
+        errors={{}}
+      />
+    );
+    const { rerender } = render(view());
+    const typeInto = (field: HTMLInputElement, text: string): void => {
+      field.focus();
+      for (const ch of text) {
+        fireEvent.change(field, { target: { value: field.value + ch } });
+        rerender(view());
+        expect(document.activeElement).toBe(field);
+        expect(field.isConnected).toBe(true);
+      }
+    };
+    const name = screen.getByLabelText('port of events input game-events') as HTMLInputElement;
+    typeInto(name, '-new');
+    expect(name.value).toBe('game-events-new');
+    // Enter renames it: the same row, the same field, focused still.
+    fireEvent.keyDown(name, { key: 'Enter' });
+    rerender(view());
+    expect(Object.keys(config['inputs'] as object)).toEqual(['game-events-new', 'board']);
+    expect(screen.getByLabelText('port of events input game-events-new')).toBe(name);
+    expect(document.activeElement).toBe(name);
+    // A namespace typed, one not offered, stays in its text box even once it reads as one offered.
+    config = { inputs: { heard: { type: 'events', namespace: 'gam' } } };
+    rerender(view());
+    const typed = screen.getByLabelText('namespace of heard, typed') as HTMLInputElement;
+    typeInto(typed, 'e-x');
+    expect(config['inputs']).toEqual({ heard: { type: 'events', namespace: 'game-x' } });
   });
 
   it('starts from nothing when no plugin offers anything', () => {
