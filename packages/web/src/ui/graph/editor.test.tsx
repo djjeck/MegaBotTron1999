@@ -104,7 +104,7 @@ describe('the graph editor', () => {
     expect(screen.queryByRole('dialog', { name: 'restarting' })).toBeNull();
     expect(loggedOut).not.toHaveBeenCalled();
     expect(core.restarted).toBe(true);
-  });
+  }, 20_000);
 
   it('keeps the focus in a config field while the owner types, each keystroke checked', async () => {
     const core = fakeCore();
@@ -125,7 +125,7 @@ describe('the graph editor', () => {
     expect(host.value).toBe('example.test.example');
     expect(screen.getByLabelText('node chat · in')).toBe(card);
     expect(core.checked.at(-1)?.nodes[0]?.config?.['host']).toBe('example.test.example');
-  });
+  }, 20_000);
 
   it('adds a node on an instance kept, or imported from an older directory, and says what it cannot', async () => {
     const core = fakeCore({
@@ -252,7 +252,7 @@ describe('the graph editor', () => {
       within(screen.getByLabelText('plugins')).getByRole('button', { name: 'close' })
     );
     expect(screen.queryByLabelText('plugins')).toBeNull();
-  });
+  }, 20_000);
 
   it('says when no older directory is mounted, or a plugin has no instance kept', async () => {
     fakeCore({ routes: { 'GET /legacy': [500, { error: 'the disk is gone' }] } });
@@ -447,7 +447,7 @@ describe('the graph editor', () => {
     expect(
       within(iface).getByText('It carries nothing to set: the binding is the permission.')
     ).toBeDefined();
-  });
+  }, 20_000);
 
   it('removes a node, keeping its instance; reverts, keeps the draft on close, and rolls back', async () => {
     const core = fakeCore({

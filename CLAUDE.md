@@ -89,7 +89,9 @@ Address every error before marking a sub-task complete.
   columns.
 - **Tests** sit next to the code they test (`foo.ts`, `foo.test.ts`) and run with Vitest. The web
   UI's (`.test.tsx`) run on happy-dom (a `// @vitest-environment happy-dom` line at their top) with
-  Testing Library.
+  Testing Library. A test that outgrows Vitest's 5 s on a loaded machine (a full render of the
+  editor, a type check, a large upload) sets its own timeout, its third argument, with room for a
+  busy CI runner; never a global one, which would hide a test that became slow.
 - **The image:** one, `megabottron1999` (`Dockerfile`, bot-os.md D49), for `linux/amd64` and
   `linux/arm64`, running `node src/main.ts` as the `node` user from `/app`, with its state in
   `/data`. `docker buildx bake --load` builds it for this machine (`docker-bake.hcl`). CI publishes

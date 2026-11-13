@@ -124,7 +124,7 @@ describe('a script node exported as a plugin (D79)', () => {
       .filter((d) => d.file?.fileName === file)
       .map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
     expect(problems).toEqual([]);
-  }, 30_000);
+  }, 60_000);
 
   it('runs as the script did, on the dev kit', async () => {
     const { plugins } = (await import(file)) as { plugins: Plugin[] };

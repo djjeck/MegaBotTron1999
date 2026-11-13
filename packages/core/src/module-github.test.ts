@@ -216,7 +216,7 @@ describe('a GitHub link', () => {
       fetch: () => Promise.resolve(new Response(new Uint8Array(256 * 2 ** 20 + 1))),
     });
     await expect(huge.tree('example/games', MAIN1)).rejects.toThrow('tarball is over');
-  });
+  }, 20_000);
 });
 
 describe('the newest tag', () => {

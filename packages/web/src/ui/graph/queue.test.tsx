@@ -118,7 +118,7 @@ describe('the queue in the editor (D73)', () => {
     fireEvent.click(screen.getByLabelText('node parser'));
     fireEvent.click(await screen.findByLabelText('node chat · out'));
     await screen.findByText('not now');
-  });
+  }, 20_000);
 
   it('words a node’s cancel conditions', () => {
     expect(cancelText(undefined)).toBe('no cancel');

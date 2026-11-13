@@ -304,7 +304,7 @@ describe('the control API’s modules', () => {
       400,
       { error: `the body is over ${64 * 2 ** 20} bytes` },
     ]);
-  });
+  }, 20_000);
 });
 
 describe('the control API’s modules from a tree and from GitHub', () => {
