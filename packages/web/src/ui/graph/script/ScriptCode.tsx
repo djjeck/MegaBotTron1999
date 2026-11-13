@@ -16,6 +16,9 @@ import {
 } from 'monaco-editor/languages/features/typescript/register';
 import TsWorker from 'monaco-editor/languages/features/typescript/ts.worker?worker';
 import { useEffect, useRef } from 'react';
+// The editor's features (completion, hover, find, folding…) and TypeScript's colours, no other
+// language's.
+import 'monaco-editor/features/register.all';
 import 'monaco-editor/languages/definitions/typescript/register';
 
 /** What the editor's TypeScript says of the code: its syntax errors, and its type errors. */
@@ -93,7 +96,7 @@ export default function ScriptCode(props: {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let live = true;
     const diagnose = (): void => {
-      void (async () => {
+      (async () => {
         const client = await (await getTypeScriptWorker())(uri);
         const [syntax, types] = await Promise.all([
           client.getSyntacticDiagnostics(uri.toString()),
@@ -104,7 +107,10 @@ export default function ScriptCode(props: {
             syntax: syntax.map((d) => where(d, model)),
             types: types.map((d) => where(d, model)),
           });
-      })();
+      })().catch(() => {
+        // TypeScript's mode starts with the first model of its language: asked again shortly.
+        if (live) timer = setTimeout(diagnose, 300);
+      });
     };
     const sub = model.onDidChangeContent(() => {
       changed.current(model.getValue());

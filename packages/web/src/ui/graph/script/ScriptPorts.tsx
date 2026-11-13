@@ -90,7 +90,7 @@ export function ScriptPorts(props: {
   const portName = (kind: 'inputs' | 'outputs' | 'events', name: string, label: string) => (
     <input
       aria-label={label}
-      className="port-name"
+      className="script-port-name"
       value={name}
       onChange={(e) => {
         const to = e.target.value.trim();
