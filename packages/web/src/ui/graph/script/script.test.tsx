@@ -180,6 +180,8 @@ describe('the script editor', () => {
     fireEvent.click(keepButton);
     expect(keep).toHaveBeenCalledWith('nope; nope();');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Discard' }));
+    // Escape, once the code changed, asks first.
+    vi.stubGlobal('confirm', () => true);
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(close).toHaveBeenCalledTimes(2);
   });
@@ -499,7 +501,41 @@ describe('a script node in the graph editor', () => {
     fireEvent.click(within(panel).getByRole('button', { name: 'Edit script' }));
     const dialog = await screen.findByRole('dialog', { name: 'script of look' });
     const code = (await within(dialog).findByLabelText('code')) as HTMLTextAreaElement;
+    // Every key typed in it is the editor's: none taken by the map's keys (Space to pan, Shift,
+    // Ctrl or Cmd to select). Monaco types in an element that is not a text field, as this one.
+    const typing = dialog.querySelector('.script-body') as HTMLElement;
+    for (const [key, keyCode] of [
+      [' ', 'Space'],
+      ['Shift', 'ShiftLeft'],
+      ['Control', 'ControlLeft'],
+      ['Meta', 'MetaLeft'],
+      ['Delete', 'Delete'],
+      ['Backspace', 'Backspace'],
+      ['ArrowLeft', 'ArrowLeft'],
+      ['Enter', 'Enter'],
+    ] as const) {
+      const down = new KeyboardEvent('keydown', {
+        key,
+        code: keyCode,
+        bubbles: true,
+        cancelable: true,
+      });
+      typing.dispatchEvent(down);
+      expect(down.defaultPrevented, key).toBe(false);
+      typing.dispatchEvent(new KeyboardEvent('keyup', { key, code: keyCode, bubbles: true }));
+    }
+    expect(screen.getByLabelText('node look')).toBeDefined();
+    // Escape is Monaco's while it uses it (a suggestion open), and asks first once code changed.
+    const used = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    typing.addEventListener('keydown', (e) => e.preventDefault(), { once: true });
+    typing.dispatchEvent(used);
+    expect(screen.getByRole('dialog', { name: 'script of look' })).toBe(dialog);
     fireEvent.change(code, { target: { value: "on('game.win', () => log('again'));" } });
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(confirm).toHaveBeenCalledWith('Discard the changes to this script?');
+    expect(screen.getByRole('dialog', { name: 'script of look' })).toBe(dialog);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Keep' }));
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: 'script of look' })).toBeNull()

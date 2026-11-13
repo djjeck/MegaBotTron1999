@@ -5,6 +5,11 @@
  * types, and the script API's calls. **Keep** writes the code to the draft, applied as any change
  * with Apply; it is refused while the code does not parse. Type errors are shown, and kept: the
  * owner may know better than the types.
+ *
+ * Every key typed in it is the editor's: the dialog is out of React Flow's reach (`nokey`), whose
+ * keys on the page (Space to pan, Shift and Ctrl or Cmd to select) would take them otherwise. Escape
+ * closes it only when Monaco has no use for it (a suggestion or a search open), and asks first when
+ * the code was changed.
  */
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { signature } from '#src/ui/graph/signature.ts';
@@ -162,9 +167,13 @@ export function ScriptEditor(props: {
   const dts = useMemo(() => scriptDts(props.api, props.id), [props.api, props.id]);
   const { close } = props;
   const first = useRef<HTMLButtonElement>(null);
+  const changedRef = useRef(false);
+  changedRef.current = code !== props.code;
   useEffect(() => {
     const key = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') close();
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      if (changedRef.current && !window.confirm('Discard the changes to this script?')) return;
+      close();
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
@@ -173,7 +182,7 @@ export function ScriptEditor(props: {
   const types = diagnostics?.types ?? [];
   const changed = code !== props.code;
   return (
-    <div className="overlay script-overlay">
+    <div className="overlay script-overlay nokey">
       <div
         className="card script-editor"
         role="dialog"
