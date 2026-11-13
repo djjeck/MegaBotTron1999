@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GraphEdge, Surface } from '#src/ui/api.ts';
 import { fakeCore } from '#test/fake-core.ts';
+import { VIEW } from '#test/graph-view.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
 import { GraphPage } from './GraphPage.tsx';
 import { edgesToUpdate, monitoredSurfaces, sameChats, unlistedNote } from './Surfaces.tsx';
@@ -58,6 +59,58 @@ describe('chats picked from lists', () => {
     // Back to every chat.
     fireEvent.click(within(picker).getByLabelText('every chat'));
     await waitFor(() => expect(core.checked.at(-1)?.nodes[0]?.config?.['chats']).toBeUndefined());
+  });
+
+  it('names a chat ticked from a search, and after a reload, not by its id', async () => {
+    fakeCore({
+      routes: {
+        'GET /accounts/chat/surfaces': [...listed([LOBBY, QUEST])],
+        'GET /accounts/chat/surfaces?search=attic': [...listed([ATTIC])],
+      },
+    });
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    fireEvent.click(await screen.findByLabelText('node chat · in', {}, slow));
+    const details = await screen.findByLabelText('details of chat');
+    const picker = within(details).getByRole('group', { name: 'chats it monitors' });
+    fireEvent.click(await within(picker).findByLabelText('The Lobby'));
+    fireEvent.change(within(picker).getByLabelText('search chats'), {
+      target: { value: 'attic' },
+    });
+    const found = await within(picker).findByRole('list', { name: 'chats found' });
+    fireEvent.click(within(found).getByLabelText('The Attic'));
+    // The search cleared: the ticked chat stays in the list, by its name.
+    fireEvent.change(within(picker).getByLabelText('search chats'), { target: { value: '' } });
+    await waitFor(() =>
+      expect(within(picker).queryByRole('list', { name: 'chats found' })).toBeNull()
+    );
+    const ticked = within(picker).getByRole('list', { name: 'latest chats' });
+    expect((within(ticked).getByLabelText('The Attic') as HTMLInputElement).checked).toBe(true);
+    expect(within(ticked).queryByLabelText('#attic')).toBeNull();
+    cleanup();
+
+    // Saved, then loaded again: the latest chats do not have it, so it is looked up by its id.
+    const graph = structuredClone(VIEW.graph);
+    const chat = graph.nodes.find((n) => n.id === 'chat');
+    if (chat !== undefined)
+      chat.config = { ...chat.config, chats: ['@QuestBot', '#attic', '#gone'] };
+    fakeCore({
+      file: graph,
+      routes: {
+        'GET /accounts/chat/surfaces': [...listed([LOBBY, QUEST])],
+        'GET /accounts/chat/surfaces?search=%23attic&limit=500': [...listed([ATTIC])],
+        'GET /accounts/chat/surfaces?search=%23gone&limit=500': [...listed([])],
+      },
+    });
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    fireEvent.click(await screen.findByLabelText('node chat · in', {}, slow));
+    const again = await screen.findByLabelText('details of chat');
+    const picker2 = within(again).getByRole('group', { name: 'chats it monitors' });
+    const latest = await within(picker2).findByRole('list', { name: 'latest chats' });
+    expect(((await within(latest).findByLabelText('The Attic')) as HTMLInputElement).checked).toBe(
+      true
+    );
+    // One that no search finds is shown by its id.
+    expect((within(latest).getByLabelText('#gone') as HTMLInputElement).checked).toBe(true);
   });
 
   it('picks an edge’s reads and senders from the connector’s monitored chats', async () => {

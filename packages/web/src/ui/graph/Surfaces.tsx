@@ -5,7 +5,7 @@
  * of them, and its `senders`; a chat-out's `sends`). A connector not running yet lists nothing: the
  * owner applies first. Lists of words (commands, senders) are rows to add and remove, not JSON.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { GraphEdge, Surface, SurfacesView } from '#src/ui/api.ts';
 import { api, ApiError, seg } from '#src/ui/api.ts';
 import { edgeKey, endOf } from './draft.ts';
@@ -176,6 +176,56 @@ const others = (list: readonly string[], surfaces: readonly Surface[]): Surface[
     .filter((c) => !surfaces.some((s) => s.id.toLowerCase() === c.toLowerCase()))
     .map((c) => ({ id: c, title: c, kind: 'group' as const }));
 
+/**
+ * The surfaces of the chats in `ids` that `known` does not name: a chat ticked from a search, or
+ * one its config lists beyond the latest. Each is remembered from any surface `known` held once
+ * (a search's results, ticked and then searched away), else looked up by a search of its id, once,
+ * so that its name shows after a reload too; one never found is left out (shown by its id).
+ */
+export function useNamed(
+  connector: string | undefined,
+  ids: readonly string[],
+  known: readonly Surface[]
+): Surface[] {
+  // By connector and id (without case): a surface, or null for one looked up and not found.
+  const [named, setNamed] = useState<ReadonlyMap<string, Surface | null>>(new Map());
+  const asked = useRef(new Set<string>());
+  const key = (c: string): string => `${connector ?? ''}\u0000${c.toLowerCase()}`;
+  const knownKey = known.map((s) => `${s.id}\u0000${s.title}`).join('\u0001');
+  useEffect(() => {
+    if (known.length === 0) return;
+    setNamed((m) => {
+      const next = new Map(m);
+      for (const s of known) next.set(key(s.id), s);
+      return next;
+    });
+    // `knownKey` stands for `known`, which each render makes anew.
+  }, [connector, knownKey]);
+  const missing = ids.filter(
+    (c) => !named.has(key(c)) && !known.some((s) => s.id.toLowerCase() === c.toLowerCase())
+  );
+  const missingKey = missing.join('\u0001');
+  useEffect(() => {
+    if (connector === undefined) return;
+    for (const c of missing) {
+      const k = key(c);
+      if (asked.current.has(k)) continue;
+      asked.current.add(k);
+      const done = (s: Surface | undefined): void => setNamed((m) => new Map(m).set(k, s ?? null));
+      api<SurfacesView>(
+        `/accounts/${seg(connector)}/surfaces?search=${encodeURIComponent(c)}&limit=500`
+      ).then(
+        (v) => done(v.surfaces.find((x) => x.id.toLowerCase() === c.toLowerCase())),
+        () => done(undefined)
+      );
+    }
+    // `missingKey` stands for `missing`, which each render makes anew.
+  }, [connector, missingKey]);
+  return ids
+    .map((c) => named.get(key(c)))
+    .filter((s): s is Surface => s !== undefined && s !== null);
+}
+
 /** The same monitored chats, without case or order; undefined (every chat) only equals itself. */
 export function sameChats(
   a: readonly string[] | undefined,
@@ -263,6 +313,14 @@ export function MonitoredChats(props: {
   const all = props.value === undefined;
   const listed = latest.state === 'listed' ? latest.surfaces : [];
   const value = props.value ?? [];
+  // The ticked chats the latest do not name: by their name, found by a search or looked up.
+  const listedIds = listed.map((s) => s.id);
+  const named = useNamed(
+    note === undefined ? props.connector : undefined,
+    value.filter((c) => !has(listedIds, c)),
+    found.state === 'listed' ? found.surfaces : []
+  );
+  const shown = [...listed, ...named];
   const toggle = (id: string, on: boolean): void => {
     // From every chat to a list: the ones listed, ticked, but this one.
     const base = all ? listed.map((s) => s.id) : value;
@@ -292,7 +350,7 @@ export function MonitoredChats(props: {
           </label>
           <Checks
             label="latest chats"
-            surfaces={[...listed, ...others(value, listed)]}
+            surfaces={[...shown, ...others(value, shown)]}
             ticked={(id) => all || has(value, id)}
             toggle={toggle}
           />
@@ -369,7 +427,16 @@ export function EdgeChats(props: {
   const value = props.value ?? [];
   const list = value === '*' ? [] : value;
   const any = value === '*';
-  const shown = s.state === 'listed' ? monitoredSurfaces(s.surfaces, props.monitored) : [];
+  const surfaces = s.state === 'listed' ? s.surfaces : [];
+  const surfaceIds = surfaces.map((x) => x.id);
+  // The monitored chats, and the edge's own, that its latest surfaces do not name, looked up.
+  const named = useNamed(
+    note === undefined ? props.connector : undefined,
+    [...(props.monitored ?? []), ...list].filter((c) => !has(surfaceIds, c)),
+    []
+  );
+  const shown =
+    s.state === 'listed' ? monitoredSurfaces([...surfaces, ...named], props.monitored) : [];
   return (
     <fieldset className="field surfaces" aria-label={props.name}>
       <legend>
