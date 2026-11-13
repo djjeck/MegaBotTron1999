@@ -110,7 +110,9 @@ export class Bus {
       publish: (type, payload, t) => {
         const entry = this.types.get(type);
         if (entry === undefined) throw new Error(`no event type ${type} is registered`);
-        if (entry.owner !== manifest.id)
+        // Its plugin's type, of a namespace its node registers: two nodes of one plugin whose
+        // config declares their namespaces (script nodes, bot-os.md D74) publish only their own.
+        if (entry.owner !== manifest.id || !manifest.games.registers.includes(namespaceOf(type)))
           throw new Error(`${instance} cannot publish ${type}: ${entry.owner} registers it`);
         if (this.o.validate) {
           const result = entry.schema.safeParse(payload);

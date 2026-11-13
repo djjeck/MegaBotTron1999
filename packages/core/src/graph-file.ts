@@ -78,6 +78,8 @@ export interface GraphChecker {
   graph(): Graph | undefined;
   /** Why the saved graph was not run at start; none when it was. */
   graphProblems(): GraphProblem[];
+  /** The nodes whose ports their config declares, as the editor draws them (bot-os.md D74). */
+  nodeViews?(raw: unknown): Record<string, unknown>;
 }
 
 /** A change to the graph's file refused, with why; `status`, the HTTP status it answers with. */
@@ -562,6 +564,8 @@ export function graphFileControls(
         problems: checked.ok ? [] : checked.problems,
         diff: graphDiff(current(saved() ?? EMPTY), current(raw)),
         text: checked.ok ? graphText(checked.graph) : textOf(raw),
+        // The nodes whose ports their config declares (D74), drawn as the draft declares them.
+        ...(core.nodeViews === undefined ? {} : { views: core.nodeViews(current(raw)) }),
       });
     },
     save: (raw) => {

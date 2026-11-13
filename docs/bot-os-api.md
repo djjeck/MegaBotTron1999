@@ -58,8 +58,19 @@ instance does not start.
 | `state`         | `{ version, migrations }`: the schema version of its store and the steps from each older one (§4.2)                                                                                                                                                                                                                                   |
 | `drift`         | The parser's threshold for an unrecoverable rate of unread messages (§4.7)                                                                                                                                                                                                                                                            |
 | `interface`     | What it offers people, commands and agents (P11): `commands` (chat commands: name, help, arguments), `actions` (typed calls that change something: zod input and output) and `state` (typed reads, by name: zod output). The web UI, the chat commands and the agent interface are all made from these descriptions, and nothing else |
+| `node`          | Optional: each node's own manifest, from its config and its id, for a plugin whose ports its node's config declares (below, bot-os.md D74)                                                                                                                                                                                            |
 
 A connector's manifest also names its **account** (§4.5): the network and the identity it holds.
+
+**A node's own manifest** (bot-os.md D74): a plugin whose ports its node's config declares (a script
+node, §5) gives `node(config, id)`, which makes each node's manifest from its config (as the schema
+makes it; as written when the schema refuses it, the load then saying why) and its id. What it
+returns is checked as any manifest, and must be of the plugin's id; another id, or a manifest
+refused, is the node's problem (`node look: bad manifest: inputs.heard…`), and the plugin's own
+stands in for it. The node's ports, kinds, registered namespaces and event types are then its own
+everywhere: the check and its edges, the bus, the drift, the queue, the log's reads, `GET /status`,
+and the editor, which draws the node as `POST /graph/check`'s `views` say its draft config declares
+it (§2.3). `core.available()` (`GET /available`) describes the plugin's own.
 
 `core.load()` checks the manifests, the graph, their order and their configuration, and makes the
 settings, before any plugin starts (`start` loads if it was not called). Each plugin instance's
@@ -136,14 +147,18 @@ edge runs from a sender's chat-out output, on its right, to the connector's chat
 the chats it may send to (`sends`) and the commands it may send there (`commands`, by first word;
 none: any text), with, for its queued sends, the least seconds between two sends of a command in one
 chat (`minIntervalS`, `{ "/inventory": 300 }`, by first word; a command not named, the connector's
-`commandIntervalS`: §4.6, bot-os.md D73). A connector has both, as one node (one account, one
-session); the editor draws it as two cards (§4.12). A connector's chat-out input takes any number of
-senders; a sender's chat-out output, one edge, required unless `optional` (the connector starts
-first, and an unbound required one fails the start:
-`node actor: output port chat (chat-out of irc) is not bound`). A port's `network` (`irc`,
-`telegram`) is matched against the connector's account, as it was for a chat. `ctx.connector(port)`
-hears through a chat-in input, and `ctx.outbox(port)` sends through a chat-out output (each also by
-the connector's id or its account).
+`commandIntervalS`: §4.6, bot-os.md D73). A chat-out output may **declare the commands it sends**
+(`commands`, by first word) and their spacing (`minIntervalS`), as a script node's do (bot-os.md
+D74): the check refuses an edge from it that allows another command, or any text
+(`node look: output port chat sends only /look: its edge allows /buy too`); a new edge drawn from it
+starts with them; and its queued sends are spaced by its declared intervals, its edge's own winning
+for a command it names. A connector has both, as one node (one account, one session); the editor
+draws it as two cards (§4.12). A connector's chat-out input takes any number of senders; a sender's
+chat-out output, one edge, required unless `optional` (the connector starts first, and an unbound
+required one fails the start: `node actor: output port chat (chat-out of irc) is not bound`). A
+port's `network` (`irc`, `telegram`) is matched against the connector's account, as it was for a
+chat. `ctx.connector(port)` hears through a chat-in input, and `ctx.outbox(port)` sends through a
+chat-out output (each also by the connector's id or its account).
 
 **What a chat-in edge reads** (bot-os.md D62) has two independent parts: `reads`, a list of chats or
 `"*"`, any chat its connector monitors (§4.5); and `senders`, a list of senders by username
@@ -462,7 +477,9 @@ about, so that the editor marks it there. An edge between ports of two types is 
 - `POST /graph/check`, a graph as the body: checked as the load would, nothing saved: `ok`, its
   `problems`, its `text`, and its `diff` from the saved file: the nodes `added`, `removed` and
   `changed` (with the fields that changed), and the edges `added`, `removed` and `changed` (with the
-  fields that changed), by their two ends.
+  fields that changed), by their two ends; and `views`, each node whose ports its config declares
+  (§2, bot-os.md D74) as the editor draws it (`describePlugin` of its own manifest), whether or not
+  the graph checks.
 - `PUT /graph/file`, a graph as the body: checked, then saved as the core holds it (each edge's ends
   and type written out), and kept as a version of the history; `saved` (false when nothing changed)
   and `restart` (whether it differs from what runs). A graph refused is not saved: 400, with its
@@ -692,8 +709,10 @@ wake.
   name. The namespace is a game's, or the registering plugin's own id for what belongs to no game
   (`turn-actor.step`); `core.*` is the core's.
 - `bus.publish(type, payload, t?)` fails for a type nobody registered, or one in a namespace the
-  plugin does not register. In tests and in development (`NODE_ENV` not `production`) the payload is
-  validated against its schema; in production it is not, to spare the parse on every message.
+  plugin does not register (its node's, for a plugin whose nodes register their own, bot-os.md D74:
+  two such nodes never publish each other's types). In tests and in development (`NODE_ENV` not
+  `production`) the payload is validated against its schema; in production it is not, to spare the
+  parse on every message.
 - `bus.subscribe(type or namespace, handler)` delivers only what the plugin declared it consumes:
   the namespaces of its events inputs, from the instances their edges bind, and its own (§2.1).
   Handlers run in order of subscription, synchronously: a message has reached every consumer before
@@ -1164,7 +1183,8 @@ version 2.
 
 **The graph editor** (bot-os.md D47, D55) is the web UI's home page (`packages/web/src/ui/graph/`),
 drawn with React Flow. It edits a draft of the saved graph (`GET /graph/file`), each node drawn from
-its plugin as `GET /available` describes it (`describePlugin`: its version, description, kinds and
+its plugin as `GET /available` describes it (a node whose ports its config declares, as the last
+check's `views` describe it, bot-os.md D74) (`describePlugin`: its version, description, kinds and
 account, its input and output ports, the reads, actions and commands its `interface` declares, and
 the JSON Schemas of its `config`, its `settings` and its actions' inputs and outputs and reads'
 outputs, zod's `toJSONSchema`), with the node's own id, account and config; the port types' looks
@@ -1177,8 +1197,10 @@ merely opening a node changes nothing. A field's description is its help. A node
 forms, editable, a key of `configSecrets` as a choice of `GET /secrets`, and what each of its
 outputs carries, not its type, which the graph draws (bot-os.md D71): an events output, the event
 types its plugin registers in that namespace (`types` of its port in `GET /available`), each with
-its schema's description (§4.4); an interface output, its members' names, folded, opening on each
-one's signature (from its schemas: `actions.sent({ chat: string, id?: string, t: number })`,
+its schema's description (§4.4) and its payload's JSON Schema (`schema`); a chat-out output that
+declares its commands, each with its spacing (bot-os.md D74); an interface output, its members'
+names, folded, opening on each one's signature (from its schemas:
+`actions.sent({ chat: string, id?: string, t: number })`,
 `state.rest() → { until: number, why: string }`) and help; another output, its port in words. An
 edge selected, what it carries: a chat-in edge its `reads` alone, a chat-out edge its `sends` and
 `commands`, with each command's spacing for its queued sends (`minIntervalS`, empty for the

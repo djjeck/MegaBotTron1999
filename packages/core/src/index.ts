@@ -112,6 +112,7 @@ export {
   loadOrder,
   type NodeDown,
   nodeInputs,
+  nodeManifest,
   nodeStates,
   type ResolvedNode,
   resolveGraph,

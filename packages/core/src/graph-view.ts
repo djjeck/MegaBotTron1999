@@ -211,6 +211,9 @@ export type PortView = (
       network?: string;
       /** A chat-in's: the key of its node's config that, set, gives the node this port. */
       when?: string;
+      /** A chat-out output's: the commands it declares it sends, and their spacing (D74). */
+      commands?: string[];
+      minIntervalS?: Record<string, number>;
     }
   | {
       type: 'events';
@@ -236,10 +239,14 @@ export type PortView = (
   help?: string;
 };
 
-/** An event type a plugin registers (§4.4), with its schema's description, if any. */
+/**
+ * An event type a plugin registers (§4.4), with its schema's description, if any, and its payload's
+ * JSON Schema, from which a script's editor types its handlers (bot-os.md D74).
+ */
 export interface EventTypeView {
   type: string;
   help?: string;
+  schema?: JsonSchema;
 }
 
 /** A member of a node's declared interface (§2 `interface`), with its schemas. */
@@ -324,8 +331,13 @@ function typesOf(events: Manifest['events'], namespace: string): EventTypeView[]
     .filter((type) => type.startsWith(`${namespace}.`))
     .sort()
     .map((type) => {
-      const help = events[type]?.description;
-      return help === undefined || help === '' ? { type } : { type, help };
+      const schema = events[type] as z.ZodType;
+      const help = schema.description;
+      return {
+        type,
+        ...(help === undefined || help === '' ? {} : { help }),
+        schema: z.toJSONSchema(schema, { io: 'output', unrepresentable: 'any' }) as JsonSchema,
+      };
     });
 }
 
@@ -342,6 +354,8 @@ function outputView(p: OutputPort, events: Manifest['events']): PortView {
   return {
     type: 'chat-out',
     ...(p.network === undefined ? {} : { network: p.network }),
+    ...(p.commands === undefined ? {} : { commands: [...p.commands] }),
+    ...(p.minIntervalS === undefined ? {} : { minIntervalS: { ...p.minIntervalS } }),
     label: describePort(p),
     optional: p.optional,
     ...(p.help === undefined ? {} : { help: p.help }),

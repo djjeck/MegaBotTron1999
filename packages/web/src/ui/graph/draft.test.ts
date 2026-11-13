@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Graph, PluginView } from '#src/ui/api.ts';
 import { AVAILABLE, VIEW } from '#test/graph-view.ts';
 import { cardsOf, cardTitle, isSplit, nodesOfCards, targetCard } from './cards.ts';
 import {
@@ -137,6 +138,47 @@ describe('the draft', () => {
     ).toEqual({
       from: 'gone',
       to: 'actor-a.',
+    });
+  });
+
+  it('starts an edge from an output that declares its commands with them (D74)', () => {
+    const g: Graph = {
+      version: 2,
+      nodes: [...VIEW.graph.nodes, { id: 'look', plugin: 'script' }],
+      edges: [],
+    };
+    const look: PluginView = {
+      plugin: 'script',
+      version: '0.1.0',
+      description: 'A script',
+      kinds: ['actor'],
+      inputs: {},
+      outputs: {
+        chat: {
+          type: 'chat-out',
+          commands: ['/look'],
+          label: 'chat-out of any network',
+          optional: false,
+        },
+      },
+      interface: { reads: [], actions: [], commands: [] },
+      secrets: [],
+      configSecrets: [],
+      events: [],
+    };
+    expect(
+      edgeOf(
+        { source: 'look', sourceHandle: 'chat', target: 'chat::out', targetHandle: 'chat' },
+        plugins,
+        g,
+        { look }
+      )
+    ).toEqual({
+      from: 'look.chat',
+      to: 'chat.chat',
+      type: 'chat-out',
+      commands: ['/look'],
+      dryRun: true,
     });
   });
 

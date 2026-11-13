@@ -136,17 +136,23 @@ export function connect(g: Graph, edge: GraphEdge): Graph {
 export function edgeOf(
   c: { source: string; sourceHandle?: string | null; target: string; targetHandle?: string | null },
   plugins: ReadonlyMap<string, PluginView>,
-  g: Graph
+  g: Graph,
+  /** The nodes whose ports their config declares, by id (`POST /graph/check`'s `views`, D74). */
+  views: Readonly<Record<string, PluginView>> = {}
 ): GraphEdge {
   const from = g.nodes.find((n) => n.id === c.source);
-  const type =
+  const output =
     c.sourceHandle == null
       ? undefined
-      : plugins.get(from?.plugin ?? '')?.outputs[c.sourceHandle]?.type;
+      : (views[c.source] ?? plugins.get(from?.plugin ?? ''))?.outputs[c.sourceHandle];
+  const type = output?.type;
+  // A chat-out output that declares its commands (D74): its edge starts allowing those.
+  const commands = output?.type === 'chat-out' ? output.commands : undefined;
   return {
     from: c.sourceHandle == null ? c.source : `${c.source}.${c.sourceHandle}`,
     to: `${c.target.endsWith('::out') ? c.target.slice(0, -'::out'.length) : c.target}.${c.targetHandle ?? ''}`,
     ...(type === undefined ? {} : { type }),
+    ...(commands === undefined ? {} : { commands: [...commands] }),
     ...(type === 'chat-out' ? { dryRun: true } : {}),
   };
 }

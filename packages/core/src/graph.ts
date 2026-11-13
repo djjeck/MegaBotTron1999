@@ -31,7 +31,7 @@
  * Nothing in here knows of any game.
  */
 import { z } from 'zod';
-import { ACCOUNT_ID, type Manifest, PLUGIN_ID } from './manifest.ts';
+import { ACCOUNT_ID, type Manifest, parseManifest, PLUGIN_ID } from './manifest.ts';
 import { isMode } from './outbox.ts';
 import {
   type ChatBinding,
@@ -185,6 +185,32 @@ export function nodeInputs(
   const parsed = manifest.config?.safeParse(config ?? {});
   const made = parsed?.success === true ? (parsed.data as Record<string, unknown>) : config;
   return resolveInputs(manifest.inputs, made);
+}
+
+/**
+ * A node's own manifest (bot-os.md D74): its plugin's, or, for a plugin whose ports its node's
+ * config declares (`manifest.node`), what that makes of the node's config (as the plugin's schema
+ * makes it, or as written when the schema refuses it, the load then saying why) and its id,
+ * checked as any manifest, of the plugin's id. A manifest refused is the node's problem, and the
+ * plugin's own stands in for it.
+ */
+export function nodeManifest(
+  base: Manifest,
+  id: string,
+  config: Readonly<Record<string, unknown>> | undefined
+): { manifest: Manifest; problem?: string } {
+  if (base.node === undefined) return { manifest: base };
+  const parsed = base.config?.safeParse(config ?? {});
+  const made = parsed?.success === true ? (parsed.data as Record<string, unknown>) : (config ?? {});
+  try {
+    const m = parseManifest(base.node(made, id));
+    if (m.id !== base.id)
+      return { manifest: base, problem: `node ${id}: its manifest is of ${m.id}, not ${base.id}` };
+    return { manifest: m };
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    return { manifest: base, problem: `node ${id}: ${why.replace(/^plugin \S+: /u, '')}` };
+  }
 }
 
 /**
@@ -461,15 +487,18 @@ export function resolveGraph(
   const accounts = new Map<string, string>();
   const instances = new Map<string, string>();
   for (const n of parsed.data.nodes) {
-    const manifest = plugins.get(n.plugin);
+    const base = plugins.get(n.plugin);
     if (nodes.has(n.id)) {
       problems.push(`node ${n.id}: in the graph twice`);
       continue;
     }
-    if (manifest === undefined) {
+    if (base === undefined) {
       problems.push(`node ${n.id}: its plugin ${n.plugin} is not in the image`);
       continue;
     }
+    // A node whose ports its config declares has a manifest of its own (D74).
+    const { manifest, problem } = nodeManifest(base, n.id, n.config);
+    if (problem !== undefined) problems.push(problem);
     const instance = n.instance ?? n.id;
     const holder = instances.get(instance);
     const kept = instanceOf(instance);
@@ -610,6 +639,24 @@ export function resolveGraph(
     if (sending !== undefined && sending.length > 0) {
       problems.push(`node ${fromNode}: output port ${port} is bound twice`);
       continue;
+    }
+    // A chat-out output that declares its commands (D74): its edge allows those, or fewer.
+    const declared = output.type === 'chat-out' ? output.commands : undefined;
+    if (declared !== undefined) {
+      const extra =
+        e.commands === undefined
+          ? undefined
+          : e.commands.filter((c) => !declared.includes(c.split(/\s/u)[0] ?? c));
+      if (e.commands === undefined || (extra?.length ?? 0) > 0) {
+        problems.push(
+          `node ${fromNode}: output port ${port} sends only ${declared.join(', ')}: ${
+            e.commands === undefined
+              ? 'its edge allows any text, name its commands'
+              : `its edge allows ${(extra as string[]).join(', ')} too`
+          } (${name})`
+        );
+        continue;
+      }
     }
     const written =
       input.type === 'chat-in'

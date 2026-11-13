@@ -38,6 +38,9 @@ const fn = z.custom<(...args: never[]) => unknown>(
   'expected a function'
 );
 const name = z.string().regex(/^[a-z][A-Za-z0-9_]*$/u, 'expected a name such as fooBar');
+/** A node's own manifest, from its config and its id (`node`, bot-os.md D74). */
+export type NodeManifest = (config: Readonly<Record<string, unknown>>, id: string) => unknown;
+const nodeFn = z.custom<NodeManifest>((v) => typeof v === 'function', 'expected a function');
 
 export const manifestSchema = z
   .strictObject({
@@ -117,6 +120,14 @@ export const manifestSchema = z
       .optional(),
     /** A connector's account (docs/bot-os-api.md §4.5). */
     account: z.string().regex(ACCOUNT_ID, 'expected <network>:<name>').optional(),
+    /**
+     * Each node's own manifest (bot-os.md D74), for a plugin whose ports its node's config declares
+     * (a script node): called with the node's config, as its schema makes it (as written when the
+     * schema refuses it), and the node's id; what it returns is the node's manifest, checked as
+     * any, of the same id. Its ports, kinds, registered namespaces and event types are the node's
+     * everywhere: the check, the edges, the bus, the drift, the queue and the editor.
+     */
+    node: nodeFn.optional(),
     interface: z
       .strictObject({
         commands: z.record(

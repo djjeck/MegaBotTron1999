@@ -90,12 +90,34 @@ function Outputs(props: { ports: Record<string, PortView>; view: NodeView }) {
                 {p.label}
                 {p.optional ? <span className="muted"> (optional)</span> : null}
                 {p.help === undefined ? null : <span className="muted"> — {p.help}</span>}
+                {p.type === 'chat-out' && p.commands !== undefined ? (
+                  <DeclaredCommands commands={p.commands} spacing={p.minIntervalS ?? {}} />
+                ) : null}
               </>
             )}
           </li>
         ))}
       </ul>
     </>
+  );
+}
+
+/** The commands a chat-out output declares it sends (D74), each with its spacing if it says one. */
+function DeclaredCommands(props: {
+  commands: readonly string[];
+  spacing: Readonly<Record<string, number>>;
+}) {
+  return (
+    <ul aria-label="commands it sends">
+      {props.commands.map((c) => (
+        <li key={c}>
+          <code>{c}</code>
+          {props.spacing[c] === undefined ? null : (
+            <span className="muted"> — at most once every {props.spacing[c]} s in a chat</span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 

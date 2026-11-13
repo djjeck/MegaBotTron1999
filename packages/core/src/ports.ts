@@ -195,6 +195,17 @@ export const outputSchema = z.discriminatedUnion('type', [
     type: z.literal('chat-out'),
     /** The network it sends on; none: any. */
     network: z.string().regex(NETWORK).optional(),
+    /**
+     * The commands it sends, by their first word, declared (bot-os.md D74): an edge from it may
+     * allow only these (the check refuses one that allows another, or any text), and a new edge
+     * drawn from it starts with them. None: whatever its edge allows.
+     */
+    commands: chats.min(1).optional(),
+    /**
+     * The least seconds between two queued sends of a command in one chat, by its first word, as
+     * the plugin needs them (D73, D74): its edge's own `minIntervalS` wins for a command it names.
+     */
+    minIntervalS: chatBindingSchema.shape.minIntervalS,
     ...common,
     bind: z
       .strictObject({

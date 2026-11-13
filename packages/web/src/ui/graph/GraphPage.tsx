@@ -59,6 +59,7 @@ import type {
   Graph,
   GraphCheckView,
   GraphFileView,
+  GraphNode,
   GraphProblem,
   GraphViewData,
   InstanceInfo,
@@ -232,9 +233,16 @@ export function GraphPage({
   };
 
   // The nodes as React Flow draws them, kept where they were moved and as they were selected.
+  // A node whose ports its config declares (a script node, D74) is drawn as the check last saw
+  // its config; any other, from its plugin.
+  const declared = check?.views;
+  const pluginOf = useCallback(
+    (n: GraphNode) => declared?.[n.id] ?? plugins.get(n.plugin),
+    [declared, plugins]
+  );
   const views = useMemo(
-    () => (draft?.nodes ?? []).map((n) => viewOf(n, plugins.get(n.plugin))),
-    [draft, plugins]
+    () => (draft?.nodes ?? []).map((n) => viewOf(n, pluginOf(n))),
+    [draft, pluginOf]
   );
   const viewsById = useMemo(() => new Map(views.map((v) => [v.id, v])), [views]);
   /** Each node's cards: one, or a connector's in and out cards (D60). */
@@ -450,7 +458,8 @@ export function GraphPage({
     setDraft((d) => next(d ?? EMPTY_GRAPH));
   };
 
-  const onConnect = (c: Connection): void => change((g) => connect(g, edgeOf(c, plugins, g)));
+  const onConnect = (c: Connection): void =>
+    change((g) => connect(g, edgeOf(c, plugins, g, declared)));
 
   const added = (n: NewNode): void => {
     // Its config starts filled with its defaults, written as if the owner had typed them; the node
@@ -577,7 +586,7 @@ export function GraphPage({
       />
     );
   else if (shownNode !== undefined) {
-    const view = viewOf(shownNode, plugins.get(shownNode.plugin));
+    const view = viewOf(shownNode, pluginOf(shownNode));
     side = (
       <NodeDetails
         key={shownNode.id}

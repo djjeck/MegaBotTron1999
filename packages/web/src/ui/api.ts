@@ -124,6 +124,11 @@ export interface GraphCheckView {
   problems: GraphProblem[];
   diff: GraphDiff;
   text?: string;
+  /**
+   * The nodes whose ports their config declares (a script node, bot-os.md D74), by id, each drawn
+   * as the draft's config declares it.
+   */
+  views?: Record<string, PluginView>;
 }
 
 /** The graph's history, as `GET /graph/history` gives it (docs/bot-os-api.md §2.3). */

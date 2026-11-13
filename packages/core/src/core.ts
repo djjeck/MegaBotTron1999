@@ -39,6 +39,7 @@ import {
   GraphError,
   type GraphInput,
   loadOrder,
+  nodeManifest,
   nodeStates,
   requiredOf,
   type ResolvedNode,
@@ -469,10 +470,19 @@ export class Core {
     const holder = [...this.entries.values()].find((e) => e.node.account === account);
     const reaches = sendsOf(entry.node)
       .filter(([p, b]) => b.node === holder?.id && (port === undefined || p === port))
-      .map(([, b]) => ({
-        ...(b.chat ?? { reads: [], sends: [] }),
-        ...(b.dryRun === true ? { dryRun: true } : {}),
-      }));
+      .map(([p, b]) => {
+        const chat = b.chat ?? { reads: [], sends: [] };
+        // The spacing its output declares (D74), under its edge's own.
+        const output = entry.manifest.outputs[p];
+        const declared = output?.type === 'chat-out' ? output.minIntervalS : undefined;
+        return {
+          ...chat,
+          ...(declared === undefined
+            ? {}
+            : { minIntervalS: { ...declared, ...chat.minIntervalS } }),
+          ...(b.dryRun === true ? { dryRun: true } : {}),
+        };
+      });
     const { state, reason } = entry.status;
     return {
       reach: reaches.length === 0 ? { sends: [] } : reaches,
@@ -1039,6 +1049,36 @@ export class Core {
       if (!(e instanceof StartError)) throw e;
       return { ok: false, problems: e.message.split('\n').map((p) => locateProblem(p, raw)) };
     }
+  }
+
+  /**
+   * The nodes of a graph whose ports their config declares (bot-os.md D74), each as the editor
+   * draws it (`describePlugin` of its own manifest), whether or not the graph checks: so that a
+   * port declared in the draft is drawn at once. A node whose manifest is refused is left out (the
+   * check says why).
+   */
+  nodeViews(raw: unknown): Record<string, PluginView> {
+    const nodes =
+      isObject(raw) && Array.isArray(raw['nodes'])
+        ? (raw['nodes'] as unknown[])
+        : ([] as unknown[]);
+    const out: Record<string, PluginView> = {};
+    for (const n of nodes) {
+      if (!isObject(n) || typeof n['id'] !== 'string' || typeof n['plugin'] !== 'string') continue;
+      const plugin = this.plugins.find((p) => p.manifest.id === n['plugin']);
+      if (plugin === undefined) continue;
+      let base: Manifest;
+      try {
+        base = parseManifest(plugin.manifest);
+      } catch {
+        continue;
+      }
+      if (base.node === undefined) continue;
+      const config = isObject(n['config']) ? n['config'] : undefined;
+      const { manifest, problem } = nodeManifest(base, n['id'], config);
+      if (problem === undefined) out[n['id']] = describePlugin(manifest);
+    }
+    return out;
   }
 
   /**
