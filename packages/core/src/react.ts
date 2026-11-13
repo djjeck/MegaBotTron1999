@@ -84,6 +84,18 @@ export function matches(payload: unknown, when: Readonly<Record<string, unknown>
 }
 
 /**
+ * Whether every field of `when` holds of the payload (a queued send's cancel, bot-os.md D73): equal
+ * to the value at its path, as `matches` asks, or, for a list there, among its items (a state's
+ * `changed.sections` holding `inventory`).
+ */
+export function holds(payload: unknown, when: Readonly<Record<string, unknown>> = {}): boolean {
+  return Object.entries(when).every(([path, value]) => {
+    const at = valueAt(payload, path);
+    return at === value || (Array.isArray(at) && at.includes(value));
+  });
+}
+
+/**
  * A text made from a payload: each `{path}` of a template replaced by its value there (a string, a
  * number or a boolean), or what a function returns. `missing` names a path with no such value (or
  * a function that returned nothing): nothing is to be sent.

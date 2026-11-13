@@ -55,7 +55,15 @@ import {
 import { describePlugin, type PluginView } from './graph-view.ts';
 import { type InstanceInfo, InstanceRegistry } from './instance-registry.ts';
 import { type Manifest, parseManifest, SECRET_NAME } from './manifest.ts';
-import { isMode, type Mode, Outbox, type SenderPolicy, type SendRecord } from './outbox.ts';
+import {
+  isMode,
+  type Mode,
+  Outbox,
+  type QueuedSend,
+  type QueueRecord,
+  type SenderPolicy,
+  type SendRecord,
+} from './outbox.ts';
 import { CORE_COMMANDS, coreCommands } from './owner-commands.ts';
 import {
   type EventQuery,
@@ -66,6 +74,7 @@ import {
   type PluginInterface,
 } from './plugin.ts';
 import { type InputPort } from './ports.ts';
+import { holds } from './react.ts';
 import { type Render, resvgRender } from './render.ts';
 import { type KeptTimer, PluginScheduler } from './scheduler.ts';
 import { type Secrets, SecretStore } from './secrets.ts';
@@ -112,7 +121,7 @@ export interface CoreOptions {
    * is where the log put the record (`LogPosition`, bot-os.md D72), the bus hands its subscribers
    * with the event, for those that keep a cursor into the log.
    */
-  record?: (r: CoreRecord | BusEvent | SendRecord | DriftRecord) => unknown;
+  record?: (r: CoreRecord | BusEvent | SendRecord | QueueRecord | DriftRecord) => unknown;
   /**
    * Each plugin instance's configuration, by its id, as the deployment sets it: checked against
    * its plugin's `config` schema at load, a bad value naming the instance and the key. A node of
@@ -336,6 +345,10 @@ export class Core {
       },
       stopNode: (id, reason) => this.stopNode(id, reason, 'owner'),
       clearStop: (id) => this.clearStop(id),
+      queue: (id) => {
+        const account = this.entries.get(id)?.node.account;
+        return account === undefined ? [] : (this.outboxes.get(account)?.pending() ?? []);
+      },
       record: (fields) => this.o.record?.({ type: 'core.power', t: this.o.clock.now(), ...fields }),
       error: (id, line) => this.logger(id).error(line),
       account: (id) => {
@@ -784,6 +797,8 @@ export class Core {
    */
   async stop(): Promise<void> {
     this.o.clock.clearTimeout(this.sweepTimer);
+    // What waits in the queues goes no further: a queued send does not outlive the process (D73).
+    for (const outbox of this.outboxes.values()) outbox.dropQueued(undefined, 'the instance stops');
     await this.shutting;
     for (const entry of [...this.entries.values()].reverse()) {
       const { instance } = entry;
@@ -1210,6 +1225,7 @@ export class Core {
     // Handed back once: a crash before the next stop must not restore it a second time.
     kept.backend.delete(RESTORE);
     const log = this.logger(id);
+    const bus = this.bus.handle(id, entry.manifest, sourcesOf(node), log, node.instance);
     const scheduler = new PluginScheduler({
       clock: this.o.clock,
       load: () => kept.get(TIMERS) as Record<string, KeptTimer> | undefined,
@@ -1249,7 +1265,7 @@ export class Core {
         ? { secrets: this.secretsOf(id), readers: () => this.readersOf(id) }
         : {}),
       scheduler,
-      bus: this.bus.handle(id, entry.manifest, sourcesOf(node), log, node.instance),
+      bus,
       drift: this.driftMonitor.reporter(id),
       outbox: (key) => {
         const bound = this.chatEnd(sendsOf(node), key);
@@ -1259,7 +1275,37 @@ export class Core {
             `${id} has no reach on the account ${key}: no edge binds a chat-out of it`
           );
         // Through that output's edge alone, when named by the port (D64: its dry run is its own).
-        return this.outbox(holder.node.account).as(id, bound?.[0] === key ? key : undefined);
+        const outbox = this.outbox(holder.node.account);
+        const handle = outbox.as(id, bound?.[0] === key ? key : undefined);
+        // A queued send's cancel on events (D73): heard on its node's own bus, as it hears any.
+        return {
+          ...handle,
+          enqueue: (chat, text, options = {}) => {
+            const on = options.cancel?.on;
+            const types = on === undefined ? [] : typeof on === 'string' ? [on] : [...on];
+            if (types.length === 0) return handle.enqueue(chat, text, options);
+            const heard: (() => void)[] = [];
+            // Subscribed before it is queued, so that a refusal queues nothing.
+            const ref: { queued?: QueuedSend } = {};
+            const hear = (e: BusEvent): void => {
+              const c = options.cancel;
+              if (ref.queued === undefined || !holds(e, c?.when) || c?.test?.(e) === false) return;
+              outbox.cancelQueued(ref.queued.id, `cancelled by ${e.type}`, e);
+            };
+            try {
+              for (const t of types) heard.push(bus.subscribe(t, hear));
+            } catch (e) {
+              for (const u of heard) u();
+              throw e;
+            }
+            const queued = handle.enqueue(chat, text, options);
+            ref.queued = queued;
+            void queued.result.then(() => {
+              for (const u of heard) u();
+            });
+            return queued;
+          },
+        };
       },
       connector: (key) => {
         const bound = this.chatEnd(chatsOf(node), key);
@@ -1481,6 +1527,10 @@ export class Core {
   }
 
   private set(entry: Entry, state: PluginState, reason?: string, stop?: StopRecord): void {
+    // A node that stops running drops what it queued (D73): it sends nothing from then on.
+    if (state !== 'running' && state !== 'starting')
+      for (const outbox of this.outboxes.values())
+        outbox.dropQueued(entry.id, `${entry.id} is ${state}`);
     entry.status = {
       id: entry.id,
       state,

@@ -25,6 +25,7 @@ import { type Buttons } from './commands.ts';
 import { type ConnectorStatus, type Surface, type SurfaceQuery } from './connector.ts';
 import { type DriftCounts } from './drift.ts';
 import { type Manifest } from './manifest.ts';
+import { type QueueEntryView } from './outbox.ts';
 import { type Instance } from './plugin.ts';
 import { type InputPort } from './ports.ts';
 import { type SettingsRegistry, type SettingValue } from './settings.ts';
@@ -72,6 +73,8 @@ export interface ControlsHost {
   stopNode(id: string, reason: string): boolean;
   /** Clears a node's kept stop, for the next start; false if it has none. */
   clearStop(id: string): boolean;
+  /** What waits in a connector node's queue (bot-os.md D73), in order. */
+  queue(id: string): QueueEntryView[];
   /** Logs the change in the event log (`core.power`). */
   record(fields: Record<string, unknown>): void;
   /** Logs a hook that failed. */
@@ -237,6 +240,18 @@ export class Controls {
     if (c === undefined) return { running: false, listed: false, surfaces: [] };
     if (c.surfaces === undefined) return { running: true, listed: false, surfaces: [] };
     return { running: true, listed: true, surfaces: await c.surfaces(query) };
+  }
+
+  /**
+   * What waits in a connector's queue (bot-os.md D73): each queued send, when it may go, and the
+   * nodes that asked for it with their cancel conditions; undefined for a node that is not a
+   * connector.
+   */
+  queue(id: string): { account?: string; entries: QueueEntryView[] } | undefined {
+    const node = this.host.nodes().find((n) => n.id === id);
+    if (node === undefined || !node.manifest.kinds.includes('connector')) return undefined;
+    const { account } = this.host.account(id);
+    return { ...(account === undefined ? {} : { account }), entries: this.host.queue(id) };
   }
 
   /** Each parser's drift: what it read and could not read, and whether it tripped (P5). */

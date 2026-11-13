@@ -23,6 +23,7 @@
  * now or refuses, as `send` does, and waits for the network's answer (Telegram's), with the sent
  * message's id, or `failed` with why if the network refused it.
  */
+import { z } from 'zod';
 import { type Clock, type TimerHandle } from './clock.ts';
 import { type Connector } from './connector.ts';
 import { type Store } from './store.ts';
@@ -36,10 +37,15 @@ export const MODES = ['read-only', 'dry-run', 'live'] as const;
 export type Mode = (typeof MODES)[number];
 export const isMode = (m: unknown): m is Mode => MODES.includes(m as Mode);
 
-/** An account's limits, below the network's own. */
+/** An account's limits, below the network's own; one not given does not limit. */
 export interface Limits {
-  minIntervalMs: number;
-  maxPerHour: number;
+  minIntervalMs?: number;
+  maxPerHour?: number;
+  /**
+   * The least time between two sends of one command in one chat that a queued send waits for
+   * (bot-os.md D73), where the edge names none for it; none: 0.
+   */
+  commandIntervalMs?: number;
 }
 
 export type SendResult = {
@@ -67,6 +73,8 @@ export type SendRecord = DeliverResult & {
   /** Who in the plugin asked: `strategy`, `control`, … */
   origin: string;
   mode: Mode;
+  /** The other nodes a coalesced queued send went for (bot-os.md D73). */
+  with?: string[];
 };
 
 /** Thrown by a connector's `send` when the network asks to wait: the account holds that long. */
@@ -79,12 +87,29 @@ export class FloodWait extends Error {
 }
 
 /**
+ * A connector's default interval between two queued sends of one command in one chat (bot-os.md
+ * D73), a field of its config: where a chat-out edge names none for a command.
+ */
+export const commandIntervalS = z
+  .number()
+  .min(0)
+  .default(0)
+  .describe(
+    'The least seconds between two queued sends of one command in one chat, where the edge names none (0: only the account’s pace)'
+  );
+
+/**
  * What one edge lets a sender send: its chats, and its commands by first word (none: any text);
  * `dryRun`, logged as sent and never sent (bot-os.md D64).
  */
 export interface Reach {
   sends: readonly string[];
   commands?: readonly string[] | undefined;
+  /**
+   * The least seconds between two sends of a command (by first word) in one chat, for a queued
+   * send (bot-os.md D73); a command not named: the connector's `commandIntervalMs`.
+   */
+  minIntervalS?: Readonly<Record<string, number>> | undefined;
   dryRun?: boolean | undefined;
 }
 
@@ -181,8 +206,8 @@ export interface OutboxOptions {
   modes?: Modes;
   /** What the outbox knows of a sender, at each send: through its output `port`, if one is named. */
   policy?: (plugin: string, port?: string) => SenderPolicy;
-  /** Where every attempt goes: the event log. */
-  record?: (r: SendRecord) => void;
+  /** Where every attempt, and every step of the queue, goes: the event log. */
+  record?: (r: SendRecord | QueueRecord) => void;
 }
 
 export interface SendOptions {
@@ -216,21 +241,119 @@ export interface OutboxHandle {
   mode(): Mode;
   /** Sends now, or refuses with why. */
   send(chat: string, text: string, options?: SendOptions): SendResult;
-  /** Sends in its turn, spaced within the account's limits. */
-  enqueue(chat: string, text: string, options?: SendOptions): Promise<SendResult>;
+  /**
+   * Queues a send (bot-os.md D73): in its turn, spaced within the account's limits and its
+   * command's interval in that chat, coalesced with the same text waiting for the same chat, and
+   * dropped if its `cancel` holds before it goes. Awaited, its outcome.
+   */
+  enqueue(chat: string, text: string, options?: QueueOptions): QueuedSend;
   /** Sends now or refuses, and waits for the network's answer: the message's id. */
   deliver(chat: string, text: string, options?: SendOptions): Promise<DeliverResult>;
 }
 
-interface Queued {
+/** An event as a cancel tests it: the bus's, `{ type, t, ...payload }`. */
+export interface CancelEvent {
+  type: string;
+  t: number;
+  [field: string]: unknown;
+}
+
+/**
+ * When a queued send is dropped before it goes (bot-os.md D73), each condition enough: an event of
+ * `on` (a type or a namespace the node hears) whose fields equal `when` (dotted paths, as a
+ * reaction's; a list at a path matches a value it contains) and pass `test`, a plugin's own; or
+ * the time: `deadline` (ms), or `withinMs` from now, after which it expires.
+ */
+export interface CancelWhen {
+  on?: string | readonly string[];
+  when?: Readonly<Record<string, unknown>>;
+  test?: (event: CancelEvent) => boolean;
+  deadline?: number;
+  withinMs?: number;
+}
+
+export interface QueueOptions extends SendOptions {
+  cancel?: CancelWhen;
+}
+
+/** What came of a queued send: the send's outcome, or dropped before it went. */
+export type QueueOutcome = SendResult['outcome'] | 'cancelled' | 'expired';
+
+export interface QueuedResult {
+  text: string;
+  outcome: QueueOutcome;
+  reason?: string;
+  /** The event that cancelled it. */
+  event?: CancelEvent;
+}
+
+/**
+ * A queued send's handle (bot-os.md D73): awaited (or `result`), its outcome; `status()` now;
+ * `cancel()` drops it if it still waits (true then).
+ */
+export interface QueuedSend extends PromiseLike<QueuedResult> {
+  readonly id: number;
+  readonly result: Promise<QueuedResult>;
+  status(): 'waiting' | QueueOutcome;
+  cancel(reason?: string): boolean;
+}
+
+/** A step of the queue, as the log keeps it (`core.queue`). */
+export type QueueRecord = {
+  type: 'core.queue';
+  t: number;
+  account: string;
   plugin: string;
   chat: string;
   text: string;
+  event: 'queued' | 'coalesced' | QueueOutcome;
+  reason?: string;
+  /** The event that cancelled it, by type. */
+  by?: string;
+};
+
+/** A queued send, as the owner sees it (the connector's panel, `GET /plugins/<id>/queue`). */
+export interface QueueEntryView {
+  chat: string;
+  text: string;
+  command: string;
+  queuedAt: number;
+  /** When it may go at the earliest: its command's interval, and the account's pace. */
+  waitingUntil: number;
+  intervalS: number;
+  /** Each node that asked for it (several, coalesced), with its conditions. */
+  nodes: {
+    plugin: string;
+    origin: string;
+    cancel?: { on?: string[]; when?: Record<string, unknown>; test?: boolean; deadline?: number };
+  }[];
+}
+
+/** One node's share of a queued send. */
+interface Member {
+  id: number;
+  plugin: string;
   options: SendOptions;
-  done: (r: SendResult) => void;
+  cancel?: CancelWhen;
+  deadline?: number;
+  intervalMs: number;
+  status: 'waiting' | QueueOutcome;
+  settle: (r: QueuedResult) => void;
+  timer?: TimerHandle;
+}
+
+/** A send waiting in its chat's queue: one text, for one or more nodes. */
+interface Waiting {
+  chat: string;
+  text: string;
+  command: string;
+  queuedAt: number;
+  members: Member[];
 }
 
 const HOUR = 3_600_000;
+/** A command's first word, as the reach and the intervals name it. */
+const firstWord = (text: string): string => text.split(/\s/u, 1)[0] ?? '';
 
 export class Outbox {
   readonly account: string;
@@ -239,7 +362,11 @@ export class Outbox {
   private recent: number[] = [];
   /** No send before this: a flood wait. */
   private heldUntil = Number.NEGATIVE_INFINITY;
-  private readonly queue: Queued[] = [];
+  /** What waits, in the order queued: each chat's queue, side by side (bot-os.md D73). */
+  private waitingList: Waiting[] = [];
+  /** When each command was last sent in each chat (`<chat> <command>`), dry runs counted. */
+  private readonly lastSent = new Map<string, number>();
+  private members = 0;
   private timer: TimerHandle | undefined;
 
   constructor(options: OutboxOptions) {
@@ -260,16 +387,23 @@ export class Outbox {
     };
   }
 
-  /** How many sends wait in the queue. */
+  /** How many sends wait in the queue (a coalesced one once). */
   get waiting(): number {
-    return this.queue.length;
+    return this.waitingList.length;
   }
 
   send(plugin: string, chat: string, text: string, options: SendOptions = {}): SendResult {
     const v = this.check(plugin, chat, text, options);
     const result = 'refused' in v ? v.refused : this.attempt(chat, text, v.dryRun);
+    this.sent(chat, text, result);
     this.log(plugin, chat, options, result, v.mode);
     return result;
+  }
+
+  /** Notes when a command went (or went as a dry run), for its interval (D73). */
+  private sent(chat: string, text: string, r: { outcome: string }): void {
+    if (r.outcome === 'sent' || r.outcome === 'dry-run')
+      this.lastSent.set(`${chat} ${firstWord(text)}`, this.o.clock.now());
   }
 
   /** How a sender sends now (`OutboxHandle.mode`). */
@@ -331,42 +465,244 @@ export class Outbox {
         }
       }
     }
+    this.sent(chat, text, result);
     this.log(plugin, chat, options, result, v.mode);
     return result;
   }
 
-  enqueue(
-    plugin: string,
-    chat: string,
-    text: string,
-    options: SendOptions = {}
-  ): Promise<SendResult> {
+  /**
+   * Queues a send (bot-os.md D73). Refused at once, as `send` refuses, what can never go now. The
+   * same text waiting for the same chat takes this node too (coalesced: one send, a handle each).
+   * It goes in its turn: the oldest send whose command's interval in its chat has passed since that
+   * command last went (the edges', the connector's by default), within the account's pace; a send
+   * of another command does not wait behind it. Until then, its cancel may drop it.
+   */
+  enqueue(plugin: string, chat: string, text: string, options: QueueOptions = {}): QueuedSend {
+    const { cancel, ...sendOptions } = options;
+    const id = ++this.members;
+    let settle!: (r: QueuedResult) => void;
+    const result = new Promise<QueuedResult>((r) => (settle = r));
+    const member: Member = {
+      id,
+      plugin,
+      options: sendOptions,
+      ...(cancel === undefined ? {} : { cancel }),
+      intervalMs: 0,
+      status: 'waiting',
+      settle: (r) => {
+        if (member.status !== 'waiting') return;
+        member.status = r.outcome;
+        if (member.timer !== undefined) this.o.clock.clearTimeout(member.timer);
+        settle(r);
+      },
+    };
+    const handle: QueuedSend = {
+      id,
+      result,
+      status: () => member.status,
+      cancel: (reason = 'cancelled by its node') => this.cancelQueued(id, reason),
+      then: (onDone, onFail) => result.then(onDone, onFail),
+    };
     // What can never go now waits for nothing: refused at once.
-    const v = this.check(plugin, chat, text, options);
+    const v = this.check(plugin, chat, text, sendOptions);
     if ('refused' in v) {
-      this.log(plugin, chat, options, v.refused, v.mode);
-      return Promise.resolve(v.refused);
+      this.log(plugin, chat, sendOptions, v.refused, v.mode);
+      member.settle(v.refused);
+      return handle;
     }
-    return new Promise((done) => {
-      this.queue.push({ plugin, chat, text, options, done });
-      this.pump();
+    member.intervalMs = this.intervalOf(plugin, chat, text, sendOptions);
+    const deadline =
+      cancel?.withinMs === undefined
+        ? cancel?.deadline
+        : Math.min(cancel.deadline ?? Infinity, this.o.clock.now() + cancel.withinMs);
+    if (deadline !== undefined) member.deadline = deadline;
+    const same = this.waitingList.find((w) => w.chat === chat && w.text === text);
+    if (same === undefined)
+      this.waitingList.push({
+        chat,
+        text,
+        command: firstWord(text),
+        queuedAt: this.o.clock.now(),
+        members: [member],
+      });
+    else same.members.push(member);
+    this.queueLog(plugin, chat, text, same === undefined ? 'queued' : 'coalesced');
+    if (deadline !== undefined)
+      member.timer = this.o.clock.setTimeout(
+        () => this.drop(id, { text, outcome: 'expired', reason: 'its deadline passed' }),
+        Math.max(0, deadline - this.o.clock.now())
+      );
+    this.pump();
+    return handle;
+  }
+
+  /**
+   * Drops one node's share of a queued send if it still waits (its handle's `cancel`, or the core
+   * for an event of its `cancel.on`): cancelled, with why and the event. False if it went already.
+   */
+  cancelQueued(id: number, reason: string, event?: CancelEvent): boolean {
+    const w = this.waitingList.find((x) => x.members.some((m) => m.id === id));
+    if (w === undefined) return false;
+    return this.drop(id, {
+      text: w.text,
+      outcome: 'cancelled',
+      reason,
+      ...(event === undefined ? {} : { event }),
     });
   }
 
-  /** Sends the head of the queue when the limits allow, then the next. */
-  private pump(): void {
-    if (this.timer !== undefined || this.queue.length === 0) return;
-    const wait = this.wait();
-    if (wait > 0) {
-      this.timer = this.o.clock.setTimeout(() => {
-        this.timer = undefined;
-        this.pump();
-      }, wait);
-      return;
-    }
-    const next = this.queue.shift() as Queued;
-    next.done(this.send(next.plugin, next.chat, next.text, next.options));
+  /** Drops what a node queued (it stopped, or the instance stops): cancelled, with why. */
+  dropQueued(plugin: string | undefined, reason: string): void {
+    for (const w of [...this.waitingList])
+      for (const m of [...w.members])
+        if (plugin === undefined || m.plugin === plugin)
+          this.drop(m.id, { text: w.text, outcome: 'cancelled', reason });
+  }
+
+  /** What waits, in order, as the owner sees it. */
+  pending(): QueueEntryView[] {
+    const pace = this.o.clock.now() + this.wait();
+    return this.waitingList.map((w) => ({
+      chat: w.chat,
+      text: w.text,
+      command: w.command,
+      queuedAt: w.queuedAt,
+      waitingUntil: Math.max(pace, this.readyAt(w)),
+      intervalS: this.intervalMsOf(w) / 1000,
+      nodes: w.members.map((m) => {
+        const c = m.cancel;
+        const on = c?.on === undefined ? undefined : typeof c.on === 'string' ? [c.on] : [...c.on];
+        return {
+          plugin: m.plugin,
+          origin: m.options.origin ?? m.plugin,
+          ...(c === undefined ||
+          (on === undefined && c.test === undefined && m.deadline === undefined)
+            ? {}
+            : {
+                cancel: {
+                  ...(on === undefined ? {} : { on }),
+                  ...(c.when === undefined ? {} : { when: { ...c.when } }),
+                  ...(c.test === undefined ? {} : { test: true }),
+                  ...(m.deadline === undefined ? {} : { deadline: m.deadline }),
+                },
+              }),
+        };
+      }),
+    }));
+  }
+
+  /** A member settled before its send went: out of its send, logged, and the queue moves on. */
+  private drop(id: number, r: QueuedResult): boolean {
+    const w = this.waitingList.find((x) => x.members.some((m) => m.id === id));
+    const m = w?.members.find((x) => x.id === id);
+    if (w === undefined || m === undefined) return false;
+    w.members = w.members.filter((x) => x !== m);
+    if (w.members.length === 0) this.waitingList = this.waitingList.filter((x) => x !== w);
+    m.settle(r);
+    this.queueLog(m.plugin, w.chat, w.text, r.outcome, r.reason, r.event?.type);
     this.pump();
+    return true;
+  }
+
+  /**
+   * A sender's interval for a command in a chat (D73): the longest its edges that let it send it
+   * name, else the connector's default.
+   */
+  private intervalOf(plugin: string, chat: string, text: string, options: SendOptions): number {
+    const word = firstWord(text);
+    const named = (this.reachesOf(this.o.policy?.(plugin, options.port)) ?? [])
+      .filter((r) => r.sends.includes(chat))
+      .flatMap((r) => (r.minIntervalS?.[word] === undefined ? [] : [r.minIntervalS[word] * 1000]));
+    return named.length > 0 ? Math.max(...named) : (this.o.limits?.()?.commandIntervalMs ?? 0);
+  }
+
+  private intervalMsOf(w: Waiting): number {
+    return Math.max(0, ...w.members.map((m) => m.intervalMs));
+  }
+
+  /** When a waiting send's command may go again in its chat. */
+  private readyAt(w: Waiting): number {
+    const last = this.lastSent.get(`${w.chat} ${w.command}`);
+    return last === undefined ? Number.NEGATIVE_INFINITY : last + this.intervalMsOf(w);
+  }
+
+  /** Sends the oldest send whose command's interval has passed, when the account may; again. */
+  private pump(): void {
+    if (this.timer !== undefined) this.o.clock.clearTimeout(this.timer);
+    this.timer = undefined;
+    for (;;) {
+      if (this.waitingList.length === 0) return;
+      const now = this.o.clock.now();
+      const pace = this.wait();
+      const next = this.waitingList.find((w) => this.readyAt(w) <= now);
+      if (pace > 0 || next === undefined) {
+        const soonest = Math.min(...this.waitingList.map((w) => this.readyAt(w)));
+        const ms = Math.max(pace, soonest - now, 0);
+        this.timer = this.o.clock.setTimeout(() => {
+          this.timer = undefined;
+          this.pump();
+        }, ms);
+        return;
+      }
+      this.issue(next);
+    }
+  }
+
+  /**
+   * A waiting send goes: each node's checks again (one refused is told so, and the others go),
+   * then one send, for real if any of them sends through a live edge, else a dry run; logged once
+   * (`core.send`, with the other nodes it went for), and each node told.
+   */
+  private issue(w: Waiting): void {
+    this.waitingList = this.waitingList.filter((x) => x !== w);
+    const going: { m: Member; dryRun: boolean; mode: Mode }[] = [];
+    for (const m of w.members) {
+      const v = this.check(m.plugin, w.chat, w.text, m.options);
+      if ('refused' in v) {
+        this.log(m.plugin, w.chat, m.options, v.refused, v.mode);
+        m.settle(v.refused);
+        this.queueLog(m.plugin, w.chat, w.text, 'refused', v.refused.reason);
+      } else going.push({ m, dryRun: v.dryRun, mode: v.mode });
+    }
+    const lead = going.find((g) => !g.dryRun) ?? going[0];
+    if (lead === undefined) return;
+    const result = this.attempt(w.chat, w.text, lead.dryRun);
+    this.sent(w.chat, w.text, result);
+    const others = [
+      ...new Set(going.filter((g) => g.m.plugin !== lead.m.plugin).map((g) => g.m.plugin)),
+    ];
+    this.log(lead.m.plugin, w.chat, lead.m.options, result, lead.mode, others);
+    for (const g of going) {
+      const outcome = result.outcome === 'sent' && g.dryRun ? 'dry-run' : result.outcome;
+      const r: QueuedResult = {
+        text: w.text,
+        outcome,
+        ...(result.reason === undefined ? {} : { reason: result.reason }),
+      };
+      g.m.settle(r);
+      this.queueLog(g.m.plugin, w.chat, w.text, outcome, result.reason);
+    }
+  }
+
+  private queueLog(
+    plugin: string,
+    chat: string,
+    text: string,
+    event: QueueRecord['event'],
+    reason?: string,
+    by?: string
+  ): void {
+    this.o.record?.({
+      type: 'core.queue',
+      t: this.o.clock.now(),
+      account: this.account,
+      plugin,
+      chat,
+      text,
+      event,
+      ...(reason === undefined ? {} : { reason }),
+      ...(by === undefined ? {} : { by }),
+    });
   }
 
   /** How long until the account may send again. */
@@ -379,8 +715,12 @@ export class Outbox {
     return Math.max(
       0,
       this.heldUntil - now,
-      limits === undefined || last === undefined ? 0 : last + limits.minIntervalMs - now,
-      limits === undefined || first === undefined || this.recent.length < limits.maxPerHour
+      limits?.minIntervalMs === undefined || last === undefined
+        ? 0
+        : last + limits.minIntervalMs - now,
+      limits?.maxPerHour === undefined ||
+        first === undefined ||
+        this.recent.length < limits.maxPerHour
         ? 0
         : first + HOUR - now
     );
@@ -437,8 +777,14 @@ export class Outbox {
     const limits = this.o.limits?.();
     const last = this.recent.at(-1);
     if (limits !== undefined) {
-      if (last !== undefined && now - last < limits.minIntervalMs) return refuse('too soon');
-      if (this.recent.length >= limits.maxPerHour) return refuse('hourly limit');
+      if (
+        limits.minIntervalMs !== undefined &&
+        last !== undefined &&
+        now - last < limits.minIntervalMs
+      )
+        return refuse('too soon');
+      if (limits.maxPerHour !== undefined && this.recent.length >= limits.maxPerHour)
+        return refuse('hourly limit');
     }
     if (dryRun) {
       this.recent.push(now);
@@ -472,7 +818,8 @@ export class Outbox {
     chat: string,
     options: SendOptions,
     result: DeliverResult,
-    mode: Mode
+    mode: Mode,
+    coalesced: readonly string[] = []
   ): void {
     this.o.record?.({
       type: 'core.send',
@@ -483,6 +830,7 @@ export class Outbox {
       origin: options.origin ?? plugin,
       mode,
       ...result,
+      ...(coalesced.length === 0 ? {} : { with: [...coalesced] }),
     });
   }
 }

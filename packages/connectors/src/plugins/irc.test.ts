@@ -178,7 +178,11 @@ describe('the irc plugin in the core', () => {
     expect((got as { self(): string }).self()).toBe('alice');
     const connector = core.connector('irc');
     expect(connector?.account).toBe('irc:alice');
-    expect(connector?.limits).toEqual({ minIntervalMs: 3000, maxPerHour: 60 });
+    expect(connector?.limits).toEqual({
+      minIntervalMs: 3000,
+      maxPerHour: 60,
+      commandIntervalMs: 0,
+    });
     expect(core.connector('reader')).toBeUndefined();
     expect(core.connector('nobody')).toBeUndefined();
     await core.stop();

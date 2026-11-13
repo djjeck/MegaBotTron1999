@@ -17,7 +17,9 @@ marked `missed` from `telegram-bot` (Telegram keeps a bot's updates for a day) a
 what it has accounted for in each (kept in its store, `last-seen` and `seen-above`), at most 1000 a
 chat (D62). Each message reaches the readers once, across live delivery, the catch-up and restarts,
 and a gap whose fetch failed is fetched again until it is filled; `telegram-bot` keeps the last
-message it delivered in each chat, against Telegram's deliveries again (D66).
+message it delivered in each chat, against Telegram's deliveries again (D66). The three chat
+connectors' configs give their account's queue its default interval between two queued sends of a
+command in one chat (`commandIntervalS`, 0 by default, D73), where a chat-out edge names none.
 
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
   structured output by a zod schema.

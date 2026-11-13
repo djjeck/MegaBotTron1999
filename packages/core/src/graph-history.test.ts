@@ -168,7 +168,14 @@ describe('a diff on one line', () => {
         ],
         edges: [
           { from: 'a.o', to: 'b.i', type: 'chat-in', reads: ['#a', 1], sends: 's', commands: [] },
-          { from: 'b.o', to: 'a.i', type: 'chat-out', sends: ['#a'], dryRun: true },
+          {
+            from: 'b.o',
+            to: 'a.i',
+            type: 'chat-out',
+            sends: ['#a'],
+            minIntervalS: { '/x': 60, '/y': -1, '/z': 'no' },
+            dryRun: true,
+          },
           { from: 'a.o' },
         ],
       })
@@ -180,7 +187,14 @@ describe('a diff on one line', () => {
       ],
       edges: [
         { from: 'a.o', to: 'b.i', type: 'chat-in', reads: ['#a'], commands: [] },
-        { from: 'b.o', to: 'a.i', type: 'chat-out', sends: ['#a'], dryRun: true },
+        {
+          from: 'b.o',
+          to: 'a.i',
+          type: 'chat-out',
+          sends: ['#a'],
+          minIntervalS: { '/x': 60 },
+          dryRun: true,
+        },
       ],
     });
     expect(printable(null)).toEqual({ version: 2, nodes: [], edges: [] });

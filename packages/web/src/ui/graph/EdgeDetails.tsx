@@ -4,6 +4,8 @@
  * monitored chats (`Surfaces.tsx`): a chat-in edge, the chats it `reads` (or all of them, `'*'`)
  * and the `senders` it hears (anyone, or a list with `me`), any chat from anyone flagged as broad;
  * a chat-out edge, those it `sends` to and the `commands` sent (their first words), as rows, and
+ * each command's spacing for the queued sends (D73: the least seconds between two of it in one
+ * chat; empty, the connector's default), and
  * whether it is a dry run (D64): **Dry-run** logs what it would send, as sent, and sends nothing;
  * **Send for real** sends. Then its removal. The edges are the permissions (P6): a plugin reads and
  * sends only what its edge says.
@@ -16,6 +18,52 @@ import { CHATS_KEY, EdgeChats, RowsField, Senders } from './Surfaces.tsx';
 function monitoredOf(node: GraphNode | undefined): string[] | undefined {
   const chats = node?.config?.[CHATS_KEY];
   return Array.isArray(chats) ? chats.filter((c): c is string => typeof c === 'string') : undefined;
+}
+
+/**
+ * Each command's spacing (D73): the least seconds between two queued sends of it in one chat, the
+ * window in which a node can still cancel one; empty, the connector's default.
+ */
+function Spacing(props: {
+  commands: readonly string[];
+  value: Readonly<Record<string, number>>;
+  set: (v: Record<string, number> | undefined) => void;
+}) {
+  if (props.commands.length === 0) return null;
+  const put = (command: string, raw: string): void => {
+    const next: Record<string, number> = { ...props.value };
+    const n = Number(raw);
+    if (raw.trim() === '' || !Number.isFinite(n) || n < 0) delete next[command];
+    else next[command] = n;
+    props.set(Object.keys(next).length === 0 ? undefined : next);
+  };
+  return (
+    <div className="field spacing" role="group" aria-label="spacing">
+      <code>minIntervalS</code>
+      <ul className="rows">
+        {props.commands.map((c) => (
+          <li key={c}>
+            <label>
+              <code>{c}</code>{' '}
+              <input
+                type="number"
+                min={0}
+                aria-label={`seconds between two ${c}`}
+                placeholder="default"
+                value={props.value[c] ?? ''}
+                onChange={(e) => put(c, e.target.value)}
+              />{' '}
+              s
+            </label>
+          </li>
+        ))}
+      </ul>
+      <small className="muted">
+        The least seconds between two queued sends of each command in one chat, the time a node has
+        to cancel one; empty: the connector’s default. Applied with Apply.
+      </small>
+    </div>
+  );
 }
 
 export function EdgeDetails(props: {
@@ -111,7 +159,21 @@ export function EdgeDetails(props: {
             help="The commands it may send there, by first word (/play); none: any text"
             placeholder="/play"
             value={edge.commands ?? []}
-            set={(commands) => props.change({ commands })}
+            set={(commands) => {
+              // A command taken out takes its spacing with it.
+              const kept = Object.entries(edge.minIntervalS ?? {}).filter(([c]) =>
+                commands.includes(c)
+              );
+              props.change({
+                commands,
+                minIntervalS: kept.length === 0 ? undefined : Object.fromEntries(kept),
+              });
+            }}
+          />
+          <Spacing
+            commands={edge.commands ?? []}
+            value={edge.minIntervalS ?? {}}
+            set={(minIntervalS) => props.change({ minIntervalS })}
           />
         </section>
       ) : (

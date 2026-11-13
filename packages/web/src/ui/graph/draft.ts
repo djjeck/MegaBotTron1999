@@ -156,7 +156,8 @@ export function edgeOf(
  * undefined is taken away.
  */
 export type EdgeChange = {
-  [K in 'reads' | 'senders' | 'sends' | 'commands' | 'dryRun']?: GraphEdge[K] | undefined;
+  [K in 'reads' | 'senders' | 'sends' | 'commands' | 'minIntervalS' | 'dryRun']?:
+    GraphEdge[K] | undefined;
 };
 
 export function updateEdge(g: Graph, key: string, change: EdgeChange): Graph {
@@ -166,7 +167,11 @@ export function updateEdge(g: Graph, key: string, change: EdgeChange): Graph {
       if (edgeKey(e) !== key) return e;
       const out: Record<string, unknown> = { ...e };
       for (const [k, v] of Object.entries(change))
-        if (v === undefined || (k === 'commands' && Array.isArray(v) && v.length === 0))
+        if (
+          v === undefined ||
+          (k === 'commands' && Array.isArray(v) && v.length === 0) ||
+          (k === 'minIntervalS' && typeof v === 'object' && Object.keys(v).length === 0)
+        )
           delete out[k];
         else out[k] = v;
       return out as GraphEdge;

@@ -43,22 +43,25 @@ the server that guards them.
   help when opened. A node up that keeps a state (docs/bot-os.md D72) has a **State** section, drawn
   from its schema alone (`StateViewer.tsx`): its pinned paths first, then each section with its
   freshness; a list of objects as a sortable, searchable table, a map as a table of keys and values,
-  an object folded, a value as a labelled line; its card shows a line of it. Every change is checked
-  by the core, and each refusal shown on its edge, port, node or field (`draft.ts`, the draft's pure
-  changes). **Review changes** opens a dialog with the diff and two actions (`Review.tsx`):
-  **Apply** saves the graph (`PUT /graph/file`) and restarts the instance on it, waiting for it and
-  coming back to the page, still logged in (`src/ui/Restart.tsx`), or says why the core refused it
-  and restarts nothing; **Revert** drops the draft, back to the graph saved, once confirmed. Its ×
-  (or Escape) only closes it, the draft kept. When the saved graph is not what runs (changed through
-  the API, rolled back, or a restart that did not happen), a banner offers **Apply (restart)**; a
-  saved graph refused at the last start is shown first. The **Text** tab, on the page's right edge,
-  opens a side sheet from the right (sliding, unless the browser asks for reduced motion) with the
-  draft printed (`graphText`), read-only, with a copy button (`GraphText.tsx`); the tab rides on the
-  sheet's edge and closes it; the rollback is Admin's, with the history. Select one node or several
-  (Shift, Ctrl or Cmd with a click; Shift and drag for a box) and **Kill selected** kills each: its
-  plugin's own safety stop, then stopped, kept across restarts; a stopped node's panel has **Clear
-  stop**, a change of the draft that Review lists and Apply makes (`clear-stop`, then the restart),
-  and its forms stay editable. Nodes start in columns (`layout.ts`) and can be moved. **Swimlanes**
+  an object folded, a value as a labelled line; its card shows a line of it. A running connector's
+  panel lists its **Queue** (`Queue.tsx`, D73): each send waiting, until when, and the nodes that
+  asked for it with what cancels them; a chat-out edge's panel sets each command's spacing
+  (`minIntervalS`, empty for the connector's default). Every change is checked by the core, and each
+  refusal shown on its edge, port, node or field (`draft.ts`, the draft's pure changes). **Review
+  changes** opens a dialog with the diff and two actions (`Review.tsx`): **Apply** saves the graph
+  (`PUT /graph/file`) and restarts the instance on it, waiting for it and coming back to the page,
+  still logged in (`src/ui/Restart.tsx`), or says why the core refused it and restarts nothing;
+  **Revert** drops the draft, back to the graph saved, once confirmed. Its × (or Escape) only closes
+  it, the draft kept. When the saved graph is not what runs (changed through the API, rolled back,
+  or a restart that did not happen), a banner offers **Apply (restart)**; a saved graph refused at
+  the last start is shown first. The **Text** tab, on the page's right edge, opens a side sheet from
+  the right (sliding, unless the browser asks for reduced motion) with the draft printed
+  (`graphText`), read-only, with a copy button (`GraphText.tsx`); the tab rides on the sheet's edge
+  and closes it; the rollback is Admin's, with the history. Select one node or several (Shift, Ctrl
+  or Cmd with a click; Shift and drag for a box) and **Kill selected** kills each: its plugin's own
+  safety stop, then stopped, kept across restarts; a stopped node's panel has **Clear stop**, a
+  change of the draft that Review lists and Apply makes (`clear-stop`, then the restart), and its
+  forms stay editable. Nodes start in columns (`layout.ts`) and can be moved. **Swimlanes**
   (docs/bot-os.md D69): a node's panel sets its **Group** (none, one of the draft's, or **new
   group…**, named and set), a change of the draft like any other; a draft with groups is drawn in
   lanes (`layout.ts`'s `swimlanes`, `lanes.ts`, `LaneNode.tsx`): the same global columns, each group

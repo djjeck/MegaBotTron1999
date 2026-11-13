@@ -259,7 +259,9 @@ describe('a dry-run edge (D64)', () => {
       ...graph(),
       edges: (graph().edges ?? []).map((e) => (e.type === 'chat-in' ? { ...e, dryRun: true } : e)),
     });
-    expect(() => core.load()).toThrow('only a chat-out edge carries sends, commands and dryRun');
+    expect(() => core.load()).toThrow(
+      'only a chat-out edge carries sends, commands, minIntervalS and dryRun'
+    );
   });
 });
 

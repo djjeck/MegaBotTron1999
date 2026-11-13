@@ -177,6 +177,8 @@ export function handleOf(c: Connector, filter?: ReadFilter): ConnectorHandle {
 export class ConnectorBase {
   readonly account: string;
   readonly network: string;
+  /** Its account's limits, which the outbox keeps to, as its plugin sets them from its config. */
+  limits?: Limits;
   private current: ConnectorStatus = { state: 'closed', phase: 'closed' };
   private name: string | undefined;
   private messages: ((m: Inbound) => void)[] = [];

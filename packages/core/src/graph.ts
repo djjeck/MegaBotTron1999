@@ -112,6 +112,11 @@ export const graphSchema = z.strictObject({
         /** A chat-out's: the chats sent to, and the commands sent (first words). */
         sends: z.array(z.string().min(1)).optional(),
         commands: z.array(z.string().min(1)).optional(),
+        /**
+         * A chat-out's: the least seconds between two queued sends of a command in one chat, by
+         * its first word (D73); a command not named, the connector's default.
+         */
+        minIntervalS: z.record(z.string().min(1), z.number().nonnegative()).optional(),
         /** A chat-out's: what it sends is logged as sent, never sent (D64); absent, live. */
         dryRun: z.boolean().optional(),
       })
@@ -241,7 +246,7 @@ export function defaultGraph(
     }
     for (const [port, output] of Object.entries(m.outputs)) {
       if (output.type !== 'chat-out' || output.bind === undefined) continue;
-      const { node, sends, commands } = output.bind;
+      const { node, sends, commands, minIntervalS } = output.bind;
       const other = byId.get(node);
       const into =
         other === undefined
@@ -254,6 +259,7 @@ export function defaultGraph(
         type: 'chat-out',
         sends: [...sends],
         ...(commands === undefined ? {} : { commands: [...commands] }),
+        ...(minIntervalS === undefined ? {} : { minIntervalS: { ...minIntervalS } }),
       });
     }
   }
@@ -580,10 +586,15 @@ export function resolveGraph(
       continue;
     }
     if (
-      (e.sends !== undefined || e.commands !== undefined || e.dryRun !== undefined) &&
+      (e.sends !== undefined ||
+        e.commands !== undefined ||
+        e.minIntervalS !== undefined ||
+        e.dryRun !== undefined) &&
       input.type !== 'chat-out'
     ) {
-      problems.push(`${name}: only a chat-out edge carries sends, commands and dryRun`);
+      problems.push(
+        `${name}: only a chat-out edge carries sends, commands, minIntervalS and dryRun`
+      );
       continue;
     }
     const bound = to.inputs.get(toPort) as Binding[];
@@ -607,6 +618,7 @@ export function resolveGraph(
           ? {
               sends: e.sends ?? [],
               ...(e.commands === undefined ? {} : { commands: e.commands }),
+              ...(e.minIntervalS === undefined ? {} : { minIntervalS: e.minIntervalS }),
               ...(e.dryRun === undefined ? {} : { dryRun: e.dryRun }),
             }
           : undefined;

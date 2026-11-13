@@ -11,7 +11,7 @@
  * has served it the commands. The token stays in the connector's secrets, and nothing hands it out:
  * no plugin, and not the wiring, gets the bot (P9).
  */
-import { definePlugin, type Plugin } from '@megabottron1999/core';
+import { commandIntervalS, definePlugin, type Plugin } from '@megabottron1999/core';
 import { type Bot } from 'grammy';
 import { z } from 'zod';
 import { createBot, TelegramBotConnector } from '#src/transport/telegram-bot.ts';
@@ -43,6 +43,7 @@ export const telegramBotConfig = z.object({
     .describe(
       'The chats it monitors for the plugins, by id or @username; unset: every chat it hears'
     ),
+  commandIntervalS,
 });
 export type TelegramBotConfig = z.infer<typeof telegramBotConfig>;
 
@@ -98,6 +99,7 @@ export function telegramBotPlugin(
         ...(o.sleep === undefined ? {} : { sleep: o.sleep }),
       });
       ref.connector = c;
+      c.limits = { commandIntervalMs: config.commandIntervalS * 1000 };
       return {
         connector: c,
         ...(surface === undefined ? {} : { surface }),

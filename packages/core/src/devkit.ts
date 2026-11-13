@@ -49,7 +49,6 @@ export type Heard = Omit<Inbound, 'account' | 'network' | 'playback'> & { playba
 
 /** A connector of any network, driven by a test or a simulator. */
 export class FakeConnector extends ConnectorBase implements Connector {
-  readonly limits?: Limits;
   /** Every send, in order. */
   readonly sent: { chat: string; text: string }[] = [];
   private readonly onSend: ((chat: string, text: string) => boolean) | undefined;

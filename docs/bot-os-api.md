@@ -134,13 +134,16 @@ everything else consumes events and interfaces. A chat-in edge runs from a conne
 output, `chat`, to a reader's chat-in input, on its left: the chats it hears (`reads`). A chat-out
 edge runs from a sender's chat-out output, on its right, to the connector's chat-out input, `chat`:
 the chats it may send to (`sends`) and the commands it may send there (`commands`, by first word;
-none: any text). A connector has both, as one node (one account, one session); the editor draws it
-as two cards (§4.12). A connector's chat-out input takes any number of senders; a sender's chat-out
-output, one edge, required unless `optional` (the connector starts first, and an unbound required
-one fails the start: `node actor: output port chat (chat-out of irc) is not bound`). A port's
-`network` (`irc`, `telegram`) is matched against the connector's account, as it was for a chat.
-`ctx.connector(port)` hears through a chat-in input, and `ctx.outbox(port)` sends through a chat-out
-output (each also by the connector's id or its account).
+none: any text), with, for its queued sends, the least seconds between two sends of a command in one
+chat (`minIntervalS`, `{ "/inventory": 300 }`, by first word; a command not named, the connector's
+`commandIntervalS`: §4.6, bot-os.md D73). A connector has both, as one node (one account, one
+session); the editor draws it as two cards (§4.12). A connector's chat-out input takes any number of
+senders; a sender's chat-out output, one edge, required unless `optional` (the connector starts
+first, and an unbound required one fails the start:
+`node actor: output port chat (chat-out of irc) is not bound`). A port's `network` (`irc`,
+`telegram`) is matched against the connector's account, as it was for a chat. `ctx.connector(port)`
+hears through a chat-in input, and `ctx.outbox(port)` sends through a chat-out output (each also by
+the connector's id or its account).
 
 **What a chat-in edge reads** (bot-os.md D62) has two independent parts: `reads`, a list of chats or
 `"*"`, any chat its connector monitors (§4.5); and `senders`, a list of senders by username
@@ -874,9 +877,9 @@ connector (§2.1):
   of before (P10's `read-only`, `dry-run`, `live`, kept as `_mode.json`) are gone: the first start
   folded them into the edges.
 - **Pacing:** `send` sends now or is refused with why (too soon, the hourly limit), for actors that
-  time their sends to the second; `enqueue` queues the send and spaces it within the account's
-  limits (`connector.limits`), and the network's waits (Telegram's `FLOOD_WAIT`) hold the account's
-  queue.
+  time their sends to the second; `enqueue` queues the send (below, bot-os.md D73) and spaces it
+  within the account's limits (`connector.limits`) and its command's interval in its chat, and the
+  network's waits (Telegram's `FLOOD_WAIT`) hold the account's queue.
 - **Replies:** matchers pair a bot's answer with the send that caused it: `replyTo`, `mentioning`,
   `within` and `from`, combined with `all`, and `waitFor` waits on a connector handle for the first
   match (`packages/core/src/replies.ts`).
@@ -892,6 +895,50 @@ the account), the rate (`too soon`, `hourly limit`, dry runs counted), and the c
 refused it; the rate counts the send when it leaves. A send may say its text is Markdown
 (`format: 'markdown'`): a connector of a network that formats sends it formatted, any other as
 written. Every attempt's record (`core.send`) has the `mode` it went in (`dry-run` or `live`).
+
+**The queue** (bot-os.md D73): an acting node that needs a piece of state asks for it with a command
+(`/inventory`), but another node may ask too, or the state may come meanwhile, so it queues the
+send, with what makes it pointless:
+
+```ts
+const q = ctx.outbox('chat').enqueue('@QuestBot', '/inventory', {
+  origin: 'stock',
+  cancel: {
+    on: 'quest-state.changed', // event types or namespaces its node hears
+    when: { sections: 'inventory' }, // dotted paths; a list matches a value it holds
+    test: (e) => e.t > asked, // a plugin's own predicate, optional
+    withinMs: 10 * 60_000, // or `deadline`, a time: then expired
+  },
+});
+const r = await q; // { text, outcome: 'sent' | 'dry-run' | 'refused' | 'cancelled' | 'expired', reason?, event? }
+q.status(); // 'waiting', or its outcome
+q.cancel(); // true if it still waited
+```
+
+- **One queue per (connector, chat),** side by side in the account's outbox, in the order queued.
+  The same text waiting for the same chat is **coalesced**: one send, a handle per node, each with
+  its own cancel; logged once (`core.send` of the first node that sends for real, with `with`, the
+  others).
+- **In its turn:** what can never go now is refused at once (the reach, a stop), as `send` refuses
+  it. A send goes when its command's interval in its chat has passed since that command last went
+  (by `send`, `deliver` or the queue; a dry run counted), within the account's pace: the oldest such
+  first, so a send of another command never waits behind one held by its interval; a command never
+  sent goes at once. The interval is the window in which a cancel can land. It is the longest its
+  coalesced nodes' edges name (`minIntervalS`), else the connector's (`limits.commandIntervalMs`,
+  from its config's `commandIntervalS`; 0 by default).
+- **Cancelled** when an event of `on` that its node hears (its events inputs' namespaces, or its
+  own; another is refused at once, nothing queued) holds `when` and `test`; **expired** at its
+  deadline; cancelled by its node's `cancel()`. Its outcome says why
+  (`cancelled by quest-state.changed`) and carries the event.
+- **When it goes,** each node's checks run again: one refused is told so, the others go; through a
+  dry-run edge its share is a dry run, and the send is a dry run unless one of its nodes sends for
+  real (the dry ones are told `dry-run`).
+- **A node that stops** (stopped, inactive, failed, or the instance stopping) has its waiting sends
+  dropped, `cancelled` with why. The queue is not kept across a restart: its nodes queue again at
+  their start, so a downtime never leaves stale commands to send.
+- **Logged:** each step as `core.queue` (`{ account, plugin, chat, text, event, reason?, by? }`,
+  `event` one of `queued`, `coalesced`, `sent`, `dry-run`, `refused`, `cancelled`, `expired`); the
+  queue as it stands is the connector's (`GET /plugins/<id>/queue`, §4.11), shown in its panel.
 
 **An outbox made outside the core** (a module's own, over a game of its own: module API 1,
 deprecated) may still keep its senders' modes: `new Outbox({ …, modes: new Modes() })`, with
@@ -1039,7 +1086,10 @@ connected, 404 for a node that is not a connector); `GET /drift`;
 `POST /off`, `/on`, `/kill`; `GET` and `POST /settings`; `GET /graph` and `GET /graph/view` (§4.12);
 `POST /plugins/<id>/kill` and `POST /plugins/<id>/clear-stop` (409 with why when refused, such as
 `actor is not stopped`); `GET /plugins/<id>/state/<name>?<field>=<value>` (a read, its input the
-query's fields, §2); `GET /plugins/<id>/view` (the state a node keeps, read only, D72:
+query's fields, §2); `GET /plugins/<id>/queue` (what waits in a connector's queue, D73:
+`{ account, entries: [{ chat, text, command, queuedAt, waitingUntil, intervalS, nodes }] }`, each
+node with its `origin` and its `cancel`, `{ on?, when?, test?, deadline? }`; 404 for a node that is
+not a connector); `GET /plugins/<id>/view` (the state a node keeps, read only, D72:
 `{ schema, state, updatedAt?, freshness?, pin? }`, its schema a JSON Schema; 404 for a node that
 keeps none, 409 for one not running); `POST /plugins/<id>/actions/<name>`, the body the action's
 input (400 for an input refused by its schema, 409 for the plugin's refusal); `GET /instances`
@@ -1071,7 +1121,8 @@ line (bot-os.md D61): each node a line, `<id> (<plugin>)`, then its instance whe
 `disabled` when it is (D64), its account, and its group (D69); then a line per key of its config and
 of its settings, the value as compact JSON with its keys sorted; then each edge a line, with its
 type and what it carries, a chat-out edge's `dry-run` among it, so that the history's diffs show a
-state changed; nodes sorted by id, edges by their text, so the same graph prints the same:
+state changed, and its commands' spacing (`spaced /inventory 300s`, D73); nodes sorted by id, edges
+by their text, so the same graph prints the same:
 
 ```text
 nodes:
@@ -1114,28 +1165,30 @@ its schema's description (§4.4); an interface output, its members' names, folde
 one's signature (from its schemas: `actions.sent({ chat: string, id?: string, t: number })`,
 `state.rest() → { until: number, why: string }`) and help; another output, its port in words. An
 edge selected, what it carries: a chat-in edge its `reads` alone, a chat-out edge its `sends` and
-`commands`. **States and dry runs** (bot-os.md D64, §2.1): a node is drawn greyed while disabled in
-the draft (its panel's **Enabled** switch), in red tones with a warning icon and its reason while
-stopped, greyed with the node it needs while inactive (from `GET /status`); a stopped node's panel
-says why, when and by what, with **Clear stop**. A node added starts disabled, and a chat-out edge
-drawn starts a dry run: its rhombus hollow and its part from the rhombus to the connector greyed and
-dashed, its panel's **Dry-run / Send for real** switch setting `dryRun`. All of these are changes of
-the draft, listed in the review (a stop cleared as "Stops cleared") and made by Apply. A connector
-is drawn as two cards (`cards.ts`, bot-os.md D60), one node in the graph all the same: its **in**
-card (`telegram-user · in`) at the left, with its chat-in output and its other ports, and its
-**out** card (`telegram-user · out`) in a column of its own at the right, with its chat-out input,
-where the senders' edges end. Each card is placed on its own; selecting either selects the node and
-opens its panel (the other card shows itself selected too); removing it removes both, after a
-confirmation that names them. The split lives in the editor's view alone: the graph file holds one
-node. Each edge has a rhombus at its midpoint in its port type's colour (`PortEdge.tsx`, React
-Flow's `EdgeLabelRenderer`), a button named after the edge (`edge irc.chat → dice.channel`) that
-selects it and opens its panel, by a click or the keyboard. Its review shows the diff and two
-actions: Apply, `PUT /graph/file`, then `POST /plugins/<id>/clear-stop` for each stop cleared, then
-`POST /restart` (none if the core refuses the graph, which the review says, nor if the saved graph
-is what runs already and no stop was cleared), and Revert, the draft back to the saved graph; a
-banner offers Apply (`POST /restart`) when the saved file differs from what runs (`differs`). After
-a restart the page waits on `GET /session` for the new process (another `boot` id), and comes back
-to the page, still logged in. One or several running nodes selected can be killed, each by
+`commands`, with each command's spacing for its queued sends (`minIntervalS`, empty for the
+connector's default, D73); a running connector's panel lists its queue. **States and dry runs**
+(bot-os.md D64, §2.1): a node is drawn greyed while disabled in the draft (its panel's **Enabled**
+switch), in red tones with a warning icon and its reason while stopped, greyed with the node it
+needs while inactive (from `GET /status`); a stopped node's panel says why, when and by what, with
+**Clear stop**. A node added starts disabled, and a chat-out edge drawn starts a dry run: its
+rhombus hollow and its part from the rhombus to the connector greyed and dashed, its panel's
+**Dry-run / Send for real** switch setting `dryRun`. All of these are changes of the draft, listed
+in the review (a stop cleared as "Stops cleared") and made by Apply. A connector is drawn as two
+cards (`cards.ts`, bot-os.md D60), one node in the graph all the same: its **in** card
+(`telegram-user · in`) at the left, with its chat-in output and its other ports, and its **out**
+card (`telegram-user · out`) in a column of its own at the right, with its chat-out input, where the
+senders' edges end. Each card is placed on its own; selecting either selects the node and opens its
+panel (the other card shows itself selected too); removing it removes both, after a confirmation
+that names them. The split lives in the editor's view alone: the graph file holds one node. Each
+edge has a rhombus at its midpoint in its port type's colour (`PortEdge.tsx`, React Flow's
+`EdgeLabelRenderer`), a button named after the edge (`edge irc.chat → dice.channel`) that selects it
+and opens its panel, by a click or the keyboard. Its review shows the diff and two actions: Apply,
+`PUT /graph/file`, then `POST /plugins/<id>/clear-stop` for each stop cleared, then `POST /restart`
+(none if the core refuses the graph, which the review says, nor if the saved graph is what runs
+already and no stop was cleared), and Revert, the draft back to the saved graph; a banner offers
+Apply (`POST /restart`) when the saved file differs from what runs (`differs`). After a restart the
+page waits on `GET /session` for the new process (another `boot` id), and comes back to the page,
+still logged in. One or several running nodes selected can be killed, each by
 `POST /plugins/<id>/kill`: stopped, until their stops are cleared. Its **Text** toggle shows the
 draft printed (the check's `text`), read-only, with a copy button. The rollback is not the editor's:
 it is the admin page's **Graph history** (`#/graph-history`), which lists the versions newest first
@@ -1329,9 +1382,10 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
 - **`irc`** (`packages/connectors/src/plugins/irc.ts`, on the IRC client of
   `packages/connectors/src/transport/irc-client.ts`): one IRC account through ZNC, its configuration
   the ZNC login (`host`, `port`, `tls`, `zncUser`, `zncNetwork`), the `nick`, the `channel` and the
-  rate limiter (`minIntervalS`, `maxPerHour`); its password is the `znc_password` secret. It opens
-  one connection however often it is started (networks' clone limits). It logs each line of the
-  channel, played back or live, as `irc.line`, and each step of the connection as `irc.status`. With
+  rate limiter (`minIntervalS`, `maxPerHour`) and its queue's default interval between two sends of
+  a command (`commandIntervalS`, D73); its password is the `znc_password` secret. It opens one
+  connection however often it is started (networks' clone limits). It logs each line of the channel,
+  played back or live, as `irc.line`, and each step of the connection as `irc.status`. With
   `healthPort` it serves `GET /health`: 200 while it is in the channel, 503 when not.
 - **`telegram-bot`** (`packages/connectors/src/plugins/telegram-bot.ts`, on grammY in
   `packages/connectors/src/transport/telegram-bot.ts`): a bot, made from its `telegram_bot_token`
@@ -1339,7 +1393,8 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   capped at ten minutes). Its status is `connecting` until `getMe` answers, `connected` while it
   polls; its own name is the bot's username. It hears every message Telegram delivers the bot and
   sends through the account's outbox (`deliver`, to a chat id or an `@username`; a 429 longer than
-  auto-retry waits out becomes `FloodWait`). With `chats` in its config (ids or `@username`s) it
+  auto-retry waits out becomes `FloodWait`); `commandIntervalS` in its config is its queue's default
+  interval between two sends of a command (D73). With `chats` in its config (ids or `@username`s) it
   monitors only those for the plugins; its surfaces are the chats it has seen (§4.5), and the
   updates Telegram kept while it was down come marked `missed`. Configured with the owner's Telegram
   user id and optionally a group (`owner`, `group`, in its node's config), it is the instance's chat
@@ -1357,7 +1412,8 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   catches up at each connection on what its readers' chats said while it was down, each message once
   (§4.5, D62, D66). It starts without waiting, retries every minute, and tells the owner of the
   first failure; a message carries its id, the one it replies to, and `own` for the owner's own from
-  any device. It sends only through the account's outbox (`deliver`, with the message's id);
+  any device. It sends only through the account's outbox (`deliver`, with the message's id), its
+  queue's default interval between two sends of a command its config's `commandIntervalS` (D73);
   GramJS's flood waits become `FloodWait`.
 - **`ServiceConnector`** (`packages/connectors/src/plugins/service.ts`): for a connector plugin that
   holds an account's secrets and offers what it makes from them through its declared interface, but

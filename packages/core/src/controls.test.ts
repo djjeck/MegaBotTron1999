@@ -714,6 +714,7 @@ describe('controlServer', () => {
       { running: true, listed: false, surfaces: [] },
     ]);
     expect(await get('/accounts/broken/surfaces')).toEqual([404, { error: 'no such connector' }]);
+    expect(await get('/plugins/chat/queue')).toEqual([200, { account: 'chat:me', entries: [] }]);
     expect(await get('/accounts/nobody/surfaces')).toEqual([404, { error: 'no such connector' }]);
     await core.stop();
   });
@@ -776,6 +777,8 @@ describe('reads with an input, and a node’s state for the viewer (bot-os.md D7
       200,
       { schema: { type: 'object' }, state: { n: 1 }, pin: ['n'] },
     ]);
+    expect(await get('/plugins/keeper/queue')).toEqual([404, { error: 'keeper is no connector' }]);
+    expect(core.controls.queue('nobody')).toBeUndefined();
     expect(await get('/plugins/broken/view')).toEqual([
       404,
       { error: 'broken keeps no state to view' },

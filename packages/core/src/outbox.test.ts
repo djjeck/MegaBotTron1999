@@ -61,7 +61,7 @@ function setup(o: { policy?: SenderPolicy; limits?: boolean } = {}) {
     clock,
     modes,
     ...(o.policy === undefined ? {} : { policy: () => o.policy as SenderPolicy }),
-    record: (r) => records.push(r),
+    record: (r) => (r.type === 'core.send' ? records.push(r) : undefined),
   });
   modes.set('p', 'live');
   return { clock, connector, modes, records, outbox, p: outbox.as('p') };
@@ -99,7 +99,7 @@ describe('deliver', () => {
       limits: () => ({ minIntervalMs: 3000, maxPerHour: 3 }),
       clock,
       modes,
-      record: (r) => records.push(r),
+      record: (r) => (r.type === 'core.send' ? records.push(r) : undefined),
     });
     modes.set('p', 'live');
     return { clock, connector, modes, records, p: outbox.as('p') };

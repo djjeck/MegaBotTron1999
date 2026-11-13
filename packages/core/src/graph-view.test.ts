@@ -289,3 +289,24 @@ describe('the nodes as the graph view shows them', () => {
     );
   });
 });
+
+describe('a chat-out edge’s spacing (bot-os.md D73)', () => {
+  it('is printed, by command, so that the history’s diffs show it', () => {
+    const spaced: Graph = {
+      ...graph,
+      edges: [
+        {
+          from: 'actor-b.channel',
+          to: 'irc.chat',
+          type: 'chat-out',
+          sends: ['#a'],
+          commands: ['!go', '!look'],
+          minIntervalS: { '!look': 60, '!go': 300 },
+        },
+      ],
+    };
+    expect(graphText(spaced)).toContain(
+      'actor-b.channel → irc.chat (chat-out): sends #a; commands !go !look; spaced !go 300s !look 60s'
+    );
+  });
+});

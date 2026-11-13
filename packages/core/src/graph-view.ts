@@ -46,6 +46,12 @@ const carried = (e: GraphEdge): string =>
     e.senders === undefined ? '' : `from ${e.senders.join(' ')}`,
     e.sends !== undefined && e.sends.length > 0 ? `sends ${e.sends.join(' ')}` : '',
     e.commands === undefined ? '' : `commands ${e.commands.join(' ')}`,
+    e.minIntervalS === undefined
+      ? ''
+      : `spaced ${Object.entries(e.minIntervalS)
+          .sort(([a], [b]) => byText(a, b))
+          .map(([c, s]) => `${c} ${s}s`)
+          .join(' ')}`,
     e.dryRun === true ? 'dry-run' : '',
   ]
     .filter((x) => x !== '')

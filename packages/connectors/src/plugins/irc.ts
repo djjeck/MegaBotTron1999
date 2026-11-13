@@ -13,6 +13,7 @@
  * with the health as JSON.
  */
 import {
+  commandIntervalS,
   type Connector,
   ConnectorBase,
   type ConnectorStatus,
@@ -45,8 +46,6 @@ const STATES: Record<TransportStatus, ConnectorStatus['state']> = {
 
 /** An IRC account's connection, as a connector: the channel's lines in, lines to it out. */
 export class IrcConnector extends ConnectorBase implements Connector {
-  /** The account's limits (`MIN_INTERVAL_S`, `MAX_PER_HOUR`), which its outbox keeps to. */
-  readonly limits?: Limits;
   private readonly channel: string;
   private readonly client: Transport;
   private started = false;
@@ -157,6 +156,7 @@ export const ircConfig = z.object({
     .min(0)
     .describe('The least seconds between two sends (the rate limiter)'),
   maxPerHour: z.number().int().min(1).describe('The most sends in any hour (the rate limiter)'),
+  commandIntervalS,
   healthPort: z
     .number()
     .int()
@@ -206,7 +206,11 @@ export function ircPlugin(
         password: ctx.secrets?.get(ZNC_PASSWORD) ?? '',
         nick: c.nick,
         channel: c.channel,
-        limits: { minIntervalMs: c.minIntervalS * 1000, maxPerHour: c.maxPerHour },
+        limits: {
+          minIntervalMs: c.minIntervalS * 1000,
+          maxPerHour: c.maxPerHour,
+          commandIntervalMs: c.commandIntervalS * 1000,
+        },
       };
       const make = o.client;
       const connector = new IrcConnector(

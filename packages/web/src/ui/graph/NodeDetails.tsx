@@ -9,7 +9,7 @@
  * running one can be killed (D44). Its forms stay editable whatever its state. Its group (D69),
  * the lane it is drawn in, is picked among the draft's, or named anew. Its outputs say what they
  * carry (D71): an events output its event types, an interface output its members. A node up that
- * keeps a state (D72) shows it, drawn from its schema.
+ * keeps a state (D72) shows it, drawn from its schema; a running connector, its queue (D73).
  */
 import { useState } from 'react';
 import type {
@@ -26,6 +26,7 @@ import type {
 import { isSplit } from './cards.ts';
 import { withDefaults } from './defaults.ts';
 import { instanceOf } from './draft.ts';
+import { ConnectorQueue } from './Queue.tsx';
 import { SchemaForm } from './SchemaForm.tsx';
 import { signature } from './signature.ts';
 import { NodeState } from './StateViewer.tsx';
@@ -366,6 +367,7 @@ export function NodeDetails(props: {
         </p>
       )}
       {live?.state === 'running' || live?.state === 'stopped' ? <NodeState id={view.id} /> : null}
+      {connector && live?.state === 'running' ? <ConnectorQueue id={view.id} /> : null}
       {!connector ? null : (
         <section>
           <h3>Account</h3>

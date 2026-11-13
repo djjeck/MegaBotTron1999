@@ -236,6 +236,9 @@ export {
   PLUGIN_API,
 } from './modules.ts';
 export {
+  type CancelEvent,
+  type CancelWhen,
+  commandIntervalS,
   type DeliverResult,
   FloodWait,
   isMode,
@@ -248,6 +251,12 @@ export {
   Outbox,
   type OutboxHandle,
   type OutboxOptions,
+  type QueuedResult,
+  type QueuedSend,
+  type QueueEntryView,
+  type QueueOptions,
+  type QueueOutcome,
+  type QueueRecord,
   type Reach,
   type SenderPolicy,
   type SendOptions,
@@ -291,6 +300,7 @@ export {
 } from './ports.ts';
 export {
   fill,
+  holds,
   matches,
   type MessageTrigger,
   react,

@@ -1474,3 +1474,18 @@ label.block {
   gap: 0.4rem;
   margin-top: 0.3rem;
 }
+
+/* A connector's queue (D73): each send waiting, with its nodes and what cancels them. */
+.details ol.queue {
+  padding-left: 1.2rem;
+  margin: 0;
+}
+
+.details ol.queue > li {
+  margin-bottom: 0.4rem;
+  overflow-wrap: anywhere;
+}
+
+.details .spacing input[type='number'] {
+  width: 6rem;
+}

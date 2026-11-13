@@ -97,6 +97,11 @@ export const chatBindingSchema = z.strictObject({
   sends: chats.default([]),
   /** The commands it may send, by their first word (`!roll`); none: any text. */
   commands: chats.optional(),
+  /**
+   * A queued send's least seconds between two sends of a command in one chat (bot-os.md D73), by
+   * the command's first word; a command not named: the connector's default.
+   */
+  minIntervalS: z.record(z.string().min(1), z.number().nonnegative()).optional(),
 });
 export type ChatBinding = z.output<typeof chatBindingSchema>;
 
@@ -196,6 +201,7 @@ export const outputSchema = z.discriminatedUnion('type', [
         node: z.string().regex(ID),
         sends: chatBindingSchema.shape.sends,
         commands: chatBindingSchema.shape.commands,
+        minIntervalS: chatBindingSchema.shape.minIntervalS,
       })
       .optional(),
   }),

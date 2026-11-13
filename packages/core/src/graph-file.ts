@@ -267,6 +267,15 @@ export function printable(raw: unknown): Graph {
         strings(r['sends']),
         strings(r['commands']),
       ];
+      const spacing = record(r['minIntervalS']);
+      const intervals =
+        spacing === undefined
+          ? undefined
+          : Object.fromEntries(
+              Object.entries(spacing).filter(
+                (x): x is [string, number] => typeof x[1] === 'number' && x[1] >= 0
+              )
+            );
       return [
         {
           ...at,
@@ -274,6 +283,7 @@ export function printable(raw: unknown): Graph {
           ...(reads === undefined ? {} : { reads }),
           ...(sends === undefined ? {} : { sends }),
           ...(commands === undefined ? {} : { commands }),
+          ...(intervals === undefined ? {} : { minIntervalS: intervals }),
           ...(r['dryRun'] === true ? { dryRun: true } : {}),
         },
       ];

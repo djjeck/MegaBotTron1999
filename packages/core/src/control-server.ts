@@ -52,6 +52,8 @@
  * - `POST /plugins/<id>/clear-stop`: that node's stop cleared, for the next start (the editor's
  *   Clear stop, which Apply sends before its restart); 409 when it is not stopped.
  * - `GET /plugins/<id>/state/<name>?<field>=<value>`: a declared read, its input the query's fields.
+ * - `GET /plugins/<id>/queue`: what waits in a connector's queue (D73), with each send's nodes and
+ *   their cancel conditions; 404 for a node that is not a connector.
  * - `GET /plugins/<id>/view`: the state a node keeps, with its schema, for the viewer (D72); 404
  *   for a node that keeps none, 409 for one not running.
  * - `POST /plugins/<id>/actions/<name>` with the action's input as the body: its output, a 400 for
@@ -459,9 +461,10 @@ export function controlHandler(
         }
         return reply(200, settings.current());
       }
-      const m = /^\/plugins\/([^/]+)\/(clear-stop|kill|state|actions|view)(?:\/([^/]+))?$/u.exec(
-        route
-      );
+      const m =
+        /^\/plugins\/([^/]+)\/(clear-stop|kill|state|actions|view|queue)(?:\/([^/]+))?$/u.exec(
+          route
+        );
       if (m !== null) {
         const [, rawId = '', what, rawName] = m;
         const id = decodeURIComponent(rawId);
@@ -481,6 +484,10 @@ export function controlHandler(
           const input = Object.fromEntries(url.searchParams);
           const r = controls.read(id, name, input);
           return 'error' in r ? reply(404, r) : reply(200, r.value);
+        }
+        if (!post && what === 'queue' && name === undefined) {
+          const r = controls.queue(id);
+          return r === undefined ? reply(404, { error: `${id} is no connector` }) : reply(200, r);
         }
         if (!post && what === 'view' && name === undefined) {
           const r = controls.view(id);
