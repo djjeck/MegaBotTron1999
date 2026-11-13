@@ -1,6 +1,6 @@
 {
   "name": "@megabottron1999/web",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "MegaBotTron1999's web UI: the owner's admin pages, a React app built by Vite, and its server behind a login",
   "license": "MIT",
