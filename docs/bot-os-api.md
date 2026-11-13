@@ -941,6 +941,12 @@ q.cancel(); // true if it still waited
 - **Logged:** each step as `core.queue` (`{ account, plugin, chat, text, event, reason?, by? }`,
   `event` one of `queued`, `coalesced`, `sent`, `dry-run`, `refused`, `cancelled`, `expired`); the
   queue as it stands is the connector's (`GET /plugins/<id>/queue`, §4.11), shown in its panel.
+- **Merges seen:** a merge may say that two nodes duplicate a piece of logic, so while the queue is
+  young they are easy to see without the log: the connector's panel marks a send several nodes share
+  (`shared by 2 nodes`), and counts the sends coalesced since the start with the pairs of nodes that
+  shared them (`3 sends coalesced since the start: a + b (2), a + c (1)`), which its card's line and
+  `GET /status`'s `summary` carry too. The count lives in memory, as the queue does, and starts
+  again at each start. (A watchdog of the queue is #41.)
 
 **An outbox made outside the core** (a module's own, over a game of its own: module API 1,
 deprecated) may still keep its senders' modes: `new Outbox({ …, modes: new Modes() })`, with
@@ -1044,7 +1050,8 @@ control API, the web UI and later the agents, whose grants will be subsets of it
   `needs tg (disabled)`; `failed` with why), its settings with the values in force, the names of the
   reads and actions its `interface` declares, its own account of itself if it declares a read named
   `status`, and, if it keeps a state (its instance's `view`, bot-os.md D72), one line of it
-  (`summary`), for its card.
+  (`summary`), for its card; a connector whose queue coalesced sends since the start says so there
+  too (`2 sends coalesced: a + b (2)`, D73).
 - **The owner's changes:** a declared read (`read`) and a declared action (`act`), whose input is
   checked against the action's schema (an error names the field) and which the plugin refuses by
   throwing, with why; a node's stop cleared (`clearStop`), for the next start. No control raises a
@@ -1089,9 +1096,10 @@ connected, 404 for a node that is not a connector); `GET /drift`;
 `POST /plugins/<id>/kill` and `POST /plugins/<id>/clear-stop` (409 with why when refused, such as
 `actor is not stopped`); `GET /plugins/<id>/state/<name>?<field>=<value>` (a read, its input the
 query's fields, §2); `GET /plugins/<id>/queue` (what waits in a connector's queue, D73:
-`{ account, entries: [{ chat, text, command, queuedAt, waitingUntil, intervalS, nodes }] }`, each
-node with its `origin` and its `cancel`, `{ on?, when?, test?, deadline? }`; 404 for a node that is
-not a connector); `GET /plugins/<id>/view` (the state a node keeps, read only, D72:
+`{ account, entries: [{ chat, text, command, queuedAt, waitingUntil, intervalS, nodes }], coalesced }`,
+each node with its `origin` and its `cancel`, `{ on?, when?, test?, deadline? }`, and `coalesced`
+the sends merged since the start, `{ count, pairs: [{ nodes: [a, b], count }] }`; 404 for a node
+that is not a connector); `GET /plugins/<id>/view` (the state a node keeps, read only, D72:
 `{ schema, state, updatedAt?, freshness?, pin? }`, its schema a JSON Schema; 404 for a node that
 keeps none, 409 for one not running); `POST /plugins/<id>/actions/<name>`, the body the action's
 input (400 for an input refused by its schema, 409 for the plugin's refusal); `GET /instances`

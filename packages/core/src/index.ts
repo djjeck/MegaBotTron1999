@@ -238,6 +238,7 @@ export {
 export {
   type CancelEvent,
   type CancelWhen,
+  type CoalescedView,
   commandIntervalS,
   type DeliverResult,
   FloodWait,

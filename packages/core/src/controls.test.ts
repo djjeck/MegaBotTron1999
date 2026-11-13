@@ -714,7 +714,10 @@ describe('controlServer', () => {
       { running: true, listed: false, surfaces: [] },
     ]);
     expect(await get('/accounts/broken/surfaces')).toEqual([404, { error: 'no such connector' }]);
-    expect(await get('/plugins/chat/queue')).toEqual([200, { account: 'chat:me', entries: [] }]);
+    expect(await get('/plugins/chat/queue')).toEqual([
+      200,
+      { account: 'chat:me', entries: [], coalesced: { count: 0, pairs: [] } },
+    ]);
     expect(await get('/accounts/nobody/surfaces')).toEqual([404, { error: 'no such connector' }]);
     await core.stop();
   });

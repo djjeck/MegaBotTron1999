@@ -6,6 +6,7 @@
 import type {
   AccountControl,
   AvailablePlugin,
+  CoalescedView,
   DiffLine,
   DriftCounts,
   EventTypeView,
@@ -43,6 +44,7 @@ import type {
 export type {
   AccountControl,
   AvailablePlugin,
+  CoalescedView,
   DiffLine,
   DriftCounts,
   EventTypeView,

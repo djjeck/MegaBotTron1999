@@ -1486,6 +1486,12 @@ label.block {
   overflow-wrap: anywhere;
 }
 
+/* A send several nodes share, and the count of them: two nodes may duplicate a piece of logic. */
+.badge.coalesced,
+.details p.coalesced {
+  color: var(--warn);
+}
+
 .details .spacing input[type='number'] {
   width: 6rem;
 }

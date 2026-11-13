@@ -3,10 +3,12 @@
  * `GET /plugins/<id>/queue`, read again every few seconds while the panel is open: its chat and
  * text, until when it waits (its command's interval in that chat, and the account's pace), and
  * each node that asked for it (several, coalesced into one send) with what cancels it: events, a
- * test of the plugin's own, a deadline. Read only.
+ * test of the plugin's own, a deadline. A send several nodes share is marked so, and the sends
+ * coalesced since the start are counted, with the pairs of nodes that shared them: a merge may
+ * say that two nodes duplicate a piece of logic. Read only.
  */
 import { useEffect, useState } from 'react';
-import type { QueueEntryView } from '#src/ui/api.ts';
+import type { CoalescedView, QueueEntryView } from '#src/ui/api.ts';
 import { api, seg } from '#src/ui/api.ts';
 
 const EVERY_MS = 3000;
@@ -26,16 +28,37 @@ export function cancelText(c: QueueEntryView['nodes'][number]['cancel']): string
   return parts.join(' · ');
 }
 
+/** The sends coalesced since the start, in words: `3 sends coalesced since the start`. */
+function Coalesced(props: { coalesced: CoalescedView }) {
+  const { count, pairs } = props.coalesced;
+  if (count === 0) return <p className="muted small">No send coalesced since the start.</p>;
+  return (
+    <p className="small coalesced">
+      {count} {count === 1 ? 'send' : 'sends'} coalesced since the start:{' '}
+      {pairs.map((p, i) => (
+        <span key={p.nodes.join(' ')}>
+          {i === 0 ? '' : ', '}
+          <code>{p.nodes[0]}</code> + <code>{p.nodes[1]}</code> ({p.count})
+        </span>
+      ))}
+    </p>
+  );
+}
+
 export function ConnectorQueue(props: { id: string }) {
   const [entries, setEntries] = useState<QueueEntryView[] | string>();
+  const [coalesced, setCoalesced] = useState<CoalescedView>();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     let live = true;
     const load = (): void => {
-      api<{ entries: QueueEntryView[] }>(`/plugins/${seg(props.id)}/queue`).then(
+      api<{ entries: QueueEntryView[]; coalesced?: CoalescedView }>(
+        `/plugins/${seg(props.id)}/queue`
+      ).then(
         (r) => {
           if (!live) return;
           setEntries(r.entries);
+          setCoalesced(r.coalesced);
           setNow(Date.now());
         },
         (e: unknown) => {
@@ -54,6 +77,7 @@ export function ConnectorQueue(props: { id: string }) {
   return (
     <section aria-label={`queue of ${props.id}`}>
       <h3>Queue</h3>
+      {coalesced === undefined ? null : <Coalesced coalesced={coalesced} />}
       {typeof entries === 'string' ? (
         <p className="muted">{entries}</p>
       ) : entries.length === 0 ? (
@@ -64,6 +88,12 @@ export function ConnectorQueue(props: { id: string }) {
             // A node's own same send queued twice waits twice: the text is no key.
             <li key={i}>
               <code>{e.text}</code> <span className="muted">to {e.chat}</span>
+              {e.nodes.length > 1 ? (
+                <>
+                  {' '}
+                  <span className="badge coalesced">shared by {e.nodes.length} nodes</span>
+                </>
+              ) : null}
               <div className="small">
                 {e.waitingUntil <= now ? 'goes now' : `waits until ${when(e.waitingUntil)} UTC`}
                 {e.intervalS > 0 ? (

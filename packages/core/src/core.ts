@@ -349,6 +349,11 @@ export class Core {
         const account = this.entries.get(id)?.node.account;
         return account === undefined ? [] : (this.outboxes.get(account)?.pending() ?? []);
       },
+      coalesced: (id) => {
+        const account = this.entries.get(id)?.node.account;
+        const outbox = account === undefined ? undefined : this.outboxes.get(account);
+        return outbox?.coalesced() ?? { count: 0, pairs: [] };
+      },
       record: (fields) => this.o.record?.({ type: 'core.power', t: this.o.clock.now(), ...fields }),
       error: (id, line) => this.logger(id).error(line),
       account: (id) => {

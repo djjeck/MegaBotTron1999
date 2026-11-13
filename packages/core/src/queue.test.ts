@@ -218,6 +218,27 @@ describe('the outbox’s queue (bot-os.md D73)', () => {
     ]);
   });
 
+  it('counts the sends coalesced since the start, by pair of nodes, in its queue and its summary', async () => {
+    const { k, queue } = await kit();
+    const summary = () => k.core.controls.status().plugins.find((p) => p.id === 'chat')?.summary;
+    expect(k.core.controls.queue('chat')?.coalesced).toEqual({ count: 0, pairs: [] });
+    expect(summary()).toBeUndefined();
+    queue('a', '/inventory');
+    queue('b', '/inventory');
+    queue('a', '/inventory');
+    queue('b', '/inventory');
+    queue('a', '/adventure');
+    queue('b', '/adventure');
+    // Gone or not, a merge stays counted: it says two nodes ask for the same.
+    k.runUntil(T0 + 600 * S);
+    expect(k.core.controls.queue('chat')).toMatchObject({
+      entries: [],
+      coalesced: { count: 2, pairs: [{ nodes: ['a', 'b'], count: 2 }] },
+    });
+    expect(summary()).toBe('2 sends coalesced: a + b (2)');
+    expect(k.core.controls.queue('a')).toBeUndefined();
+  });
+
   it('cancels a waiting send when an event of its cancel arrives, or its deadline passes', async () => {
     const { k, queue, publish, steps } = await kit();
     queue('a', '/inventory');

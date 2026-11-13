@@ -53,7 +53,8 @@
  *   Clear stop, which Apply sends before its restart); 409 when it is not stopped.
  * - `GET /plugins/<id>/state/<name>?<field>=<value>`: a declared read, its input the query's fields.
  * - `GET /plugins/<id>/queue`: what waits in a connector's queue (D73), with each send's nodes and
- *   their cancel conditions; 404 for a node that is not a connector.
+ *   their cancel conditions, and the sends it coalesced since the start, by pair of nodes; 404
+ *   for a node that is not a connector.
  * - `GET /plugins/<id>/view`: the state a node keeps, with its schema, for the viewer (D72); 404
  *   for a node that keeps none, 409 for one not running.
  * - `POST /plugins/<id>/actions/<name>` with the action's input as the body: its output, a 400 for

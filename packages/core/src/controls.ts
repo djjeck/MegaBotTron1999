@@ -25,7 +25,7 @@ import { type Buttons } from './commands.ts';
 import { type ConnectorStatus, type Surface, type SurfaceQuery } from './connector.ts';
 import { type DriftCounts } from './drift.ts';
 import { type Manifest } from './manifest.ts';
-import { type QueueEntryView } from './outbox.ts';
+import { type CoalescedView, type QueueEntryView } from './outbox.ts';
 import { type Instance } from './plugin.ts';
 import { type InputPort } from './ports.ts';
 import { type SettingsRegistry, type SettingValue } from './settings.ts';
@@ -75,6 +75,8 @@ export interface ControlsHost {
   clearStop(id: string): boolean;
   /** What waits in a connector node's queue (bot-os.md D73), in order. */
   queue(id: string): QueueEntryView[];
+  /** The sends a connector node's queue coalesced since the start, and the nodes that shared them. */
+  coalesced(id: string): CoalescedView;
   /** Logs the change in the event log (`core.power`). */
   record(fields: Record<string, unknown>): void;
   /** Logs a hook that failed. */
@@ -152,6 +154,15 @@ export interface PluginControl {
 export type ActResult = { output: unknown } | { error: string; refused?: boolean };
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/**
+ * The sends a queue coalesced, in words (`2 sends coalesced: a + b (2)`), or undefined for none.
+ */
+function coalescedText(c: CoalescedView): string | undefined {
+  if (c.count === 0) return undefined;
+  const pairs = c.pairs.map((p) => `${p.nodes.join(' + ')} (${p.count})`).join(', ');
+  return `${c.count} ${c.count === 1 ? 'send' : 'sends'} coalesced: ${pairs}`;
+}
 
 /** A schema's refusal of an input, field by field. */
 const issues = (list: readonly { path: readonly PropertyKey[]; message: string }[]): string =>
@@ -244,14 +255,24 @@ export class Controls {
 
   /**
    * What waits in a connector's queue (bot-os.md D73): each queued send, when it may go, and the
-   * nodes that asked for it with their cancel conditions; undefined for a node that is not a
-   * connector.
+   * nodes that asked for it with their cancel conditions; and the sends it coalesced since the
+   * start, with the pairs of nodes that shared them, which may say two nodes duplicate a piece of
+   * logic. Undefined for a node that is not a connector.
    */
-  queue(id: string): { account?: string; entries: QueueEntryView[] } | undefined {
-    const node = this.host.nodes().find((n) => n.id === id);
-    if (node === undefined || !node.manifest.kinds.includes('connector')) return undefined;
+  queue(
+    id: string
+  ): { account?: string; entries: QueueEntryView[]; coalesced: CoalescedView } | undefined {
+    if (!this.isConnector(id)) return undefined;
     const { account } = this.host.account(id);
-    return { ...(account === undefined ? {} : { account }), entries: this.host.queue(id) };
+    return {
+      ...(account === undefined ? {} : { account }),
+      entries: this.host.queue(id),
+      coalesced: this.host.coalesced(id),
+    };
+  }
+
+  private isConnector(id: string): boolean {
+    return this.host.nodes().some((n) => n.id === id && n.manifest.kinds.includes('connector'));
   }
 
   /** Each parser's drift: what it read and could not read, and whether it tripped (P5). */
@@ -379,14 +400,19 @@ export class Controls {
     }
   }
 
-  /** One line of a node's state for its card, if it runs and offers one. */
+  /**
+   * One line of a node's state for its card, if it runs and offers one; for a connector, the sends
+   * its queue coalesced since the start, if any (bot-os.md D73).
+   */
   private summary(id: string): string | undefined {
+    let line: string | undefined;
     try {
-      return this.host.instance(id)?.view?.summary?.();
+      line = this.host.instance(id)?.view?.summary?.();
     } catch (e) {
       this.host.error(id, `summary: ${message(e)}`);
-      return undefined;
     }
+    const merged = this.isConnector(id) ? coalescedText(this.host.coalesced(id)) : undefined;
+    return [line, merged].filter((x) => x !== undefined).join(' · ') || undefined;
   }
 
   /**

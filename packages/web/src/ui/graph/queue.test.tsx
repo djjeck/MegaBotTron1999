@@ -70,7 +70,20 @@ describe('the queue in the editor (D73)', () => {
   });
 
   it('shows what waits in a running connector’s queue, its nodes and their cancels', async () => {
-    let answer: [number, unknown] = [200, { account: 'chat:me', entries: [ENTRY] }];
+    let answer: [number, unknown] = [
+      200,
+      {
+        account: 'chat:me',
+        entries: [ENTRY],
+        coalesced: {
+          count: 3,
+          pairs: [
+            { nodes: ['actor-a', 'actor-b'], count: 2 },
+            { nodes: ['actor-a', 'actor-c'], count: 1 },
+          ],
+        },
+      },
+    ];
     fakeCore({ routes: { 'GET /plugins/chat/queue': () => answer } });
     render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
     fireEvent.click(await screen.findByLabelText('node chat · out', {}, slow));
@@ -81,6 +94,22 @@ describe('the queue in the editor (D73)', () => {
     expect(within(queue).getByText(/on parser.changed \(sections = "inventory"\)/u)).toBeDefined();
     expect(within(queue).getByText('no cancel')).toBeDefined();
     expect(within(queue).getByText(/\(stock\)/u)).toBeDefined();
+    // A send two nodes share, and the merges since the start: they may duplicate a piece of logic.
+    expect(within(queue).getByText('shared by 2 nodes')).toBeDefined();
+    expect(within(queue).getByText(/3 sends coalesced since the start/u).textContent).toBe(
+      '3 sends coalesced since the start: actor-a + actor-b (2), actor-a + actor-c (1)'
+    );
+    answer = [
+      200,
+      { entries: [], coalesced: { count: 1, pairs: [{ nodes: ['a', 'b'], count: 1 }] } },
+    ];
+    fireEvent.click(screen.getByLabelText('node parser'));
+    fireEvent.click(await screen.findByLabelText('node chat · out'));
+    await screen.findByText(/1 send coalesced since the start/u);
+    answer = [200, { entries: [], coalesced: { count: 0, pairs: [] } }];
+    fireEvent.click(screen.getByLabelText('node parser'));
+    fireEvent.click(await screen.findByLabelText('node chat · out'));
+    await screen.findByText('No send coalesced since the start.');
     answer = [200, { entries: [] }];
     fireEvent.click(screen.getByLabelText('node parser'));
     fireEvent.click(await screen.findByLabelText('node chat · out'));

@@ -329,6 +329,16 @@ export interface QueueEntryView {
   }[];
 }
 
+/**
+ * The sends coalesced since the instance started (bot-os.md D73), which may say that two nodes
+ * duplicate a piece of logic: how many times a node joined another's waiting send, and each pair
+ * of nodes that shared one, with how many times.
+ */
+export interface CoalescedView {
+  count: number;
+  pairs: { nodes: [string, string]; count: number }[];
+}
+
 /** One node's share of a queued send. */
 interface Member {
   id: number;
@@ -368,6 +378,9 @@ export class Outbox {
   private readonly lastSent = new Map<string, number>();
   private members = 0;
   private timer: TimerHandle | undefined;
+  /** The sends coalesced since it was made: how many, and per pair of nodes (`[a, b]`, as JSON). */
+  private merges = 0;
+  private readonly mergedPairs = new Map<string, number>();
 
   constructor(options: OutboxOptions) {
     this.account = options.account;
@@ -531,7 +544,14 @@ export class Outbox {
         queuedAt: this.o.clock.now(),
         members: [member],
       });
-    else same.members.push(member);
+    else {
+      this.merges += 1;
+      for (const other of new Set(same.members.map((m) => m.plugin))) {
+        const key = JSON.stringify([other, plugin].sort());
+        this.mergedPairs.set(key, (this.mergedPairs.get(key) ?? 0) + 1);
+      }
+      same.members.push(member);
+    }
     this.queueLog(plugin, chat, text, same === undefined ? 'queued' : 'coalesced');
     if (deadline !== undefined)
       member.timer = this.o.clock.setTimeout(
@@ -595,6 +615,14 @@ export class Outbox {
         };
       }),
     }));
+  }
+
+  /** The sends coalesced since it was made, and the pairs of nodes that shared them, most first. */
+  coalesced(): CoalescedView {
+    const pairs = [...this.mergedPairs]
+      .map(([key, count]) => ({ nodes: JSON.parse(key) as [string, string], count }))
+      .sort((x, y) => y.count - x.count || x.nodes.join(' ').localeCompare(y.nodes.join(' ')));
+    return { count: this.merges, pairs };
   }
 
   /** A member settled before its send went: out of its send, logged, and the queue moves on. */
