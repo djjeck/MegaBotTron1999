@@ -1,6 +1,6 @@
 {
   "name": "@megabottron1999/web",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "private": true,
   "description": "MegaBotTron1999's web UI: the owner's admin pages, a React app built by Vite, and its server behind a login",
   "license": "MIT",
@@ -20,7 +20,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@megabottron1999/core": "0.1.13"
+    "@megabottron1999/core": "0.1.14"
   },
   "devDependencies": {
     "@xyflow/react": "12.12.0",
