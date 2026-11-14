@@ -27,7 +27,10 @@
  * Nothing in here knows of any game.
  */
 import { type Inbound, inChat } from './connector.ts';
+import { holds, matches, valueAt } from './paths.ts';
 import { type PluginContext } from './plugin.ts';
+
+export { holds, matches, valueAt };
 
 /** What a reaction reads: an event as published, or a message with its pattern's groups. */
 export type ReactionPayload = Readonly<Record<string, unknown>>;
@@ -69,33 +72,6 @@ export interface Reaction {
 
 /** A `{path}` placeholder: a name, then dotted names or indices. */
 const PLACEHOLDER = /\{([A-Za-z_$][\w$]*(?:\.[\w$]+)*)\}/gu;
-
-/** The value at a dotted path of a payload; undefined where a step is missing. */
-export function valueAt(payload: unknown, path: string): unknown {
-  let at: unknown = payload;
-  for (const key of path.split('.')) {
-    if (typeof at !== 'object' || at === null || !Object.hasOwn(at, key)) return undefined;
-    at = (at as Record<string, unknown>)[key];
-  }
-  return at;
-}
-
-/** Whether every field of `when` is equal (`===`) to the payload's at its path. */
-export function matches(payload: unknown, when: Readonly<Record<string, unknown>> = {}): boolean {
-  return Object.entries(when).every(([path, value]) => valueAt(payload, path) === value);
-}
-
-/**
- * Whether every field of `when` holds of the payload (a queued send's cancel, bot-os.md D73): equal
- * to the value at its path, as `matches` asks, or, for a list there, among its items (a state's
- * `changed.sections` holding `inventory`).
- */
-export function holds(payload: unknown, when: Readonly<Record<string, unknown>> = {}): boolean {
-  return Object.entries(when).every(([path, value]) => {
-    const at = valueAt(payload, path);
-    return at === value || (Array.isArray(at) && at.includes(value));
-  });
-}
 
 /**
  * A text made from a payload: each `{path}` of a template replaced by its value there (a string, a

@@ -15,7 +15,10 @@
  *   input `port` uses (`ctx.use`), each a promise.
  * - `outbox(port).enqueue(chat, text, { cancel })`, or `enqueue(port, chat, text, { cancel })`: a
  *   queued send through its chat-out output `port` (`ctx.outbox(port).enqueue`), a handle awaited
- *   for its outcome, with `status()` and `cancel()`.
+ *   for its outcome, with `status()` and `cancel()`; its `answer`, what the game answered, for a
+ *   command a parser declares answers for (docs/bot-os.md D98).
+ * - `outbox(port).held(chat, command)`: what holds that command back now (a cooldown, the
+ *   retry-loop guard), `{ until, reason }`, or undefined; a promise.
  * - `publish(type, payload)`: an event of its own (`ctx.bus.publish`).
  * - `store.read(name)`, `store.write(name, value)`, `store.remove(name)`, `store.names()`: its own
  *   documents (`ctx.store`), read from a copy kept beside it.
@@ -34,7 +37,16 @@ export interface SendOutcome {
   text: string;
   outcome: string;
   reason?: string;
+  retryAt?: number;
   event?: Record<string, unknown>;
+  /** What the game answered (D98): `{ status, reason?, retryAt?, event? }`. */
+  answer?: { status: string; reason?: string; retryAt?: number; event?: Record<string, unknown> };
+}
+
+/** What holds a command back (`ctx.outbox(port).held`). */
+export interface ScriptHold {
+  until: number;
+  reason: string;
 }
 
 /** What a script may cancel a queued send on (D73): no predicate of its own, which cannot cross. */
@@ -60,6 +72,8 @@ export interface ScriptBridge {
   ): void;
   /** Drops a queued send still waiting: whether it did. */
   cancel(id: number): Promise<boolean>;
+  /** What holds a command back through its output `port` (D98), if anything. */
+  held(port: string, chat: string, command: string): Promise<ScriptHold | undefined>;
   publish(type: string, payload: Record<string, unknown>): void;
   write(name: string, value: unknown): void;
   remove(name: string): void;
@@ -173,6 +187,8 @@ export class ScriptRuntime {
     const outbox = (port: string) => ({
       enqueue: (chat: string, text: string, options: { cancel?: ScriptCancel } = {}) =>
         this.enqueue(port, chat, text, options.cancel),
+      held: (chat: string, command: string) =>
+        this.bridge.held(String(port), String(chat), String(command)),
     });
     const api = {
       on: (type: string, fn: (e: unknown) => unknown): void => {

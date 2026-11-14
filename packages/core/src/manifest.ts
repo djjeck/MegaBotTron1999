@@ -4,6 +4,7 @@
  * and the field, and the instance does not start: it is a mistake in the image, best seen at once.
  */
 import { z } from 'zod';
+import { answerSchema } from './answers.ts';
 import {
   type DeclaredInput,
   type DeclaredOutput,
@@ -83,6 +84,12 @@ export const manifestSchema = z
     events: z
       .record(z.string().regex(EVENT_TYPE, 'expected <namespace>.<name>'), schema)
       .default({}),
+    /**
+     * A parser's: which of its own events answer which commands (bot-os.md D98, #59), the first
+     * that matches an event its answer; a node's send of one of them to a chat it reads waits for
+     * that answer (`answers.ts`, docs/bot-os-api.md §4.6).
+     */
+    answers: z.array(answerSchema).default([]),
     uses: z.record(z.string().regex(PLUGIN_ID), z.array(z.string().min(1))).default({}),
     reach: z
       .array(
@@ -367,6 +374,14 @@ export const manifestSchema = z
           message: `namespace ${ns} is not among games.registers`,
         });
     }
+    m.answers.forEach((a, i) => {
+      if (!Object.hasOwn(m.events, a.event))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['answers', i, 'event'],
+          message: `${a.event} is not among its events`,
+        });
+    });
     if (m.games.registers.includes('core'))
       ctx.addIssue({
         code: 'custom',

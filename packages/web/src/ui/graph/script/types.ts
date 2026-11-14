@@ -396,7 +396,19 @@ interface QueuedResult {
   text: string;
   outcome: 'sent' | 'dry-run' | 'refused' | 'failed' | 'cancelled' | 'expired';
   reason?: string;
+  /** Refused as its command rests: when it may go again. */
+  retryAt?: number;
   event?: { type: string; t: number; [field: string]: unknown };
+  /**
+   * What the game answered, for a command a parser declares answers for (unanswered: none came in
+   * time): awaited, a sent command settles once it is answered.
+   */
+  answer?: {
+    status: 'ok' | 'refused' | 'unanswered';
+    reason?: string;
+    retryAt?: number;
+    event?: { type: string; t: number; [field: string]: unknown };
+  };
 }
 /** A queued send: awaited, its outcome. */
 interface QueuedSend extends PromiseLike<QueuedResult> {
@@ -417,6 +429,8 @@ declare function use<P extends keyof ScriptInterfaces>(port: P): ScriptInterface
 declare function outbox(port: ScriptOutput): {
   /** Queues a send, spaced and coalesced; dropped if its cancel holds before it goes. */
   enqueue(chat: string, text: string, options?: { cancel?: ScriptCancel }): QueuedSend;
+  /** What holds a command (its first word) back now: the bot's cooldown, or the retry-loop guard. */
+  held(chat: string, command: string): Promise<{ until: number; reason: string } | undefined>;
 };
 /** Queues a send through a chat-out output: outbox(port).enqueue(chat, text, options). */
 declare function enqueue(port: ScriptOutput, chat: string, text: string, options?: { cancel?: ScriptCancel }): QueuedSend;

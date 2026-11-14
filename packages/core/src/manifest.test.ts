@@ -13,6 +13,7 @@ describe('parseManifest', () => {
       outputs: { interface: { type: 'interface', plugin: 'test-plugin', members: [] } },
       games: { registers: [] },
       events: {},
+      answers: [],
       secrets: [],
       configSecrets: [],
       configChats: [],

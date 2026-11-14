@@ -15,7 +15,11 @@
  *   history: missed while down, bot-os.md D83), and reports to drift (P5) a message it
  *   claims and cannot read, which pauses the turn-actor that requires it past the threshold;
  * - offers `state.rest`: until when its bot rests, as its last answer said (the bot's rest after a
- *   turn, or the wait of a "too soon"), for the actor to wait out.
+ *   turn, or the wait of a "too soon"), for the actor to wait out;
+ * - declares its `<id>.turn` an answer to its turn commands (bot-os.md D98): `refused` with
+ *   `cooldown` for a "too soon", `ok` for any other outcome read (not an unread one), each with its
+ *   `retryAt` (the rest it starts), so that a turn queued by any node settles with what the bot
+ *   answered, and the outbox holds the next one back until the bot's rest is over.
  *
  * It keeps nothing in its factory's closure: everything hangs off its instance (§2.1). It resumes
  * from its own records (bot-os.md D62): the owner's recent turns and its bot's rest, kept in its
@@ -157,9 +161,34 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
               .literal(true)
               .optional()
               .describe('Read from history (a message missed while down), not news: act on none'),
+            retryAt: z
+              .number()
+              .optional()
+              .describe('When the bot rests until, as this answer says (ms): its next turn then'),
           })
           .describe(`What @${spec.bot} answered to a turn of the owner's, as its grammar reads it`),
       },
+      // Its turn event answers a turn (D98): a "too soon" refuses it, any other reading takes it.
+      answers: [
+        {
+          event: `${spec.id}.turn`,
+          commands,
+          when: { 'outcome.kind': 'nothing', 'outcome.reason': 'cooldown' },
+          status: 'refused',
+          reason: 'cooldown',
+          retryAtFrom: 'retryAt',
+          withinS: ANSWER_WINDOW_MS / 1000,
+        },
+        {
+          event: `${spec.id}.turn`,
+          commands,
+          unless: { 'outcome.kind': 'unknown' },
+          status: 'ok',
+          reason: 'rest',
+          retryAtFrom: 'retryAt',
+          withinS: ANSWER_WINDOW_MS / 1000,
+        },
+      ],
       inputs: {
         chat: {
           type: 'chat-in',
@@ -255,16 +284,19 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
           return;
         }
         ctx.drift.read(m.time);
-        if (reading.restMs !== undefined) {
-          const until = m.time + reading.restMs;
-          if (rest === undefined || until > rest.until) {
-            rest = { until, why: whyOf(reading.outcome) };
-            keep();
-          }
+        const retryAt = reading.restMs === undefined ? undefined : m.time + reading.restMs;
+        if (retryAt !== undefined && (rest === undefined || retryAt > rest.until)) {
+          rest = { until: retryAt, why: whyOf(reading.outcome) };
+          keep();
         }
         ctx.bus.publish(
           `${spec.id}.turn`,
-          { chat: m.chat, outcome: reading.outcome, ...old },
+          {
+            chat: m.chat,
+            outcome: reading.outcome,
+            ...(retryAt === undefined ? {} : { retryAt }),
+            ...old,
+          },
           m.time
         );
       });

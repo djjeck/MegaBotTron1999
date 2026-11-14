@@ -660,6 +660,159 @@ describe('a send the network refuses (D95)', () => {
   });
 });
 
+describe('command answers (D98)', () => {
+  const flush = () => new Promise((r) => setImmediate(r));
+  const OK = { commands: ['/give'], holds: ['/give'], answer: { status: 'ok' as const } };
+  const refused = (retryAt?: number) => ({
+    commands: ['/give'],
+    holds: ['/give'],
+    answer: {
+      status: 'refused' as const,
+      reason: 'cooldown',
+      ...(retryAt === undefined ? {} : { retryAt }),
+    },
+  });
+
+  /** An outbox whose `/give` waits a minute for its answer, through a connector of `deliver`. */
+  function answering(o: { dryRun?: boolean; limits?: Limits } = {}) {
+    const clock = new VirtualClock(0);
+    const connector = new LaterConnector();
+    const outbox = new Outbox({
+      account: 'test:me',
+      connector: () => connector,
+      limits: () => o.limits,
+      clock,
+      policy: () => ({
+        reach: { sends: ['@QuestBot'], ...(o.dryRun === true ? { dryRun: true } : {}) },
+      }),
+      watch: () => true,
+      expects: (_chat, command) => (command === '/give' ? 60_000 : undefined),
+    });
+    return { clock, connector, outbox, p: outbox.as('p') };
+  }
+
+  it('settles a queued send with what the game answered, or unanswered past its window', async () => {
+    const { clock, outbox, p } = answering();
+    const q = p.enqueue('@QuestBot', '/give alice sword');
+    await flush();
+    expect(q.status()).toBe('sent');
+    expect(q.cancel()).toBe(false);
+    outbox.answered({ chat: '42', aliases: ['@questbot'] }, OK);
+    await expect(q).resolves.toEqual({
+      text: '/give alice sword',
+      outcome: 'sent',
+      answer: { status: 'ok' },
+    });
+    const late = p.enqueue('@QuestBot', '/give bob shield');
+    clock.advance(60_000);
+    await expect(late.result).resolves.toEqual({
+      text: '/give bob shield',
+      outcome: 'sent',
+      answer: { status: 'unanswered' },
+    });
+    // A command no parser answers, and a dry run, are settled as they go.
+    await expect(p.enqueue('@QuestBot', '/look')).resolves.toEqual({
+      text: '/look',
+      outcome: 'sent',
+    });
+    const dry = answering({ dryRun: true });
+    await expect(dry.p.enqueue('@QuestBot', '/give')).resolves.toEqual({
+      text: '/give',
+      outcome: 'dry-run',
+    });
+  });
+
+  it('pairs an answer before the network acks the send, and by the id it replies to', async () => {
+    const { connector, outbox, p } = answering();
+    let ack!: (r: { id?: string }) => void;
+    connector.answers.push(() => new Promise((r) => (ack = r)));
+    connector.answers.push(() => Promise.resolve({ id: '7' }));
+    const first = p.enqueue('@QuestBot', '/give a');
+    outbox.answered({ chat: '@QuestBot' }, refused());
+    ack({ id: '6' });
+    await expect(first).resolves.toMatchObject({ outcome: 'sent', answer: { status: 'refused' } });
+    const delivered = await p.deliver('@QuestBot', '/give b');
+    expect(delivered).toEqual({ text: '/give b', outcome: 'sent', id: '7' });
+    const third = p.enqueue('@QuestBot', '/give c');
+    await flush();
+    // A reply to the delivered one answers it, not the queued one waiting.
+    outbox.answered({ chat: '@QuestBot', replyTo: '7' }, OK);
+    expect(third.status()).toBe('sent');
+    outbox.answered({ chat: '@QuestBot' }, OK);
+    await expect(third).resolves.toMatchObject({ answer: { status: 'ok' } });
+  });
+
+  it('waits for no answer to a send the network refused', async () => {
+    const { clock, connector, p } = answering();
+    connector.answers.push(() => Promise.reject(new Error('chat not found')));
+    connector.answers.push(() => Promise.reject(new Error('blocked')));
+    await expect(p.enqueue('@QuestBot', '/give a')).resolves.toEqual({
+      text: '/give a',
+      outcome: 'failed',
+      reason: 'chat not found',
+    });
+    await expect(p.deliver('@QuestBot', '/give b')).resolves.toMatchObject({ outcome: 'failed' });
+    clock.advance(60_000);
+  });
+
+  it("holds a command back while the bot's cooldown lasts: queued, it waits; sent now, refused", async () => {
+    const { clock, connector, outbox, p } = answering();
+    outbox.answered({ chat: '@QuestBot' }, refused(30_000));
+    expect(p.held('@QuestBot', '/give alice')).toEqual({
+      until: 30_000,
+      reason: 'cooldown: cooldown',
+    });
+    expect(p.send('@QuestBot', '/give alice')).toEqual({
+      text: '/give alice',
+      outcome: 'refused',
+      reason: 'cooldown: cooldown, 30 s more',
+      retryAt: 30_000,
+    });
+    await expect(p.deliver('@QuestBot', '/give alice')).resolves.toMatchObject({
+      outcome: 'refused',
+      retryAt: 30_000,
+    });
+    const q = p.enqueue('@QuestBot', '/give alice');
+    expect(outbox.pending()[0]?.waitingUntil).toBe(30_000);
+    clock.advance(29_999);
+    expect(q.status()).toBe('waiting');
+    clock.advance(1);
+    await flush();
+    expect(q.status()).toBe('sent');
+    expect(connector.formats).toHaveLength(1);
+  });
+
+  it('answers the watchdog: an answer clears the count, an answer that never came adds to it', () => {
+    const clock = new VirtualClock(0);
+    const connector = new FakeConnector('test:me', 'test');
+    const paused: string[] = [];
+    const outbox = new Outbox({
+      account: 'test:me',
+      connector: () => connector,
+      limits: () => ({ unansweredAt: 2 }),
+      clock,
+      watch: () => true,
+      pause: (plugin) => paused.push(plugin),
+      expects: () => 1000,
+    });
+    const p = outbox.as('p');
+    expect(p.send('@QuestBot', '/give').outcome).toBe('sent');
+    outbox.answered({ chat: '@QuestBot' }, OK);
+    expect(p.send('@QuestBot', '/give').outcome).toBe('sent');
+    outbox.answered({ chat: '@QuestBot' }, OK);
+    // Two that time out: the threshold, before a third is sent.
+    expect(p.send('@QuestBot', '/give').outcome).toBe('sent');
+    clock.advance(1000);
+    expect(p.send('@QuestBot', '/give').outcome).toBe('sent');
+    clock.advance(1000);
+    expect(p.send('@QuestBot', '/give').reason).toBe(
+      'stopped: stalled: 2 sends of /give to @QuestBot went unanswered'
+    );
+    expect(paused).toEqual(['p']);
+    expect(outbox.backoffs('p')).toEqual([]);
+  });
+});
+
 describe('unreachableHint', () => {
   it.each([
     ['Forbidden: bot was kicked from the group chat', 'not a member'],

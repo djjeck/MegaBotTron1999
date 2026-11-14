@@ -24,6 +24,12 @@
  * senders' modes (`modes`, module API 1, deprecated): `read-only` refuses, `dry-run` stops before
  * the network, `live` sends.
  *
+ * **Command answers** (bot-os.md D98, #59, `answers.ts`): a live send of a command that a parser
+ * reading its chat declares an answer for waits for that answer; a queued one settles with it
+ * (`answer`: `ok`, `refused`, or `unanswered` past its window). An answer's `retryAt` holds the
+ * command back in that chat (a queued send waits it out, an immediate one is refused), and the
+ * retry-loop guard backs off a node whose command keeps being refused for the same reason.
+ *
  * Every attempt is logged (`core.send`), with its outcome. `send` sends now or refuses, for actors
  * that time their sends to the second; `enqueue` waits its turn within the limits; `deliver` sends
  * now or refuses, as `send` does, and waits for the network's answer (Telegram's), with the sent
@@ -38,6 +44,15 @@
  * `failed`, with why.
  */
 import { z } from 'zod';
+import {
+  Answers,
+  type BackoffView,
+  type CommandAnswer,
+  firstWord,
+  type Hold,
+  type Pending,
+  type ReadAnswer,
+} from './answers.ts';
 import { type Clock, type TimerHandle } from './clock.ts';
 import { type Buttons } from './commands.ts';
 import { type Connector } from './connector.ts';
@@ -78,6 +93,8 @@ export type SendResult = {
   text: string;
   outcome: 'sent' | 'dry-run' | 'refused';
   reason?: string;
+  /** Refused as the command rests (a cooldown, the guard, D98): when it may go again. */
+  retryAt?: number;
 };
 
 /** A send that waited for the network's answer (`deliver`): its id, or why it failed there. */
@@ -273,6 +290,11 @@ export interface OutboxOptions {
   title?: (chat: string) => string | undefined;
   /** Pauses a node whose sends went unanswered (D93), with why: the core's stop. */
   pause?: (plugin: string, reason: string) => void;
+  /**
+   * How long a live send of a command (its first word) to a chat waits for its answer (bot-os.md
+   * D98): a parser that reads the chat declares one; undefined: no answer is waited for.
+   */
+  expects?: (chat: string, command: string) => number | undefined;
 }
 
 export interface SendOptions {
@@ -321,6 +343,12 @@ export interface OutboxHandle {
   /** Sends now or refuses, and waits for the network's answer: the message's id. */
   deliver(chat: string, text: string, options?: SendOptions): Promise<DeliverResult>;
   /**
+   * What holds its sends of `command` (a first word) to `chat` back now (bot-os.md D98): the
+   * bot's cooldown, as an answer's `retryAt` set it, or the retry-loop guard; until when, and why.
+   * Undefined: nothing does.
+   */
+  held(chat: string, command: string): Hold | undefined;
+  /**
    * The account's owner's own chat, where its connector has one (a telegram-bot's `owner`).
    * Undefined while the connector does not run.
    */
@@ -368,8 +396,15 @@ export interface QueuedResult {
   text: string;
   outcome: QueueOutcome;
   reason?: string;
+  /** Refused as its command rests: when it may go again. */
+  retryAt?: number;
   /** The event that cancelled it. */
   event?: CancelEvent;
+  /**
+   * What the game answered (bot-os.md D98): for a live send of a command a parser declares an
+   * answer for, once it came, or `unanswered` past its window.
+   */
+  answer?: CommandAnswer;
 }
 
 /**
@@ -468,6 +503,8 @@ interface Member {
   deadline?: number;
   intervalMs: number;
   status: 'waiting' | QueueOutcome;
+  /** Its handle has settled. */
+  done: boolean;
   settle: (r: QueuedResult) => void;
   timer?: TimerHandle;
 }
@@ -493,8 +530,6 @@ interface Unanswered {
 }
 
 const HOUR = 3_600_000;
-/** A command's first word, as the reach and the intervals name it. */
-const firstWord = (text: string): string => text.split(/\s/u, 1)[0] ?? '';
 
 export class Outbox {
   readonly account: string;
@@ -516,10 +551,26 @@ export class Outbox {
   private readonly unanswered = new Map<string, Unanswered>();
   /** The queue is being pumped: a pump asked meanwhile (a pause dropping a node's sends) waits. */
   private pumping = false;
+  /** The sends waiting for their answers, the cooldowns and the guard (D98). */
+  private readonly answers: Answers;
 
   constructor(options: OutboxOptions) {
     this.account = options.account;
     this.o = options;
+    this.answers = new Answers({
+      account: options.account,
+      clock: options.clock,
+      ...(options.notice === undefined ? {} : { notice: options.notice }),
+      // An answer that did not come is a send unanswered for the watchdog, now (D93).
+      unanswered: (plugins, chat, command) => {
+        for (const plugin of plugins) {
+          const u = this.unanswered.get(this.unansweredKey(plugin, chat, command));
+          if (u?.open !== true) continue;
+          u.count += 1;
+          u.open = false;
+        }
+      },
+    });
   }
 
   /** The way out for one plugin, through its output `port` if named (every edge otherwise). */
@@ -534,6 +585,7 @@ export class Outbox {
       deliver: (chat, text, options = {}) => this.deliver(plugin, chat, text, via(options)),
       owner: () => this.o.connector()?.owner?.(),
       chats: () => this.chatsOf(plugin, port),
+      held: (chat, command) => this.answers.held(plugin, chat, firstWord(command)),
     };
   }
 
@@ -550,17 +602,57 @@ export class Outbox {
 
   send(plugin: string, chat: string, text: string, options: SendOptions = {}): SendResult {
     const v = this.check(plugin, chat, text, options);
-    const stalled = 'refused' in v || v.dryRun ? undefined : this.stalled(plugin, chat, text);
     const result =
       'refused' in v
         ? v.refused
-        : stalled !== undefined
-          ? stalled
-          : this.attempt(chat, text, v.dryRun, options.buttons, [plugin]).result;
+        : (this.resting(plugin, chat, text) ??
+          (v.dryRun ? undefined : this.stalled(plugin, chat, text)) ??
+          this.attempt(chat, text, v.dryRun, options.buttons, [plugin]).result);
     this.sent(chat, text, result);
-    if (result.outcome === 'sent') this.went(plugin, chat, text);
+    if (result.outcome === 'sent') {
+      this.went(plugin, chat, text);
+      this.expect([plugin], chat, text);
+    }
     this.log(plugin, chat, options, result, v.mode);
     return result;
+  }
+
+  /**
+   * A send held back now (D98): its command rests in that chat (an answer's `retryAt`), or the
+   * guard backs its node off; refused with why and when it may go again.
+   */
+  private resting(plugin: string, chat: string, text: string): SendResult | undefined {
+    const hold = this.answers.held(plugin, chat, firstWord(text));
+    if (hold === undefined) return undefined;
+    const s = Math.ceil((hold.until - this.o.clock.now()) / 1000);
+    return { text, outcome: 'refused', reason: `${hold.reason}, ${s} s more`, retryAt: hold.until };
+  }
+
+  /** A live send that waits for its answer, if a parser of its chat declares one (D98). */
+  private expect(plugins: readonly string[], chat: string, text: string): Pending | undefined {
+    const command = firstWord(text);
+    const ms = this.o.expects?.(chat, command);
+    return ms === undefined ? undefined : this.answers.expect(plugins, chat, command, ms);
+  }
+
+  /**
+   * An answer read from a message of `chat` (by any of its names, D90), declared by the parser
+   * that read it (D98): its cooldown kept, and the send it answers settled, whose nodes' sends of
+   * the command are answered for the watchdog too (D93).
+   */
+  answered(
+    m: { chat: string; aliases?: readonly string[] | undefined; replyTo?: string | undefined },
+    read: ReadAnswer
+  ): void {
+    const paired = this.answers.answered([m.chat, ...(m.aliases ?? [])], m.replyTo, read);
+    if (paired === undefined) return;
+    for (const plugin of paired.plugins)
+      this.unanswered.delete(this.unansweredKey(plugin, paired.chat, paired.command));
+  }
+
+  /** A node's commands the retry-loop guard holds back (D98), for `GET /status`. */
+  backoffs(plugin: string): BackoffView[] {
+    return this.answers.backoffs(plugin);
   }
 
   /** Notes when a command went (or went as a dry run), for its interval (D73). */
@@ -601,8 +693,10 @@ export class Outbox {
     let result: DeliverResult =
       'refused' in v
         ? v.refused
-        : ((v.dryRun ? undefined : this.stalled(plugin, chat, text)) ??
+        : (this.resting(plugin, chat, text) ??
+          (v.dryRun ? undefined : this.stalled(plugin, chat, text)) ??
           this.admit(text, v.dryRun) ?? { text, outcome: 'sent' });
+    let pending: Pending | undefined;
     if (result.outcome === 'sent') {
       const connector = this.o.connector();
       const now = this.o.clock.now();
@@ -612,6 +706,8 @@ export class Outbox {
         result = { text, outcome: 'refused', reason: 'not connected' };
       else {
         this.recent.push(now);
+        // Waiting before the network acks it: the bot may answer first.
+        pending = this.expect([plugin], chat, text);
         try {
           const extra = {
             ...(options.format === undefined ? {} : { format: options.format }),
@@ -623,7 +719,9 @@ export class Outbox {
             Object.keys(extra).length === 0 ? undefined : extra
           );
           result = { text, outcome: 'sent', ...(id === undefined ? {} : { id }) };
+          if (id !== undefined) pending?.identify(id);
         } catch (e) {
+          pending?.drop();
           if (e instanceof FloodWait) {
             this.heldUntil = this.o.clock.now() + e.ms;
             result = { text, outcome: 'refused', reason: e.message };
@@ -639,7 +737,11 @@ export class Outbox {
       }
     }
     this.sent(chat, text, result);
-    if (result.outcome === 'sent') this.went(plugin, chat, text);
+    if (result.outcome === 'sent') {
+      this.went(plugin, chat, text);
+      // Sent by the connector's `send`, with no answer of the network's to wait for first.
+      if (pending === undefined) this.expect([plugin], chat, text);
+    }
     this.log(plugin, chat, options, result, v.mode);
     return result;
   }
@@ -728,8 +830,10 @@ export class Outbox {
       ...(cancel === undefined ? {} : { cancel }),
       intervalMs: 0,
       status: 'waiting',
+      done: false,
       settle: (r) => {
-        if (member.status !== 'waiting') return;
+        if (member.done) return;
+        member.done = true;
         member.status = r.outcome;
         if (member.timer !== undefined) this.o.clock.clearTimeout(member.timer);
         settle(r);
@@ -892,10 +996,18 @@ export class Outbox {
     return Math.max(0, ...w.members.map((m) => m.intervalMs));
   }
 
-  /** When a waiting send's command may go again in its chat. */
+  /**
+   * When a waiting send's command may go again in its chat: its interval since it last went, and
+   * what holds it back (D98: the bot's cooldown, a node's guard; for a coalesced one, the longest).
+   */
   private readyAt(w: Waiting): number {
     const last = this.lastSent.get(`${w.chat} ${w.command}`);
-    return last === undefined ? Number.NEGATIVE_INFINITY : last + this.intervalMsOf(w);
+    return Math.max(
+      last === undefined ? Number.NEGATIVE_INFINITY : last + this.intervalMsOf(w),
+      ...w.members.map(
+        (m) => this.answers.held(m.plugin, w.chat, w.command)?.until ?? Number.NEGATIVE_INFINITY
+      )
+    );
   }
 
   /** Sends the oldest send whose command's interval has passed, when the account may; again. */
@@ -952,10 +1064,21 @@ export class Outbox {
     }
     const lead = going.find((g) => !g.dryRun) ?? going[0];
     if (lead === undefined) return;
-    const live = going.filter((g) => !g.dryRun).map((g) => g.m.plugin);
-    const { result, answer } = this.attempt(w.chat, w.text, lead.dryRun, lead.m.options.buttons, [
-      ...new Set(live),
-    ]);
+    const live = [...new Set(going.filter((g) => !g.dryRun).map((g) => g.m.plugin))];
+    const { result, answer } = this.attempt(
+      w.chat,
+      w.text,
+      lead.dryRun,
+      lead.m.options.buttons,
+      live
+    );
+    // It waits for the game's answer from now (D98): the bot may answer before the network acks.
+    const pending =
+      result.outcome === 'sent' && live.length > 0 ? this.expect(live, w.chat, w.text) : undefined;
+    void answer?.then((a) => {
+      if (a.failed !== undefined) pending?.drop();
+      else if (a.id !== undefined) pending?.identify(a.id);
+    });
     this.sent(w.chat, w.text, result);
     const others = [
       ...new Set(going.filter((g) => g.m.plugin !== lead.m.plugin).map((g) => g.m.plugin)),
@@ -971,12 +1094,18 @@ export class Outbox {
           outcome: failed === undefined ? outcome : 'failed',
           ...(reason === undefined ? {} : { reason }),
         };
-        g.m.settle(r);
         this.queueLog(g.m.plugin, w.chat, w.text, r.outcome, reason);
+        if (r.outcome !== 'sent' || pending === undefined) {
+          g.m.settle(r);
+          return;
+        }
+        // Sent, and its handle waits for the game's answer (D98).
+        g.m.status = 'sent';
+        pending.wait((a) => g.m.settle({ ...r, answer: a }));
       };
       // A live share settles once the network answers (D95); a dry run, at once.
       if (answer === undefined || outcome !== 'sent') settle(undefined);
-      else void answer.then(settle);
+      else void answer.then((a) => settle(a.failed));
     }
   }
 
@@ -1100,7 +1229,7 @@ export class Outbox {
     dryRun: boolean,
     buttons: Buttons | undefined,
     plugins: readonly string[]
-  ): { result: SendResult; answer?: Promise<string | undefined> } {
+  ): { result: SendResult; answer?: Promise<{ failed?: string; id?: string }> } {
     const refuse = (reason: string): SendResult => ({ text, outcome: 'refused', reason });
     const admitted = this.admit(text, dryRun);
     if (admitted !== undefined) return { result: admitted };
@@ -1112,15 +1241,15 @@ export class Outbox {
       const answer = connector
         .deliver(chat, text, buttons === undefined ? undefined : { buttons })
         .then(
-          () => undefined,
+          ({ id }) => (id === undefined ? {} : { id }),
           (e: unknown) => {
             if (e instanceof FloodWait) {
               this.heldUntil = this.o.clock.now() + e.ms;
-              return e.message;
+              return { failed: e.message };
             }
             const reason = e instanceof Error ? e.message : String(e);
             this.unreachable(plugins, chat, text, reason);
-            return reason;
+            return { failed: reason };
           }
         );
       return { result: { text, outcome: 'sent' }, answer };

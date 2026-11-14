@@ -29,6 +29,12 @@ never their values.
   the instance does, and the merges counted since the start, by pair of nodes; and its watchdog
   (docs/bot-os.md D93), which stops an actor whose sends of a command go unanswered too many times
   in a row.
+- `src/answers.ts`: command answers (docs/bot-os.md D98): the parsers' declared answers (a
+  manifest's `answers`), the sends waiting for theirs (`await enqueue(…)` settles with `answer`),
+  the cooldowns their `retryAt` sets per chat and command, and the retry-loop guard, which backs off
+  a node refused again and again for one reason (`GET /status`'s `backoff`, a `backoff` notice).
+- `src/paths.ts`: dotted paths into a payload (`valueAt`, `matches`, `holds`), as reactions, cancels
+  and answers read them.
 - `src/notices.ts`: the owner's notices (docs/bot-os.md D91, D94): what needs the owner's attention,
   raised where it happens (a node failed or made inactive by a stop's cascade, a drift, a send
   coalesced, a node the send-queue watchdog stopped, the load's warnings, the saved graph refused, a

@@ -42,6 +42,7 @@ export type FromWorker =
   | { op: 'ended'; end: CallEnd }
   | { op: 'use'; id: number; port: string; member: string; input: unknown }
   | { op: 'cancel'; id: number; send: number }
+  | { op: 'held'; id: number; port: string; chat: string; command: string }
   | {
       op: 'enqueue';
       send: number;

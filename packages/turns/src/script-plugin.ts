@@ -363,6 +363,10 @@ function hostBridge(ctx: PluginContext, c: ScriptConfig): ScriptBridge {
       }
     },
     cancel: (id) => Promise.resolve(sends.get(id)?.cancel('cancelled by the script') ?? false),
+    held: (port, chat, command) => {
+      const hold = ctx.outbox(port).held(chat, command);
+      return Promise.resolve(hold === undefined ? undefined : { ...hold });
+    },
     publish: (type, payload) => ctx.bus.publish(type, payload),
     write: (name, value) => ctx.store.write(name, value),
     remove: (name) => ctx.store.remove(name),
@@ -582,6 +586,12 @@ function workerRunner(
         void bridge
           .cancel(m.send)
           .then((value) => send({ op: 'answer', id: m.id, ok: true, value }));
+        return;
+      case 'held':
+        bridge.held(m.port, m.chat, m.command).then(
+          (value) => send({ op: 'answer', id: m.id, ok: true, value }),
+          (e: unknown) => send({ op: 'answer', id: m.id, ok: false, error: message(e) })
+        );
         return;
       case 'enqueue':
         bridge.enqueue(m.send, m.port, m.chat, m.text, m.cancel, (result) =>

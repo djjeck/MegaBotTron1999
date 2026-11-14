@@ -20,6 +20,7 @@
  *
  * Nothing in here knows of any game or any network.
  */
+import { type BackoffView } from './answers.ts';
 import { type Buttons } from './commands.ts';
 import { type ConnectorStatus, type Surface, type SurfaceQuery } from './connector.ts';
 import { type NodeCost } from './costs.ts';
@@ -91,6 +92,8 @@ export interface ControlsHost {
   drift(): DriftCounts[];
   /** What a node costs (bot-os.md D77). */
   cost?(id: string): NodeCost | undefined;
+  /** A node's commands the retry-loop guard holds back (bot-os.md D98). */
+  backoffs?(id: string): BackoffView[];
 }
 
 /** What the controls read of a running connector. */
@@ -159,6 +162,11 @@ export interface PluginControl {
   summary?: string;
   /** What it costs, since the start (bot-os.md D77). */
   cost?: NodeCost;
+  /**
+   * Its commands the retry-loop guard holds back (bot-os.md D98): refused so many times in a row
+   * for the same reason; none, when nothing is.
+   */
+  backoff?: BackoffView[];
 }
 
 /** An action's outcome: its output, or why not (`refused`: the plugin's own refusal). */
@@ -209,6 +217,7 @@ export class Controls {
         const status = reads.includes('status') ? this.read(id, 'status') : undefined;
         const summary = this.summary(id);
         const cost = this.host.cost?.(id);
+        const backoff = this.host.backoffs?.(id) ?? [];
         return {
           id,
           plugin: m.id,
@@ -223,6 +232,7 @@ export class Controls {
           ...(status !== undefined && 'value' in status ? { status: status.value } : {}),
           ...(summary === undefined ? {} : { summary }),
           ...(cost === undefined ? {} : { cost }),
+          ...(backoff.length === 0 ? {} : { backoff }),
         };
       }),
     };

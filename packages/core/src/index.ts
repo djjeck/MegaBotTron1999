@@ -2,6 +2,20 @@
  * The core's public API (docs/bot-os-api.md): what plugins and the instance's wiring import.
  * Nothing in here knows of any game.
  */
+export {
+  type AnswerDeclaration,
+  type AnswerDeclarationInput,
+  answerSchema,
+  type BackoffView,
+  type CommandAnswer,
+  DEFAULT_ANSWER_WITHIN_S,
+  GUARD_AT,
+  GUARD_BASE_MS,
+  GUARD_MAX_MS,
+  type Hold,
+  type ReadAnswer,
+  readAnswer,
+} from './answers.ts';
 export { type BusEvent, type BusHandle, type EventHandler } from './bus.ts';
 export { type Clock, type TimerHandle, VirtualClock, wallClock } from './clock.ts';
 export {

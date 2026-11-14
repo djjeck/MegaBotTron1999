@@ -64,10 +64,36 @@ describe('a turn parser', () => {
         instance: 'quest',
         chat: GROUP,
         outcome: { kind: 'gain', bot: QUESTBOT, item: 'an apple' },
+        // The rest it starts, when its next turn may go (D98).
+        retryAt: T0 + 15 * MIN,
       },
     ]);
     expect(p.iface.rest()).toMatchObject({ until: T0 + 15 * MIN, why: 'its rest after a turn' });
     expect(p.drift()).toMatchObject({ read: 1, unread: 0 });
+  });
+
+  it("answers a turn (D98): a too soon refuses it, its rest holds the bot's turns back", async () => {
+    const p = await run(questPlugin());
+    const outbox = p.kit.core.outbox('telegram:alice').as('anyone');
+    p.hear({ ...own, chat: PRIVATE, text: '/play' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Too soon: 20 minutes.' });
+    expect(outbox.held(PRIVATE, '/play')).toEqual({
+      until: T0 + 20 * MIN,
+      reason: 'cooldown: cooldown',
+    });
+    p.kit.clock.advance(20 * MIN);
+    p.hear({ ...own, chat: PRIVATE, text: '/play' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Found a pear.' });
+    expect(outbox.held(PRIVATE, '/play')).toEqual({
+      until: T0 + 35 * MIN,
+      reason: 'cooldown: rest',
+    });
+    // Unread, it answers nothing: the rest stays as it was.
+    p.kit.clock.advance(15 * MIN);
+    p.hear({ ...own, chat: PRIVATE, text: '/play' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'The sky is green.' });
+    expect(outbox.held(PRIVATE, '/play')).toBeUndefined();
+    await p.kit.stop();
   });
 
   it("hands its grammar a message's file with its caption (D82)", async () => {

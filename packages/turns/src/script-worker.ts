@@ -6,7 +6,7 @@
  */
 import { getHeapStatistics } from 'node:v8';
 import { parentPort, workerData } from 'node:worker_threads';
-import { ScriptRuntime, type SendOutcome } from './script-runtime.ts';
+import { type ScriptBridge, ScriptRuntime, type SendOutcome } from './script-runtime.ts';
 import { type FromHost, type FromWorker, type WorkerData } from './script-worker-messages.ts';
 
 const port = parentPort;
@@ -48,6 +48,10 @@ const runtime = new ScriptRuntime({
       post({ op: 'enqueue', send, port: p, chat, text, cancel });
     },
     cancel: (send) => call((id) => ({ op: 'cancel', id, send })) as Promise<boolean>,
+    held: (p, chat, command) =>
+      call((id) => ({ op: 'held', id, port: p, chat, command })) as ReturnType<
+        ScriptBridge['held']
+      >,
     publish: (type, payload) => post({ op: 'publish', type, payload }),
     write: (name, value) => post({ op: 'write', name, value }),
     remove: (name) => post({ op: 'remove', name }),

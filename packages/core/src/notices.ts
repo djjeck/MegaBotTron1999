@@ -4,7 +4,7 @@
  * rather than for the owner to find in the log. One feed per instance:
  *
  * - **raised** by the core (`failed`, `cascade`, `drift`, `coalesced`, `warning`, `stalled`,
- *   `graph-refused`) at the point where it acts, by a plugin through `ctx.notice` (a state node's
+ *   `graph-refused`, `backoff`) at the point where it acts, by a plugin through `ctx.notice` (a state node's
  *   `refused`, D72) and through `ctx.notify` (`told`, with its buttons, D94), each with the node it
  *   is about, and one owner-facing line naming nodes by id;
  * - **recorded** in the event log as it is raised (`core.notice`), so that the editor's events
@@ -31,6 +31,7 @@ export const NOTICE_KINDS = [
   'unreachable',
   'told',
   'graph-refused',
+  'backoff',
 ] as const;
 export type CoreNoticeKind = (typeof NOTICE_KINDS)[number];
 
@@ -48,8 +49,8 @@ export interface Notice {
    * cascade made inactive (`cascade`), a node failed (`failed`), a warning of the graph's check
    * (`warning`), a node the send-queue watchdog paused (`stalled`, bot-os.md D93), a plugin's
    * message for the owner (`told`, `ctx.notify`, D94), the saved graph refused at the load, no node
-   * running (`graph-refused`, D94), a send the network refused (`unreachable`, D95), or a plugin's
-   * own kind.
+   * running (`graph-refused`, D94), a send the network refused (`unreachable`, D95), a node the
+   * retry-loop guard holds back (`backoff`, D98), or a plugin's own kind.
    */
   kind: string;
   /** When, in ms. */
@@ -63,7 +64,8 @@ export interface Notice {
    * coalesced send's `chat`, `text` and the other nodes (`with`); a drift's `paused` nodes; the
    * reason of a cascade or a failure; a stall's `account`, `chat`, `command`, `count` and `reason`;
    * a drift's `unread` message; a told message's `buttons`; a refused graph's `problems`; a send
-   * refused's `account`, `chat` and `reason`.
+   * refused's `account`, `chat` and `reason`; a backoff's `account`, `chat`, `command`, `reason`
+   * and `count`.
    */
   detail?: Readonly<Record<string, unknown>>;
 }

@@ -19,6 +19,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { type z } from 'zod';
+import { answerWindowMs, type BackoffView, readAnswer } from './answers.ts';
 import { Bus, type BusEvent, type BusHandle } from './bus.ts';
 import { type Clock } from './clock.ts';
 import { type ChatCommand, type CommandButton, type CommandHandler } from './commands.ts';
@@ -398,6 +399,7 @@ export class Core {
       },
       drift: () => this.drift(),
       cost: (id) => this.cost(id),
+      backoffs: (id) => this.backoffs(id),
     });
     this.driftMonitor = new DriftMonitor({
       clock: options.clock,
@@ -527,10 +529,45 @@ export class Core {
         pause: (plugin, reason) => {
           this.stopNode(plugin, reason, 'stalled');
         },
+        // A send waits for the game's answer where a parser reading its chat declares one (D98).
+        expects: (chat, command) => this.answerWindow(account, chat, command),
       });
       this.outboxes.set(account, outbox);
     }
     return outbox;
+  }
+
+  /**
+   * How long a send of `command` to `chat` on an account waits for the game's answer (D98): the
+   * longest window of the answers declared for it by the nodes up that read that chat there;
+   * undefined if none declares one.
+   */
+  private answerWindow(account: string, chat: string, command: string): number | undefined {
+    const windows = this.chatReaders(account, chat).flatMap((e) => {
+      const ms = answerWindowMs(e.manifest.answers, command);
+      return ms === undefined ? [] : [ms];
+    });
+    return windows.length === 0 ? undefined : Math.max(...windows);
+  }
+
+  /** The nodes up that read `chat` on an account (a chat-in edge naming it, or every chat). */
+  private chatReaders(account: string, chat: string): Entry[] {
+    const holder = [...this.entries.values()].find((e) => e.node.account === account);
+    const name = chat.toLowerCase();
+    return [...this.entries.values()].filter(
+      (e) =>
+        e.up === true &&
+        chatsOf(e.node).some(
+          ([, b]) =>
+            b.node === holder?.id &&
+            (b.chat?.reads === '*' || (b.chat?.reads ?? []).some((r) => r.toLowerCase() === name))
+        )
+    );
+  }
+
+  /** A node's commands the retry-loop guard holds back, on every account (D98). */
+  backoffs(id: string): BackoffView[] {
+    return [...this.outboxes.values()].flatMap((o) => o.backoffs(id));
   }
 
   /**
@@ -540,18 +577,7 @@ export class Core {
    */
   private awaitsAnswers(plugin: string, account: string, chat: string): boolean {
     if (this.entries.get(plugin)?.manifest.kinds.includes('actor') !== true) return false;
-    const holder = [...this.entries.values()].find((e) => e.node.account === account);
-    const name = chat.toLowerCase();
-    return [...this.entries.values()].some(
-      (e) =>
-        e.up === true &&
-        e.node.manifest.games.registers.length > 0 &&
-        chatsOf(e.node).some(
-          ([, b]) =>
-            b.node === holder?.id &&
-            (b.chat?.reads === '*' || (b.chat?.reads ?? []).some((r) => r.toLowerCase() === name))
-        )
-    );
+    return this.chatReaders(account, chat).some((e) => e.node.manifest.games.registers.length > 0);
   }
 
   /**
@@ -1480,16 +1506,22 @@ export class Core {
     const log = this.logger(id);
     const own = this.bus.handle(id, entry.manifest, sourcesOf(node), log, node.instance);
     // The message its node is reading now, through a chat-in edge: an event it publishes meanwhile
-    // is an answer heard from that chat, for the send-queue watchdog (D93); its own messages and
+    // is an answer heard from that chat, for the send-queue watchdog (D93), and, if its manifest
+    // declares the event an answer, the answer to a command sent there (D98); its own messages and
     // history are none.
     let reading: Inbound | undefined;
+    let heard = false;
     const bus: BusHandle = {
       ...own,
       publish: (type, payload, t) => {
-        if (reading !== undefined) {
-          const m = reading;
-          reading = undefined;
-          this.outboxes.get(m.account)?.heard(m);
+        const m = reading;
+        if (m !== undefined) {
+          const outbox = this.outboxes.get(m.account);
+          if (!heard) outbox?.heard(m);
+          heard = true;
+          // Before its subscribers hear it: one that sends again finds the cooldown it sets.
+          const read = readAnswer(entry.manifest.answers, type, payload, t ?? this.o.clock.now());
+          if (read !== undefined && payload['playback'] !== true) outbox?.answered(m, read);
         }
         own.publish(type, payload, t);
       },
@@ -1610,6 +1642,7 @@ export class Core {
             handle.onMessage((m) => {
               if (entry.up !== true) return;
               reading = m.own === true || m.playback ? undefined : m;
+              heard = false;
               try {
                 this.costs.time(id, () => h(m));
               } finally {

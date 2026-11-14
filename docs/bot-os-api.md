@@ -49,6 +49,7 @@ instance does not start.
 | `requires`      | Shorthand (§2.1): the plugins it needs started first, by id, read as input ports. The load order follows them; a missing one or a cycle fails the start, naming it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `games`         | `registers`: the namespaces whose event types it defines (its game's, or its own id); `consumes`: those whose events it reads (P7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `events`        | The event types it registers, `<namespace>.<name>` → zod schema of the payload (§4.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `answers`       | Optional, a parser's: which of its own events answer which commands (bot-os.md D98), `[{ event, commands, when?, unless?, status, reason?, reasonFrom?, retryAtFrom?, holds?, withinS? }]` (§4.6, Command answers)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `uses`          | Shorthand (§2.1): the other plugins' interfaces it calls, by id and member (`{ dice: ['state.game'] }`): reviewed with both (P6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `reach`         | Shorthand (§2.1): what it reads and sends, per connector: `{ connector, reads: chats, sends: chats, commands }`, read as a chat-in input and a chat-out output. The outbox refuses a send outside it (§4.6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `config`        | A zod object: what is set at deploy. The core validates it at load; a bad value names the plugin and the key. Every default is in the schema, per field (`.default()`, nested ones included), never merged in code after parsing, and each field says what it is (`.describe()`): the editor shows both                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -1191,6 +1192,65 @@ q.cancel(); // true if it still waited
     and a node made inactive by it was shut down, so a parser heard again later starts nothing by
     itself. The counts live in memory and start again at each start.
 
+**Command answers** (bot-os.md D98, #59; `packages/core/src/answers.ts`): the watchdog asks only
+whether the bot still speaks; a node that sends a command also needs to learn what the game answered
+to _its_ command (refused, and why), so that it adjusts its plan rather than retrying something the
+game will not allow. Answers are in memory and best effort: nothing is kept across a restart, where
+the node decides again from its state.
+
+- **A parser declares** which of its own events answer which commands, in its manifest:
+
+  ```ts
+  answers: [
+    // The first that matches an event is its answer.
+    { event: 'quest.give', commands: ['/give', '/throw'], when: { result: 'wait' },
+      status: 'refused', reason: 'cooldown', retryAtFrom: 'until', holds: ['/give'] },
+    { event: 'quest.give', commands: ['/give', '/throw'], when: { result: 'no' },
+      status: 'refused', reasonFrom: 'why' },
+    { event: 'quest.give', commands: ['/give', '/throw'], unless: { result: 'unknown' },
+      status: 'ok', withinS: 60 },
+  ],
+  ```
+
+  `event` is one of its `events`; `commands`, by first word; `when` (as a cancel's: dotted paths, a
+  list holding a value) and `unless` (every field holding: not this answer) choose by the payload;
+  `status` is `ok` or `refused`; `reason` a fixed one (`cooldown`, `missing`, `invalid`, or a game's
+  own) and `reasonFrom` a path of the payload holding one; `retryAtFrom` the path of a time (ms)
+  when the command may go again; `holds` the commands that time holds back (a group sharing a
+  cooldown; its `commands` by default); `withinS` how long the bot takes to answer (120 by default).
+  A parser of another repository declares them the same way, in its `definePlugin` manifest; the
+  turn parsers declare theirs (§5).
+
+- **The answer** (`CommandAnswer`):
+  `{ status: 'ok' | 'refused' | 'unanswered', reason?, retryAt?, event? }`, `event` the one that
+  answered (`{ type, t, …payload }`).
+- **Paired by the core:** an event a node publishes while the core hands it a message of a chat
+  (synchronously, as the watchdog hears an answer; the account's own messages and history, and a
+  payload marked `playback`, are none, D83) that one of its declarations matches answers a live send
+  of one of its commands to that chat (by any of its names, D90) that waits for an answer: the one
+  the message replies to (`replyTo`, the network's id of the send), else the oldest. A send waits
+  for an answer when a node up that reads its chat on that account declares one for its command, for
+  the longest `withinS` of them; past it, `unanswered`. A dry run waits for none.
+- **`await enqueue(…)`** settles, for such a send, once it is answered:
+  `{ outcome: 'sent', answer }`; `status()` says `sent` meanwhile. Any other send settles as it
+  goes, as before. `send` and `deliver` return at once as before, but their sends wait for an answer
+  all the same, for the cooldowns, the guard and the watchdog.
+- **Cooldowns:** an answer's `retryAt` (any answer read live, paired or not: a turn the owner sent
+  by hand too) holds its `holds` back in that chat until then, the latest kept: a queued send waits
+  it out (its `waitingUntil` says so), and `send` or `deliver` is refused
+  (`cooldown: cooldown, 30 s more`, with `retryAt`). `ctx.outbox(port).held(chat, command)` says
+  what holds a command back now, `{ until, reason }`, so that a node can ask when it may send next.
+- **The retry-loop guard:** a node whose command keeps being refused for the same reason (`refused`
+  with no `retryAt`: a cooldown with one holds it back already) is held back from it in that chat
+  once it reaches `GUARD_AT` (3) refusals in a row, for `GUARD_BASE_MS` (a minute), doubled at each
+  refusal more, up to an hour; queued, it waits; sent now, it is refused
+  (`backed off: refused 3 times in a row (missing), 60 s more`). An `ok` clears its count; a refusal
+  for another reason starts it again. It is shown in `GET /status`, the node's `backoff`
+  (`[{ account, chat, command, reason, count, until }]`, §4.11), and raised once, at the third, as a
+  `backoff` notice (§4.16).
+- **The watchdog** (D93): an answer paired with a send answers that node's count of its command at
+  once; an answer that never came adds an unanswered send at the end of its window.
+
 **An outbox made outside the core** (a module's own, over a game of its own: module API 1,
 deprecated) may still keep its senders' modes: `new Outbox({ …, modes: new Modes() })`, with
 `modes.set(plugin, mode, by?)`, where `read-only` refuses, `dry-run` logs as if sent and `live`
@@ -1304,6 +1364,9 @@ control API, the web UI and later the agents, whose grants will be subsets of it
   `status`, and, if it keeps a state (its instance's `view`, bot-os.md D72), one line of it
   (`summary`), for its card; a connector whose queue coalesced sends since the start says so there
   too (`2 sends coalesced: a + b (2)`, D73).
+- **What holds a node back** (bot-os.md D98), its `backoff` in `GET /status`, while there is any:
+  each command the retry-loop guard holds back (§4.6, Command answers),
+  `{ account, chat, command, reason, count, until }`.
 - **What each node costs** (bot-os.md D77), its `cost` in `GET /status`, since the start:
   `dispatch`, its handlers' `calls`, their time (`ms`) and the longest (`maxMs`), timed where the
   core hands it a bus event, a message or a timer (the synchronous part, real time); and `own`, what
@@ -1698,20 +1761,23 @@ same text for the same chat, D73, about the node that joined; `detail`: `account
 node; `detail`: `account`, `chat`, `command`, `count`, `reason`), `unreachable` (a send the network
 refused, §4.6, D95, about each node it went for but one that tells the owner itself; its text names
 the chat by its title and says what to do; `detail`: `account`, `chat`, `reason`), `warning` (each
-warning of the graph's check at the load, D89, D90, about its node if it names one) and
-`graph-refused` (the saved graph refused at the load, so that no node runs, D94; `detail.problems`;
-no node hears it, the events panel shows it). **A plugin raises** its own through
-`ctx.notice(kind, text, detail?)`, about its node: a state node raises `refused` for each event it
-refuses (D72; `detail`: `event`, `at`, `reason`); and `told` through `ctx.notify(text, buttons?)`
-(§4.8, D94; `detail.buttons`, which `buttonsOf(notice)` reads). A kind is lower-case words and
-dashes; raising one sends nothing. **A plugin whose manifest declares `notices: true`** gets
-`ctx.notices`: `subscribe(handler)` hears the notices raised since the instance started first (the
-newest `NOTICES_KEPT`, 200), so that the load's warnings and a node failed at its start reach a node
-started after them, then each as it is raised, while its node is up; the time its handler takes is
-its node's (D77). The notices live in memory (`core.notices()` lists them), and **each is recorded**
-as it is raised (`core.notice`: `kind`, `node?`, `text`, `detail?`), so that the editor's events
-panel shows every notice whether a node tells it or not (D94), beside the records it was raised with
-(`core.plugin`, `core.drift`, `core.queue`, `<id>.refused`).
+warning of the graph's check at the load, D89, D90, about its node if it names one), `backoff` (a
+node the retry-loop guard holds back, its command refused for the same reason three times in a row,
+§4.6, D98, about that node; `detail`: `account`, `chat`, `command`, `reason`, `count`; told by
+`owner-notice` among its `other` kinds) and `graph-refused` (the saved graph refused at the load, so
+that no node runs, D94; `detail.problems`; no node hears it, the events panel shows it). **A plugin
+raises** its own through `ctx.notice(kind, text, detail?)`, about its node: a state node raises
+`refused` for each event it refuses (D72; `detail`: `event`, `at`, `reason`); and `told` through
+`ctx.notify(text, buttons?)` (§4.8, D94; `detail.buttons`, which `buttonsOf(notice)` reads). A kind
+is lower-case words and dashes; raising one sends nothing. **A plugin whose manifest declares
+`notices: true`** gets `ctx.notices`: `subscribe(handler)` hears the notices raised since the
+instance started first (the newest `NOTICES_KEPT`, 200), so that the load's warnings and a node
+failed at its start reach a node started after them, then each as it is raised, while its node is
+up; the time its handler takes is its node's (D77). The notices live in memory (`core.notices()`
+lists them), and **each is recorded** as it is raised (`core.notice`: `kind`, `node?`, `text`,
+`detail?`), so that the editor's events panel shows every notice whether a node tells it or not
+(D94), beside the records it was raised with (`core.plugin`, `core.drift`, `core.queue`,
+`<id>.refused`).
 
 `owner-notice` (§5) tells a kind it does not name as `other`. Its view (`GET /plugins/<id>/view`,
 D72) shows the notices waiting by kind with when each is due, when each kind was last told, whether
@@ -1860,21 +1926,26 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   bot's messages answer one: a reply to it or, in the private chat, the first message within two
   minutes of it (a chat is private as its connector says, `Inbound.private`, so that one configured
   by id counts; from a connector that does not say, a chat named by `@username`). What it reads it
-  publishes as `<id>.turn` (`{ chat, outcome, playback? }`, `playback: true` for a message played
-  back, D83); a message it claims and cannot read goes to drift (§4.7) and is published as an
-  `unknown` outcome. Its read `rest` says until when the bot rests, from its last answer. It resumes
-  from what it parsed (D62): the owner's recent turns and its bot's rest are kept in its store
-  (`parsed`) as they change and read back at its start; it never re-reads the chat, and reads missed
-  messages as any other. Its game gives it a spec (`TurnParserSpec`): its `id`, its `bot`, its
-  `description`, its grammar (`read`, given each of its bot's messages as a `BotMessage`: `text`,
-  `private`, `answers`, `replies`, `self`, and `document`, the file it carries with its text when it
-  has one, such as the bot's export of the player's state, beside the caption in `text`, D82) and
-  its `turnCommands`, the bot's turn commands by first word (`["/play"]`, at least one): which
-  commands are turns is a fact of the game, so it has no config (bot-os.md D70). A node saved while
-  it had one (`"config": { "commands": [...] }`) still loads and runs: a plugin with no config
-  schema ignores its node's config, which the file keeps as written until the owner takes it out. It
-  adds to the owner's summary the answers it read live, by their outcome's kind (§4.17, D92). The
-  tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
+  publishes as `<id>.turn` (`{ chat, outcome, retryAt?, playback? }`, `retryAt` the end of the rest
+  it starts, `playback: true` for a message played back, D83); a message it claims and cannot read
+  goes to drift (§4.7) and is published as an `unknown` outcome. Its read `rest` says until when the
+  bot rests, from its last answer. **Its turn answers its turn commands** (§4.6, Command answers,
+  bot-os.md D98): `refused` with `cooldown` for a "too soon" (`kind: nothing`, `reason: cooldown`),
+  `ok` (`rest`) for any other outcome read, not an `unknown` one, each with its `retryAt`, within
+  two minutes; so a turn queued by any node settles with the bot's answer, and the outbox holds the
+  turn command back in that chat until the bot's rest is over. It resumes from what it parsed (D62):
+  the owner's recent turns and its bot's rest are kept in its store (`parsed`) as they change and
+  read back at its start; it never re-reads the chat, and reads missed messages as any other. Its
+  game gives it a spec (`TurnParserSpec`): its `id`, its `bot`, its `description`, its grammar
+  (`read`, given each of its bot's messages as a `BotMessage`: `text`, `private`, `answers`,
+  `replies`, `self`, and `document`, the file it carries with its text when it has one, such as the
+  bot's export of the player's state, beside the caption in `text`, D82) and its `turnCommands`, the
+  bot's turn commands by first word (`["/play"]`, at least one): which commands are turns is a fact
+  of the game, so it has no config (bot-os.md D70). A node saved while it had one
+  (`"config": { "commands": [...] }`) still loads and runs: a plugin with no config schema ignores
+  its node's config, which the file keeps as written until the owner takes it out. It adds to the
+  owner's summary the answers it read live, by their outcome's kind (§4.17, D92). The tests play a
+  made-up @QuestBot (`packages/turns/test/quest.ts`).
 - **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
   (P3, P17), each with its own id, configuration, store, timer and state. Its ports: `chat`, a
   chat-in input on `telegram`, which reads the private chat with its bot (for the turns the owner
@@ -2044,6 +2115,7 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   use(port).actions.<action>(input): Promise<output>;
   outbox(port).enqueue(chat, text, { cancel? }): QueuedSend; // ctx.outbox(port).enqueue
   enqueue(port, chat, text, { cancel? }): QueuedSend; // the same, shorter
+  outbox(port).held(chat, command): Promise<{ until, reason } | undefined>; // ctx.outbox(port).held
   publish(type, payload): void; // its own events: ctx.bus.publish
   store.read(name); store.write(name, value); store.remove(name); store.names(); // ctx.store
   clock.now(): number; // ctx.clock; `Date.now()` and `new Date()` read it too
@@ -2051,18 +2123,21 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   ```
 
   A queued send's handle is awaited for its outcome (§4.6), with `status()` and `cancel()` (a
-  promise); its cancel takes `on`, `when`, `deadline` and `withinMs`, not `test`, a function that
-  cannot cross a thread. A member, an output or an event type its ports do not declare is refused,
-  with why (`state offers it state.count, not state.get`); a handler that throws is logged, and the
-  others go on. **It runs** in a worker thread of its own, its environment empty, its heap limited
-  (`limits.memoryMb`, 16–2048, 64 by default), and the CPU it spends at a stretch limited
-  (`limits.callMs`, 10–60000, 1000 by default): a ping from the main thread unanswered for twice the
-  limit while the worker's thread spends the limit on the CPU, as a loop does in a handler's run or
-  after an `await`, is a hang; a thread stalled with its host, not running, is waited for, even in
-  the middle of a run (bot-os.md D81, D85). It is pinged only while its script is busy, from a
-  message that may run its code until the worker says it is idle again, so an idle script costs
-  nothing (D87). Past either, or if it crashes, the worker is killed and the node failed with why
-  (`its script hung: a handler of quest.tick spent over 1000 ms of CPU`,
+  promise); for a command a parser declares answers for, awaited it gives what the game answered too
+  (`const a = await enqueue(…)`; `a.answer?.status`: `ok`, `refused` with its `reason` and
+  `retryAt`, or `unanswered`; bot-os.md D98), and `held(chat, command)` says what holds the command
+  back now (the bot's cooldown, the retry-loop guard); its cancel takes `on`, `when`, `deadline` and
+  `withinMs`, not `test`, a function that cannot cross a thread. A member, an output or an event
+  type its ports do not declare is refused, with why (`state offers it state.count, not state.get`);
+  a handler that throws is logged, and the others go on. **It runs** in a worker thread of its own,
+  its environment empty, its heap limited (`limits.memoryMb`, 16–2048, 64 by default), and the CPU
+  it spends at a stretch limited (`limits.callMs`, 10–60000, 1000 by default): a ping from the main
+  thread unanswered for twice the limit while the worker's thread spends the limit on the CPU, as a
+  loop does in a handler's run or after an `await`, is a hang; a thread stalled with its host, not
+  running, is waited for, even in the middle of a run (bot-os.md D81, D85). It is pinged only while
+  its script is busy, from a message that may run its code until the worker says it is idle again,
+  so an idle script costs nothing (D87). Past either, or if it crashes, the worker is killed and the
+  node failed with why (`its script hung: a handler of quest.tick spent over 1000 ms of CPU`,
   `its script ran out of memory (its limit is 64 MB)`), the instance up. Its calls to the main
   thread are messages: an interface's member called there, a send queued there, its store's writes
   (read from a copy beside it), its events and its log lines; its clock is the main thread's time as

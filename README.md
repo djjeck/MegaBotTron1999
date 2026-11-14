@@ -168,6 +168,10 @@ export const greeter = definePlugin({
   event read from that chat in between (10 times in a row by default, the connector's
   `unansweredAt`, per command `unansweredAtBy`, 0 for never) is stopped the way drift stops it, and
   a `stalled` notice says why; the owner clears the stop in the editor once the parser reads again.
+- **Command answers** (D98): a parser declares which of its events answer which commands
+  (`answers`), and a node's `await enqueue(…)` settles with what the game answered (`ok`, `refused`
+  with its reason, `unanswered`); an answer's `retryAt` holds the command back in that chat (a
+  cooldown), and a node refused again and again for one reason is backed off.
 - **The owner's notices** (D91, D94): what needs the owner's attention is raised where it happens,
   recorded (`core.notice`, in the editor's Events page), and an `owner-notice` node tells it.
   Nothing reports outside the graph: the core sends no chat anything itself, so **with no

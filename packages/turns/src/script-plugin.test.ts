@@ -261,6 +261,7 @@ for (const isolation of ['in-process', 'worker'] as const)
           await enqueue('chat', '@QuestBot', '/look now');
           const q = enqueue('chat', '@QuestBot', '/look later');
           log.info(q.status(), await q.cancel(), (await q).outcome);
+          log.info('held', await outbox('chat').held('@QuestBot', '/look'));
           console.log({ a: 1 });
           throw new Error('done');
         });
@@ -278,6 +279,7 @@ for (const isolation of ['in-process', 'worker'] as const)
             /^examine: error: Error: publish\("quest.gain"\): it publishes examine.looked/u
           ),
           'examine: waiting true cancelled',
+          'examine: held undefined',
           'examine: {"a":1}',
         ])
       );
@@ -536,6 +538,7 @@ describe('the script runtime', () => {
     use: () => Promise.resolve(undefined),
     enqueue: () => {},
     cancel: () => Promise.resolve(false),
+    held: () => Promise.resolve({ until: 7, reason: 'cooldown: cooldown' }),
     publish: () => {},
     write: () => {},
     remove: (n: string) => void lines.push(`remove ${n}`),
