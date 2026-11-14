@@ -27,7 +27,7 @@
  * its factory's closure: everything hangs off its instance (§2.1). Each step is published as
  * `turn-actor.step`, with the instance's id, and printed.
  */
-import { definePlugin, type Plugin, type PluginContext } from '@megabottron1999/core';
+import { definePlugin, inChat, type Plugin, type PluginContext } from '@megabottron1999/core';
 import { Rng } from '@megabottron1999/core/rng.ts';
 import { z } from 'zod';
 import { DEFAULT_SCHEDULE, hash, type Plan, Planner, scheduleProblem } from '#src/schedule.ts';
@@ -236,7 +236,7 @@ class TurnActor {
     const commands = [this.c.command];
     // A turn the owner sends by hand in the chat, from any device, restarts the count.
     this.ctx.connector('chat').onMessage((m) => {
-      if (m.own !== true || m.chat.toLowerCase() !== this.c.chat.toLowerCase()) return;
+      if (m.own !== true || !inChat(m, this.c.chat)) return;
       if (!isTurnCommand(m.text, commands, bot)) return;
       if (this.last !== undefined && m.time <= this.last) return;
       this.remember(m.time);

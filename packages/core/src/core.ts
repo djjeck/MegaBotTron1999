@@ -1220,7 +1220,16 @@ export class Core {
     let resolved: ReturnType<typeof resolveGraph> | undefined;
     let ordered: ResolvedNode[];
     try {
-      resolved = resolveGraph(raw, manifests, (instance) => this.registry.meta(instance)?.plugin);
+      resolved = resolveGraph(
+        raw,
+        manifests,
+        (instance) => this.registry.meta(instance)?.plugin,
+        // A chat's names, as the node's running connector knows them (D90); none while it is not.
+        (node, plugin, chat) =>
+          this.entries.get(node)?.manifest.id === plugin
+            ? this.connector(node)?.chatNames?.(chat)
+            : undefined
+      );
       ordered = loadOrder(resolved.nodes);
     } catch (e) {
       if (e instanceof GraphError)

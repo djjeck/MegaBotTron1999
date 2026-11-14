@@ -92,13 +92,24 @@ describe('the telegram-user plugin', () => {
     await core.stop();
   });
 
-  it('monitors the chats of its config, or every chat: the check warns of one read beside (D89)', () => {
+  it('monitors the chats of its config, or every chat: the check warns of one read beside (D89, D90)', () => {
     const plugin = telegramUserPlugin({ self: 'alice', client });
     expect(readWarnings(plugin, undefined, ['@QuestBot'])).toEqual([]);
+    // Its connector not running, a chat named otherwise cannot be told: not warned of.
     expect(
       readWarnings(plugin, { chats: [GROUP, '@questbot'] }, ['@QuestBot', '@DiceBot'])
+    ).toEqual([]);
+    // Running, it knows each chat's names: the same chat by id or @username is heard.
+    const names = (chat: string) =>
+      ({
+        '@questbot': ['5000001', '@QuestBot'],
+        '5000001': ['5000001', '@QuestBot'],
+        [GROUP]: [GROUP],
+      })[chat.toLowerCase()];
+    expect(
+      readWarnings(plugin, { chats: [GROUP, '5000001'] }, ['@QuestBot', '@DiceBot'], names)
     ).toEqual([
-      `node quest: input port chat reads @DiceBot, which conn does not monitor (its chats: ${GROUP}, @questbot) (edge conn → quest.chat)`,
+      `node quest: input port chat reads @DiceBot, which conn does not monitor (its chats: ${GROUP}, 5000001) (edge conn → quest.chat)`,
     ]);
   });
 
@@ -158,6 +169,58 @@ describe('the telegram-user plugin', () => {
     await deliver?.({ message: said('QuestBot') });
     await deliver?.({ message: said('bob') });
     expect(heard).toEqual([`${GROUP} /play QuestBot`]);
+    await core.stop();
+  });
+
+  it('hears a chat its config names by id through an edge naming it by @username, unwarned (D90)', async () => {
+    const heard: string[] = [];
+    let deliver: ((e: { message: RawMessage }) => Promise<void>) | undefined;
+    const c = client();
+    c.addEventHandler = (h) => (deliver = h);
+    c.getDialogs = () =>
+      Promise.resolve([
+        {
+          id: { toString: () => '5000001' },
+          isUser: true,
+          entity: { username: 'QuestBot', bot: true },
+          message: { id: 1 },
+        },
+      ]);
+    const graph = (reads: string[]) => ({
+      version: 2 as const,
+      nodes: [
+        { id: 'tg', plugin: 'telegram-user', config: { chats: ['5000001'] } },
+        { id: 'reader', plugin: 'reader' },
+      ],
+      edges: [{ from: 'tg.chat', to: 'reader.chat', reads }],
+    });
+    const core = new Core({
+      clock: new VirtualClock(),
+      secrets: secretsWith(USER),
+      graph: graph(['@questbot']),
+    });
+    core.register(
+      telegramUserPlugin({ client: () => c }),
+      reader((m) => heard.push(`${m.chat} ${m.text}`))
+    );
+    await core.start();
+    await new Promise((r) => setImmediate(r));
+    await deliver?.({
+      message: {
+        id: 3,
+        date: 1,
+        message: '/play',
+        chatId: { toString: () => '5000001' },
+        isPrivate: true,
+        getSender: () => Promise.resolve({ username: 'QuestBot' }),
+        getChat: () => Promise.resolve({ username: 'QuestBot' }),
+      },
+    });
+    expect(heard).toEqual(['5000001 /play']);
+    expect(core.check(graph(['@questbot'])).warnings).toEqual([]);
+    expect(core.check(graph(['@DiceBot'])).warnings?.map((w) => w.text)).toEqual([
+      'node reader: input port chat reads @DiceBot, which tg does not monitor (its chats: 5000001) (edge tg.chat → reader.chat)',
+    ]);
     await core.stop();
   });
 

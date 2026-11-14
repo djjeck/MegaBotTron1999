@@ -115,6 +115,11 @@ export interface Inbound {
   network: string;
   /** Where: a channel (`#lobby`), a chat's id. */
   chat: string;
+  /**
+   * The chat's other names, where it has several (a Telegram chat's id and `@username`, bot-os.md
+   * D90): a chat-in edge that reads any of them hears it (`hears`).
+   */
+  aliases?: readonly string[];
   /** Who: a nick, a username. */
   sender: string;
   text: string;
@@ -183,14 +188,19 @@ export interface ReadFilter {
 /** A name compared as networks do: without case, and without a leading `@`. */
 const plainName = (s: string): string => s.replace(/^@/u, '').toLowerCase();
 
+/** Whether `m` was said in `chat`, by its name or any of its `aliases` (D90), without case. */
+export function inChat(m: Pick<Inbound, 'chat' | 'aliases'>, chat: string): boolean {
+  const name = chat.toLowerCase();
+  return [m.chat, ...(m.aliases ?? [])].some((c) => c.toLowerCase() === name);
+}
+
 /**
- * Whether a read filter hears `m`: in one of its chats (any, for `'*'`), compared without case,
- * and from one of its senders (anyone, without `senders`). `me` is the account's own messages
+ * Whether a read filter hears `m`: in one of its chats (any, for `'*'`), by the chat's name or any
+ * of its `aliases` (D90), compared without case, and from one of its senders (anyone, without `senders`). `me` is the account's own messages
  * (`own`, or sent as the account's own name, `self`).
  */
 export function hears(filter: ReadFilter, m: Inbound, self?: string): boolean {
-  if (filter.reads !== '*' && !filter.reads.some((c) => c.toLowerCase() === m.chat.toLowerCase()))
-    return false;
+  if (filter.reads !== '*' && !filter.reads.some((c) => inChat(m, c))) return false;
   if (filter.senders === undefined) return true;
   const sender = plainName(m.sender);
   return filter.senders.some((f) =>
@@ -248,6 +258,13 @@ export interface Connector extends ConnectorHandle {
    * tell (not connected).
    */
   surfaces?(query?: SurfaceQuery): Promise<Surface[]>;
+  /**
+   * Every name it knows `chat` by, `chat` among them (an id and a `@username`, bot-os.md D90), from
+   * the chats it has seen; undefined when it cannot tell (a chat it never saw). For the graph's
+   * check, whose warning (D89) then matches a chat however it is named; a connector whose manifest
+   * says its chats have `aliases` offers it.
+   */
+  chatNames?(chat: string): readonly string[] | undefined;
 }
 
 /**

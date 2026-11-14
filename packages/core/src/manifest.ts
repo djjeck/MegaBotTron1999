@@ -145,13 +145,16 @@ export const manifestSchema = z
      * check warns of a chat-in edge that reads a chat its connector does not monitor. `'all'`: every
      * chat it hears; `{ config: key }`: the key of its config that holds the chat (a string) or the
      * chats (a list of strings), unset meaning every chat. Chats compare without case. Undeclared:
-     * unknown, and nothing is warned of.
+     * unknown, and nothing is warned of. `aliases`: a chat may go by several names (an id, a
+     * `@username`; D90): the check asks its running connector (`Connector.chatNames`) which, and
+     * warns of none it cannot tell.
      */
     monitors: z
       .union([
         z.literal('all'),
         z.strictObject({
           config: z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key'),
+          aliases: z.literal(true).optional(),
         }),
       ])
       .optional(),

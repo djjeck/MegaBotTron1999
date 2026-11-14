@@ -315,6 +315,25 @@ describe('TelegramBotConnector', () => {
     await c.stop();
   });
 
+  it('gives a chat its @username as an alias, and knows its names once seen (D90)', async () => {
+    const { c, stub } = connector({ chats: ['@lobby_chat'] });
+    const heard: Inbound[] = [];
+    c.onMessage((m) => heard.push(m));
+    c.start();
+    await flush();
+    expect(c.chatNames('@Lobby_Chat')).toBeUndefined();
+    const named = (u: ReturnType<typeof stub.command>, username: string) => {
+      (u as unknown as { message: { chat: Record<string, unknown> } }).message.chat['username'] =
+        username;
+      return u;
+    };
+    await stub.bot.handleUpdate(named(stub.command(-100777, 5, '/map'), 'Lobby_Chat'));
+    expect(heard.map((m) => [m.chat, m.aliases])).toEqual([['-100777', ['@Lobby_Chat']]]);
+    expect(c.chatNames('@lobby_chat')).toEqual(['-100777', '@Lobby_Chat']);
+    expect(c.chatNames('-100777')).toEqual(['-100777', '@Lobby_Chat']);
+    await c.stop();
+  });
+
   it('delivers a message Telegram delivers again only once, across a restart too', async () => {
     const { c, stub, docs } = connector();
     const heard: string[] = [];

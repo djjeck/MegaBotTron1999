@@ -241,6 +241,11 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
   private all: { at: number; dialogs: RawDialog[] } | undefined;
   /** The chats as given, by their lower case; undefined: every chat. */
   private readonly chats: Map<string, string> | undefined;
+  /**
+   * Each chat's names (its marked id, and its `@username` where it has one, D90), by each of them
+   * in lower case: from the dialogs and the private chats heard.
+   */
+  private readonly names = new Map<string, readonly string[]>();
   private started = false;
   private listening = false;
   private connected = false;
@@ -350,7 +355,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
         const id = this.surfaceName(d);
         if (id === undefined) return undefined;
         const lastActive = d.date === undefined ? undefined : d.date * 1000;
-        const configured = this.chats?.has(id.toLowerCase()) === true;
+        const configured = this.listed(this.namesOf(id)) !== undefined;
         if (
           search === '' &&
           !configured &&
@@ -386,12 +391,44 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     if (this.all !== undefined && now - this.all.at < DIALOGS_TTL_MS) return this.all.dialogs;
     const dialogs = [...(await this.o.client.getDialogs({}))].filter((d) => !migrated(d));
     this.all = { at: now, dialogs };
+    for (const d of dialogs) this.learn(d.id?.toString(), username(d.entity));
     return dialogs;
   }
 
-  /** Whether it monitors `chat`: one of its chats, or any when it was given none. */
+  /** Whether it monitors `chat`, by any of its names: one of its chats, or any when given none. */
   private monitors(chat: string): boolean {
-    return this.chats === undefined || this.chats.has(chat.toLowerCase());
+    return this.chats === undefined || this.listed(this.namesOf(chat)) !== undefined;
+  }
+
+  /**
+   * Every name it knows `chat` by (D90), `chat` among them: its marked id and its `@username`,
+   * as the dialogs and the private chats heard told them; undefined for a chat it never saw.
+   */
+  chatNames(chat: string): readonly string[] | undefined {
+    const names = this.names.get(chat.toLowerCase());
+    return names === undefined ? undefined : [...names];
+  }
+
+  /** A chat's names, kept: its marked id and its `@username` (a user's, a public group's). */
+  private learn(id: string | undefined, user: string | undefined): void {
+    if (id === undefined) return;
+    const names = user === undefined ? [id] : [id, `@${user}`];
+    for (const n of names) this.names.set(n.toLowerCase(), names);
+  }
+
+  /** Every name of `chat` it knows, `chat` first; `chat` alone for one it never saw. */
+  private namesOf(chat: string): readonly string[] {
+    const names = this.names.get(chat.toLowerCase()) ?? [];
+    return [chat, ...names.filter((n) => n.toLowerCase() !== chat.toLowerCase())];
+  }
+
+  /** A chat as its config lists it, by the first of `names` it lists; undefined if none. */
+  private listed(names: readonly (string | undefined)[]): string | undefined {
+    for (const n of names) {
+      const given = n === undefined ? undefined : this.chats?.get(n.toLowerCase());
+      if (given !== undefined) return given;
+    }
+    return undefined;
   }
 
   /** A chat's peer: resolved at connection for the chats given, else now. */
@@ -414,6 +451,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       if (!this.listening) client.addEventHandler((e) => this.heard(e.message), new NewMessage({}));
       this.listening = true;
       const dialogs = [...(await client.getDialogs({}))];
+      for (const d of dialogs) if (!migrated(d)) this.learn(d.id?.toString(), username(d.entity));
       for (const chat of this.chats?.values() ?? []) await this.peer(chat);
       this.named(username(await client.getMe()));
       if (!this.started) return;
@@ -490,10 +528,14 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     else this.ledger.mark(key, id);
   }
 
-  /** Whether a running reader reads `chat` (`ctx.readers`): its gap is fetched, or skipped. */
+  /**
+   * Whether a running reader reads `chat` (`ctx.readers`), by any of its names (D90): its gap is
+   * fetched, or skipped.
+   */
   private read(chat: string): boolean {
+    const names = new Set(this.namesOf(chat).map((n) => n.toLowerCase()));
     return (this.o.readers?.() ?? []).some(
-      (r) => r.reads === '*' || r.reads.some((c) => c.toLowerCase() === chat.toLowerCase())
+      (r) => r.reads === '*' || r.reads.some((c) => names.has(c.toLowerCase()))
     );
   }
 
@@ -671,8 +713,10 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     const sender = username(await m.getSender());
     const replyTo = m.replyTo?.replyToMsgId;
     const document = await this.document(m);
+    const aliases = this.namesOf(chat).slice(1);
     return {
       chat,
+      ...(aliases.length === 0 ? {} : { aliases }),
       sender: sender ?? '',
       text: m.message,
       time: m.date * 1000,
@@ -702,14 +746,14 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     );
   }
 
-  /** The name a chat is delivered by: as given, else a group's id, a private chat's @username. */
+  /**
+   * The name a chat is delivered by: as given, by any of its names (D90), else a group's id, a
+   * private chat's @username.
+   */
   private chatName(id: string | undefined, other: string | undefined): string | undefined {
     const at = other === undefined ? undefined : `@${other}`;
     if (this.chats === undefined) return at ?? id;
-    return (
-      (id === undefined ? undefined : this.chats.get(id.toLowerCase())) ??
-      (at === undefined ? undefined : this.chats.get(at.toLowerCase()))
-    );
+    return this.listed([id, at, ...(id === undefined ? [] : this.namesOf(id))]);
   }
 
   private nameOf(d: RawDialog): string | undefined {
@@ -732,7 +776,9 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     if (m.isPrivate !== true) return this.chatName(id, undefined);
     const byId = this.chats?.get(id?.toLowerCase() ?? '');
     if (byId !== undefined) return byId;
-    return this.chatName(id, username(await m.getChat()));
+    const other = username(await m.getChat());
+    this.learn(id, other);
+    return this.chatName(id, other);
   }
 }
 

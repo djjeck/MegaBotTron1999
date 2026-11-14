@@ -7,6 +7,7 @@ import {
   handleOf,
   hears,
   type Inbound,
+  inChat,
   isTextDocument,
   readDocument,
   type ReadFilter,
@@ -96,6 +97,25 @@ describe('connectors', () => {
     expect(hears({ reads: '*', senders: ['me'] }, m('#b', 'x'))).toBe(false);
     expect(hears({ reads: '*', senders: ['me'] }, m('#b', 'x'), 'X')).toBe(true);
     expect(hears({ reads: '*', senders: [] }, m('#b', 'x'))).toBe(false);
+  });
+
+  it('match a chat by any of its names (D90)', () => {
+    const m: Inbound = {
+      account: 'telegram:alice',
+      network: 'telegram',
+      chat: '5000001',
+      aliases: ['@QuestBot'],
+      sender: 'QuestBot',
+      text: 't',
+      time: 1,
+      playback: false,
+    };
+    expect(hears({ reads: ['@questbot'] }, m)).toBe(true);
+    expect(hears({ reads: ['5000001'] }, m)).toBe(true);
+    expect(hears({ reads: ['@DiceBot'] }, m)).toBe(false);
+    expect(inChat(m, '@QUESTBOT')).toBe(true);
+    expect(inChat({ chat: '#lobby' }, '#Lobby')).toBe(true);
+    expect(inChat({ chat: '#lobby' }, '#games')).toBe(false);
   });
 
   it('stop hearing when told to, and keep the status of their last change', () => {

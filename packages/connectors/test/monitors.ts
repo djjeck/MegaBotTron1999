@@ -1,7 +1,8 @@
 /**
  * What the graph's check warns of (bot-os.md D89) when a reader's chat-in edge from a connector
  * plugin's node, with its config, reads the chats given: so that each connector's tests check the
- * chats its manifest says it monitors.
+ * chats its manifest says it monitors. `names`, what its running connector would know each chat by
+ * (`chatNames`, D90); none: it is not running.
  */
 import { parseManifest, type Plugin, resolveGraph } from '@megabottron1999/core';
 
@@ -16,7 +17,8 @@ const READER = parseManifest({
 export function readWarnings(
   plugin: Plugin,
   config: Record<string, unknown> | undefined,
-  reads: string[]
+  reads: string[],
+  names?: (chat: string) => readonly string[] | undefined
 ): string[] {
   const manifest = parseManifest(plugin.manifest);
   return resolveGraph(
@@ -31,6 +33,8 @@ export function readWarnings(
     new Map([
       [manifest.id, manifest],
       ['reader', READER],
-    ])
+    ]),
+    undefined,
+    (node, plugin, chat) => (node === 'conn' && plugin === manifest.id ? names?.(chat) : undefined)
   ).warnings;
 }

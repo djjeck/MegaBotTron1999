@@ -1246,3 +1246,125 @@ describe('the catch-up', () => {
     expect(seen()).toEqual({ [GROUP]: 1600 });
   });
 });
+
+describe('a chat by any of its names (D90)', () => {
+  const BOT_ID = '5000001';
+  const dialogs: RawDialog[] = [
+    {
+      id: { toString: () => GROUP },
+      title: 'The Lobby',
+      date: 1_793_000_000,
+      isGroup: true,
+      entity: { username: 'lobby_group' },
+      inputEntity: { peer: GROUP },
+      message: { id: 20 },
+    },
+    {
+      id: { toString: () => BOT_ID },
+      title: 'Quest Bot',
+      date: 1_793_000_000,
+      isUser: true,
+      entity: { username: 'QuestBot', bot: true },
+      inputEntity: { peer: '@QuestBot' },
+      message: { id: 9 },
+    },
+  ];
+  const bot = (id: number) =>
+    raw({
+      id,
+      chatId: { toString: () => BOT_ID },
+      isPrivate: true,
+      chat: { username: 'QuestBot' },
+      sender: { username: 'QuestBot' },
+    });
+
+  function make(chats: string[] | undefined, readers: ReadFilter[] = []) {
+    const f = fake({ dialogs, history: { '@QuestBot': [bot(8), bot(9)] } });
+    const clock = new VirtualClock(SAID + 3_600_000);
+    const messages: Inbound[] = [];
+    const docs = new Map<string, unknown>([[LAST_SEEN_DOC, { [BOT_ID]: 7 }]]);
+    const c = new TelegramUserConnector({
+      account: 'telegram:alice',
+      client: f.client,
+      ...(chats === undefined ? {} : { chats }),
+      clock,
+      log: () => {},
+      store: {
+        read: <T>(name: string) => docs.get(name) as T | undefined,
+        write: (name, value) => docs.set(name, value),
+      },
+      readers: () => readers,
+    });
+    c.onMessage((m) => messages.push(m));
+    return { c, f, clock, messages };
+  }
+
+  it('knows each chat by its id and its @username, from the dialogs', async () => {
+    const { c } = make([BOT_ID]);
+    expect(c.chatNames('@QuestBot')).toBeUndefined();
+    c.start();
+    await flush();
+    expect(c.chatNames('@questbot')).toEqual([BOT_ID, '@QuestBot']);
+    expect(c.chatNames(BOT_ID)).toEqual([BOT_ID, '@QuestBot']);
+    expect(c.chatNames('@Lobby_Group')).toEqual([GROUP, '@lobby_group']);
+    expect(c.chatNames('@DiceBot')).toBeUndefined();
+  });
+
+  it('delivers a chat as its config names it, with its other names, and sends to it by either', async () => {
+    const { c, f, clock, messages } = make([BOT_ID, '@lobby_group']);
+    c.start();
+    await settle(clock);
+    await f.deliver(bot(10));
+    await f.deliver(raw({ id: 21 }));
+    expect(messages.map((m) => [m.chat, m.aliases])).toEqual([
+      [BOT_ID, ['@QuestBot']],
+      // A public group listed by its @username is heard, and delivered so.
+      ['@lobby_group', [GROUP]],
+    ]);
+    await expect(c.deliver('@questbot', 'hi')).resolves.toEqual({ id: '99' });
+    await expect(c.deliver('@DiceBot', 'hi')).rejects.toThrow('is not a chat of');
+  });
+
+  it('given no chats, delivers a chat as before, with its other names', async () => {
+    const { c, f, clock, messages } = make(undefined);
+    c.start();
+    await settle(clock);
+    await f.deliver(bot(10));
+    await f.deliver(raw({ id: 21 }));
+    // A private chat first heard live: its names learnt from it.
+    await f.deliver(
+      raw({
+        id: 1,
+        chatId: { toString: () => '5000002' },
+        isPrivate: true,
+        chat: { username: 'DiceBot' },
+      })
+    );
+    expect(messages.map((m) => [m.chat, m.aliases])).toEqual([
+      ['@QuestBot', [BOT_ID]],
+      [GROUP, ['@lobby_group']],
+      ['@DiceBot', ['5000002']],
+    ]);
+    expect(c.chatNames('5000002')).toEqual(['5000002', '@DiceBot']);
+  });
+
+  it('catches up on a chat its readers name otherwise than its config', async () => {
+    const { c, f, clock, messages } = make([BOT_ID], [{ reads: ['@questbot'] }]);
+    c.start();
+    await settle(clock);
+    expect(f.calls.filter((x) => x.startsWith('history'))).toEqual([
+      'history @QuestBot <10 >7 100',
+    ]);
+    expect(messages.map((m) => [m.id, m.chat, m.missed])).toEqual([
+      ['8', BOT_ID, true],
+      ['9', BOT_ID, true],
+    ]);
+  });
+
+  it('lists a chat its config names otherwise as monitored, as its config names it', async () => {
+    const { c, clock } = make(['@lobby_group']);
+    c.start();
+    await settle(clock);
+    expect((await c.surfaces({ search: 'lobby' })).map((x) => x.id)).toEqual(['@lobby_group']);
+  });
+});

@@ -581,6 +581,48 @@ describe('the graph API', () => {
     await again.core.stop();
   });
 
+  it('asks the running connector the names of a chat, and warns only of one it can tell (D90)', async () => {
+    const both = ['-1001', '@lobby_group'];
+    const connector = Object.assign(new FakeConnector({ account: 'chat:watcher' }), {
+      chatNames: (chat: string) =>
+        ({ '-1001': both, '@lobby_group': both, '-1002': ['-1002'] })[chat.toLowerCase()],
+    });
+    const aliased = definePlugin({
+      manifest: { ...watcher.manifest, monitors: { config: 'chats', aliases: true } },
+      create: () => ({ connector }),
+    });
+    const reading = (reads: string[]): GraphInput => ({
+      ...warned,
+      nodes: warned.nodes.map((n) =>
+        n.id === 'watch' ? { ...n, config: { chats: ['-1001'] } } : n
+      ),
+      edges: (warned.edges ?? []).map((e) => (e.to === 'actor.chat' ? { ...e, reads } : e)),
+    });
+    // Another plugin, whose node of the same id is not the running connector's, below.
+    const other = definePlugin({
+      manifest: { ...aliased.manifest, id: 'other' },
+      create: () => ({ connector: new FakeConnector({ account: 'chat:watcher' }) }),
+    });
+    write('graph.json', reading(['-1001']));
+    const { core } = instance(aliased, other);
+    await core.start();
+    // By @username on the edge, by id in the config: the same chat, heard.
+    expect(core.check(reading(['@Lobby_Group']))).toMatchObject({ ok: true, warnings: [] });
+    expect(core.check(reading(['-1002', '@Unseen'])).warnings?.map((w) => w.text)).toEqual([
+      'node actor: input port chat reads -1002, which watch does not monitor (its chats: -1001) (edge watch → actor.chat)',
+      'node actor: input port chat reads @Unseen, which watch does not monitor (its chats: -1001) (edge watch → actor.chat)',
+    ]);
+    // The other plugin's node of the same id (refused: the instance is the watcher's) tells nothing.
+    const swapped = reading(['@Lobby_Group']);
+    expect(
+      core.check({
+        ...swapped,
+        nodes: swapped.nodes.map((n) => (n.id === 'watch' ? { ...n, plugin: 'other' } : n)),
+      }).warnings
+    ).toEqual([]);
+    await core.stop();
+  });
+
   it('runs the saved graph after a restart, its file the same, and says why one is refused', async () => {
     write('graph.json', good);
     const { core, file } = instance();

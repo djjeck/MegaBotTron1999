@@ -236,6 +236,9 @@ describe('the turn-actor', () => {
     r.account.hear({ ...own, chat: CHAT, time: T0 + MIN, text: '/inventario' });
     r.account.hear({ chat: CHAT, sender: QUESTBOT, time: T0 + MIN, text: '/play' });
     expect(r.events().filter((e) => e === 'seen')).toHaveLength(1);
+    // Its chat delivered by id, its @username an alias (D90): the same chat.
+    r.account.hear({ ...own, chat: '5000001', aliases: [CHAT], time: T0 + 2 * MIN, text: '/play' });
+    expect(r.events().filter((e) => e === 'seen')).toHaveLength(2);
   });
 
   it('waits for the account through a live edge, and retries a failed send two minutes later', async () => {

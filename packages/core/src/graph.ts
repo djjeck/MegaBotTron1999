@@ -165,6 +165,38 @@ export function monitoredChats(
   return { key: m.config, chats };
 }
 
+/**
+ * The chats of a chat-in edge's `reads` that a connector monitoring `monitored` does not hear
+ * (bot-os.md D89, D90). A chat goes by itself and by every name `names` gives it (its running
+ * connector's `chatNames`: an id and a `@username`, say), compared without case; it is heard when
+ * one of its names is one of a monitored chat's. Where a chat may go by several names (`aliases`,
+ * the manifest's) and `names` knows neither it nor every monitored chat, it cannot be told: unknown,
+ * not wrong, and so not returned.
+ */
+export function unmonitoredReads(
+  reads: readonly string[],
+  monitored: readonly string[],
+  aliases: boolean,
+  names: (chat: string) => readonly string[] | undefined = () => undefined
+): string[] {
+  const known = (chat: string): string[] | undefined => {
+    const n = names(chat);
+    return n === undefined ? undefined : [chat, ...n].map((c) => c.toLowerCase());
+  };
+  const heard = new Set<string>();
+  let allKnown = true;
+  for (const m of monitored) {
+    const k = known(m);
+    if (k === undefined) allKnown = false;
+    for (const c of k ?? [m.toLowerCase()]) heard.add(c);
+  }
+  return reads.filter((chat) => {
+    const k = known(chat);
+    if ((k ?? [chat.toLowerCase()]).some((c) => heard.has(c))) return false;
+    return !aliases || k !== undefined || allKnown;
+  });
+}
+
 /** A chat-in's reads, copied: `'*'` as it is, a list anew. */
 const copyReads = (r: ChatBinding['reads']): ChatBinding['reads'] => (r === '*' ? r : [...r]);
 
@@ -495,14 +527,22 @@ function upgradeChats(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unk
  * Checks a graph against the manifests of the plugins the image has (by plugin id): the graph as
  * the core holds it (each edge's ends and type written out), its nodes, in the graph's order, and
  * its warnings (bot-os.md D89), which refuse nothing: a chat-in edge that reads a chat its
- * connector's config does not monitor (`monitoredChats`). A GraphError lists every problem, each
- * naming its node and port.
+ * connector's config does not monitor (`monitoredChats`, `unmonitoredReads`; each chat by any of
+ * its names, as `chatNames` says, D90). A GraphError lists every problem, each naming its node and
+ * port.
  */
 export function resolveGraph(
   raw: unknown,
   plugins: ReadonlyMap<string, Manifest>,
   /** The plugin of an instance kept already, by its id; undefined for a fresh one. */
-  instanceOf: (instance: string) => string | undefined = () => undefined
+  instanceOf: (instance: string) => string | undefined = () => undefined,
+  /**
+   * Every name a connector's node, of a plugin, knows a chat by, as its running connector says
+   * (bot-os.md D90); undefined when it cannot tell (not running, not connected, a chat it never
+   * saw).
+   */
+  chatNames: (node: string, plugin: string, chat: string) => readonly string[] | undefined = () =>
+    undefined
 ): { graph: Graph; nodes: ResolvedNode[]; warnings: string[] } {
   const parsed = graphSchema.safeParse(upgradeGraph(raw, plugins));
   if (!parsed.success)
@@ -724,12 +764,16 @@ export function resolveGraph(
         ? monitoredChats(from.manifest, from.config)
         : undefined;
     if (monitored !== undefined && monitored !== 'all') {
-      const lower = new Set(monitored.chats.map((c) => c.toLowerCase()));
-      for (const chat of e.reads as string[])
-        if (!lower.has(chat.toLowerCase()))
-          warnings.push(
-            `node ${toNode}: input port ${toPort} reads ${chat}, which ${fromNode} does not monitor (its ${monitored.key}: ${monitored.chats.length === 0 ? 'none' : monitored.chats.join(', ')}) (edge ${e.from} → ${e.to})`
-          );
+      const aliases = typeof from.manifest.monitors === 'object' && from.manifest.monitors.aliases;
+      for (const chat of unmonitoredReads(
+        e.reads as string[],
+        monitored.chats,
+        aliases === true,
+        (c) => chatNames(fromNode, from.manifest.id, c)
+      ))
+        warnings.push(
+          `node ${toNode}: input port ${toPort} reads ${chat}, which ${fromNode} does not monitor (its ${monitored.key}: ${monitored.chats.length === 0 ? 'none' : monitored.chats.join(', ')}) (edge ${e.from} → ${e.to})`
+        );
     }
   }
   for (const n of nodes.values())

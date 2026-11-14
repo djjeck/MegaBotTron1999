@@ -198,6 +198,11 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
   private since = 0;
   private readonly chats: Set<string> | undefined;
   private readonly seen: Record<string, Surface>;
+  /**
+   * Each chat's names (its id, and its `@username` where it has one, D90), by each of them in lower
+   * case: from the chats it has seen since it started.
+   */
+  private readonly names = new Map<string, readonly string[]>();
   /** The last message id delivered in each chat: one delivered again is not delivered twice. */
   private readonly ledger: SeenLedger;
 
@@ -230,8 +235,10 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
       if (heard) this.ledger.advance(key, m.message_id);
       if (text !== undefined && heard)
         try {
+          const aliases = this.namesOf(m.chat).slice(1);
           this.received({
             chat: String(m.chat.id),
+            ...(aliases.length === 0 ? {} : { aliases }),
             sender: m.from?.username ?? '',
             text,
             time: m.date * 1000,
@@ -317,13 +324,29 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
 
   /** Whether it monitors `chat`: one of its chats (by id or `@username`), or any without. */
   private monitors(chat: Chat): boolean {
-    if (this.chats === undefined) return true;
-    const name = 'username' in chat && chat.username !== undefined ? `@${chat.username}` : '';
-    return this.chats.has(String(chat.id)) || this.chats.has(name.toLowerCase());
+    const chats = this.chats;
+    return chats === undefined || this.namesOf(chat).some((n) => chats.has(n.toLowerCase()));
   }
 
-  /** A chat seen: kept among its surfaces, when it is new or its activity moved enough. */
+  /** A chat's names: its id, and its `@username` where it has one. */
+  private namesOf(chat: Chat): string[] {
+    const id = String(chat.id);
+    return 'username' in chat && chat.username !== undefined ? [id, `@${chat.username}`] : [id];
+  }
+
+  /**
+   * Every name it knows `chat` by (D90), `chat` among them: its id and its `@username`, as the chats
+   * it has seen since it started told them; undefined for one it has not seen.
+   */
+  chatNames(chat: string): readonly string[] | undefined {
+    const names = this.names.get(chat.toLowerCase());
+    return names === undefined ? undefined : [...names];
+  }
+
+  /** A chat seen: its names learnt; kept among its surfaces, when new or its activity moved enough. */
   private saw(chat: Chat, lastActive?: number): void {
+    const names = this.namesOf(chat);
+    for (const n of names) this.names.set(n.toLowerCase(), names);
     const id = String(chat.id);
     const before = this.seen[id];
     const active = Math.max(lastActive ?? 0, before?.lastActive ?? 0);

@@ -28,6 +28,7 @@ export {
   hears,
   type Inbound,
   type InboundDocument,
+  inChat,
   isTextDocument,
   LIVE_GRACE_S,
   liveGraceS,

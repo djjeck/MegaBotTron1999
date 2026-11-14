@@ -270,6 +270,26 @@ describe('react on a message', () => {
     expect(records()[0]).toMatchObject({ on: 'message', outcome: 'sent' });
   });
 
+  it('reads its chats by any of their names (D90)', async () => {
+    const { account, on } = await run();
+    on({
+      on: { match: /a (?<item>\w+) lies here/u, chats: ['@questbot'] },
+      chat: BOT,
+      send: '/look {item}',
+    });
+    // The bot's chat delivered by its id, its @username an alias.
+    account.hear({
+      chat: '5000001',
+      aliases: [BOT],
+      sender: 'QuestBot',
+      text: 'a lamp lies here',
+      time: T0,
+    });
+    account.hear({ chat: '5000002', sender: 'QuestBot', text: 'a rope lies here', time: T0 });
+    await flush();
+    expect(account.sent).toEqual([{ chat: BOT, text: '/look lamp' }]);
+  });
+
   it("gives a message's file in its payload (D82)", async () => {
     const { account, on } = await run();
     on({ on: { match: 'Your map' }, chat: BOT, send: '/look {document.name} {document.size}' });

@@ -10,6 +10,7 @@ import {
   requiredOf,
   type ResolvedNode,
   resolveGraph,
+  unmonitoredReads,
   upgradeGraph,
 } from './graph.ts';
 import { type Manifest, type ManifestInput, parseManifest } from './manifest.ts';
@@ -674,5 +675,78 @@ describe('the chats a connector monitors (D89)', () => {
       ]);
       expect((e as GraphError).warnings).toHaveLength(1);
     }
+  });
+});
+
+describe('a chat by any of its names (D90)', () => {
+  const plugins = new Map(
+    [
+      m('tg', {
+        kinds: ['connector'],
+        account: 'telegram:alice',
+        config: z.object({ chats: z.array(z.string()).optional() }),
+        monitors: { config: 'chats', aliases: true },
+      }),
+      m('reader', { kinds: ['parser'], inputs: { chat: { type: 'chat-in' } } }),
+    ].map((x) => [x.id, x])
+  );
+  const g = (chats: string[], reads: string[]): GraphInput => ({
+    version: 2,
+    nodes: [
+      { id: 'conn', plugin: 'tg', config: { chats } },
+      { id: 'quest', plugin: 'reader' },
+    ],
+    edges: [{ from: 'conn', to: 'quest.chat', reads }],
+  });
+  /** What a running connector knows: a bot's chat by id and @username, a group by its id. */
+  const known: Record<string, string[]> = {
+    '5000001': ['5000001', '@QuestBot'],
+    '@questbot': ['5000001', '@QuestBot'],
+    '-1001': ['-1001'],
+  };
+  const names = (_node: string, _plugin: string, chat: string) => known[chat.toLowerCase()];
+
+  it('hears a chat named by id on one side and by @username on the other, either way', () => {
+    expect(resolveGraph(g(['5000001'], ['@questbot']), plugins, undefined, names).warnings).toEqual(
+      []
+    );
+    expect(resolveGraph(g(['@QuestBot'], ['5000001']), plugins, undefined, names).warnings).toEqual(
+      []
+    );
+  });
+
+  it('warns of a chat it can tell is not monitored: known itself, or every monitored chat known', () => {
+    // @DiceBot unknown, but every monitored chat is: none of their names.
+    expect(
+      resolveGraph(g(['5000001', '-1001'], ['@DiceBot']), plugins, undefined, names).warnings
+    ).toEqual([
+      'node quest: input port chat reads @DiceBot, which conn does not monitor (its chats: 5000001, -1001) (edge conn → quest.chat)',
+    ]);
+    // A monitored chat unknown, but the chat read known: none of its names monitored.
+    expect(
+      resolveGraph(g(['@Unseen', '-1001'], ['5000001']), plugins, undefined, names).warnings
+    ).toHaveLength(1);
+  });
+
+  it('warns of nothing it cannot tell: its connector not running, or neither side known', () => {
+    expect(resolveGraph(g(['5000001'], ['@questbot']), plugins).warnings).toEqual([]);
+    expect(
+      resolveGraph(g(['@Unseen'], ['@AlsoUnseen']), plugins, undefined, names).warnings
+    ).toEqual([]);
+    // The same name, as written, needs no connector.
+    expect(unmonitoredReads(['@QuestBot'], ['@questbot'], true)).toEqual([]);
+  });
+
+  it('tells a connector of one name per chat by its name alone', () => {
+    expect(unmonitoredReads(['#games', '#Lobby'], ['#lobby'], false)).toEqual(['#games']);
+  });
+
+  it('asks the names of the reading edge’s connector node, of its plugin', () => {
+    const asked: string[] = [];
+    resolveGraph(g(['-1001'], ['@QuestBot']), plugins, undefined, (node, plugin, chat) => {
+      asked.push(`${node} ${plugin} ${chat}`);
+      return undefined;
+    });
+    expect(asked).toEqual(['conn tg -1001', 'conn tg @QuestBot']);
   });
 });

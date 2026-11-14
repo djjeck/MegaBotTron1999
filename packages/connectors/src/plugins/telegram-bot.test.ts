@@ -40,10 +40,20 @@ describe('the telegram-bot plugin', () => {
     expect(polling).toBe(false);
   });
 
-  it('monitors the chats of its config, or every chat: the check warns of one read beside (D89)', () => {
+  it('monitors the chats of its config, or every chat: the check warns of one read beside (D89, D90)', () => {
     const plugin = telegramBotPlugin();
     expect(readWarnings(plugin, undefined, ['@QuestBot', String(GROUP)])).toEqual([]);
-    expect(readWarnings(plugin, { chats: [String(GROUP)] }, [String(GROUP), '@QuestBot'])).toEqual([
+    // Not running: a chat named otherwise cannot be told.
+    expect(readWarnings(plugin, { chats: [String(GROUP)] }, [String(GROUP), '@QuestBot'])).toEqual(
+      []
+    );
+    // Running: the group seen as @lobby_group too, the bot's chat never.
+    const both = [String(GROUP), '@lobby_group'];
+    const names = (chat: string) =>
+      ({ [String(GROUP)]: both, '@lobby_group': both })[chat.toLowerCase()];
+    expect(
+      readWarnings(plugin, { chats: [String(GROUP)] }, ['@Lobby_Group', '@QuestBot'], names)
+    ).toEqual([
       `node quest: input port chat reads @QuestBot, which conn does not monitor (its chats: ${GROUP}) (edge conn → quest.chat)`,
     ]);
   });

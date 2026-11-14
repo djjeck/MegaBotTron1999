@@ -26,7 +26,7 @@
  *
  * Nothing in here knows of any game.
  */
-import { type Inbound } from './connector.ts';
+import { type Inbound, inChat } from './connector.ts';
 import { type PluginContext } from './plugin.ts';
 
 /** What a reaction reads: an event as published, or a message with its pattern's groups. */
@@ -210,10 +210,10 @@ export function react(ctx: PluginContext, reaction: Reaction): () => void {
     });
   } else {
     const { port = 'chat', chats, match } = reaction.on;
-    const wanted = chats?.map((c) => c.toLowerCase());
     unsubscribe = ctx.connector(port).onMessage((m) => {
       if (m.playback || m.own === true) return;
-      if (wanted !== undefined && !wanted.includes(m.chat.toLowerCase())) return;
+      // By any of the chat's names (D90).
+      if (chats !== undefined && !chats.some((c) => inChat(m, c))) return;
       const payload = messagePayload(m, match);
       if (payload !== undefined) act(payload);
     });

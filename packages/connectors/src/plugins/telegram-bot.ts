@@ -70,8 +70,9 @@ export function telegramBotPlugin(
       account,
       secrets: [BOT_TOKEN],
       config: telegramBotConfig,
-      // The chats its config lists; unset, every chat (D89).
-      monitors: { config: 'chats' },
+      // The chats its config lists; unset, every chat (D89). A chat goes by its id and its
+      // @username, which its connector tells apart (D90).
+      monitors: { config: 'chats', aliases: true },
     },
     create: (ctx) => {
       const log = (line: string): void => ctx.log.info(line);
