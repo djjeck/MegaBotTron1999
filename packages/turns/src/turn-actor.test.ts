@@ -76,7 +76,6 @@ async function run(
           // One interval, 17 minutes: a plan "at once" is at once.
           config: { seed: 7, schedule: { maxGapMin: 17 }, ...o.config },
           edges: [
-            { from: TELEGRAM_USER, to: 'quest-turns.chat', reads: [CHAT] },
             {
               from: 'quest-turns.chat',
               to: `${TELEGRAM_USER}.chat`,
@@ -145,10 +144,8 @@ describe('its bot’s chat, its edges’ alone (D97)', () => {
     }
   };
 
-  it('takes the one chat its chat-out edge names, which its chat-in edge reads', () => {
+  it('takes the one chat its chat-out edge names', () => {
     expect(problems(graph([CHAT], [CHAT]))).toEqual([]);
-    // Without case, as the networks compare names.
-    expect(problems(graph([CHAT], [CHAT.toLowerCase()]))).toEqual([]);
   });
 
   it('refuses an edge of no chat, of two, or of a chat not a bot’s @username', () => {
@@ -163,14 +160,16 @@ describe('its bot’s chat, its edges’ alone (D97)', () => {
     ]);
   });
 
-  it('refuses a chat-in edge that reads another chat, more, or every chat', () => {
-    const said = (reads: string[] | '*') => problems(graph([CHAT], reads));
-    expect(said(['@OtherBot'])).toEqual([
-      `node quest-turns: input port chat reads ${CHAT}, the chat its output chat sends to, and no other: its edge reads @OtherBot (edge ${TELEGRAM_USER}.chat → quest-turns.chat)`,
-    ]);
-    expect(said([CHAT, '@OtherBot'])[0]).toContain(`its edge reads ${CHAT}, @OtherBot`);
-    expect(said('*')[0]).toContain('its edge reads every chat');
-    expect(said([])[0]).toContain('its edge reads none');
+  it('drops the chat-in edge a graph saved before gave it, whatever it read (D99)', () => {
+    for (const reads of [[CHAT], ['@OtherBot'], '*'] as const) {
+      const { graph: resolved } = resolveGraph(
+        graph([CHAT], reads === '*' ? '*' : [...reads]),
+        manifests
+      );
+      expect(resolved.edges.filter((e) => e.to === 'quest-turns.chat')).toEqual([]);
+      expect(resolved.edges).toHaveLength(3);
+    }
+    expect(turnActorPlugin().manifest.inputs).not.toHaveProperty('chat');
   });
 
   it('moves the chat of a graph saved by 0.1.19 from its config onto its edges', () => {
@@ -178,9 +177,10 @@ describe('its bot’s chat, its edges’ alone (D97)', () => {
     expect(problems(saved)).toEqual([]);
     const moved = moveChats(saved, manifests) as GraphInput;
     expect(moved.nodes.find((n) => n.id === 'quest-turns')?.config).toEqual({ seed: 3 });
+    // Onto its chat-out edge alone: its chat-in edge is dropped as the graph loads (D99).
     expect(
       moved.edges?.filter((e) => e.from === 'quest-turns.chat' || e.to === 'quest-turns.chat')
-    ).toMatchObject([{ reads: [CHAT] }, { sends: [CHAT] }]);
+    ).toMatchObject([{ reads: [] }, { sends: [CHAT] }]);
     // A chat there already, by any case, is not added again; nothing else moved, nothing changed.
     const again = moveChats(
       graph([CHAT], [CHAT.toLowerCase()], { chat: CHAT }),
@@ -316,23 +316,83 @@ describe('the turn-actor', () => {
     expect(first - T0).toBeLessThanOrEqual(3 * MIN);
   });
 
-  it('counts from a turn alice sends by hand in its chat, and from none elsewhere', async () => {
+  it('counts from a turn alice sends by hand in its chat, as its parser tells it (D99)', async () => {
     const r = await run({ clock: new VirtualClock(T0 - 5 * MIN) });
-    await r.until(T0 - 5 * MIN);
-    const own = { sender: 'alice', own: true, id: '1' };
-    r.account.hear({ ...own, chat: CHAT, time: T0, text: '/play' });
-    expect(r.steps.at(-2)).toMatchObject({ event: 'seen', detail: 'sent by hand at 12:00' });
+    const first = r.status().next as number;
+    const own = { sender: 'alice', own: true };
+    r.account.hear({ ...own, id: '1', chat: CHAT, time: T0 - 5 * MIN, text: '/play' });
+    // Read when its turn comes due: it plans afresh from it, and sends nothing.
+    await r.until(first);
+    expect(r.steps.at(-2)).toMatchObject({ event: 'seen', detail: 'sent by hand at 11:55' });
     expect(r.steps.at(-1)?.event).toBe('planned');
-    expect(r.status().last).toBe(T0);
-    // An older one, another command, another's: nothing.
-    r.account.hear({ ...own, chat: CHAT, time: T0 - MIN, text: '/play' });
-    r.account.hear({ ...own, chat: CHAT, time: T0 + MIN, text: '/inventario' });
-    r.account.hear({ chat: CHAT, sender: QUESTBOT, time: T0 + MIN, text: '/play' });
+    expect(r.status().last).toBe(T0 - 5 * MIN);
+    const next = r.status().next as number;
+    expect(next).toBeGreaterThanOrEqual(T0 + 12 * MIN);
+    // An older one, another command, another's: nothing; its own turn goes as planned.
+    r.account.hear({ ...own, id: '2', chat: CHAT, time: T0 - 6 * MIN, text: '/play' });
+    r.account.hear({ ...own, id: '3', chat: CHAT, time: T0, text: '/inventario' });
+    r.account.hear({ chat: CHAT, sender: QUESTBOT, time: T0, text: '/play' });
+    await r.until(next);
     expect(r.events().filter((e) => e === 'seen')).toHaveLength(1);
+    expect(r.steps.at(-2)).toMatchObject({ event: 'sent', detail: '/play (dry run)' });
     // Its chat delivered by id, its @username an alias (D90): the same chat.
-    r.account.hear({ ...own, chat: '5000001', aliases: [CHAT], time: T0 + 2 * MIN, text: '/play' });
+    const third = r.status().next as number;
+    r.account.hear({
+      ...own,
+      id: '4',
+      chat: '5000001',
+      aliases: [CHAT],
+      private: true,
+      time: next + MIN,
+      text: '/play',
+    });
+    await r.until(third);
     expect(r.events().filter((e) => e === 'seen')).toHaveLength(2);
     expect(r.summary()).toEqual(['1 turn in a dry run, 2 by hand']);
+  });
+
+  it('reads a turn sent by hand while it was down at its start', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'turn-actor-'));
+    try {
+      const clock = new VirtualClock(T0);
+      const a = await run({ dataDir, clock });
+      const planned = a.status().next as number;
+      await a.core.stop();
+      const b = await run({ dataDir, clock });
+      b.account.hear({ sender: 'alice', own: true, id: '9', chat: CHAT, time: T0, text: '/play' });
+      await b.core.stop();
+      const c = await run({ dataDir, clock });
+      expect(c.steps.map((x) => x.event)).toContain('seen');
+      expect(c.status().last).toBe(T0);
+      expect(c.status().next).toBeGreaterThan(planned);
+      await c.core.stop();
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("waits out the bot's rest, which the outbox holds its command back for too (D98)", async () => {
+    const r = await run({ edge: 'live' });
+    r.account.open();
+    await r.until(T0 + 5 * MIN);
+    expect(r.account.sent).toHaveLength(1);
+    const sent = r.status().last as number;
+    // The bot says too soon: its parser's rest, and the outbox's cooldown, hold the next turn.
+    r.account.hear({
+      chat: CHAT,
+      sender: QUESTBOT,
+      time: sent + MIN,
+      text: 'Too soon: 40 minutes.',
+    });
+    const next = r.status().next as number;
+    await r.until(next);
+    expect(r.steps.at(-1)).toMatchObject({ event: 'rest' });
+    expect(r.steps.at(-1)?.detail).toContain('rests: it said too soon');
+    expect(r.status().next).toBeGreaterThanOrEqual(sent + 41 * MIN);
+    expect(r.core.outbox('telegram:alice').as('quest-turns').held(CHAT, '/play')?.until).toBe(
+      sent + 41 * MIN
+    );
+    expect(r.account.sent).toHaveLength(1);
   });
 
   it('waits for the account through a live edge, and retries a failed send two minutes later', async () => {

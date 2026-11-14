@@ -3,7 +3,8 @@
  * connector's three chat edges, all empty, to a parser, a turn-actor and a reactor on events. It
  * converts on load, runs, and is shown as version 2; and, at the first start since the modes went
  * (bot-os.md D64), its senders, which kept no mode (`read-only`), send through dry-run edges; the
- * turn-actor's chat moves from its config onto its edges (D97).
+ * turn-actor's chat moves from its config onto its edge (D97), and its chat-in edge, which it no
+ * longer has, is dropped (D99).
  */
 import { TELEGRAM_USER } from '@megabottron1999/connectors/plugins/telegram-user.ts';
 import {
@@ -52,7 +53,7 @@ const V1 = {
 };
 
 describe('a version 1 graph of the shell’s plugins', () => {
-  it('converts on load: the parser reads, the turn-actor reads and sends, the reactor sends', async () => {
+  it('converts on load: the parser reads, the turn-actor and the reactor send', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'graph-v1-'));
     try {
       fs.writeFileSync(path.join(dir, 'graph.json'), JSON.stringify(V1));
@@ -74,12 +75,6 @@ describe('a version 1 graph of the shell’s plugins', () => {
       ]);
       const edges = [
         { from: `${TELEGRAM_USER}.chat`, to: `${QUEST}.chat`, type: 'chat-in', reads: [] },
-        {
-          from: `${TELEGRAM_USER}.chat`,
-          to: 'quest-turns.chat',
-          type: 'chat-in',
-          reads: ['@QuestBot'],
-        },
         {
           from: 'quest-turns.chat',
           to: `${TELEGRAM_USER}.chat`,

@@ -213,6 +213,12 @@ export const manifestSchema = z
       )
       .default([]),
     /**
+     * Input ports it had in an earlier release and has no more (bot-os.md D99: the turn actor's
+     * chat-in): a graph saved with an edge to one is migrated as it loads (`upgradeGraph`), the
+     * edge dropped, so that it loads rather than being refused for a port that is gone.
+     */
+    droppedInputs: z.array(z.string().min(1)).default([]),
+    /**
      * It hears the owner's notices (bot-os.md D91, `ctx.notices`): what the core and the plugins
      * raise for the owner's attention, for a node that tells the owner (`owner-notice`).
      */
@@ -374,6 +380,14 @@ export const manifestSchema = z
           message: `namespace ${ns} is not among games.registers`,
         });
     }
+    m.droppedInputs.forEach((port, i) => {
+      if (Object.hasOwn(m.inputs, port))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['droppedInputs', i],
+          message: `it still has an input ${port}`,
+        });
+    });
     m.answers.forEach((a, i) => {
       if (!Object.hasOwn(m.events, a.event))
         ctx.addIssue({

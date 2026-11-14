@@ -15,7 +15,9 @@
  *   history: missed while down, bot-os.md D83), and reports to drift (P5) a message it
  *   claims and cannot read, which pauses the turn-actor that requires it past the threshold;
  * - offers `state.rest`: until when its bot rests, as its last answer said (the bot's rest after a
- *   turn, or the wait of a "too soon"), for the actor to wait out;
+ *   turn, or the wait of a "too soon"), for the actor to wait out; and `state.lastTurn`: the
+ *   owner's last turn in the private chat with its bot, by hand or its actor's, from which the
+ *   actor counts (bot-os.md D99: the actor reads no chat);
  * - declares its `<id>.turn` an answer to its turn commands (bot-os.md D98): `refused` with
  *   `cooldown` for a "too soon", `ok` for any other outcome read (not an unread one), each with its
  *   `retryAt` (the rest it starts), so that a turn queued by any node settles with what the bot
@@ -98,14 +100,20 @@ export interface Rest {
   why: string;
 }
 
+/** A turn of the owner's, as its parser knows it: when, and the network's id of the message. */
+export interface LastTurn {
+  t: number;
+  id?: string;
+}
+
 /** The interface a turn-actor uses of its parser (a contract, docs/bot-os-api.md §2.1). */
 export interface TurnParserInterface {
-  state: { rest(): Rest | undefined };
+  state: { rest(): Rest | undefined; lastTurn(): LastTurn | undefined };
   actions: { sent(turn: { chat: string; id?: string; t: number }): void };
 }
 
 /** The members of the contract, as an actor's input names them. */
-export const TURN_PARSER_MEMBERS = ['state.rest', 'actions.sent'];
+export const TURN_PARSER_MEMBERS = ['state.rest', 'state.lastTurn', 'actions.sent'];
 
 /** How long after a turn the first message of the bot in private still answers it. */
 export const ANSWER_WINDOW_MS = 2 * 60_000;
@@ -116,7 +124,8 @@ export const PARSED_DOC = 'parsed';
 
 /** What it keeps of what it parsed, to resume from at its next start. */
 interface Parsed {
-  turns: { chat: string; id?: string; t: number; answered: boolean }[];
+  /** `private`: in the private chat with its bot (unset in a store of before: by the chat's name). */
+  turns: { chat: string; id?: string; t: number; answered: boolean; private?: boolean }[];
   rest?: Rest;
 }
 
@@ -203,6 +212,10 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
             help: `Until when @${spec.bot} rests, as its last answer said`,
             output: z.object({ until: z.number(), why: z.string() }).optional(),
           },
+          lastTurn: {
+            help: `The owner's last turn in the private chat with @${spec.bot}: by hand, from any device, or its actor's`,
+            output: z.object({ t: z.number(), id: z.string().optional() }).optional(),
+          },
         },
         actions: {
           sent: {
@@ -229,10 +242,13 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       let rest: Rest | undefined = kept?.rest;
       const keep = (): void =>
         ctx.store.write(PARSED_DOC, { turns, ...(rest === undefined ? {} : { rest }) });
-      const remember = (turn: { chat: string; id?: string; t: number }): void => {
+      const remember = (
+        turn: { chat: string; id?: string; t: number },
+        inPrivate: boolean
+      ): void => {
         if (turn.id !== undefined && turns.some((x) => x.chat === turn.chat && x.id === turn.id))
           return;
-        turns.push({ ...turn, answered: false });
+        turns.push({ ...turn, answered: false, private: inPrivate });
         if (turns.length > KEPT_TURNS) turns.shift();
         keep();
       };
@@ -254,7 +270,10 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       handle.onMessage((m) => {
         if (m.own === true) {
           if (isTurnCommand(m.text, commands, spec.bot))
-            remember({ chat: m.chat, ...(m.id === undefined ? {} : { id: m.id }), t: m.time });
+            remember(
+              { chat: m.chat, ...(m.id === undefined ? {} : { id: m.id }), t: m.time },
+              isPrivate(m)
+            );
           return;
         }
         if (m.sender.toLowerCase() !== spec.bot.toLowerCase()) return;
@@ -303,8 +322,20 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       const iface: TurnParserInterface = {
         state: {
           rest: () => (rest !== undefined && rest.until > ctx.clock.now() ? rest : undefined),
+          lastTurn: () => {
+            const last = turns
+              .filter((x) => x.private ?? isPrivate({ chat: x.chat }))
+              .reduce<Parsed['turns'][number] | undefined>(
+                (a, x) => (a === undefined || x.t >= a.t ? x : a),
+                undefined
+              );
+            return last === undefined
+              ? undefined
+              : { t: last.t, ...(last.id === undefined ? {} : { id: last.id }) };
+          },
         },
-        actions: { sent: (turn) => remember(turn) },
+        // Its actor sends to its bot's private chat alone (D97).
+        actions: { sent: (turn) => remember(turn, true) },
       };
       return { interface: iface };
     },

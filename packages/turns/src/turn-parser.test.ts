@@ -72,6 +72,23 @@ describe('a turn parser', () => {
     expect(p.drift()).toMatchObject({ read: 1, unread: 0 });
   });
 
+  it("tells the owner's last turn in the private chat, by hand or its actor's, not the group's (D99)", async () => {
+    const p = await run(questPlugin(), {}, GROUP);
+    const last = () => {
+      const r = p.kit.core.controls.read(QUEST, 'lastTurn');
+      return 'value' in r ? r.value : r;
+    };
+    expect(last()).toBeUndefined();
+    p.hear({ ...own, chat: PRIVATE, text: '/play' });
+    expect(last()).toEqual({ t: T0, id: '1000' });
+    p.kit.clock.advance(MIN);
+    p.hear({ ...own, chat: GROUP, text: `/play@${QUESTBOT}` });
+    expect(last()).toEqual({ t: T0, id: '1000' });
+    p.iface.sent({ chat: PRIVATE, t: T0 + 2 * MIN });
+    expect(last()).toEqual({ t: T0 + 2 * MIN });
+    await p.kit.stop();
+  });
+
   it("answers a turn (D98): a too soon refuses it, its rest holds the bot's turns back", async () => {
     const p = await run(questPlugin());
     const outbox = p.kit.core.outbox('telegram:alice').as('anyone');

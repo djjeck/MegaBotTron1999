@@ -66,6 +66,7 @@ instance does not start.
 | `configInputs`  | Optional, with `node`: where its nodes declare their own inputs, `{ key, types }`: the key of its `config` holding a record of input ports by name, written as a manifest's, and the types it takes there (`events`, `interface`); the editor adds one there for an edge dropped on such a node (below, bot-os.md D80)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `configChats`   | Optional: the keys of its `config` that name a chat (bot-os.md D96), `[{ key, output?, input?, kinds?, template?, owner?, sender? }]`, so that the editor picks each in its chat picker from its connector's chats instead of having the owner type an id: the connector is its own node (a connector's, no port named), or the one at the other end of the edge from its chat-out `output` or to its chat-in `input`; a string or a list holds the chats as the connector names them (`Surface.id`), a number a chat by its numeric id; `kinds` the kinds it takes (`private`, `group`, `channel`, `bot`); `template`, a `{path}` template may stand for the chat instead; `owner`, a connector's key naming its account's owner's chat (`owner()`, §4.5); `sender`, a key naming people it recognises, not chats it sends to (bot-os.md D100): its picker says nothing of reaching them, and the editor writes them on no edge. A chat picked for a key with an `output` or an `input` (not a template) is **written on that edge too** (its `sends`, or its `reads` unless `"*"`), and replaced there when the pick changes, the chats added by hand kept (bot-os.md D97): the edge is what lets it send. `telegram-bot` declares its `owner` (a person, `owner: true`), `group` and `deny` (people and bots, `sender: true`), the reactor its `chat` (or a template) and `in` |
 | `movedChats`    | Optional: keys its `config` had in an earlier release that named a chat its edge now names alone (bot-os.md D97), `[{ key, output?, input? }]`: a graph saved with one is migrated as it loads (`upgradeGraph`, §2.3), the chat added to the `sends` of the edge from its chat-out `output`, or the `reads` of the edge to its chat-in `input`, where not there already, and the key dropped. `owner-notice` and the turn actor declare their old `chat`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `droppedInputs` | Optional: input ports it had in an earlier release and has no more (bot-os.md D99, the turn actor's `chat`): a graph saved with an edge to one loads with that edge dropped (§2.3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `audit`         | Optional: keys of its `config` whose every change a save or rollback of the graph records in the event log (`core.config`: who, when, the value's SHA-256, never the value; §2.3, bot-os.md D75)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 A connector's manifest also names its **account** (§4.5): the network and the identity it holds.
@@ -194,9 +195,10 @@ writes that chat on a new edge drawn from it, and says so on an edge left withou
 given
 (`node quest-turns: output port chat sends to one chat, its bot's @username: its edge names none`);
 and a chat-in input declared **`sameAs: '<output>'`** has its edge read that one chat and no other
-(`node quest-turns: input port chat reads @QuestBot, the chat its output chat sends to, and no other: its edge reads every chat`).
-A handle's `chats()` gives the chats its edges let it send to (the owner's for an edge that names
-none from an `owner` output): where such a node sends.
+(`node look: input port chat reads @QuestBot, the chat its output chat sends to, and no other: its edge reads every chat`;
+the turn actor had one until it stopped reading its chat, bot-os.md D99). A handle's `chats()` gives
+the chats its edges let it send to (the owner's for an edge that names none from an `owner` output):
+where such a node sends.
 
 **What a chat-in edge reads** (bot-os.md D62) has two independent parts: `reads`, a list of chats or
 `"*"`, any chat its connector monitors (§4.5); and `senders`, a list of senders by username
@@ -219,9 +221,9 @@ split between them (`reads` to the input; `sends`, `commands` to the output). A 
 unchanged: its `ctx.connector('channel')` and `ctx.outbox('channel')` name the two halves.
 
 An interface input that names no plugin is a **contract**: any node whose interface declares its
-members binds it (`interface with state.rest, actions.sent`), so each instance of one plugin may use
-another plugin's interface (each turn-actor instance its own bot's parser, §5). It has no default
-edge: the graph binds it.
+members binds it (`interface with state.rest, state.lastTurn, actions.sent`), so each instance of
+one plugin may use another plugin's interface (each turn-actor instance its own bot's parser, §5).
+It has no default edge: the graph binds it.
 
 **An events input whose namespace its node's config names** (bot-os.md D57): a plugin that learns
 what it listens to from its node's config (the `reactor`, §5) declares
@@ -434,7 +436,6 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
       "reads": "*",
       "senders": ["@QuestBot", "me"]
     },
-    { "from": "tg.chat", "to": "quest-turns.chat", "type": "chat-in", "reads": ["@QuestBot"] },
     {
       "from": "quest-turns.chat",
       "to": "tg.chat",
@@ -461,6 +462,10 @@ it (without case), and the key dropped, so the owner picks nothing again
 (`{ "from": "owner-notice.chat", "to": "telegram-bot.chat", "sends": ["1000000002"] }` and the
 node's `"chat": "1000000002"` become the same edge and a node without `chat`). The file is rewritten
 by the next save.
+
+**An input a plugin no longer has** (bot-os.md D99): a node whose plugin declares `droppedInputs`
+(the turn actor's chat-in `chat`, gone in 0.1.21) loads with its edges to those inputs dropped
+(`dropInputs`), rather than refused for a port that is gone; the file is rewritten by the next save.
 
 **Version 1** (one `chat` edge for both the reads and the sends, from the connector to the plugin)
 is converted as it is read (`upgradeGraph`, `packages/core/src/graph.ts`, bot-os.md D60), against
@@ -940,15 +945,14 @@ is read. A bot never hears another bot, so a bot's export reaches `telegram-user
 **A chat by any of its names** (bot-os.md D90): a Telegram chat has an id and may have a
 `@username`, and a config, an edge or a reaction may name it either way. The connector delivers a
 message under one name (as its `chats` config names the chat, else as before: a group's id, a
-private chat's `@username`) and gives the others as `aliases`; a chat-in edge's `reads`, a
-reaction's `chats` and a turn actor's chat match the name or any alias, without case (the core's
-`hears` and `inChat(m, chat)`). `telegram-user` learns each chat's names from its dialogs (and a
-private chat's from its first message), so it monitors, catches up on and sends to a chat its config
-names either way; `telegram-bot` from the chats it has seen since it started. Since a private chat
-may so be delivered under its id, both say whether a chat is private (`private`, as Telegram tells
-it): read that, not whether the name starts with `@`. Each offers `chatNames(chat)`: every name it
-knows the chat by, `chat` among them, or undefined for one it never saw, which the graph's check
-asks (§2.3).
+private chat's `@username`) and gives the others as `aliases`; a chat-in edge's `reads` and a
+reaction's `chats` match the name or any alias, without case (the core's `hears` and
+`inChat(m, chat)`). `telegram-user` learns each chat's names from its dialogs (and a private chat's
+from its first message), so it monitors, catches up on and sends to a chat its config names either
+way; `telegram-bot` from the chats it has seen since it started. Since a private chat may so be
+delivered under its id, both say whether a chat is private (`private`, as Telegram tells it): read
+that, not whether the name starts with `@`. Each offers `chatNames(chat)`: every name it knows the
+chat by, `chat` among them, or undefined for one it never saw, which the graph's check asks (§2.3).
 
 A connector may also offer `chatTitle(chat)`, a chat's title by any of its names (both Telegram
 connectors, from the chats they have seen), which a send the network refused names (§4.6, D95), and
@@ -1935,52 +1939,58 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   publishes as `<id>.turn` (`{ chat, outcome, retryAt?, playback? }`, `retryAt` the end of the rest
   it starts, `playback: true` for a message played back, D83); a message it claims and cannot read
   goes to drift (§4.7) and is published as an `unknown` outcome. Its read `rest` says until when the
-  bot rests, from its last answer. **Its turn answers its turn commands** (§4.6, Command answers,
-  bot-os.md D98): `refused` with `cooldown` for a "too soon" (`kind: nothing`, `reason: cooldown`),
-  `ok` (`rest`) for any other outcome read, not an `unknown` one, each with its `retryAt`, within
-  two minutes; so a turn queued by any node settles with the bot's answer, and the outbox holds the
-  turn command back in that chat until the bot's rest is over. It resumes from what it parsed (D62):
-  the owner's recent turns and its bot's rest are kept in its store (`parsed`) as they change and
-  read back at its start; it never re-reads the chat, and reads missed messages as any other. Its
-  game gives it a spec (`TurnParserSpec`): its `id`, its `bot`, its `description`, its grammar
-  (`read`, given each of its bot's messages as a `BotMessage`: `text`, `private`, `answers`,
-  `replies`, `self`, and `document`, the file it carries with its text when it has one, such as the
-  bot's export of the player's state, beside the caption in `text`, D82) and its `turnCommands`, the
-  bot's turn commands by first word (`["/play"]`, at least one): which commands are turns is a fact
-  of the game, so it has no config (bot-os.md D70). A node saved while it had one
-  (`"config": { "commands": [...] }`) still loads and runs: a plugin with no config schema ignores
-  its node's config, which the file keeps as written until the owner takes it out. It adds to the
-  owner's summary the answers it read live, by their outcome's kind (§4.17, D92). The tests play a
-  made-up @QuestBot (`packages/turns/test/quest.ts`).
+  bot rests, from its last answer. Its read `lastTurn` says the owner's last turn in the private
+  chat with its bot (`{ t, id? }`, by hand from any device or its actor's), from which its actor
+  counts (D99). **Its turn answers its turn commands** (§4.6, Command answers, bot-os.md D98):
+  `refused` with `cooldown` for a "too soon" (`kind: nothing`, `reason: cooldown`), `ok` (`rest`)
+  for any other outcome read, not an `unknown` one, each with its `retryAt`, within two minutes; so
+  a turn queued by any node settles with the bot's answer, and the outbox holds the turn command
+  back in that chat until the bot's rest is over. It resumes from what it parsed (D62): the owner's
+  recent turns and its bot's rest are kept in its store (`parsed`) as they change and read back at
+  its start; it never re-reads the chat, and reads missed messages as any other. Its game gives it a
+  spec (`TurnParserSpec`): its `id`, its `bot`, its `description`, its grammar (`read`, given each
+  of its bot's messages as a `BotMessage`: `text`, `private`, `answers`, `replies`, `self`, and
+  `document`, the file it carries with its text when it has one, such as the bot's export of the
+  player's state, beside the caption in `text`, D82) and its `turnCommands`, the bot's turn commands
+  by first word (`["/play"]`, at least one): which commands are turns is a fact of the game, so it
+  has no config (bot-os.md D70). A node saved while it had one (`"config": { "commands": [...] }`)
+  still loads and runs: a plugin with no config schema ignores its node's config, which the file
+  keeps as written until the owner takes it out. It adds to the owner's summary the answers it read
+  live, by their outcome's kind (§4.17, D92). The tests play a made-up @QuestBot
+  (`packages/turns/test/quest.ts`).
 - **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
   (P3, P17), each with its own id, configuration, store, timer and state. Its ports: `chat`, a
-  chat-in input on `telegram`, which reads the private chat with its bot (for the turns the owner
-  sends by hand), and `chat`, a chat-out output, which sends there (its command only); and `parser`,
-  a contract (`state.rest`, `actions.sent`) bound to its bot's parser, required, so that drift on
-  the parser stops it. (Its read is to go, its parser telling it of the turns sent by hand, #21.)
-  **Its bot's chat is its edges' alone** (bot-os.md D97): its chat-out edge names exactly one chat,
-  the bot's `@username` (`single`), and its chat-in edge reads that chat and no other (`sameAs`);
-  the check refuses anything else, with why. Its configuration names no chat (a `chat` saved by
-  0.1.19 moves onto its edges as the graph loads, §2.3): `command` (the bot's turn command; `/play`
-  when unset), `schedule` (the planner's pace, each field with its default in the schema,
-  `DEFAULT_SCHEDULE` of `packages/turns/src/schedule.ts`: 17–20 minutes between turns, some skipped,
-  nights off: asleep from `bedtime` to the next `wake`, wall-clock times in its `timeZone`, a night
-  that may cross midnight or not, the two times never equal), `nightSalt` (the instances with one
-  salt sleep the same nights) and `seed`. It plans from the owner's last turn with the bot (kept in
-  its store; a turn sent by hand counts too), as the durable timer `turn` (dropped if it came due
-  more than 10 minutes before a start); when it is due, it asks its parser whether the bot rests
-  and, if so, comes back a few minutes after; through a live chat-out edge it waits for the account
-  to be connected, sends through its outbox and tells its parser the message's id; through a dry-run
-  edge (bot-os.md D64, as a new one is drawn) it logs its turn (`sent`, `/play (dry run)`) and sends
-  nothing; a failed send is tried again two minutes later. It plays while its node runs and the
-  instance is on; its safety stop (`kill`) stops its node (`ctx.stop`), which drops its plan until
-  the owner clears the stop in the editor. It needs no `ctx.mode`. It declares no chat command,
-  since two instances would clash: the owner reaches each with `/plugins <id>` and its read
-  `status`. Each step is published as `turn-actor.step`; its turns (sent, in a dry run, by hand,
-  failed) go in the owner's summary (§4.17, D92). The image offers it (`src/main.ts`): the editor
-  adds one node per bot, each on its own instance, its `chat` edges from and to the owner's
-  `telegram-user` node and its `parser` edge to its bot's parser. The turn parsers are not the
-  image's: each is made from a game's grammar, so a game's module offers it.
+  chat-out output on `telegram`, which sends to the private chat with its bot (its command only);
+  and `parser`, a contract (`state.rest`, `state.lastTurn`, `actions.sent`) bound to its bot's
+  parser, required, so that drift on the parser stops it. **It only sends** (bot-os.md D99): it
+  reads no chat, the turns the owner sends by hand coming from its parser (`state.lastTurn`), and
+  the chat-in edge a graph saved before gave it is dropped as the graph loads (§2.3,
+  `droppedInputs`). **Its bot's chat is its edge's alone** (bot-os.md D97): its chat-out edge names
+  exactly one chat, the bot's `@username` (`single`); the check refuses anything else, with why. Its
+  configuration names no chat (a `chat` saved by 0.1.19 moves onto its edges as the graph loads,
+  §2.3): `command` (the bot's turn command; `/play` when unset), `schedule` (the planner's pace,
+  each field with its default in the schema, `DEFAULT_SCHEDULE` of `packages/turns/src/schedule.ts`:
+  17–20 minutes between turns, some skipped, nights off: asleep from `bedtime` to the next `wake`,
+  wall-clock times in its `timeZone`, a night that may cross midnight or not, the two times never
+  equal), `nightSalt` (the instances with one salt sleep the same nights) and `seed`. It plans from
+  the owner's last turn with the bot (kept in its store; a turn sent by hand counts too: its
+  parser's `state.lastTurn`, read at its start and when its turn is due, a newer one planning afresh
+  from it), as the durable timer `turn` (dropped if it came due more than 10 minutes before a
+  start); when it is due, it asks its parser whether the bot rests, and its outbox what holds its
+  command back (`held`, D98: the bot's cooldown as an answer said, the retry-loop guard), and, if
+  anything does, comes back a few minutes after the longest; through a live chat-out edge it sends
+  through its outbox (refused `not connected`, it waits for the account, trying each minute) and
+  tells its parser the message's id; through a dry-run edge (bot-os.md D64, as a new one is drawn)
+  it logs its turn (`sent`, `/play (dry run)`) and sends nothing; a send refused as its command
+  rests is tried again when it may go (`retryAt`), any other failed send two minutes later. It plays
+  while its node runs and the instance is on; its safety stop (`kill`) stops its node (`ctx.stop`),
+  which drops its plan until the owner clears the stop in the editor. It needs no `ctx.mode`. It
+  declares no chat command, since two instances would clash: the owner reaches each with
+  `/plugins <id>` and its read `status`. Each step is published as `turn-actor.step`; its turns
+  (sent, in a dry run, by hand, failed) go in the owner's summary (§4.17, D92). The image offers it
+  (`src/main.ts`): the editor adds one node per bot, each on its own instance, its `chat` edges from
+  and to the owner's `telegram-user` node and its `parser` edge to its bot's parser. The turn
+  parsers are not the image's: each is made from a game's grammar, so a game's module offers it.
 - **`owner-notice`** (`packages/turns/src/owner-notice.ts`, bot-os.md D91, D94): the one node that
   reports to a chat; without one, nothing is (the editor's events panel shows the notices, §4.16).
   It tells the owner what needs attention, from the notices (§4.16), through its `chat` output

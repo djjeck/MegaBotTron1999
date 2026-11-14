@@ -104,6 +104,8 @@ export type DeliverResult = {
   reason?: string;
   /** The network's id of the message sent. */
   id?: string;
+  /** Refused as the command rests (a cooldown, the guard, D98): when it may go again. */
+  retryAt?: number;
 };
 
 /** An attempt, as the log keeps it. */

@@ -147,7 +147,8 @@ describe('the first start since modes became states (D64)', () => {
       [
         // The file the release before wrote, taken into the history first.
         'migrated',
-        '+ node tg; + node quest; + node quest-turns; + node look; + node shout; + edge tg.chat → quest.chat; + edge tg.chat → quest-turns.chat; + edge quest-turns.chat → tg.chat; … 5 more',
+        // The turn-actor's chat-in edge of before dropped as it loads (D99).
+        '+ node tg; + node quest; + node quest-turns; + node look; + node shout; + edge tg.chat → quest.chat; + edge quest-turns.chat → tg.chat; + edge quest.interface → quest-turns.parser; … 4 more',
       ],
     ]);
     const text = (graphFileControls(file, core).file() as { text: string }).text;

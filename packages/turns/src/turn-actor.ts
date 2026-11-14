@@ -1,28 +1,31 @@
 /**
  * The base turn-actor (docs/bot-os-api.md §5): one plugin, run as one instance per game bot
  * that may be automated (P3, P17), each bound by its ports to the private
- * chat with its bot and to its bot's parser. An instance sends its `command` (by default
- * `/play`; set it to the bot's own turn command) to its bot's chat, from the owner's account, at a
- * person's pace. **Its bot's chat is its edges' alone** (bot-os.md D97): the one chat its chat-out
- * edge sends to, the bot's `@username`, which its chat-in edge reads, and no other (the check
- * refuses anything else); its config names none:
+ * chat with its bot (it only sends there) and to its bot's parser. An instance sends its `command`
+ * (by default `/play`; set it to the bot's own turn command) to its bot's chat, from the owner's
+ * account, at a person's pace. **Its bot's chat is its edge's alone** (bot-os.md D97): the one chat
+ * its chat-out edge sends to, the bot's `@username` (the check refuses anything else); its config
+ * names none. It reads no chat (D99): what it knows of the chat, its parser tells it:
  *
  * - its planner (packages/turns/src/schedule.ts) counts from the owner's last turn with the
- *   bot: its own, or one sent by hand in that chat (from any device), which plans afresh; the last
- *   one is kept in its store (`state`), so a restart never sends sooner; with no recent turn, it
- *   sends within a few minutes, each instance at its own moment;
+ *   bot: its own, or one sent by hand in that chat (from any device), which its parser knows
+ *   (`state.lastTurn`) and it reads at its start and when its turn is due, planning afresh from a
+ *   newer one; the last one is kept in its store (`state`), so a restart never sends sooner; with
+ *   no recent turn, it sends within a few minutes, each instance at its own moment;
  * - before it sends, it asks its parser whether the bot rests (`state.rest`: its rest after a
- *   turn, 30 minutes after a fight lost, a "too soon"), and if it does, it waits it
- *   out, coming back a few minutes after;
+ *   turn, 30 minutes after a fight lost, a "too soon"), and its outbox what holds its command back
+ *   (`held`, D98: the bot's cooldown as an answer said it, the retry-loop guard), and if anything
+ *   does, it waits it out, coming back a few minutes after;
  * - its next send is the durable timer `turn`, kept across restarts; one that came due while the
  *   client was down for more than `PLAN_GRACE_MS` is dropped, and it plans afresh;
  * - it plays while its node runs and the bot is on; stopped (bot-os.md D64: drift on its parser,
  *   which it requires, the owner's kill or stop, or its own safety stop, `kill`), it drops its plan
  *   and plays no more until the owner clears the stop in the editor;
  * - through a dry-run chat-out edge (D64) its turns are logged, nothing sent; through a live one,
- *   it waits for the account to be connected, and tells its parser each turn sent, so the parser
- *   matches the bot's reply to it;
- * - a failed send is planned again two minutes later.
+ *   it waits for the account to be connected (its send refused `not connected`), and tells its
+ *   parser each turn sent, so the parser matches the bot's reply to it;
+ * - a send refused as its command rests (D98) is planned again when it may go; any other failed
+ *   send, two minutes later.
  *
  * It declares no chat command (two instances would clash on its name): the owner's `/plugins <id>`
  * gives each its state, and its read `status` its last and next send. It keeps nothing in
@@ -32,7 +35,6 @@
 import {
   counted,
   definePlugin,
-  inChat,
   type Plugin,
   type PluginContext,
   type SummaryWindow,
@@ -41,7 +43,7 @@ import {
 import { Rng } from '@megabottron1999/core/rng.ts';
 import { z } from 'zod';
 import { DEFAULT_SCHEDULE, hash, type Plan, Planner, scheduleProblem } from '#src/schedule.ts';
-import { isTurnCommand, TURN_PARSER_MEMBERS, type TurnParserInterface } from './turn-parser.ts';
+import { TURN_PARSER_MEMBERS, type TurnParserInterface } from './turn-parser.ts';
 
 export const TURN_ACTOR = 'turn-actor';
 /** The timer of the next turn. */
@@ -172,11 +174,11 @@ export function turnActorPlugin(): Plugin {
       description:
         "A game bot's turn, from the owner's account, in its private chat, at a person's pace",
       config: turnActorConfig,
-      // Its bot's chat is its edges' (D97); its config's `chat` of 0.1.19 moves there.
-      movedChats: [
-        { key: 'chat', output: 'chat' },
-        { key: 'chat', input: 'chat' },
-      ],
+      // Its bot's chat is its edge's (D97); its config's `chat` of 0.1.19 moves there.
+      movedChats: [{ key: 'chat', output: 'chat' }],
+      // It read its bot's chat for the turns sent by hand, which its parser tells it now (D99): a
+      // graph saved with that edge loads without it.
+      droppedInputs: ['chat'],
       // Its turns since the last summary, for the owner (bot-os.md D92).
       summary: true,
       games: { registers: [TURN_ACTOR] },
@@ -186,17 +188,10 @@ export function turnActorPlugin(): Plugin {
         ),
       },
       inputs: {
-        chat: {
-          type: 'chat-in',
-          network: 'telegram',
-          // It reads the one chat it sends to, and no other (D97).
-          sameAs: 'chat',
-          help: "the owner's own account: its bot's private chat, where it sees the turns the owner sends by hand; it reads the chat its chat output sends to",
-        },
         parser: {
           type: 'interface',
           members: TURN_PARSER_MEMBERS,
-          help: "Its bot's parser: the bot's rest, and the turns it sent",
+          help: "Its bot's parser: the bot's rest, the owner's last turn (by hand too), and the turns it sent",
         },
       },
       outputs: {
@@ -255,21 +250,10 @@ class TurnActor {
   }
 
   instance() {
-    const bot = this.chat.slice(1);
-    const commands = [this.c.command];
-    // A turn the owner sends by hand in the chat, from any device, restarts the count.
-    this.ctx.connector('chat').onMessage((m) => {
-      if (m.own !== true || !inChat(m, this.chat)) return;
-      if (!isTurnCommand(m.text, commands, bot)) return;
-      if (this.last !== undefined && m.time <= this.last) return;
-      this.remember(m.time);
-      this.turns.add('by hand');
-      this.step('seen', `sent by hand at ${clock(m.time)}`);
-      if (this.plan !== undefined) this.replan();
-    });
     return {
       start: () => {
         this.ctx.summary?.contribute((w) => this.summaryLines(w));
+        if (this.byHand() && this.plan !== undefined) this.replan();
         this.settle();
       },
       onTimer: (name: string) => {
@@ -303,6 +287,19 @@ class TurnActor {
       ...(this.last === undefined ? {} : { last: this.last }),
       ...(this.plan === undefined ? {} : { next: this.plan.at }),
     };
+  }
+
+  /**
+   * A turn the owner sent by hand in the chat, from any device, since its last, as its parser
+   * knows it (D99): it counts from it. Whether there was one.
+   */
+  private byHand(): boolean {
+    const turn = this.ctx.use<TurnParserInterface>('parser').state.lastTurn();
+    if (turn === undefined || (this.last !== undefined && turn.t <= this.last)) return false;
+    this.remember(turn.t);
+    this.turns.add('by hand');
+    this.step('seen', `sent by hand at ${clock(turn.t)}`);
+    return true;
   }
 
   /** Whether it plays now: its node not stopped, the bot not off. */
@@ -348,35 +345,52 @@ class TurnActor {
     this.step(event, `${clock(plan.at)} UTC${notes.length > 0 ? ` (${notes.join(', ')})` : ''}`);
   }
 
-  /** Its plan is due: waits for the bot's rest or the account, or sends. */
+  /**
+   * What holds its turn back now, the longest: the bot's rest as its parser read it, or what its
+   * outbox holds its command back for (D98: a cooldown an answer said, the retry-loop guard).
+   */
+  private resting(now: number): { until: number; why: string } | undefined {
+    const rest = this.ctx.use<TurnParserInterface>('parser').state.rest();
+    const held = this.ctx.outbox('chat').held(this.chat, this.c.command);
+    const holds = [
+      ...(rest !== undefined && rest.until > now ? [rest] : []),
+      ...(held !== undefined && held.until > now ? [{ until: held.until, why: held.reason }] : []),
+    ];
+    return holds.sort((a, b) => b.until - a.until)[0];
+  }
+
+  /** Its plan is due: plans afresh from a turn sent by hand, waits for a rest, or sends. */
   private async due(): Promise<void> {
     const plan = this.plan;
     this.plan = undefined;
     if (!this.playing() || this.sending) return;
+    if (this.byHand()) {
+      this.replan();
+      return;
+    }
     const now = this.ctx.clock.now();
-    const rest = this.ctx.use<TurnParserInterface>('parser').state.rest();
-    if (rest !== undefined && rest.until > now) {
+    const rest = this.resting(now);
+    if (rest !== undefined) {
       this.setPlan(this.planner.after(rest.until), 'rest', `${this.chat} rests: ${rest.why}`);
       return;
     }
-    // Through a dry-run edge, nothing is sent: it waits for no connection (D64).
-    const live = this.ctx.outbox('chat').mode() === 'live';
-    if (live && this.ctx.connector('chat').status().state !== 'connected') {
-      if (!this.waiting) this.step('waiting', "the owner's account is not connected");
-      this.waiting = true;
-      this.plan = plan ?? { at: now, skipped: 0, afterSleep: false };
-      this.ctx.scheduler.after(TURN_TIMER, CONNECT_WAIT_MS, {
-        payload: this.plan,
-        late: 'fire',
-        graceMs: PLAN_GRACE_MS,
-      });
-      return;
-    }
-    this.waiting = false;
     this.sending = true;
     try {
       const r = await this.ctx.outbox('chat').deliver(this.chat, this.c.command);
       const t = this.ctx.clock.now();
+      // The account not connected (a dry run never waits for it, D64): it tries again shortly.
+      if (r.outcome === 'refused' && r.reason === 'not connected') {
+        if (!this.waiting) this.step('waiting', "the owner's account is not connected");
+        this.waiting = true;
+        this.plan = plan ?? { at: t, skipped: 0, afterSleep: false };
+        this.ctx.scheduler.after(TURN_TIMER, CONNECT_WAIT_MS, {
+          payload: this.plan,
+          late: 'fire',
+          graceMs: PLAN_GRACE_MS,
+        });
+        return;
+      }
+      this.waiting = false;
       if (r.outcome === 'sent' || r.outcome === 'dry-run') {
         if (r.outcome === 'sent')
           this.ctx
@@ -394,8 +408,10 @@ class TurnActor {
       } else {
         this.turns.add('failed');
         this.step('failed', r.reason ?? r.outcome);
+        // Refused as its command rests (D98): again when it may go, else a little later.
+        const at = r.retryAt !== undefined && r.retryAt > t ? r.retryAt : t + RETRY_MS;
         if (this.playing())
-          this.setPlan({ at: t + RETRY_MS, skipped: 0, afterSleep: false }, 'planned', 'a retry');
+          this.setPlan({ at, skipped: 0, afterSleep: false }, 'planned', 'a retry');
       }
     } finally {
       this.sending = false;

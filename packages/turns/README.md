@@ -7,16 +7,19 @@ a game's player state, the script node, and the node that tells the owner what n
   account (a chat-in input: it reads, never sends), from a grammar the game provides with its bot's
   turn commands (`turnCommands`: a fact of the game, not a config, docs/bot-os.md D70). It knows the
   owner's turns (sent by hand or by the actor), which of the bot's messages answer one, publishes
-  what it reads, reports to drift what it cannot read, and says until when the bot rests. It resumes
-  from what it parsed, kept in its store, never by re-reading the chat (docs/bot-os.md D62).
+  what it reads, reports to drift what it cannot read, says until when the bot rests and the owner's
+  last turn in the private chat (`state.lastTurn`, docs/bot-os.md D99), and declares its turn event
+  an answer to its turn commands (D98). It resumes from what it parsed, kept in its store, never by
+  re-reading the chat (docs/bot-os.md D62).
 - `turnActorPlugin` (`src/turn-actor.ts`): an actor that sends one bot's turn command in the private
   chat with it, at a person's pace (`src/schedule.ts`: intervals drawn from a range, skipped turns,
-  nights off), waiting out the rest its parser reads. One plugin, run as one instance per bot. Its
-  bot's chat is its edges' alone (docs/bot-os.md D97): its chat-out edge names that one chat, the
-  bot's `@username`, and its chat-in edge reads it and no other; its config names none. Through a
-  dry-run chat-out edge it logs each turn and sends nothing; through a live one it waits for the
-  account to be connected. Its safety stop (the kill switch) stops its node (`ctx.stop`,
-  docs/bot-os.md D64), until the owner clears the stop in the editor.
+  nights off), waiting out the rest its parser reads and the cooldown its outbox holds its command
+  for (D98). One plugin, run as one instance per bot. It only sends (docs/bot-os.md D99): the turns
+  the owner sends by hand come from its parser (`state.lastTurn`), and it reads no chat. Its bot's
+  chat is its edge's alone (D97): its chat-out edge names that one chat, the bot's `@username`; its
+  config names none. Through a dry-run chat-out edge it logs each turn and sends nothing; through a
+  live one it waits for the account to be connected. Its safety stop (the kill switch) stops its
+  node (`ctx.stop`, docs/bot-os.md D64), until the owner clears the stop in the editor.
 - `reactorPlugin` (`src/reactor.ts`): the `reactor`, one reaction (`react()` of the core) from its
   node's config: when an event of its `on` type is heard (on its events input, there only with `on`
   and then required: the check refuses a reactor on events that no edge binds), or a message on its
@@ -67,7 +70,8 @@ a game's player state, the script node, and the node that tells the owner what n
   with no worker to kill, each synchronous run is cut by vm's limit in real time.
 
 Their chats run left to right (docs/bot-os.md D60): a parser has a chat-in input only, the reactor a
-chat-out output (and a chat-in only with `match`), and the turn-actor both, for now. Whether a send
-goes for real is its chat-out edge's: a `dryRun` edge logs it as sent and sends nothing (D64).
+chat-out output (and a chat-in only with `match`), and the turn-actor a chat-out output only (D99).
+Whether a send goes for real is its chat-out edge's: a `dryRun` edge logs it as sent and sends
+nothing (D64).
 
 The tests play a made-up @QuestBot (`test/quest.ts`), and a made-up game's inventory.

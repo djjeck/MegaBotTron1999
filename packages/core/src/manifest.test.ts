@@ -5,6 +5,12 @@ import { ManifestError, parseManifest } from './manifest.ts';
 const base = { id: 'test-plugin', version: '0.1.0', kinds: ['stats'], description: 'a test' };
 
 describe('parseManifest', () => {
+  it('refuses a dropped input it still has (D99)', () => {
+    expect(() =>
+      parseManifest({ ...base, inputs: { chat: { type: 'chat-in' } }, droppedInputs: ['chat'] })
+    ).toThrow('droppedInputs.0: it still has an input chat');
+  });
+
   it('fills in the defaults', () => {
     expect(parseManifest(base)).toEqual({
       ...base,
@@ -18,6 +24,7 @@ describe('parseManifest', () => {
       configSecrets: [],
       configChats: [],
       movedChats: [],
+      droppedInputs: [],
       notices: false,
       summary: false,
       audit: [],

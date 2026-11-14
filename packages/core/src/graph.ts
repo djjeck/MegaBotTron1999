@@ -422,7 +422,27 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  * The other edges and the nodes are kept as they are. Nothing is checked: `resolveGraph` does.
  */
 export function upgradeGraph(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unknown {
-  return moveChats(foldModes(upgradeChats(raw, plugins)), plugins);
+  return dropInputs(moveChats(foldModes(upgradeChats(raw, plugins)), plugins), plugins);
+}
+
+/**
+ * A graph with an edge to an input port its node's plugin no longer has (`droppedInputs`,
+ * bot-os.md D99: the turn actor's chat-in) without that edge; any other graph as it is. Nothing
+ * is checked.
+ */
+export function dropInputs(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unknown {
+  if (!isRecord(raw) || !Array.isArray(raw['nodes']) || !Array.isArray(raw['edges'])) return raw;
+  const gone = new Set<string>();
+  for (const n of raw['nodes'] as unknown[]) {
+    if (!isRecord(n) || typeof n['id'] !== 'string' || typeof n['plugin'] !== 'string') continue;
+    for (const port of plugins.get(n['plugin'])?.droppedInputs ?? [])
+      gone.add(`${n['id']}.${port}`);
+  }
+  if (gone.size === 0) return raw;
+  const edges = (raw['edges'] as unknown[]).filter(
+    (e) => !isRecord(e) || typeof e['to'] !== 'string' || !gone.has(e['to'])
+  );
+  return edges.length === (raw['edges'] as unknown[]).length ? raw : { ...raw, edges };
 }
 
 /**

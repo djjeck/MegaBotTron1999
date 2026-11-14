@@ -124,6 +124,7 @@ export {
   type Binding,
   defaultGraph,
   downText,
+  dropInputs,
   foldModes,
   type Graph,
   GRAPH_VERSION,
