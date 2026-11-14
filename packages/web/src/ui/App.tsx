@@ -5,14 +5,16 @@
  * app is the owner's console, in one menu.
  *
  * Its shell: a top bar whose tabs are the pages (the tab selected is the page's title), the page
- * between, which alone scrolls, and a bottom bar for small print, such as diagnostics. The bars
- * stay where they are.
+ * between, which alone scrolls, and a bottom bar for small print, such as diagnostics: the release
+ * the instance runs and its commit (`GET /instance`), read again after a restart. The bars stay
+ * where they are.
  * Every page is reached by the URL's hash (`#/admin`); a page added here is a line of `PAGES`, as
  * the widgets will be. The admin page's sections keep their old routes (`#/plugins`), which lead to
  * it, scrolled to the section.
  */
 import type { ReactNode } from 'react';
 import { Fragment, useCallback, useEffect, useState } from 'react';
+import type { InstanceHealth } from './api.ts';
 import { api } from './api.ts';
 import { GraphPage } from './graph/GraphPage.tsx';
 import { useRoute } from './hooks.ts';
@@ -66,6 +68,12 @@ export function resolve(route: string): { page: Page; section?: string } {
   return { page: PAGES[0] as Page };
 }
 
+/** The release an instance runs, and its commit's start when known; undefined from an older one. */
+export function release(h: InstanceHealth): string | undefined {
+  if (h.version === undefined) return undefined;
+  return h.commit === undefined ? `v${h.version}` : `v${h.version} (${h.commit.slice(0, 7)})`;
+}
+
 export function App() {
   const [session, setSession] = useState<'unknown' | 'in' | 'out'>('unknown');
   const [note, setNote] = useState<string>();
@@ -88,6 +96,15 @@ export function App() {
     setNote(why);
     setSession('out');
   }, []);
+  // The release the instance runs, for the bottom bar: read once logged in, and after a restart.
+  const [build, setBuild] = useState<string>();
+  useEffect(() => {
+    if (session !== 'in') return;
+    api<InstanceHealth>('/instance').then(
+      (h) => setBuild(release(h)),
+      () => setBuild(undefined)
+    );
+  }, [session, generation]);
   useEffect(() => {
     api<{ authenticated: boolean }>('/session').then(
       (s) => setSession(s.authenticated ? 'in' : 'out'),
@@ -144,9 +161,11 @@ export function App() {
           <Fragment key={generation}>{current.page({ loggedOut, restarted, section })}</Fragment>
         </div>
       </main>
-      {/* The bottom bar: small print, such as diagnostics (the version, to come), in its slot. */}
+      {/* The bottom bar: small print, such as diagnostics, in its slot. */}
       <footer className="status-bar">
-        <div className="status-bar-slot" />
+        <div className="status-bar-slot">
+          {build === undefined ? null : <span title="the release the instance runs">{build}</span>}
+        </div>
       </footer>
     </div>
   );

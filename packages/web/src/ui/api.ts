@@ -87,6 +87,10 @@ export interface GraphViewData {
 /** The instance's health, as `GET /instance` gives it. */
 export interface InstanceHealth {
   off: boolean;
+  /** The release it runs; absent from an older instance. */
+  version?: string;
+  /** The commit its image was built from, when known. */
+  commit?: string;
   uptimeS: number;
   node: string;
   memoryMb: { rss: number; heap: number };

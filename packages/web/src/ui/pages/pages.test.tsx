@@ -66,6 +66,19 @@ describe('AdminPage', () => {
 });
 
 describe('InstancePage', () => {
+  it('shows the release it runs, with its commit when known', async () => {
+    fakeApi({
+      'GET /instance': [200, { ...HEALTH, version: '1.2.3', commit: 'abcdef0123456789' }],
+    });
+    render(<InstancePage loggedOut={loggedOut} />);
+    expect(await screen.findByText('Release')).toBeDefined();
+    expect(screen.getByText('abcdef012345')).toBeDefined();
+    cleanup();
+    fakeApi({ 'GET /instance': [200, { ...HEALTH, version: '1.2.3' }] });
+    render(<InstancePage loggedOut={loggedOut} />);
+    expect(await screen.findByText('1.2.3')).toBeDefined();
+  });
+
   it('shows the health, and turns the instance off and on, and kills it once confirmed', async () => {
     let off = false;
     const api = fakeApi({

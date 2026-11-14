@@ -17,6 +17,11 @@ variable "TAGS" {
   default = "local"
 }
 
+variable "BUILD_COMMIT" {
+  # The commit shown by GET /instance; empty unless given (BUILD_COMMIT=$(git rev-parse HEAD)).
+  default = ""
+}
+
 variable "PLATFORMS" {
   # Comma-separated; empty for this machine's.
   default = ""
@@ -31,4 +36,5 @@ target "megabottron1999" {
   dockerfile = "Dockerfile"
   platforms  = PLATFORMS == "" ? [] : split(",", PLATFORMS)
   tags       = [for t in split(",", TAGS) : "${IMAGE}:${t}"]
+  args       = { BUILD_COMMIT = BUILD_COMMIT }
 }

@@ -37,11 +37,23 @@ import { reactorPlugin } from '@megabottron1999/turns/reactor.ts';
 import { scriptPlugin } from '@megabottron1999/turns/script-plugin.ts';
 import { turnActorPlugin } from '@megabottron1999/turns/turn-actor.ts';
 import { startWebUi } from '@megabottron1999/web/server/web-server.ts';
+import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { format } from 'node:util';
 
 const env = process.env;
+// The release it runs (the root package.json's version) and the commit its image was built from
+// (BUILD_COMMIT, the Dockerfile's build argument, set by the Publish workflow), for GET /instance
+// and the web UI's bottom bar.
+const build = {
+  version: (
+    JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      version: string;
+    }
+  ).version,
+  ...(env['BUILD_COMMIT'] ? { commit: env['BUILD_COMMIT'] } : {}),
+};
 const dataDir = env['LOG_DIR'] || '/data';
 const port = (name: string, fallback: number): number => {
   const n = Number(env[name]);
@@ -155,6 +167,7 @@ const controlApi = controlHandler({
   instances: () => core.instances(),
   graphFile: graphFileControls(graphFile, core, (v) => secrets.redactDeep(v)),
   restart: () => void end('restart'),
+  build,
   // A module is removed only while no node of the saved graph uses its plugins (D68).
   modules: moduleControls(modules, loaded, githubModules, () => graphFile.nodes()),
 });
@@ -170,7 +183,10 @@ const web = startWebUi({
   port: port('WEB_PORT', 8082),
   print: (line) => console.log(line),
 });
-console.log(`megabottron1999: started, ${core.nodes().length} plugin instance(s) in the graph`);
+console.log(
+  `megabottron1999 ${build.version}${build.commit === undefined ? '' : ` (${build.commit.slice(0, 7)})`}: ` +
+    `started, ${core.nodes().length} plugin instance(s) in the graph`
+);
 
 // The end, at a signal or the owner's restart: the core stops first, its plugins' state kept, then
 // the process exits 0, for Docker's `restart: unless-stopped` to start it again after a restart.

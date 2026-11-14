@@ -1202,8 +1202,9 @@ card ends with the way back to the owner's main card that the wiring names (`Cor
 **The HTTP control API** (`packages/core/src/control-server.ts`), one request handler
 (`controlHandler`) that the entry point serves twice: on the container's loopback (`CONTROL_PORT`,
 8081), and under `/api/` on the web UI's listener, only behind its login. `GET /status`;
-`GET /instance` (off or on, the process's uptime, Node's version and memory, the plugins and the
-accounts counted by state); `GET /accounts`; `GET /accounts/<id>/surfaces?search=&limit=50` (a
+`GET /instance` (off or on, the release it runs as `version` and the commit its image was built from
+as `commit`, absent when unknown, the process's uptime, Node's version and memory, the plugins and
+the accounts counted by state); `GET /accounts`; `GET /accounts/<id>/surfaces?search=&limit=50` (a
 connector's surfaces, §4.5: `{ running, listed, surfaces }`, `running` false until it runs, `listed`
 false for a connector that cannot list its chats, 409 with why when it cannot tell now, such as not
 connected, 404 for a node that is not a connector); `GET /drift`;

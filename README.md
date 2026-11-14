@@ -96,6 +96,9 @@ docker buildx bake --load                          # this machine's platform, me
 PLATFORMS=linux/arm64 docker buildx bake --load    # arm64, under emulation elsewhere
 ```
 
+`BUILD_COMMIT=$(git rev-parse HEAD)` before either names the commit that `GET /instance` and the web
+UI's bottom bar show beside the release (the published images carry theirs).
+
 ## How plugins work
 
 A plugin is a TypeScript module that exports a manifest and a `create` function:

@@ -10,7 +10,8 @@
  *   disabled, stopped with its stop, inactive with the node it needs, failed), settings, reads,
  *   actions, and its own `status` read if it declares one; `graph.refused`, why the saved graph
  *   did not run, when it did not.
- * - `GET /instance`: the instance's health: off or on, the process's uptime, Node's version and
+ * - `GET /instance`: the instance's health: off or on, the release it runs (`version`, and the
+ *   `commit` its image was built from, when known), the process's uptime, Node's version and
  *   memory, the plugins and the accounts counted by state.
  * - `GET /accounts`: each connector instance, its account and its connection's status.
  * - `GET /accounts/<id>/surfaces?search=&limit=50`: the chats a connector can see, latest first
@@ -245,6 +246,14 @@ export interface ControlOptions {
    * (Docker's `restart: unless-stopped`) to start it again. Called once the answer has gone.
    */
   restart?: () => void;
+  /** The release the instance runs, and the commit its image was built from when known. */
+  build?: Build;
+}
+
+/** A release, and the commit its image was built from (unknown outside a published image). */
+export interface Build {
+  version: string;
+  commit?: string;
 }
 
 const HOUR = 3_600_000;
@@ -322,6 +331,7 @@ export function controlHandler(
         const memory = process.memoryUsage();
         return reply(200, {
           off,
+          ...o.build,
           uptimeS: Math.round(process.uptime()),
           node: process.version,
           memoryMb: {

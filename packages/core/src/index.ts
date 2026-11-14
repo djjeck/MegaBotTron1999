@@ -39,6 +39,7 @@ export {
 } from './connector.ts';
 export {
   ACTOR_HEADER,
+  type Build,
   controlHandler,
   type ControlOptions,
   controlServer,

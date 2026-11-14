@@ -650,6 +650,7 @@ describe('controlServer', () => {
         return records;
       },
       now: () => 10 * 3_600_000,
+      build: { version: '1.2.3', commit: 'abcdef0123456789' },
     });
     await new Promise<void>((r) => server?.listen(0, '127.0.0.1', r));
     const { port } = server.address() as { port: number };
@@ -661,6 +662,8 @@ describe('controlServer', () => {
     const [, health] = await get('/instance');
     expect(health).toMatchObject({
       off: false,
+      version: '1.2.3',
+      commit: 'abcdef0123456789',
       node: process.version,
       plugins: { running: 3 },
       accounts: { closed: 1 },

@@ -5,10 +5,12 @@ import type { Answer } from '#test/fake-api.ts';
 import { fakeApi } from '#test/fake-api.ts';
 import { fakeCore } from '#test/fake-core.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
-import { App, NOTICE_MS, PAGES } from './App.tsx';
+import { App, NOTICE_MS, PAGES, release } from './App.tsx';
 
 const HEALTH = {
   off: false,
+  version: '1.2.3',
+  commit: 'abcdef0123456789',
   uptimeS: 90_061,
   node: 'v24.0.0',
   memoryMb: { rss: 80, heap: 30 },
@@ -28,6 +30,15 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   restore();
+});
+
+describe('release', () => {
+  it('names the release, its commit when known, and nothing for an older instance', () => {
+    const { version, commit, ...older } = HEALTH;
+    expect(release(HEALTH)).toBe('v1.2.3 (abcdef0)');
+    expect(release({ ...older, version })).toBe('v1.2.3');
+    expect(release({ ...older, commit })).toBeUndefined();
+  });
 });
 
 describe('App', () => {
@@ -79,8 +90,9 @@ describe('App', () => {
         .getAllByRole('link')
         .map((l) => l.textContent)
     ).toEqual(['Graph', 'Modules', 'Admin', 'Drift', 'Events']);
-    // The bottom bar, for small print, stays on every page.
-    expect(screen.getByRole('contentinfo')).toBeDefined();
+    // The bottom bar, for small print, stays on every page: the release the instance runs.
+    const bar = screen.getByRole('contentinfo');
+    expect(await within(bar).findByText('v1.2.3 (abcdef0)')).toBeDefined();
     for (const page of PAGES) {
       window.location.hash = `#/${page.route}`;
       window.dispatchEvent(new HashChangeEvent('hashchange'));

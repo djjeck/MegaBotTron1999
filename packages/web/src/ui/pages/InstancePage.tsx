@@ -54,6 +54,15 @@ export function InstancePage({ loggedOut }: PageProps) {
             </button>
           )}
         </dd>
+        {h.version === undefined ? null : (
+          <>
+            <dt>Release</dt>
+            <dd>
+              {h.version}
+              {h.commit === undefined ? null : <code> {h.commit.slice(0, 12)}</code>}
+            </dd>
+          </>
+        )}
         <dt>Up for</dt>
         <dd>{duration(h.uptimeS)}</dd>
         <dt>Node</dt>

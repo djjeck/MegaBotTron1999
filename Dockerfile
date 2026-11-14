@@ -43,6 +43,12 @@ COPY src/ src/
 RUN mkdir /data && chown node:node /data
 USER node
 
+# The commit the image is built from (the Publish workflow passes it), shown with the release by
+# GET /instance and the web UI's bottom bar; empty for a local build. Last, so that it spoils no
+# layer's cache.
+ARG BUILD_COMMIT=""
+ENV BUILD_COMMIT=${BUILD_COMMIT}
+
 ENV NODE_ENV=production LOG_DIR=/data HEALTH_PORT=8080 WEB_PORT=8082
 # The health endpoint (the irc connector's, when configured), and the web UI (only with its
 # password, the web_ui_password secret), for a proxy on the container's network.

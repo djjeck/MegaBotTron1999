@@ -6,17 +6,18 @@ the server that guards them.
 - `src/ui/`: a React app, built by Vite (`npm run build`, `vite.config.ts`, `index.html`) into
   `dist/`, the only build step of the shell. Its pages are reached by the URL's hash, as tabs across
   a top bar, the tab selected being the page's title; a bottom bar holds small print, such as
-  diagnostics (its slot is empty for now); both bars stay, and only the page between them scrolls.
-  The home page is the **Graph** (`#/graph`, `src/ui/graph/`), the graph editor (docs/bot-os.md
-  D55), drawn with React Flow (`@xyflow/react`): a draft of the saved graph, each plugin instance a
-  node with its input ports on the left and its output ports on the right, each port type in its own
-  shape and colour, each binding an edge in its type's colour, dashed when the input is optional,
-  and on each node its state and drift (docs/bot-os.md D64): disabled, greyed; stopped, in red tones
-  with a warning icon and its reason; inactive, greyed with the node it needs. The page is the map,
-  filling the area between the bars: its minimap at the top right; what the draft needs (**Review
-  changes**, the problems, the selection and **Kill selected**) at the top left; the zoom controls
-  and the legend at the bottom left; and **Add a node**, a floating "+" button, at the bottom right.
-  The panel of what is selected opens beside the map (below it on a phone). Chats flow left to right
+  diagnostics: the release the instance runs and its commit (`GET /api/instance`, read again after a
+  restart); both bars stay, and only the page between them scrolls. The home page is the **Graph**
+  (`#/graph`, `src/ui/graph/`), the graph editor (docs/bot-os.md D55), drawn with React Flow
+  (`@xyflow/react`): a draft of the saved graph, each plugin instance a node with its input ports on
+  the left and its output ports on the right, each port type in its own shape and colour, each
+  binding an edge in its type's colour, dashed when the input is optional, and on each node its
+  state and drift (docs/bot-os.md D64): disabled, greyed; stopped, in red tones with a warning icon
+  and its reason; inactive, greyed with the node it needs. The page is the map, filling the area
+  between the bars: its minimap at the top right; what the draft needs (**Review changes**, the
+  problems, the selection and **Kill selected**) at the top left; the zoom controls and the legend
+  at the bottom left; and **Add a node**, a floating "+" button, at the bottom right. The panel of
+  what is selected opens beside the map (below it on a phone). Chats flow left to right
   (docs/bot-os.md D60): a connector is drawn as two cards (`cards.ts`), its **in** card
   (`telegram-user · in`) at the left, whose chat-in output feeds the readers, and its **out** card
   (`telegram-user · out`) in a column of its own at the right, whose chat-out input takes the
@@ -122,22 +123,22 @@ the server that guards them.
   is offered. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59) has one
   section per area, each reached by its route (`#/instance`, `#/graph-history`, `#/graph-text`,
   `#/accounts`, `#/plugins`, `#/resources`), which opens the page scrolled to it: **Instance** (on
-  or off with its switch, uptime, memory, the plugins and accounts by state, the kill switch),
-  **Graph history** (`GraphHistoryPage.tsx`, docs/bot-os.md D61: each version of the saved graph,
-  newest first, with its time, what changed and how the instance started on it, the last that ran
-  marked "last good"; one opened shows what rolling back to it would change, as the review's diff
-  (**Changes**) and as a line diff of the two printouts (**As text**), and **Roll back to this**
-  asks, repeating the diff, then restarts on it), **Graph as text** (the saved graph printed, with a
-  copy button), **Accounts** (each connector, its account and its connection's status) and
-  **Plugins** (each plugin instance with its state, read-only (its reason and its stop), and,
-  opened, its settings, its own status and the reads and actions it declares) and **Resources**
-  (`ResourcesPage.tsx`, docs/bot-os.md D77: the nodes by cost since the start, the CPU a script's
-  worker spent running its code or else the time in its handlers, sortable by any column, the top
-  three marked). Beside it, **Drift** (each parser's counts and the latest reports) and **Events**
-  (the event log's latest records, filtered by type). Every page reads the control API only; the app
-  imports the core's types and nothing else of it, so its bundle holds none of the shell's code. All
-  the pages are in one menu, with no admin part apart: the whole app is the owner's console. A page
-  is a line of `PAGES` in `src/ui/App.tsx`.
+  or off with its switch, the release and its commit, uptime, memory, the plugins and accounts by
+  state, the kill switch), **Graph history** (`GraphHistoryPage.tsx`, docs/bot-os.md D61: each
+  version of the saved graph, newest first, with its time, what changed and how the instance started
+  on it, the last that ran marked "last good"; one opened shows what rolling back to it would
+  change, as the review's diff (**Changes**) and as a line diff of the two printouts (**As text**),
+  and **Roll back to this** asks, repeating the diff, then restarts on it), **Graph as text** (the
+  saved graph printed, with a copy button), **Accounts** (each connector, its account and its
+  connection's status) and **Plugins** (each plugin instance with its state, read-only (its reason
+  and its stop), and, opened, its settings, its own status and the reads and actions it declares)
+  and **Resources** (`ResourcesPage.tsx`, docs/bot-os.md D77: the nodes by cost since the start, the
+  CPU a script's worker spent running its code or else the time in its handlers, sortable by any
+  column, the top three marked). Beside it, **Drift** (each parser's counts and the latest reports)
+  and **Events** (the event log's latest records, filtered by type). Every page reads the control
+  API only; the app imports the core's types and nothing else of it, so its bundle holds none of the
+  shell's code. All the pages are in one menu, with no admin part apart: the whole app is the
+  owner's console. A page is a line of `PAGES` in `src/ui/App.tsx`.
 - `src/server/web-server.ts`: the UI's own listener. It serves the built app, and the core's control
   API (`controlHandler` of `@megabottron1999/core`) under `/api/`, only to a logged-in owner.
   `startWebUi` starts it only when the `web_ui_password` Docker secret is provided (12 characters at
