@@ -102,6 +102,11 @@ describe('a turn parser', () => {
       [{ kind: 'unknown', bot: QUESTBOT, text: 'Something odd.' }, true],
       [{ kind: 'gain', bot: QUESTBOT, item: 'a pear' }, undefined],
     ]);
+    // The owner's summary counts the news alone (D92).
+    const now = p.kit.clock.now();
+    expect(
+      p.kit.core.summary({ since: now, until: now + 1 }).find((x) => x.node === QUEST)?.lines
+    ).toEqual(['1 answer to turns read: 1 gain']);
   });
 
   it('resumes from what it parsed, kept in its store, and reads missed messages as any', async () => {
@@ -171,6 +176,11 @@ describe('a turn parser', () => {
       outcome: { kind: 'unknown', bot: QUESTBOT, text: 'Level 5!' },
     });
     expect(p.drift()).toMatchObject({ read: 0, unread: 1 });
+    const now = p.kit.clock.now();
+    expect(
+      p.kit.core.summary({ since: now, until: now + 1 }).find((x) => x.node === QUEST)?.lines
+    ).toEqual(['1 answer to turns read: 1 unknown']);
+    expect(p.kit.core.summary({ since: now + 1, until: now + 2 })).toEqual([]);
   });
 
   it('knows a private chat named by id by what its connector says, not by its name (D90)', async () => {

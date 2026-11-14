@@ -166,7 +166,9 @@ export const greeter = definePlugin({
   `owner-notice` node tells it. Wire it from the editor: add the node, set its `chat` to where the
   owner reads (their private chat with the bot, by their Telegram user id), draw its `chat` edge to
   the `telegram-bot` node with that chat among the edge's sends, and make the edge live once the dry
-  run's log (`core.send`, `dry-run`) reads right.
+  run's log (`core.send`, `dry-run`) reads right. The same node sends a summary of what happened
+  every hour (`summaryEveryMin`; none when nothing did, from lines the core and the plugins add,
+  D92) and a notice at each start: the release, the nodes running and not, the graph's warnings.
 - **The dev kit** (`DevKit`, `FakeConnector`, `VirtualClock`) runs plugins on a virtual clock with
   fake connectors, for tests and simulators.
 

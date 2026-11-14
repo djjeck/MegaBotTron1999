@@ -25,11 +25,13 @@
  */
 import { TELEGRAM_USER } from '@megabottron1999/connectors/plugins/telegram-user.ts';
 import {
+  counted,
   definePlugin,
   type Inbound,
   type InboundDocument,
   ME,
   type Plugin,
+  Tally,
 } from '@megabottron1999/core';
 import { z } from 'zod';
 
@@ -143,6 +145,8 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       version: '0.1.0',
       kinds: ['parser'],
       description: spec.description,
+      // The answers it read since the last summary, by outcome, for the owner (bot-os.md D92).
+      summary: true,
       games: { registers: [spec.id] },
       events: {
         [`${spec.id}.turn`]: z
@@ -181,6 +185,15 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
     },
     create: (ctx) => {
       const handle = ctx.connector('chat');
+      /** The answers read live (not history), by their outcome's kind; `unknown`, unread. */
+      const read = new Tally(ctx.clock);
+      ctx.summary?.contribute((w) => {
+        const kinds = read.counts(w);
+        const total = kinds.reduce((sum, [, n]) => sum + n, 0);
+        if (total === 0) return [];
+        const each = kinds.map(([kind, n]) => `${n} ${kind}`).join(', ');
+        return [`${counted(total, 'answer')} to turns read: ${each}`];
+      });
       /** the owner's turns, newest last: chat, id, time, and whether something answered it. */
       const kept = ctx.store.read<Parsed>(PARSED_DOC);
       const turns: Parsed['turns'] = kept?.turns ?? [];
@@ -227,6 +240,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
         if (reading === undefined) return;
         // History, not news (bot-os.md D83): a message missed while down, or played back.
         const old = m.playback ? { playback: true } : {};
+        if (!m.playback) read.add('unread' in reading ? 'unknown' : reading.outcome.kind);
         if ('unread' in reading) {
           ctx.drift.unread({ text: m.text, t: m.time });
           ctx.bus.publish(

@@ -31,6 +31,10 @@ never their values.
   raised where it happens (a node failed or made inactive by a stop's cascade, a drift, a send
   coalesced, the load's warnings, and a plugin's own through `ctx.notice`), and heard by a node
   whose manifest declares `notices: true` (`ctx.notices`), those since the start first.
+- `src/summary.ts`: the owner's summary (docs/bot-os.md D92): the lines each plugin whose manifest
+  declares `summary: true` contributes for a window (`ctx.summary.contribute`), after the core's own
+  (each node's sends by outcome, the notices by kind), collected by a node that tells them; the
+  instance as it runs, for a start notice; and `Tally`, counts by key and time for a window.
 - `src/state-view.ts`: a node's state as the owner sees it (its schema, freshness and pins,
   docs/bot-os.md D72), for the state plugins and the web UI's viewer; `src/event-log.ts` keeps a
   cursor into the log (a length read per day file) for a reader that resumes where it left it.

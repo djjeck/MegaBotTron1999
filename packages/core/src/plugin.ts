@@ -23,6 +23,7 @@ import { type Scheduler } from './scheduler.ts';
 import { type SettingValue } from './settings.ts';
 import { type StateView } from './state-view.ts';
 import { type Store } from './store.ts';
+import { type SummaryHandle } from './summary.ts';
 
 /** A plugin's log lines, on stdout, prefixed with its id. */
 export interface Logger {
@@ -102,6 +103,12 @@ export interface PluginContext {
    * is raised, while its node is up.
    */
   readonly notices?: NoticesHandle;
+  /**
+   * The owner's summary (§4.17, bot-os.md D92): given only to a plugin whose manifest declares
+   * `summary: true`. `contribute` adds its lines for a window of time to every summary;
+   * `collect` and `instance` are for a node that tells the summary (`owner-notice`).
+   */
+  readonly summary?: SummaryHandle;
   /**
    * Its mode, as module API 1 knew it (deprecated, bot-os.md D64): derived, `dry-run` when every
    * chat-out edge of its node is a dry run (or it has none), `live` otherwise. `set('read-only')`,

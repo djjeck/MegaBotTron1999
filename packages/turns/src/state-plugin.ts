@@ -34,6 +34,7 @@
 import {
   behind,
   type BusEvent,
+  counted,
   definePlugin,
   type LogCursor,
   type LogPosition,
@@ -42,6 +43,7 @@ import {
   type SectionFreshness,
   type StateView,
   summaryOf,
+  Tally,
   valueAtPath,
 } from '@megabottron1999/core';
 import { isDeepStrictEqual } from 'node:util';
@@ -220,6 +222,8 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
       version: spec.version ?? '0.1.0',
       kinds: ['stats'],
       description: spec.description,
+      // The events it applied and refused since the last summary, for the owner (bot-os.md D92).
+      summary: true,
       games: { registers: [spec.id] },
       events: {
         [`${spec.id}.changed`]: z
@@ -282,6 +286,14 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
       let dirty = false;
       let scheduled = false;
       let live = false;
+      /** The events heard live, `applied` or `refused`, for the owner's summary (D92). */
+      const tally = new Tally(ctx.clock);
+      ctx.summary?.contribute((w) => {
+        const applied = tally.count('applied', w);
+        const refused = tally.count('refused', w);
+        if (applied + refused === 0) return [];
+        return [`${counted(applied, 'event')} applied${refused > 0 ? `, ${refused} refused` : ''}`];
+      });
 
       /** Keeps the state, then announces what changed, then notes it announced. */
       const save = (): void => {
@@ -349,6 +361,7 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
           const fits = spec.schema.safeParse(next);
           if (!fits.success) throw new Error(`a state its schema refuses: ${fits.error.message}`);
         } catch (e) {
+          if (heard) tally.add('refused');
           ctx.log.warn(`${event.type} at ${event.t} not applied: ${message(e)}`);
           ctx.record(`${spec.id}.refused`, { event: event.type, at: event.t, reason: message(e) });
           // For the owner's attention (D91): a node that tells them groups these.
@@ -367,6 +380,7 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
         const refreshed = Object.entries(marks).flatMap(([s, how]) =>
           how === undefined || !sections.includes(s) ? [] : (mark(s, how, stamp), [s])
         );
+        if (heard) tally.add('applied');
         const before = state;
         state = next;
         if (changed.length > 0) updatedAt = ctx.clock.now();

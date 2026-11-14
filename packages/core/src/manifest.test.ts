@@ -16,6 +16,7 @@ describe('parseManifest', () => {
       secrets: [],
       configSecrets: [],
       notices: false,
+      summary: false,
       audit: [],
       state: { migrations: [] },
       interface: {},

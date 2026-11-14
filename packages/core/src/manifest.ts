@@ -164,6 +164,11 @@ export const manifestSchema = z
      */
     notices: z.boolean().default(false),
     /**
+     * It adds lines to the owner's summary, or reads the summary for a node that tells it (bot-os.md
+     * D92, `ctx.summary`).
+     */
+    summary: z.boolean().default(false),
+    /**
      * Keys of its config whose every change a save of the graph records in the event log
      * (`core.config`, bot-os.md D75): who saved it, when, and its SHA-256, never its value (a
      * script node's code).

@@ -16,17 +16,27 @@
  * the next, one message (`refused 5 events in the last 10 min: …`), listing at most `maxLines`
  * items. A warning already told at the previous start is not told again.
  *
- * **What comes next builds on it** (D91): the owner's periodic summary (#46) is another message of
- * this node, sent through `tell` on its own timer, its lines from the plugins; a send-queue watchdog
- * (#41) raises its own notice kind from the outbox (`OutboxOptions.notice`), which this node tells
- * as `other` until it gets a `KINDS` entry of its own.
+ * **A summary every `summaryEveryMin`** (D92, #46): what happened since the last one, from the
+ * core's lines (sends per node, notices by kind) and those the plugins contribute (`ctx.summary`,
+ * §4.17); none when nobody has anything to say. The time of the last is kept in its store, so that
+ * a restart neither sends one again nor puts the next off.
+ *
+ * **A start notice at each start** (`startNotice`, D92): the release and commit, the nodes running,
+ * those that are not and why, and the graph's warnings; the failures and warnings heard before it
+ * go in it, not in messages of their own.
+ *
+ * **What comes next builds on it** (D91): a send-queue watchdog (#41) raises its own notice kind
+ * from the outbox (`OutboxOptions.notice`), which this node tells as `other` until it gets a
+ * `KINDS` entry of its own.
  */
 import {
   type Clock,
   definePlugin,
+  type InstanceSummary,
   type Notice,
   type Plugin,
   type PluginContext,
+  type SummarySection,
   type TimerHandle,
 } from '@megabottron1999/core';
 import { z } from 'zod';
@@ -35,6 +45,18 @@ export const OWNER_NOTICE = 'owner-notice';
 
 /** The store's document of the warnings told, so that a restart does not tell them again. */
 export const WARNED_DOC = 'warned';
+
+/** The store's document of its summaries: when it last sent one, and last looked. */
+export const SUMMARY_DOC = 'summary';
+export interface SummaryKept {
+  /** When it last sent a summary: the next covers what happened since. */
+  sentAt?: number;
+  /** When it last looked, sent or not: the next look is a cadence later. */
+  checkedAt?: number;
+}
+
+/** How long after every node has started the start notice waits, for a failure at the start. */
+export const START_WAIT_MS = 10_000;
 
 /** The kinds it tells by name; any other is `other`. */
 export const REPORTED = [
@@ -116,6 +138,21 @@ export const ownerNoticeConfig = z.object({
     .min(1)
     .default(5)
     .describe('The most items one message lists; the rest are counted'),
+  summaryEveryMin: z
+    .number()
+    .int()
+    .min(0)
+    .max(7 * 24 * 60)
+    .default(60)
+    .describe(
+      'Minutes between two summaries of what happened (sends, notices, what the plugins say); none when nothing did. 0: no summary'
+    ),
+  startNotice: z
+    .boolean()
+    .default(true)
+    .describe(
+      'A message at each start: the release, the nodes running and those not, the graph’s warnings'
+    ),
 });
 export type OwnerNoticeConfig = z.output<typeof ownerNoticeConfig>;
 
@@ -181,12 +218,14 @@ export const KINDS: Readonly<Record<Reported, KindSpec>> = {
 export const reportedOf = (kind: string): Reported =>
   (REPORTED as readonly string[]).includes(kind) && kind !== 'other' ? (kind as Reported) : 'other';
 
-/** `ms` in the owner's words: `40 s`, `10 min`, `2 h`. */
+/** `ms` in the owner's words: `40 s`, `10 min`, `2 h`, `2 h 30 min`. */
 export function span(ms: number): string {
   const s = Math.round(ms / 1000);
   if (s < 60) return `${s} s`;
   const min = Math.round(s / 60);
-  return min < 120 ? `${min} min` : `${Math.round(min / 60)} h`;
+  if (min < 120) return `${min} min`;
+  const h = Math.floor(min / 60);
+  return min % 60 === 0 ? `${h} h` : `${h} h ${min % 60} min`;
 }
 
 /**
@@ -284,6 +323,76 @@ export class NoticeDesk {
   }
 }
 
+/** A section's lines, as a message words them: one on the title's line, several listed. */
+function wordSection(title: string, lines: readonly string[], maxLines: number): string[] {
+  if (lines.length === 1) return [`${title}: ${String(lines[0])}`];
+  const shown = lines.slice(0, maxLines).map((l) => `- ${l}`);
+  if (lines.length > maxLines) shown.push(`- and ${lines.length - maxLines} more`);
+  return [`${title}:`, ...shown];
+}
+
+/**
+ * A summary: its window (since the last summary, or since the start when that came after), then
+ * each section with something to say.
+ */
+export function wordSummary(
+  sections: readonly SummarySection[],
+  window: { since: number; until: number; sinceStart: boolean },
+  maxLines: number
+): string {
+  const head = window.sinceStart
+    ? `Summary since the start, ${span(window.until - window.since)} ago:`
+    : `Summary of the last ${span(window.until - window.since)}:`;
+  return [head, ...sections.flatMap((s) => wordSection(s.title, s.lines, maxLines))].join('\n');
+}
+
+/** What a start notice says of the graph's warnings: those new, and those told before. */
+export interface StartWarnings {
+  fresh: readonly string[];
+  told: number;
+}
+
+/**
+ * A start notice: the release and commit, the nodes running (at most `maxLines` named), those not
+ * with their state and why (`reasons`: false where the core has told the owner already), and the
+ * graph's warnings, the new ones listed.
+ */
+export function wordStart(
+  instance: InstanceSummary,
+  warnings: StartWarnings | undefined,
+  maxLines: number,
+  reasons: (state: string) => boolean
+): string {
+  const commit = instance.commit === undefined ? '' : ` (${instance.commit.slice(0, 7)})`;
+  const out = [instance.version === undefined ? 'Started' : `Started ${instance.version}${commit}`];
+  const running = instance.nodes.filter((n) => n.state === 'running').map((n) => n.id);
+  const named = running.slice(0, maxLines);
+  if (running.length > maxLines) named.push(`and ${running.length - maxLines} more`);
+  out.push(
+    running.length === 0
+      ? 'No node running'
+      : `${plural(running.length, 'node')} running: ${named.join(', ')}`
+  );
+  const down = instance.nodes
+    .filter((n) => n.state !== 'running')
+    .map(
+      (n) =>
+        `${n.id}: ${n.state}${n.reason !== undefined && reasons(n.state) ? ` (${n.reason})` : ''}`
+    );
+  if (down.length > 0) out.push(...wordSection('Not running', down, maxLines));
+  if (warnings !== undefined && warnings.fresh.length > 0)
+    out.push(
+      ...wordSection(
+        `The graph warns (${warnings.fresh.length} new${warnings.told > 0 ? `, ${warnings.told} told before` : ''})`,
+        warnings.fresh,
+        maxLines
+      )
+    );
+  else if (warnings !== undefined && warnings.told > 0)
+    out.push(`The graph warns of ${plural(warnings.told, 'thing')} told before`);
+  return out.join('\n');
+}
+
 /** Whether a notice is about the node itself: it would tell of its own sends, in a loop. */
 function ownNotice(n: Notice, id: string): boolean {
   const others = n.detail?.['with'];
@@ -298,9 +407,10 @@ export function ownerNoticePlugin(): Plugin {
       version: '0.1.0',
       kinds: ['stats'],
       description:
-        'Tells the owner what needs attention: refused events, coalesced sends, drift, cascades, failures, warnings',
+        'Tells the owner what needs attention (refused events, coalesced sends, drift, cascades, failures, warnings), a summary on a cadence, and a notice at each start',
       config: ownerNoticeConfig,
       notices: true,
+      summary: true,
       outputs: {
         chat: {
           type: 'chat-out',
@@ -313,6 +423,26 @@ export function ownerNoticePlugin(): Plugin {
       const told = new Set(ctx.store.read<string[]>(WARNED_DOC) ?? []);
       const warned: string[] = [];
       let unsubscribe: (() => void) | undefined;
+      /** The failures and warnings heard before the start notice, which it tells; none once sent. */
+      let atStart: Notice[] | undefined = c.startNotice ? [] : undefined;
+      let startTimer: TimerHandle | undefined;
+      let summaryTimer: TimerHandle | undefined;
+      let kept: SummaryKept = ctx.store.read<SummaryKept>(SUMMARY_DOC) ?? {};
+      const summary = (): NonNullable<PluginContext['summary']> => {
+        if (ctx.summary === undefined) throw new Error('no summary: its manifest declares it');
+        return ctx.summary;
+      };
+      /** One message, through its single send path: queued, so that a dry-run edge sends nothing. */
+      const send = (kind: string, text: string, count: number): void => {
+        ctx.record(`${OWNER_NOTICE}.told`, { kind, count, chat: c.chat, text });
+        const queued = ctx.outbox('chat').enqueue(c.chat, text);
+        void queued.then((r) => {
+          if (r.outcome === 'refused' || r.outcome === 'expired' || r.outcome === 'cancelled')
+            ctx.log.warn(
+              `not told (${r.outcome}${r.reason === undefined ? '' : `: ${r.reason}`}): ${text}`
+            );
+        });
+      };
       const desk = new NoticeDesk({
         clock: ctx.clock,
         maxLines: c.maxLines,
@@ -323,26 +453,62 @@ export function ownerNoticePlugin(): Plugin {
             everyMin: own.everyMin ?? DEFAULT_PACE[kind].everyMin,
           };
         },
-        tell: (kind, text, notices) => {
-          ctx.record(`${OWNER_NOTICE}.told`, { kind, count: notices.length, chat: c.chat, text });
-          const queued = ctx.outbox('chat').enqueue(c.chat, text);
-          void queued.then((r) => {
-            if (r.outcome === 'refused' || r.outcome === 'expired' || r.outcome === 'cancelled')
-              ctx.log.warn(
-                `not told (${r.outcome}${r.reason === undefined ? '' : `: ${r.reason}`}): ${text}`
-              );
-          });
-        },
+        tell: (kind, text, notices) => send(kind, text, notices.length),
       });
       const hear = (n: Notice): void => {
         if (ownNotice(n, ctx.id)) return;
         const kind = reportedOf(n.kind);
-        if (n.kind === 'warning') {
-          warned.push(n.text);
-          if (told.has(n.text)) return;
+        if (n.kind === 'warning') warned.push(n.text);
+        // Before the start notice, a failure or a warning is its news, not a message of its own.
+        if (atStart !== undefined && (n.kind === 'failed' || n.kind === 'warning')) {
+          atStart.push(n);
+          return;
         }
+        if (n.kind === 'warning' && told.has(n.text)) return;
         if (!c.report[kind]) return;
         desk.add(kind, n);
+      };
+      const tellStart = (): void => {
+        startTimer = undefined;
+        const heard = atStart ?? [];
+        atStart = undefined;
+        const texts = [...new Set(heard.filter((n) => n.kind === 'warning').map((n) => n.text))];
+        const warnings = c.report.warning
+          ? {
+              fresh: texts.filter((w) => !told.has(w)),
+              told: texts.filter((w) => told.has(w)).length,
+            }
+          : undefined;
+        // A failure's reason is the core's to tell, at once, where it tells the owner; with
+        // `failed` off (D91), the owner hears it there, and the start notice names only the state.
+        const text = wordStart(
+          summary().instance(),
+          warnings,
+          c.maxLines,
+          (state) => state !== 'failed' || c.report.failed
+        );
+        send('start', text, 1);
+      };
+      const every = c.summaryEveryMin * 60_000;
+      const tellSummary = (): void => {
+        const now = ctx.clock.now();
+        const startedAt = summary().instance().startedAt ?? now;
+        const since = Math.max(kept.sentAt ?? startedAt, startedAt);
+        const sections = summary().collect({ since, until: now });
+        if (sections.length > 0) {
+          send(
+            'summary',
+            wordSummary(
+              sections,
+              { since, until: now, sinceStart: (kept.sentAt ?? -Infinity) < startedAt },
+              c.maxLines
+            ),
+            sections.length
+          );
+          kept = { sentAt: now, checkedAt: now };
+        } else kept = { ...kept, checkedAt: now };
+        ctx.store.write(SUMMARY_DOC, kept);
+        summaryTimer = ctx.clock.setTimeout(tellSummary, every);
       };
       return {
         start() {
@@ -351,11 +517,24 @@ export function ownerNoticePlugin(): Plugin {
           unsubscribe = notices.subscribe(hear);
           // The load's warnings, heard first: kept, so that the next start tells only new ones.
           ctx.store.write(WARNED_DOC, warned);
+          if (every > 0) {
+            // A cadence after the last look, kept across a restart; one overdue, a cadence on.
+            const now = ctx.clock.now();
+            const due = (kept.checkedAt ?? now) + every;
+            summaryTimer = ctx.clock.setTimeout(tellSummary, due > now ? due - now : every);
+          }
+        },
+        ready() {
+          // Every node has started: what the start notice says, once a failure at the start is in.
+          if (atStart !== undefined) startTimer = ctx.clock.setTimeout(tellStart, START_WAIT_MS);
         },
         stop() {
           unsubscribe?.();
           unsubscribe = undefined;
           desk.stop();
+          ctx.clock.clearTimeout(startTimer);
+          ctx.clock.clearTimeout(summaryTimer);
+          startTimer = summaryTimer = undefined;
         },
       };
     },

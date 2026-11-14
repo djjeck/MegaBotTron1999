@@ -154,6 +154,8 @@ export interface DevKitOptions {
   validateEvents?: boolean;
   /** Whether an archived plugin may run (`CoreOptions.allowArchived`): off unless said. */
   allowArchived?: boolean;
+  /** The release and commit the run says it is (`CoreOptions.build`), for a start notice. */
+  build?: CoreOptions['build'];
 }
 
 /** A core on a virtual clock, with the state of a run set before it starts. */
@@ -184,6 +186,7 @@ export class DevKit {
       ...(o.notify === undefined ? {} : { notify: o.notify }),
       ...(o.validateEvents === undefined ? {} : { validateEvents: o.validateEvents }),
       ...(o.allowArchived === undefined ? {} : { allowArchived: o.allowArchived }),
+      ...(o.build === undefined ? {} : { build: o.build }),
     });
     this.core.register(...(o.plugins ?? []));
   }

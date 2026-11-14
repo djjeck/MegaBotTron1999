@@ -27,7 +27,15 @@
  * its factory's closure: everything hangs off its instance (§2.1). Each step is published as
  * `turn-actor.step`, with the instance's id, and printed.
  */
-import { definePlugin, inChat, type Plugin, type PluginContext } from '@megabottron1999/core';
+import {
+  counted,
+  definePlugin,
+  inChat,
+  type Plugin,
+  type PluginContext,
+  type SummaryWindow,
+  Tally,
+} from '@megabottron1999/core';
 import { Rng } from '@megabottron1999/core/rng.ts';
 import { z } from 'zod';
 import { DEFAULT_SCHEDULE, hash, type Plan, Planner, scheduleProblem } from '#src/schedule.ts';
@@ -166,6 +174,8 @@ export function turnActorPlugin(): Plugin {
       description:
         "A game bot's turn, from the owner's account, in its private chat, at a person's pace",
       config: turnActorConfig,
+      // Its turns since the last summary, for the owner (bot-os.md D92).
+      summary: true,
       games: { registers: [TURN_ACTOR] },
       events: {
         [`${TURN_ACTOR}.step`]: stepSchema.describe(
@@ -221,10 +231,13 @@ class TurnActor {
   private sending = false;
   /** Told once while it waits for the account. */
   private waiting = false;
+  /** Its turns by how they went (`sent`, `dry-run`, `by hand`, `failed`), for the summary. */
+  private readonly turns: Tally;
 
   constructor(ctx: PluginContext) {
     this.ctx = ctx;
     this.c = ctx.config as TurnActorConfig;
+    this.turns = new Tally(ctx.clock);
     const seed = this.c.seed ?? (ctx.clock.now() ^ hash(ctx.id)) >>> 0;
     this.planner = new Planner(this.c.schedule, new Rng(seed), this.c.nightSalt);
     this.last = ctx.store.read<TurnActorState>('state')?.last;
@@ -240,11 +253,15 @@ class TurnActor {
       if (!isTurnCommand(m.text, commands, bot)) return;
       if (this.last !== undefined && m.time <= this.last) return;
       this.remember(m.time);
+      this.turns.add('by hand');
       this.step('seen', `sent by hand at ${clock(m.time)}`);
       if (this.plan !== undefined) this.replan();
     });
     return {
-      start: () => this.settle(),
+      start: () => {
+        this.ctx.summary?.contribute((w) => this.summaryLines(w));
+        this.settle();
+      },
       onTimer: (name: string) => {
         if (name === TURN_TIMER) void this.due();
       },
@@ -356,6 +373,7 @@ class TurnActor {
             .use<TurnParserInterface>('parser')
             .actions.sent({ chat: this.c.chat, ...(r.id === undefined ? {} : { id: r.id }), t });
         this.remember(t);
+        this.turns.add(r.outcome);
         this.step(
           'sent',
           r.outcome === 'sent'
@@ -364,6 +382,7 @@ class TurnActor {
         );
         if (this.playing()) this.replan();
       } else {
+        this.turns.add('failed');
         this.step('failed', r.reason ?? r.outcome);
         if (this.playing())
           this.setPlan({ at: t + RETRY_MS, skipped: 0, afterSleep: false }, 'planned', 'a retry');
@@ -376,6 +395,18 @@ class TurnActor {
   private remember(t: number): void {
     this.last = t;
     this.ctx.store.write('state', { last: t } satisfies TurnActorState);
+  }
+
+  /** Its turns in a summary's window: `3 turns sent, 1 by hand, 1 failed`; none, nothing. */
+  private summaryLines(w: SummaryWindow): string[] {
+    const n = (key: string): number => this.turns.count(key, w);
+    const parts = [
+      ...(n('sent') > 0 ? [`${counted(n('sent'), 'turn')} sent`] : []),
+      ...(n('dry-run') > 0 ? [`${counted(n('dry-run'), 'turn')} in a dry run`] : []),
+      ...(n('by hand') > 0 ? [`${n('by hand')} by hand`] : []),
+      ...(n('failed') > 0 ? [`${n('failed')} failed`] : []),
+    ];
+    return parts.length === 0 ? [] : [parts.join(', ')];
   }
 
   private step(event: TurnStep['event'], detail: string): void {

@@ -47,7 +47,7 @@ import { format } from 'node:util';
 const env = process.env;
 // The release it runs (the root package.json's version) and the commit its image was built from
 // (BUILD_COMMIT, the Dockerfile's build argument, set by the Publish workflow), for GET /instance
-// and the web UI's bottom bar.
+// and the web UI's bottom bar, and the owner's start notice.
 const build = {
   version: (
     JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
@@ -76,6 +76,8 @@ const graphFile = new GraphFile(dataDir, () => clock.now());
 
 const core = new Core({
   clock,
+  // The release and commit, for the owner's start notice (owner-notice, docs/bot-os.md D92).
+  build,
   dataDir,
   secrets,
   graphFile,

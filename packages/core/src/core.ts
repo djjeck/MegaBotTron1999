@@ -85,6 +85,7 @@ import { type KeptTimer, PluginScheduler } from './scheduler.ts';
 import { type Secrets, SecretStore } from './secrets.ts';
 import { PluginSettings, SETTINGS_DOC, SettingsRegistry } from './settings.ts';
 import { CORE_STORE, type Migration, Stores } from './store.ts';
+import { Summaries, type SummarySection, type SummaryWindow } from './summary.ts';
 
 /**
  * A node's state (bot-os.md D64): `disabled` by the owner, `stopped` by exception (a safety stop,
@@ -121,6 +122,11 @@ export interface CoreOptions {
   clock: Clock;
   /** Where log lines go (stdout). */
   print?: (line: string) => void;
+  /**
+   * The release the instance runs and the commit its image was built from (`GET /instance`), for
+   * the owner's start notice (bot-os.md D92); none in tests.
+   */
+  build?: { version: string; commit?: string };
   /**
    * Where the core's records and every event published go (the event log). What it returns, if it
    * is where the log put the record (`LogPosition`, bot-os.md D72), the bus hands its subscribers
@@ -308,6 +314,8 @@ export class Core {
   private shutting: Promise<void> = Promise.resolve();
   /** The owner's notices (D91): what needs their attention, for the nodes that tell them. */
   private readonly noticeFeed: Notices;
+  /** The owner's summary (D92): its contributors, and the core's own counts. */
+  private readonly summaries: Summaries;
 
   constructor(given: CoreOptions) {
     const secrets = given.secrets;
@@ -337,6 +345,20 @@ export class Core {
     this.noticeFeed = new Notices({
       error: (plugin, line) => this.logger(plugin).error(line),
       ...(secrets === undefined ? {} : { redact: (text: string) => secrets.redact(text) }),
+    });
+    this.summaries = new Summaries({
+      clock: options.clock,
+      ...(options.build === undefined ? {} : { build: options.build }),
+      nodes: () =>
+        [...this.entries.values()].map((e) => ({
+          id: e.id,
+          plugin: e.manifest.id,
+          state: e.status.state,
+          ...(e.status.reason === undefined ? {} : { reason: e.status.reason }),
+        })),
+      tellers: () =>
+        new Set([...this.entries.values()].filter((e) => e.manifest.notices).map((e) => e.id)),
+      error: (node, line) => this.logger(node).error(line),
     });
     this.stores = new Stores(options.dataDir);
     if (options.dataDir === undefined)
@@ -503,12 +525,26 @@ export class Core {
         limits: () => connector()?.limits,
         clock: this.o.clock,
         policy: (plugin, port) => this.policyOf(plugin, account, port),
-        ...(this.o.record === undefined ? {} : { record: this.o.record }),
+        record: (r) => {
+          this.counted(r);
+          this.o.record?.(r);
+        },
         notice: (n) => this.notice(n),
       });
       this.outboxes.set(account, outbox);
     }
     return outbox;
+  }
+
+  /**
+   * A send counted for the owner's summary (D92), by node and outcome: each node it went for, and a
+   * queued send dropped before it went.
+   */
+  private counted(r: SendRecord | QueueRecord): void {
+    if (r.type === 'core.send')
+      for (const node of [r.plugin, ...(r.with ?? [])]) this.summaries.sent(node, r.outcome);
+    else if (r.event === 'cancelled' || r.event === 'expired')
+      this.summaries.sent(r.plugin, r.event);
   }
 
   /**
@@ -654,11 +690,17 @@ export class Core {
   /** Raises a notice for the owner's attention (D91), now. */
   private notice(n: Omit<Notice, 't'>): void {
     this.noticeFeed.raise({ ...n, t: this.o.clock.now() });
+    this.summaries.noticed(n.kind);
   }
 
   /** The owner's notices raised since the start (D91), the newest kept, in order. */
   notices(): Notice[] {
     return this.noticeFeed.recent();
+  }
+
+  /** The owner's summary of a window (D92): the core's lines, then each contributor's. */
+  summary(window: SummaryWindow): SummarySection[] {
+    return this.summaries.collect(window);
   }
 
   /** Each parser's drift: the messages it read and could not read (§4.7). */
@@ -729,6 +771,7 @@ export class Core {
   async start(): Promise<void> {
     if (this.started) throw new Error('the core is started once');
     this.started = true;
+    this.summaries.started();
     this.load();
     for (const entry of this.entries.values()) await this.startOne(entry);
     // Every plugin has started: each hears it, in load order (§3).
@@ -1541,6 +1584,7 @@ export class Core {
             },
           }
         : {}),
+      ...(entry.manifest.summary ? { summary: this.summaries.handle(id) } : {}),
       // Module API 1's modes, derived from the node's state and its edges (D64), deprecated.
       mode: {
         get: () => (sendsOf(node).every(([, b]) => b.dryRun === true) ? 'dry-run' : 'live'),

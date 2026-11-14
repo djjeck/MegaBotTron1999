@@ -57,6 +57,7 @@ instance does not start.
 | `configSecrets` | The keys of its `config` whose values name a secret (§4.9): a connector run as several nodes, each with a credential its node's config names. Only a `connector`                                                                                                                                                                                                                                                                                                                                                                                   |
 | `monitors`      | Optional, a connector's: which chats its node monitors, so that the check warns of a chat-in edge reading one it does not (§2.3, bot-os.md D89): `'all'`, every chat it hears; or `{ config: key }`, the key of its `config` holding the chat (a string) or the chats (a list), unset meaning every chat; chats compare without case. Undeclared: unknown, and nothing is warned of. `{ config: key, aliases: true }`: a chat may go by several names (an id, a `@username`, bot-os.md D90), which its running connector tells (`chatNames`, §4.5) |
 | `notices`       | Optional, `true` for a plugin that hears the owner's notices (`ctx.notices`, §4.16, bot-os.md D91), as `owner-notice` does; false by default                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `summary`       | Optional, `true` for a plugin that adds lines to the owner's summary, or reads it (`ctx.summary`, §4.17, bot-os.md D92); false by default                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `state`         | `{ version, migrations }`: the schema version of its store and the steps from each older one (§4.2)                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `drift`         | The parser's threshold for an unrecoverable rate of unread messages (§4.7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `interface`     | What it offers people, commands and agents (P11): `commands` (chat commands: name, help, arguments), `actions` (typed calls that change something: zod input and output) and `state` (typed reads, by name: zod output). The web UI, the chat commands and the agent interface are all made from these descriptions, and nothing else                                                                                                                                                                                                              |
@@ -673,6 +674,7 @@ interface PluginContext<Config, Settings> {
   notify(text: string, buttons?: Buttons): void; // the owner (§4.8); nothing while off
   notice(kind: string, text: string, detail?: object): void; // for the owner's attention (§4.16)
   notices?: { subscribe(handler: (n: Notice) => void): () => void }; // with `notices: true` (§4.16)
+  summary?: { contribute(lines); collect(window); instance() }; // with `summary: true` (§4.17)
   stop(reason: string): void; // its safety stop: its node stopped, kept (§2.1, Node states)
   fail(reason: string): void; // its node failed at runtime, not kept (§3)
   off(): boolean; // the instance is off (§4.11)
@@ -1597,21 +1599,74 @@ each was raised beside (`core.plugin`, `core.drift`, `core.queue`, `<id>.refused
 core's own) is where a send-queue watchdog (#41) will raise the node it pauses, and `owner-notice`
 (§5) tells a kind it does not name as `other`.
 
+### 4.17 The owner's summary
+
+What happened over a window of time, in a few lines, for a node that tells the owner on a cadence
+(`owner-notice`, §5), and what the instance runs as it starts (bot-os.md D92,
+`packages/core/src/summary.ts`). **A plugin whose manifest declares `summary: true`** gets
+`ctx.summary`:
+
+```ts
+interface SummaryHandle {
+  // Its lines for a window: what it did from `since` (included) to `until` (excluded), in ms;
+  // none ([] or undefined) when it did nothing. Returns the way to stop.
+  contribute(
+    lines: (window: { since: number; until: number }) => readonly string[] | undefined
+  ): () => void;
+  // Every contributor's lines for a window, the core's first, then the nodes' in load order;
+  // only those with something to say: { title, node?, lines }. For a node that tells them.
+  collect(window: SummaryWindow): SummarySection[];
+  // The release and commit (CoreOptions.build, as GET /instance says), when the core started,
+  // and each node with its plugin, state and why ({ id, plugin, state, reason? }), in load order.
+  instance(): InstanceSummary;
+}
+```
+
+**A contributor** says what it did in the window in short owner-facing lines, naming nodes by id,
+without its own id (the summary titles its lines with it): `40 events applied, 2 refused`. It counts
+as things happen with a **`Tally`** (`new Tally(ctx.clock)`; `add(key, n?)`; `count(key, window)`;
+`counts(window)`, each key with its count, in the order first added), which keeps 7 days back
+(`TALLY_KEPT_MS`) and at most `TALLY_MAX` (100 000) times per key; `counted(n, 'event')` words
+`1 event`, `2 events`. Its function is called when a summary is made; one that throws is logged and
+left out. The counts live in memory: a window reaches back to the start at most. A game's module
+adds its own lines the same way (its turns, what it bought):
+
+```ts
+manifest: { /* … */ summary: true },
+create: (ctx) => {
+  const bought = new Tally(ctx.clock);
+  ctx.summary?.contribute((w) => {
+    const n = bought.count('item', w);
+    return n === 0 ? [] : [`${counted(n, 'item')} bought`];
+  });
+  // … bought.add('item') at each purchase
+}
+```
+
+**The core's own lines** come first: `Sends`, each node's sends in the window by outcome (`sent`,
+`dry-run`, `refused`, `failed`, and a queued send `cancelled` or `expired`, D73; a coalesced send
+counts for each node it went for), but those of the nodes that tell the owner (`notices: true`),
+whose sends are the summaries and notices themselves; and `Notices`, the notices raised (§4.16),
+counted by kind. **The shell's plugins contribute:** a state node its events heard live, `applied`
+and `refused` (D72); a turn parser the answers to turns it read live, by their outcome's kind
+(`unknown` for one it could not read); a `turn-actor` its turns, `sent`, `in a dry run`, `by hand`,
+`failed`. `core.summary(window)` gives what `collect` gives, for tests.
+
 ## 5. The shell's own plugins
 
-| Plugin          | Kinds        | Package                       | What it is                                                                                        |
-| --------------- | ------------ | ----------------------------- | ------------------------------------------------------------------------------------------------- |
-| `irc`           | connector    | `@megabottron1999/connectors` | An IRC account through a ZNC bouncer, with its flood limits and a health endpoint                 |
-| `telegram-bot`  | connector    | `@megabottron1999/connectors` | A Telegram bot (grammY), and the owner's chat surface                                             |
-| `telegram-user` | connector    | `@megabottron1999/connectors` | A Telegram user account (GramJS), reading and sending in the chats it monitors                    |
-| `anthropic`     | connector    | `@megabottron1999/connectors` | The Claude API: `ask`, with structured output (§4.13)                                             |
-| (service)       | connector    | `@megabottron1999/connectors` | `ServiceConnector`: the connector of a plugin that holds secrets for an API client, no chat       |
-| (turn parsers)  | parser       | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives      |
-| `turn-actor`    | actor        | `@megabottron1999/turns`      | One game bot's turns, at a person's pace, run as one instance per bot                             |
-| `reactor`       | actor        | `@megabottron1999/turns`      | One reaction (§4.15) from its config: a command sent when an event is heard or a message matches  |
-| `script`        | actor, stats | `@megabottron1999/turns`      | TypeScript typed in the editor, on the ports its config declares, in a worker thread of its own   |
-| `owner-notice`  | stats        | `@megabottron1999/turns`      | Tells the owner what needs attention (§4.16), grouped and paced per kind, through a chat-out edge |
-| (states)        | stats        | `@megabottron1999/turns`      | `statePlugin`: a game's player state, kept from its parsers' events, from a spec a game gives     |
+| Plugin          | Kinds        | Package                       | What it is                                                                                                                       |
+| --------------- | ------------ | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `irc`           | connector    | `@megabottron1999/connectors` | An IRC account through a ZNC bouncer, with its flood limits and a health endpoint                                                |
+| `telegram-bot`  | connector    | `@megabottron1999/connectors` | A Telegram bot (grammY), and the owner's chat surface                                                                            |
+| `telegram-user` | connector    | `@megabottron1999/connectors` | A Telegram user account (GramJS), reading and sending in the chats it monitors                                                   |
+| `anthropic`     | connector    | `@megabottron1999/connectors` | The Claude API: `ask`, with structured output (§4.13)                                                                            |
+| (service)       | connector    | `@megabottron1999/connectors` | `ServiceConnector`: the connector of a plugin that holds secrets for an API client, no chat                                      |
+| (turn parsers)  | parser       | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives                                     |
+| `turn-actor`    | actor        | `@megabottron1999/turns`      | One game bot's turns, at a person's pace, run as one instance per bot                                                            |
+| `reactor`       | actor        | `@megabottron1999/turns`      | One reaction (§4.15) from its config: a command sent when an event is heard or a message matches                                 |
+| `script`        | actor, stats | `@megabottron1999/turns`      | TypeScript typed in the editor, on the ports its config declares, in a worker thread of its own                                  |
+| `owner-notice`  | stats        | `@megabottron1999/turns`      | Tells the owner what needs attention (§4.16), a summary on a cadence (§4.17) and a notice at each start, through a chat-out edge |
+| (states)        | stats        | `@megabottron1999/turns`      | `statePlugin`: a game's player state, kept from its parsers' events, from a spec a game gives                                    |
 
 - **`irc`** (`packages/connectors/src/plugins/irc.ts`, on the IRC client of
   `packages/connectors/src/transport/irc-client.ts`): one IRC account through ZNC, its configuration
@@ -1687,8 +1742,9 @@ core's own) is where a send-queue watchdog (#41) will raise the node it pauses, 
   its `turnCommands`, the bot's turn commands by first word (`["/play"]`, at least one): which
   commands are turns is a fact of the game, so it has no config (bot-os.md D70). A node saved while
   it had one (`"config": { "commands": [...] }`) still loads and runs: a plugin with no config
-  schema ignores its node's config, which the file keeps as written until the owner takes it out.
-  The tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
+  schema ignores its node's config, which the file keeps as written until the owner takes it out. It
+  adds to the owner's summary the answers it read live, by their outcome's kind (§4.17, D92). The
+  tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
 - **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
   (P3, P17), each with its own id, configuration, store, timer and state. Its ports: `chat`, a
   chat-in input on `telegram`, which reads the private chat with its bot (for the turns the owner
@@ -1710,8 +1766,9 @@ core's own) is where a send-queue watchdog (#41) will raise the node it pauses, 
   instance is on; its safety stop (`kill`) stops its node (`ctx.stop`), which drops its plan until
   the owner clears the stop in the editor. It needs no `ctx.mode`. It declares no chat command,
   since two instances would clash: the owner reaches each with `/plugins <id>` and its read
-  `status`. Each step is published as `turn-actor.step`. The image offers it (`src/main.ts`): the
-  editor adds one node per bot, each on its own instance, its `chat` edges from and to the owner's
+  `status`. Each step is published as `turn-actor.step`; its turns (sent, in a dry run, by hand,
+  failed) go in the owner's summary (§4.17, D92). The image offers it (`src/main.ts`): the editor
+  adds one node per bot, each on its own instance, its `chat` edges from and to the owner's
   `telegram-user` node and its `parser` edge to its bot's parser. The turn parsers are not the
   image's: each is made from a game's grammar, so a game's module offers it.
 - **`owner-notice`** (`packages/turns/src/owner-notice.ts`, bot-os.md D91): tells the owner what
@@ -1726,20 +1783,35 @@ core's own) is where a send-queue watchdog (#41) will raise the node it pauses, 
   the least minutes between two of its messages, what comes meanwhile going in the next
   (`DEFAULT_PACE`: `failed`, `drift` and `cascade` 10 s and 5 min; `refused` 60 s and 10 min;
   `coalesced` 60 s and 30 min; `warning` 30 s and 60 min; `other` 60 s and 10 min; a field left out
-  keeps its default); and `maxLines`, the most items a message lists (5), the rest counted. A kind's
-  message is plain text: one notice is its own line (`script-1 failed: its script hung: …`);
-  several, a title with their count and, past a minute, how long they took, then an item each, alike
-  ones counted once (`inventory refused 5 events in the last 10 min:` and `- quest.gain: … (×3)`),
-  grouped by node for `refused` and `coalesced`. It tells nothing of itself (a notice about its
-  node, or a send it shared), so its own sends cannot feed it. The load's warnings it has told are
-  kept in its store (`warned`), and the next start tells only new ones. Each message is recorded as
-  `owner-notice.told` (`kind`, `count`, `chat`, `text`). Nothing it holds survives a restart: what
-  waits is dropped when its node stops. The core's own tells to the owner's chat surface (§4.8) stay
-  as they are, so a `telegram-bot` with an `owner` tells a failure or a drift at once, and
-  `owner-notice` again, grouped: turn its `failed` and `drift` off to hear them once. **Next** (not
-  built): the owner's periodic summary and its start notice (#46) are to be its messages too, on a
-  timer of their own through the same send, each plugin adding its lines; a send-queue watchdog
-  (#41) is to raise a notice kind of its own (§4.16).
+  keeps its default); `maxLines`, the most items a message lists (5), the rest counted;
+  `summaryEveryMin` and `startNotice`, below. A kind's message is plain text: one notice is its own
+  line (`script-1 failed: its script hung: …`); several, a title with their count and, past a
+  minute, how long they took, then an item each, alike ones counted once
+  (`inventory refused 5 events in the last 10 min:` and `- quest.gain: … (×3)`), grouped by node for
+  `refused` and `coalesced`. It tells nothing of itself (a notice about its node, or a send it
+  shared), so its own sends cannot feed it. The load's warnings it has told are kept in its store
+  (`warned`), and the next start tells only new ones. Each message is recorded as
+  `owner-notice.told` (`kind`, `count`, `chat`, `text`; `kind` `summary` and `start` for the two
+  below). What waits in a kind is dropped when its node stops. The core's own tells to the owner's
+  chat surface (§4.8) stay as they are, so a `telegram-bot` with an `owner` tells a failure or a
+  drift at once, and `owner-notice` again, grouped: turn its `failed` and `drift` off to hear them
+  once. **A summary** (bot-os.md D92) every `summaryEveryMin` minutes (60 by default, at most a
+  week; 0: none): what happened since the last summary sent, or since the start when that came
+  later, from `collect` (§4.17), each section titled (`Sends`, `Notices`, a node's id), one line on
+  its title's, several listed, at most `maxLines`; **none when no section has anything to say**, and
+  the next then covers the time since the last one sent. Its own sends are not in it. Kept in its
+  store (`summary`): when it last sent one (`sentAt`) and last looked (`checkedAt`), so that after a
+  restart the next is still due a cadence after the last look (a cadence after the start when that
+  is past), neither sent again nor put off; what happened between the last summary and the stop is
+  in none. **A start notice** at each start (`startNotice`, on by default), 10 s after every node
+  has started (`START_WAIT_MS`), so that a node that fails as it starts is in it: the release and
+  commit, the nodes running (at most `maxLines` named, the rest counted), those not running with
+  their state and why, and the graph's warnings (those new listed, those told at an earlier start
+  counted, with `warning` on). The failures and warnings heard before it are its news, not messages
+  of their own. A failure's reason is the core's to tell, at once, to the owner's chat surface: with
+  `failed` off (as D91 advises an owner who hears the core there), the start notice names a failed
+  node's state alone; the core tells no start of its own. A send-queue watchdog (#41) is to raise a
+  notice kind of its own (§4.16).
 - **`reactor`** (`packages/turns/src/reactor.ts`): one reaction (`react`, §4.15) made from its
   node's config, with no code, run as one instance per reaction. An actor: whether it sends for real
   is its chat-out edge's (a dry run as the editor draws it, D64). Its configuration
@@ -1908,7 +1980,8 @@ core's own) is where a send-queue watchdog (#41) will raise the node it pauses, 
     A fresh instance reads the whole log. An event the reducer throws on, or whose result the schema
     refuses, leaves the state as it was, is passed (the cursor moves past it) and recorded
     (`<id>.refused`, with why), never retried; and raised as a `refused` notice (§4.16, bot-os.md
-    D91), for a node that tells the owner.
+    D91), for a node that tells the owner. The events heard live, applied and refused, are counted
+    in the owner's summary (§4.17, D92): `40 events applied, 2 refused`.
   - **Announced** after the write: each applied event that changed a section's value or freshness as
     `<id>.changed`, `{ sections, refreshed, event: { type, t } }`; a catch-up at start as one, its
     sections summed, with no event. A crash between the write and the announcement: the batch kept

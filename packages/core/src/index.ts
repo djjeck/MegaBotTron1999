@@ -359,3 +359,17 @@ export {
   type Store,
   Stores,
 } from './store.ts';
+export {
+  counted,
+  type InstanceSummary,
+  type NodeSummary,
+  Summaries,
+  type SummariesOptions,
+  type SummaryHandle,
+  type SummaryLines,
+  type SummarySection,
+  type SummaryWindow,
+  Tally,
+  TALLY_KEPT_MS,
+  TALLY_MAX,
+} from './summary.ts';

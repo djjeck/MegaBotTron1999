@@ -100,7 +100,10 @@ async function run(
     clock.advanceTo(t);
     await flush();
   };
-  return { core, clock, account, steps, events, status, until };
+  /** Its lines in the owner's summary (D92), since the start. */
+  const summary = (): string[] | undefined =>
+    core.summary({ since: 0, until: clock.now() + 1 }).find((s) => s.node === 'quest-turns')?.lines;
+  return { core, clock, account, steps, events, status, until, summary };
 }
 
 describe('turnActorConfig', () => {
@@ -192,6 +195,7 @@ describe('the turn-actor', () => {
     await r.until(T0 + 6 * 60 * MIN);
     expect(r.events().filter((e) => e === 'sent').length).toBeGreaterThanOrEqual(10);
     expect(r.account.sent).toEqual([]);
+    expect(r.summary()?.[0]).toMatch(/^\d+ turns in a dry run$/u);
   });
 
   it('in live sends its command to its chat, tells its parser, and waits out the rest it reads', async () => {
@@ -214,6 +218,7 @@ describe('the turn-actor', () => {
     );
     await r.until(T0 + 34 * MIN);
     expect(r.account.sent).toHaveLength(2);
+    expect(r.summary()).toEqual(['2 turns sent']);
   });
 
   it('with no recent turn, sends within the spread of its interval, not at once', async () => {
@@ -239,6 +244,7 @@ describe('the turn-actor', () => {
     // Its chat delivered by id, its @username an alias (D90): the same chat.
     r.account.hear({ ...own, chat: '5000001', aliases: [CHAT], time: T0 + 2 * MIN, text: '/play' });
     expect(r.events().filter((e) => e === 'seen')).toHaveLength(2);
+    expect(r.summary()).toEqual(['1 turn in a dry run, 2 by hand']);
   });
 
   it('waits for the account through a live edge, and retries a failed send two minutes later', async () => {
@@ -256,6 +262,7 @@ describe('the turn-actor', () => {
     r.account.fail = undefined;
     await r.until(T0 + 2 * CONNECT_WAIT_MS + RETRY_MS);
     expect(r.account.sent).toHaveLength(1);
+    expect(r.summary()).toEqual(['1 turn sent, 1 failed']);
   });
 
   it('drops its plan off and plans again on; its safety stop stops its node', async () => {
