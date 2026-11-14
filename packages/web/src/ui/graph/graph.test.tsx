@@ -1,9 +1,12 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { ConnectionLineComponentProps } from '@xyflow/react';
+import { Position } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeCore } from '#test/fake-core.ts';
 import { status, STOP, VIEW } from '#test/graph-view.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
+import { DraggedEdge } from './DraggedEdge.tsx';
 import { GraphPage } from './GraphPage.tsx';
 import { layout } from './layout.ts';
 import { SchemaForm } from './SchemaForm.tsx';
@@ -555,5 +558,32 @@ describe('layout', () => {
       c: { x: 640, y: 0 },
       d: { x: 0, y: 140 },
     });
+  });
+});
+
+describe('DraggedEdge', () => {
+  it('draws the line dragged, red and dashed over a port that cannot take it', () => {
+    const props = {
+      fromX: 0,
+      fromY: 0,
+      toX: 100,
+      toY: 50,
+      fromPosition: Position.Right,
+      toPosition: Position.Left,
+    } as unknown as ConnectionLineComponentProps;
+    const { container, rerender } = render(
+      <svg>
+        <DraggedEdge {...props} connectionStatus="valid" />
+      </svg>
+    );
+    const path = () => container.querySelector('path.dragged-edge') as SVGPathElement;
+    expect(path().getAttribute('stroke-dasharray')).toBeNull();
+    rerender(
+      <svg>
+        <DraggedEdge {...props} connectionStatus="invalid" />
+      </svg>
+    );
+    expect(path().getAttribute('class')).toContain('refused');
+    expect(path().getAttribute('stroke')).toBe('#b91c1c');
   });
 });

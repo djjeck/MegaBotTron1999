@@ -1891,3 +1891,9 @@ ul.warnings {
 .record-field li small {
   flex-basis: 100%;
 }
+
+/* An edge dragged over a port that cannot take it (#4): the port ringed in the refusal's red. */
+.react-flow__handle.connectingto:not(.valid) {
+  outline: 2px solid var(--bad);
+  outline-offset: 2px;
+}

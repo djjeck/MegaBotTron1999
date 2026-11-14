@@ -598,3 +598,33 @@ export function dropOn(
   );
   return { graph: connect(grown, edge), port, added: kept === undefined };
 }
+
+/**
+ * Why an output cannot feed an input, as the check would say it, or undefined if it can or the
+ * editor cannot tell yet (#4): asked while an edge is dragged, so that a mismatch is refused at
+ * the port instead of at the save. From the ports the views give (`GET /available`, the check's
+ * `views` and `inputs`): their types, then a chat's network, an events port's namespace, an
+ * interface's plugin and members, as the core compares them (`mismatch`, bot-os-api.md §2.1). An
+ * events input whose namespace is not resolved yet is left to the check.
+ */
+export function bindProblem(output: PortView, input: PortView): string | undefined {
+  const no = `${output.label} cannot bind ${input.label}`;
+  if (output.type !== input.type) return no;
+  if (output.type === 'chat-in' || output.type === 'chat-out') {
+    const [a, b] = [output.network, (input as { network?: string }).network];
+    return a === undefined || b === undefined || a === b ? undefined : no;
+  }
+  if (output.type === 'events' && input.type === 'events')
+    return output.namespace === undefined ||
+      input.namespace === undefined ||
+      output.namespace === input.namespace
+      ? undefined
+      : no;
+  if (output.type !== 'interface' || input.type !== 'interface') return undefined;
+  if (input.plugin !== undefined && output.plugin !== undefined && input.plugin !== output.plugin)
+    return no;
+  const missing = input.members.filter((m) => !output.members.includes(m));
+  return missing.length === 0
+    ? undefined
+    : `${output.plugin ?? output.label} does not declare ${missing.join(', ')}`;
+}

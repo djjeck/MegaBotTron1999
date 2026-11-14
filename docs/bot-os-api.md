@@ -1442,7 +1442,9 @@ account, its input and output ports, the reads, actions and commands its `interf
 the JSON Schemas of its `config`, its `settings` and its actions' inputs and outputs and reads'
 outputs, zod's `toJSONSchema`), with the node's own id, account and config; the port types' looks
 come from `GET /graph/view` (`PORT_TYPE_INFO`). It polls `GET /status` and `GET /drift` for each
-node's live state and drift. Each change of the draft is checked (`POST /graph/check`) and every
+node's live state and drift. An edge dragged over a port that cannot take it (another type, network
+or namespace, or an interface missing a member) is drawn refused and its drop refused, the status
+saying why (bot-os.md D101). Each change of the draft is checked (`POST /graph/check`) and every
 problem shown where it is located (§2.3); every warning too (bot-os.md D89), in amber, dashed, on
 its edge, its port and its node, listed in their panels and in the review, and counted in the map's
 bar beside the problems (`N warnings`), without keeping Apply from the draft. A node's config starts

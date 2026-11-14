@@ -621,6 +621,30 @@ describe('the graph editor', () => {
     expect(core.api.calls).not.toContain('POST /restart {}');
   });
 
+  it('refuses an edge dragged onto a port of another type, and says why (#4)', async () => {
+    const core = fakeCore();
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    const parser = await screen.findByLabelText('node parser', {}, slow);
+    const actor = screen.getByLabelText('node actor-a');
+    await waitFor(() => expect(core.checked.length).toBeGreaterThan(0));
+    const before = core.checked.length;
+    // The parser's events output dropped on the actor's interface input.
+    const target = within(actor).getByTestId('port in parser');
+    const at = { clientX: 400, clientY: 300 };
+    vi.spyOn(document, 'elementFromPoint').mockReturnValue(target);
+    fireEvent.mouseDown(within(parser).getByTestId('port out events'), {
+      button: 0,
+      clientX: 10,
+      clientY: 10,
+    });
+    fireEvent.mouseMove(document, at);
+    fireEvent.mouseUp(document, at);
+    expect((await screen.findByRole('status')).textContent).toMatch(
+      /^Not connected: events of \S+ cannot bind interface/u
+    );
+    expect(core.checked.length).toBe(before);
+  });
+
   it('draws a node’s inputs as the check resolves them (#6)', async () => {
     const core = fakeCore();
     const check = core.api.routes['POST /graph/check'] as (b: unknown) => [number, unknown];

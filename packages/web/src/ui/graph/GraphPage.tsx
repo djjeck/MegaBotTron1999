@@ -42,7 +42,7 @@
  * a band, a React Flow group node holding its cards, the connectors' cards outside every band. A
  * lane's label zooms to it; resting on a node or a lane's label dims what it does not reach.
  */
-import type { Connection, FinalConnectionState, Node } from '@xyflow/react';
+import type { Connection, Edge, FinalConnectionState, Node } from '@xyflow/react';
 import {
   Background,
   Controls,
@@ -77,6 +77,7 @@ import { withDefaults } from './defaults.ts';
 import {
   addNode,
   asGraph,
+  bindProblem,
   connect,
   dropOn,
   edgeKey,
@@ -96,6 +97,7 @@ import {
   updateNode,
   viewOf,
 } from './draft.ts';
+import { DraggedEdge } from './DraggedEdge.tsx';
 import { EdgeDetails } from './EdgeDetails.tsx';
 import { TextView } from './GraphText.tsx';
 import type { LaneNodeType } from './LaneNode.tsx';
@@ -515,6 +517,33 @@ export function GraphPage({
     setDraft((d) => next(d ?? EMPTY_GRAPH));
   };
 
+  /**
+   * Why an edge from one port to another would be refused (#4), as their views say, or undefined
+   * (unknown ports: the check says): asked while dragging, so that React Flow refuses the drop
+   * and draws the line as refused.
+   */
+  const connectionProblem = useCallback(
+    (c: {
+      source: string;
+      sourceHandle?: string | null;
+      target: string;
+      targetHandle?: string | null;
+    }): string | undefined => {
+      const output =
+        c.sourceHandle == null ? undefined : viewsById.get(c.source)?.outputs[c.sourceHandle];
+      const input =
+        c.targetHandle == null
+          ? undefined
+          : viewsById.get(nodeOfCard(c.target))?.inputs[c.targetHandle];
+      return output === undefined || input === undefined ? undefined : bindProblem(output, input);
+    },
+    [viewsById]
+  );
+  const isValidConnection = useCallback(
+    (c: Edge | Connection) => connectionProblem(c) === undefined,
+    [connectionProblem]
+  );
+
   const onConnect = (c: Connection): void =>
     change((g) => connect(g, edgeOf(c, plugins, g, declared)));
 
@@ -525,6 +554,20 @@ export function GraphPage({
   const onConnectEnd = (event: MouseEvent | TouchEvent, state: FinalConnectionState): void => {
     const handle = state.fromHandle;
     if (state.isValid === true || handle?.type !== 'source' || handle.id == null) return;
+    // Dropped on a port that cannot take it (#4): said, and not bound elsewhere.
+    const port = state.toHandle;
+    if (port?.type === 'target' && port.id != null) {
+      const why = connectionProblem({
+        source: handle.nodeId,
+        sourceHandle: handle.id,
+        target: port.nodeId,
+        targetHandle: port.id,
+      });
+      if (why !== undefined) {
+        setSaid(`Not connected: ${why}`);
+        return;
+      }
+    }
     const point = 'changedTouches' in event ? event.changedTouches[0] : event;
     if (point === undefined || draft === undefined) return;
     const card = document
@@ -844,6 +887,8 @@ export function GraphPage({
             onEdgesChange={onEdgesChange}
             onSelectionChange={selectionChanged}
             onConnect={onConnect}
+            isValidConnection={isValidConnection}
+            connectionLineComponent={DraggedEdge}
             onConnectEnd={onConnectEnd}
             onNodeMouseEnter={hoverNode}
             onNodeMouseLeave={leaveNode}

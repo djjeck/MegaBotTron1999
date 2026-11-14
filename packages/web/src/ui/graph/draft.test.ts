@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { Graph, PluginView } from '#src/ui/api.ts';
+import type { Graph, PluginView, PortView } from '#src/ui/api.ts';
 import { AVAILABLE, VIEW } from '#test/graph-view.ts';
 import { cardsOf, cardTitle, isSplit, nodesOfCards, targetCard } from './cards.ts';
 import {
   addNode,
   asGraph,
+  bindProblem,
   connect,
   dropOn,
   edgeKey,
@@ -693,5 +694,46 @@ describe('an edge dropped on a node whose inputs its config declares (D80)', () 
 
   it('names a port free in the node', () => {
     expect(freeName('chat', ['chat', 'chat-2'])).toBe('chat-3');
+  });
+});
+
+describe('an edge dragged (#4)', () => {
+  const port = (p: Record<string, unknown>): PortView =>
+    ({ optional: false, label: `${String(p['type'])} port`, ...p }) as PortView;
+
+  it('binds ports of one type that agree, and says why others do not', () => {
+    const chatIn = port({ type: 'chat-in', network: 'irc', label: 'chat-in of irc' });
+    expect(bindProblem(chatIn, port({ type: 'chat-in' }))).toBeUndefined();
+    expect(bindProblem(chatIn, port({ type: 'chat-in', network: 'telegram' }))).toBe(
+      'chat-in of irc cannot bind chat-in port'
+    );
+    expect(bindProblem(chatIn, port({ type: 'events', namespace: 'dice' }))).toBe(
+      'chat-in of irc cannot bind events port'
+    );
+    const out = port({ type: 'chat-out' });
+    expect(bindProblem(out, port({ type: 'chat-out', network: 'irc' }))).toBeUndefined();
+    const dice = port({ type: 'events', namespace: 'dice' });
+    expect(bindProblem(dice, port({ type: 'events', namespace: 'dice' }))).toBeUndefined();
+    expect(bindProblem(dice, port({ type: 'events', namespace: 'cards' }))).toBe(
+      'events port cannot bind events port'
+    );
+    // Not resolved yet: the check says.
+    expect(bindProblem(dice, port({ type: 'events', config: 'on' }))).toBeUndefined();
+    const face = port({ type: 'interface', plugin: 'dice', members: ['state.get'] });
+    expect(
+      bindProblem(face, port({ type: 'interface', plugin: 'dice', members: ['state.get'] }))
+    ).toBeUndefined();
+    expect(bindProblem(face, port({ type: 'interface', members: ['actions.roll'] }))).toBe(
+      'dice does not declare actions.roll'
+    );
+    expect(
+      bindProblem(
+        port({ type: 'interface', members: [] }),
+        port({ type: 'interface', members: ['x'] })
+      )
+    ).toBe('interface port does not declare x');
+    expect(bindProblem(face, port({ type: 'interface', plugin: 'cards', members: [] }))).toBe(
+      'interface port cannot bind interface port'
+    );
   });
 });
