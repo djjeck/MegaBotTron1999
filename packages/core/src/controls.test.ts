@@ -463,8 +463,8 @@ describe('the core’s commands', () => {
     expect(off?.options?.buttons?.[0]).toEqual([{ label: '🟢 Turn the bot on', action: 'on' }]);
     expect((await ask(named(core, 'off')))[0]?.text).toMatch(/^Refused: already off/u);
     expect((await ask(named(core, 'kill')))[0]).toEqual({
-      text: 'The bot is off: `cli.ts on` first',
-      options: { keep: true },
+      text: 'The bot is off: /on first',
+      options: { buttons: [[{ label: '🟢 Turn the bot on', action: 'on' }]], keep: true },
     });
     expect((await ask(named(core, 'on')))[0]?.text).toMatch(/^actor back\nThe bot is on\./u);
     expect((await ask(named(core, 'kill')))[0]).toMatchObject({

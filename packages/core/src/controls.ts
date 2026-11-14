@@ -1,8 +1,7 @@
 /**
  * The owner's controls (docs/bot-os-api.md §4.11, P11): what the owner of the instance sees and
  * changes, built from what each plugin declares, and nothing else. Every control surface (the chat
- * surface's owner commands, the HTTP control API under `cli.ts`, the web UI and the agents later)
- * is made from these.
+ * surface's owner commands, the HTTP control API and the web UI on it) is made from these.
  *
  * - Each node's state (bot-os.md D64: running; disabled; stopped, with its stop; inactive, with
  *   the node it needs; failed, with why), its settings, and the state and actions its manifest's
@@ -57,7 +56,8 @@ export const KILLED = 'killed by the owner';
 export const STOPPED = 'stopped by the owner';
 
 /** The text of a change refused while the instance is off. */
-export const OFF_REFUSAL = 'the bot is off: `cli.ts on` first';
+export const OFF_REFUSAL =
+  "the bot is off: turn it on first (the web UI's switch, on the Admin page, or the owner's /on)";
 
 /** What the controls need of the core. */
 export interface ControlsHost {

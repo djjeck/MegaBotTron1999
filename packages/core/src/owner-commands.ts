@@ -185,7 +185,10 @@ export function coreCommands(o: CoreCommandsOptions): ChatCommand[] {
     ),
     command('kill', 'Kill switch: everything off, and no command sent', async (answer) => {
       if (controls.off) {
-        await answer.text(`The bot is off: \`cli.ts on\` first`, undefined, { keep: true });
+        await answer.text('The bot is off: /on first', undefined, {
+          buttons: [[{ label: '🟢 Turn the bot on', action: 'on' }]],
+          keep: true,
+        });
         return;
       }
       const k = controls.kill();

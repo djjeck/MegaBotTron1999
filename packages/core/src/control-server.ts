@@ -1,9 +1,9 @@
 /**
  * The owner's control API over HTTP (docs/bot-os-api.md §4.11): the core's controls (`Controls`)
  * as JSON. One request handler (`controlHandler`), served twice by the instance's wiring: on the
- * container's loopback for `cli.ts` (`controlServer`; `docker exec … node src/cli.ts …`), which
- * nothing on the Docker network can reach, and under `/api/` by the web UI's server, only behind its
- * login (`@megabottron1999/web`). Nothing here knows of any plugin: the routes are the
+ * container's loopback (`controlServer`; `docker exec <container> wget -qO- 127.0.0.1:8081/status`),
+ * which nothing on the Docker network can reach, and under `/api/` by the web UI's server, only
+ * behind its login (`@megabottron1999/web`). Nothing here knows of any plugin: the routes are the
  * controls', and each plugin's are its declared reads and actions.
  *
  * - `GET /status`: the instance (off or on) and each plugin: its state (bot-os.md D64: running,
@@ -493,7 +493,7 @@ export function controlHandler(
   };
 }
 
-/** The control API on a server of its own: the wiring's, on the loopback, for `cli.ts`. */
+/** The control API on a server of its own: the wiring's, on the container's loopback. */
 export function controlServer(o: ControlOptions): http.Server {
   return http.createServer(controlHandler(o));
 }
