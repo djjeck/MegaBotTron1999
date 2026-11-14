@@ -22,6 +22,7 @@ import {
   GitHubModules,
   GraphFile,
   graphFileControls,
+  healthServer,
   KEY_SECRET,
   loadModules,
   moduleControls,
@@ -172,6 +173,13 @@ const controlApi = controlHandler({
   modules: moduleControls(modules, loaded, githubModules, () => graphFile.nodes()),
 });
 const control = http.createServer(controlApi).listen(port('CONTROL_PORT', 8081), '127.0.0.1');
+// The shell's health endpoint, for a container's healthcheck (GET /health: 200 while every enabled
+// connector is connected, 503 otherwise), on HEALTH_PORT, every interface; off unless it is set
+// (the image sets 8080).
+const healthPort = port('HEALTH_PORT', 0);
+const healthy =
+  healthPort === 0 ? undefined : healthServer(core.controls).listen(healthPort, '0.0.0.0');
+if (healthy !== undefined) console.log(`health: on port ${healthPort}`);
 // The web UI, on every interface for a reverse proxy, only with the owner's password (the
 // `web_ui_password` secret, docs/bot-os.md D40): without it, no listener at all.
 const web = startWebUi({
@@ -195,6 +203,7 @@ const end = shutdown({
   close: () => {
     githubModules.stop();
     control.close();
+    healthy?.close();
     web?.close();
   },
   exit: (code) => process.exit(code),

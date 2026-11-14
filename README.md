@@ -86,7 +86,10 @@ rather than publishing the port.
   (a GitHub token, to raise the API's limit of 60 requests an hour for installing and updating
   modules from GitHub links; `GITHUB_TOKEN` in the environment is read too, though the secret is the
   safer place).
-- **Ports:** 8082 is the web UI. The control API listens on the container's loopback (8081) only.
+- **Ports:** 8082 is the web UI. 8080 is the health endpoint (`HEALTH_PORT`): `GET /health` answers
+  200 while every enabled connector is connected, 503 otherwise, and the image's `HEALTHCHECK`
+  probes it; set `HEALTH_PORT` empty to turn it off, and disable the healthcheck with it. The
+  control API listens on the container's loopback (8081) only.
 - The container runs as the `node` user, from `/app`, with `node src/main.ts`.
 
 To build the image yourself:

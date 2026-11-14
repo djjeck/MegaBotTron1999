@@ -175,6 +175,14 @@ export {
   writeGraphFile,
 } from './graph-view.ts';
 export {
+  type ConnectorHealth,
+  type Health,
+  health,
+  healthHandler,
+  healthServer,
+  type HealthSource,
+} from './health.ts';
+export {
   INSTANCE_DOC,
   type InstanceInfo,
   type InstanceMeta,

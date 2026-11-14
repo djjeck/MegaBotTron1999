@@ -1230,6 +1230,16 @@ values, for a connector's config to name (§4.9; the wiring leaves out `web_ui_p
 control API is the owner's alone: no agent is ever given it (P11), so no agent installs a module
 (P1).
 
+**The health endpoint** (`packages/core/src/health.ts`), for a container's healthcheck, apart from
+the control API: on `HEALTH_PORT` (every interface; off unless set, and the image sets 8080; an irc
+connector's `healthPort` must be another), `GET /health` (or `HEAD`) answers 200 while every enabled
+connector is connected and 503 otherwise, with
+`{ ok, uptimeS, on, connectors: [{ id, plugin, status, counted }] }`: `on` the owner's switch (said,
+not counted: off is the owner's choice), each connector's `status` its connection's (`connected`,
+`connecting`, `closed`) or, without one, its node's (`failed`), and `counted` false for one the
+owner disabled or stopped, which the verdict leaves out. It reveals no config, account, chat or
+secret. The image's `HEALTHCHECK` probes it (every 30 s, after a start period of 60 s).
+
 **The web UI's login** (`packages/web/src/server/auth.ts`, bot-os.md D45) is meant for a trusted
 network: behind it the owner installs modules and edits script nodes (§5), code that runs with the
 bot's accounts, so a UI exposed to the internet needs another layer of authentication in front of
@@ -1536,7 +1546,8 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   a command (`commandIntervalS`, D73); its password is the `znc_password` secret. It opens one
   connection however often it is started (networks' clone limits). It logs each line of the channel,
   played back or live, as `irc.line`, and each step of the connection as `irc.status`. With
-  `healthPort` it serves `GET /health`: 200 while it is in the channel, 503 when not.
+  `healthPort` it serves `GET /health`: 200 while it is in the channel, 503 when not; kept for the
+  configs that set it, though the shell's own health endpoint (§4.11) covers every connector.
 - **`telegram-bot`** (`packages/connectors/src/plugins/telegram-bot.ts`, on grammY in
   `packages/connectors/src/transport/telegram-bot.ts`): a bot, made from its `telegram_bot_token`
   secret at `create` (with auto-retry), connected and polling at `start` with retries (a backoff

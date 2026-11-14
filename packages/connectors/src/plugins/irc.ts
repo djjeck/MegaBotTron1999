@@ -10,7 +10,8 @@
  * It logs what it hears: every line of the channel, played back or live, as `irc.line`, and
  * every step of the connection as `irc.status`, which it prints too. With a `healthPort` it serves
  * the health endpoint: `GET /health` answers 200 while it is in the channel, 503 when it is not,
- * with the health as JSON.
+ * with the health as JSON. The shell's own (`HEALTH_PORT`, docs/bot-os-api.md §4.11) covers every
+ * connector, this one included; this one is kept for the configs that set it, on another port.
  */
 import {
   commandIntervalS,
