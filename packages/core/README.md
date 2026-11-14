@@ -27,6 +27,10 @@ never their values.
   queue (docs/bot-os.md D73): one per (connector, chat), the same text of different nodes coalesced,
   each command spaced by its interval, each send dropped when its cancel holds, its node stops or
   the instance does, and the merges counted since the start, by pair of nodes.
+- `src/notices.ts`: the owner's notices (docs/bot-os.md D91): what needs the owner's attention,
+  raised where it happens (a node failed or made inactive by a stop's cascade, a drift, a send
+  coalesced, the load's warnings, and a plugin's own through `ctx.notice`), and heard by a node
+  whose manifest declares `notices: true` (`ctx.notices`), those since the start first.
 - `src/state-view.ts`: a node's state as the owner sees it (its schema, freshness and pins,
   docs/bot-os.md D72), for the state plugins and the web UI's viewer; `src/event-log.ts` keeps a
   cursor into the log (a length read per day file) for a reader that resumes where it left it.

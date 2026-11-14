@@ -59,6 +59,7 @@ import {
 import { describePlugin, type PluginView, stableJson } from './graph-view.ts';
 import { type InstanceInfo, InstanceRegistry } from './instance-registry.ts';
 import { type Manifest, parseManifest, SECRET_NAME } from './manifest.ts';
+import { type Notice, Notices } from './notices.ts';
 import {
   isMode,
   type Mode,
@@ -305,6 +306,8 @@ export class Core {
   private readonly costs = new Costs();
   /** The shutdowns a runtime stop's cascade started (D64, #29): `stop` waits for them. */
   private shutting: Promise<void> = Promise.resolve();
+  /** The owner's notices (D91): what needs their attention, for the nodes that tell them. */
+  private readonly noticeFeed: Notices;
 
   constructor(given: CoreOptions) {
     const secrets = given.secrets;
@@ -331,6 +334,10 @@ export class Core {
                 }),
           };
     const options = this.o;
+    this.noticeFeed = new Notices({
+      error: (plugin, line) => this.logger(plugin).error(line),
+      ...(secrets === undefined ? {} : { redact: (text: string) => secrets.redact(text) }),
+    });
     this.stores = new Stores(options.dataDir);
     if (options.dataDir === undefined)
       for (const [id, docs] of Object.entries(options.documents ?? {})) {
@@ -387,7 +394,19 @@ export class Core {
       ...(options.record === undefined ? {} : { record: options.record }),
       notify: (text) => this.tell(text),
       threshold: (parser) => this.entries.get(parser)?.manifest.drift ?? DEFAULT_DRIFT,
-      pause: (parser, reason) => this.stopActorsOf(parser, reason),
+      pause: (parser, reason) => {
+        const paused = this.stopActorsOf(parser, reason);
+        this.notice({
+          kind: 'drift',
+          node: parser,
+          text:
+            paused.length === 0
+              ? `${reason}; nothing that acts depends on it`
+              : `${reason}; stopped ${paused.join(', ')} until you clear the stop in the editor`,
+          detail: { reason, paused },
+        });
+        return paused;
+      },
     });
     this.bus = this.newBus();
   }
@@ -485,6 +504,7 @@ export class Core {
         clock: this.o.clock,
         policy: (plugin, port) => this.policyOf(plugin, account, port),
         ...(this.o.record === undefined ? {} : { record: this.o.record }),
+        notice: (n) => this.notice(n),
       });
       this.outboxes.set(account, outbox);
     }
@@ -631,6 +651,16 @@ export class Core {
     return this.o.secrets?.redact(text) ?? text;
   }
 
+  /** Raises a notice for the owner's attention (D91), now. */
+  private notice(n: Omit<Notice, 't'>): void {
+    this.noticeFeed.raise({ ...n, t: this.o.clock.now() });
+  }
+
+  /** The owner's notices raised since the start (D91), the newest kept, in order. */
+  notices(): Notice[] {
+    return this.noticeFeed.recent();
+  }
+
   /** Each parser's drift: the messages it read and could not read (§4.7). */
   drift(): DriftCounts[] {
     return this.driftMonitor.counts();
@@ -756,6 +786,11 @@ export class Core {
     // A warning refuses nothing (D89): printed, for the log, and shown by the editor's check.
     if (compiled.warnings.length > 0)
       (this.o.print ?? (() => {}))(`core: the graph warns:\n${compiled.warnings.join('\n')}`);
+    // And raised (D91), for a node that tells the owner.
+    for (const w of compiled.warnings) {
+      const { node } = locateProblem(w, raw);
+      this.notice({ kind: 'warning', ...(node === undefined ? {} : { node }), text: w });
+    }
     this.entries = compiled.entries;
     this.loadedGraph = compiled.graph;
     this.bus = compiled.bus;
@@ -857,6 +892,7 @@ export class Core {
       this.set(entry, 'stopping');
       entry.scheduler?.disarm();
       this.bus.drop(entry.id);
+      this.noticeFeed.drop(entry.id);
       try {
         if (instance.serialise !== undefined)
           this.stores.internal(entry.node.instance).put(RESTORE, instance.serialise());
@@ -932,10 +968,17 @@ export class Core {
         entry.up = false;
         entry.scheduler?.disarm();
         this.bus.drop(entry.id);
+        this.noticeFeed.drop(entry.id);
         this.logger(entry.id).warn(`inactive: ${reason}`);
         shut.push(entry);
       }
       this.set(entry, 'inactive', reason);
+      this.notice({
+        kind: 'cascade',
+        node: entry.id,
+        text: `${entry.id} is inactive: ${reason}`,
+        detail: { reason },
+      });
     }
     if (shut.length > 0) this.shutting = this.shutting.then(() => this.shutDown(shut));
   }
@@ -1485,6 +1528,19 @@ export class Core {
         set: (key, raw) => this.settings.set(`${id}.${key}`, raw),
       },
       notify: (text, buttons) => this.tell(text, buttons),
+      notice: (kind, text, detail) =>
+        this.notice({ kind, node: id, text, ...(detail === undefined ? {} : { detail }) }),
+      ...(entry.manifest.notices
+        ? {
+            notices: {
+              // Heard while its node is up, its time counted as its handlers' (D77).
+              subscribe: (handler) =>
+                this.noticeFeed.subscribe(id, (n) => {
+                  if (entry.up === true) this.costs.time(id, () => handler(n));
+                }),
+            },
+          }
+        : {}),
       // Module API 1's modes, derived from the node's state and its edges (D64), deprecated.
       mode: {
         get: () => (sendsOf(node).every(([, b]) => b.dryRun === true) ? 'dry-run' : 'live'),
@@ -1693,9 +1749,16 @@ export class Core {
     entry.up = false;
     entry.scheduler?.disarm();
     this.bus.drop(entry.id);
+    this.noticeFeed.drop(entry.id);
     this.set(entry, 'failed', reason);
     this.logger(entry.id).error(`failed: ${reason}`);
     this.tell(`Plugin ${entry.id} failed: ${reason}`);
+    this.notice({
+      kind: 'failed',
+      node: entry.id,
+      text: `${entry.id} failed: ${reason}`,
+      detail: { reason },
+    });
   }
 
   private set(entry: Entry, state: PluginState, reason?: string, stop?: StopRecord): void {

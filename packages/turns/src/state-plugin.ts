@@ -9,7 +9,8 @@
  * - **Applies** each event of its types, heard live on the bus from the nodes its events edges
  *   bind (required: a parser disabled or stopped makes it inactive, and what requires it, D65),
  *   with the reducer; a reducer that throws, or makes a state its schema refuses, leaves the
- *   state as it was, and the event is recorded as refused (`<id>.refused`) and passed.
+ *   state as it was, and the event is recorded as refused (`<id>.refused`), raised as a notice for
+ *   the owner (`refused`, bot-os.md D91) and passed.
  * - **Keeps** `{ state, updatedAt, cursor, freshness }` in its store (`state`), so that it
  *   survives restarts (P8).
  * - **Resumes from its cursor** (D72): at start it reads the event log after its cursor, applies
@@ -350,6 +351,12 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
         } catch (e) {
           ctx.log.warn(`${event.type} at ${event.t} not applied: ${message(e)}`);
           ctx.record(`${spec.id}.refused`, { event: event.type, at: event.t, reason: message(e) });
+          // For the owner's attention (D91): a node that tells them groups these.
+          ctx.notice('refused', `${ctx.id} refused ${event.type}: ${message(e)}`, {
+            event: event.type,
+            at: event.t,
+            reason: message(e),
+          });
           return;
         }
         const changed = sections.filter((s) => !isDeepStrictEqual(state[s], next[s]));

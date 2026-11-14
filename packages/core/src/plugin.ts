@@ -16,6 +16,7 @@ import { type OwnCost } from './costs.ts';
 import { type DriftReporter } from './drift.ts';
 import { type LogCursor, type LogEntry, type LogTail } from './event-log.ts';
 import { type ManifestInput } from './manifest.ts';
+import { type NoticesHandle } from './notices.ts';
 import { type Mode, type OutboxHandle } from './outbox.ts';
 import { type Render } from './render.ts';
 import { type Scheduler } from './scheduler.ts';
@@ -88,6 +89,19 @@ export interface PluginContext {
    * instance is off.
    */
   notify(text: string, buttons?: Buttons): void;
+  /**
+   * Raises a notice for the owner's attention (§4.16, bot-os.md D91), about its node: `kind`, lower-case
+   * words and dashes (a state node's `refused`, or the plugin's own), `text`, one line naming nodes
+   * by id, and `detail`, fields a listener may group by. Heard by the nodes that tell the owner
+   * (`owner-notice`), which group and pace them; nothing is sent by raising one.
+   */
+  notice(kind: string, text: string, detail?: Readonly<Record<string, unknown>>): void;
+  /**
+   * The owner's notices (§4.16, D91), raised by the core and the plugins: given only to a plugin whose
+   * manifest declares `notices: true`, which hears those raised since the start, then each as it
+   * is raised, while its node is up.
+   */
+  readonly notices?: NoticesHandle;
   /**
    * Its mode, as module API 1 knew it (deprecated, bot-os.md D64): derived, `dry-run` when every
    * chat-out edge of its node is a dry run (or it has none), `live` otherwise. `set('read-only')`,

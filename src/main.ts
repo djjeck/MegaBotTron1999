@@ -3,7 +3,7 @@
  * owner's control API and the web UI, and no game. Everything it calls is tested; this file is
  * wiring, left out of coverage.
  *
- * The connectors, the turn-actor, the reactor and the script node are registered, and so are the plugins of the modules installed under
+ * The connectors, the turn-actor, the reactor, the script node and owner-notice are registered, and so are the plugins of the modules installed under
  * `/data/modules/<id>/` (docs/bot-os.md D49, docs/bot-os-api.md §7), so the image offers them; the
  * graph is the saved one, `/data/graph.json` (D50, docs/bot-os-api.md §2.3), each node's state in
  * its instance under `/data/instances/`. No file: no node runs until the owner adds one. A file
@@ -34,6 +34,7 @@ import {
   Stores,
   wallClock,
 } from '@megabottron1999/core';
+import { ownerNoticePlugin } from '@megabottron1999/turns/owner-notice.ts';
 import { reactorPlugin } from '@megabottron1999/turns/reactor.ts';
 import { scriptPlugin } from '@megabottron1999/turns/script-plugin.ts';
 import { turnActorPlugin } from '@megabottron1999/turns/turn-actor.ts';
@@ -98,6 +99,8 @@ const image: Plugin[] = [
   reactorPlugin(),
   // Script nodes (docs/bot-os.md D76): the owner's code, each in a worker thread of its own.
   scriptPlugin(),
+  // What needs the owner's attention, told through a connector (docs/bot-os.md D91).
+  ownerNoticePlugin(),
 ];
 core.register(...image);
 // The modules (docs/bot-os-api.md §7): each one refused is named, with why, and the others load.

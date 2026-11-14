@@ -26,6 +26,7 @@
 import { z } from 'zod';
 import { type Clock, type TimerHandle } from './clock.ts';
 import { type Connector } from './connector.ts';
+import { type Notice } from './notices.ts';
 import { type Store } from './store.ts';
 
 /**
@@ -208,6 +209,11 @@ export interface OutboxOptions {
   policy?: (plugin: string, port?: string) => SenderPolicy;
   /** Where every attempt, and every step of the queue, goes: the event log. */
   record?: (r: SendRecord | QueueRecord) => void;
+  /**
+   * What the owner should hear of (bot-os.md D91): a send coalesced across nodes (`coalesced`),
+   * raised as a notice; and any other the queue comes to watch for.
+   */
+  notice?: (n: Omit<Notice, 't'>) => void;
 }
 
 export interface SendOptions {
@@ -551,6 +557,13 @@ export class Outbox {
         this.mergedPairs.set(key, (this.mergedPairs.get(key) ?? 0) + 1);
       }
       same.members.push(member);
+      const others = [...new Set(same.members.map((m) => m.plugin))].filter((p) => p !== plugin);
+      this.o.notice?.({
+        kind: 'coalesced',
+        node: plugin,
+        text: `${plugin} queued ${JSON.stringify(text)} to ${chat}, as ${others.join(', ')} had: sent once`,
+        detail: { account: this.account, chat, text, with: others },
+      });
     }
     this.queueLog(plugin, chat, text, same === undefined ? 'queued' : 'coalesced');
     if (deadline !== undefined)

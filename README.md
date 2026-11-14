@@ -18,10 +18,10 @@ dry run, logged as sent (D64).
 It knows no game. Games, and what plays them, are plugins on top of it.
 
 **Status: 0.1.x, before the launch.** The core, the connectors, the turn plugins, the reactor,
-script nodes, the module loader, the graph read from the data volume (`/data/graph.json`) with each
-node's state in an instance apart from it, and the web UI's graph editor, where the graph is built
-node by node, work. The plugin API changes freely until the launch ([docs/bot-os.md](docs/bot-os.md)
-P13).
+script nodes, the owner's notices, the module loader, the graph read from the data volume
+(`/data/graph.json`) with each node's state in an instance apart from it, and the web UI's graph
+editor, where the graph is built node by node, work. The plugin API changes freely until the launch
+([docs/bot-os.md](docs/bot-os.md) P13).
 
 > **Plugins run with the shell's full rights.** There is no sandbox. A plugin can read every secret
 > the process holds and send as every account it is connected to. Run only plugins you have read.
@@ -139,12 +139,16 @@ export const greeter = definePlugin({
   owner's control API are all made from these declarations.
 - **The context** gives it a clock, its own store, durable timers, the bus, the event log read back
   (its own namespaces and those it consumes), handles on the connectors its edges bind, an outbox,
-  drift reporting, its settings, and its own safety stop (`ctx.stop`). A plugin is built from its
-  node's saved config and its context alone. It never holds a credential: connectors do.
+  drift reporting, its settings, a way to raise a notice for the owner (`ctx.notice`), and its own
+  safety stop (`ctx.stop`). A plugin is built from its node's saved config and its context alone. It
+  never holds a credential: connectors do.
 - **The image offers** the connectors (`irc`, `telegram-bot`, `telegram-user`, `anthropic`) and the
   `turn-actor`, one node per game bot, and the `reactor`, one node per reaction ("when this event is
   heard, or a message matches, send this command", from its config alone, on `react()`, which any
-  plugin may call too); everything that knows a game comes from a module.
+  plugin may call too), the `script` node, and `owner-notice`, which tells the owner what needs
+  attention (refused events, coalesced sends, drift, cascades, failures, the graph's warnings),
+  grouped and paced per kind, through a `telegram-bot` to the owner's private chat or through IRC;
+  everything that knows a game comes from a module.
 - **Standard services,** implemented once by the shell (D52): SVG to PNG in every plugin's context
   (`ctx.render.svgToPng`), and asking an LLM through the `anthropic` connector (`ask`, with
   structured output), for the plugins an edge binds to it.
@@ -158,6 +162,11 @@ export const greeter = definePlugin({
   them at the first start.
 - **Drift:** a parser reports every message it claims but cannot read; past a threshold, the core
   stops the actors that depend on it, and what requires them goes inactive, until the owner looks.
+- **The owner's notices** (D91): what needs the owner's attention is raised where it happens, and an
+  `owner-notice` node tells it. Wire it from the editor: add the node, set its `chat` to where the
+  owner reads (their private chat with the bot, by their Telegram user id), draw its `chat` edge to
+  the `telegram-bot` node with that chat among the edge's sends, and make the edge live once the dry
+  run's log (`core.send`, `dry-run`) reads right.
 - **The dev kit** (`DevKit`, `FakeConnector`, `VirtualClock`) runs plugins on a virtual clock with
   fake connectors, for tests and simulators.
 

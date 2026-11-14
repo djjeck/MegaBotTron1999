@@ -247,6 +247,15 @@ export {
   PLUGIN_API,
 } from './modules.ts';
 export {
+  type CoreNoticeKind,
+  type Notice,
+  NOTICE_KIND,
+  NOTICE_KINDS,
+  Notices,
+  NOTICES_KEPT,
+  type NoticesHandle,
+} from './notices.ts';
+export {
   type CancelEvent,
   type CancelWhen,
   type CoalescedView,

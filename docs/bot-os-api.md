@@ -56,6 +56,7 @@ instance does not start.
 | `secrets`       | The secrets it needs, by name (`znc_password`). Only a `connector` may declare any (P9); the manifest of any other kind that does is refused                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `configSecrets` | The keys of its `config` whose values name a secret (§4.9): a connector run as several nodes, each with a credential its node's config names. Only a `connector`                                                                                                                                                                                                                                                                                                                                                                                   |
 | `monitors`      | Optional, a connector's: which chats its node monitors, so that the check warns of a chat-in edge reading one it does not (§2.3, bot-os.md D89): `'all'`, every chat it hears; or `{ config: key }`, the key of its `config` holding the chat (a string) or the chats (a list), unset meaning every chat; chats compare without case. Undeclared: unknown, and nothing is warned of. `{ config: key, aliases: true }`: a chat may go by several names (an id, a `@username`, bot-os.md D90), which its running connector tells (`chatNames`, §4.5) |
+| `notices`       | Optional, `true` for a plugin that hears the owner's notices (`ctx.notices`, §4.16, bot-os.md D91), as `owner-notice` does; false by default                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `state`         | `{ version, migrations }`: the schema version of its store and the steps from each older one (§4.2)                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `drift`         | The parser's threshold for an unrecoverable rate of unread messages (§4.7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `interface`     | What it offers people, commands and agents (P11): `commands` (chat commands: name, help, arguments), `actions` (typed calls that change something: zod input and output) and `state` (typed reads, by name: zod output). The web UI, the chat commands and the agent interface are all made from these descriptions, and nothing else                                                                                                                                                                                                              |
@@ -353,8 +354,8 @@ plugin's, each input bound as its `bind` says (`defaultGraph`), which tests and 
 `withInstances(graph, plugin, instances)` replaces the default node of a plugin meant for several
 instances by its instances. `core.graph()` gives the graph the instance runs, every edge written
 out. A changed graph takes effect at the next start (P8). The instance's entry point (`src/main.ts`)
-registers the connectors, the turn-actor, the reactor and the modules' plugins (§7), and runs the
-graph saved in its volume (`CoreOptions.graphFile`, §2.3).
+registers the connectors, the turn-actor, the reactor, the script node, `owner-notice` and the
+modules' plugins (§7), and runs the graph saved in its volume (`CoreOptions.graphFile`, §2.3).
 
 ### 2.2 Instances
 
@@ -670,6 +671,8 @@ interface PluginContext<Config, Settings> {
   useOptional<T>(port: string): T | undefined; // an optional input's, while bound and running
   drift: DriftReporter; // §4.7, parsers only
   notify(text: string, buttons?: Buttons): void; // the owner (§4.8); nothing while off
+  notice(kind: string, text: string, detail?: object): void; // for the owner's attention (§4.16)
+  notices?: { subscribe(handler: (n: Notice) => void): () => void }; // with `notices: true` (§4.16)
   stop(reason: string): void; // its safety stop: its node stopped, kept (§2.1, Node states)
   fail(reason: string): void; // its node failed at runtime, not kept (§3)
   off(): boolean; // the instance is off (§4.11)
@@ -1087,7 +1090,8 @@ q.cancel(); // true if it still waited
   (`shared by 2 nodes`), and counts the sends coalesced since the start with the pairs of nodes that
   shared them (`3 sends coalesced since the start: a + b (2), a + c (1)`), which its card's line and
   `GET /status`'s `summary` carry too. The count lives in memory, as the queue does, and starts
-  again at each start. (A watchdog of the queue is #41.)
+  again at each start. Each merge is also raised as a `coalesced` notice (§4.16), for a node that
+  tells the owner (`owner-notice`, §5). (A watchdog of the queue is #41.)
 
 **An outbox made outside the core** (a module's own, over a game of its own: module API 1,
 deprecated) may still keep its senders' modes: `new Outbox({ …, modes: new Modes() })`, with
@@ -1113,21 +1117,22 @@ As built (`packages/core/src/drift.ts`): a parser reports through `ctx.drift` (`
 the text and the lines it did not know); the contract's type is `Reading`. Each unread message is
 logged (`event: "unread"`) and told to the owner, the first at once and then at most once an hour
 with the count of those meanwhile. Past the threshold the core stops the actors once until the rate
-falls back, logs it (`event: "pause"`, with the plugins stopped) and tells the owner; `core.drift()`
-gives the counts.
+falls back, logs it (`event: "pause"`, with the plugins stopped), tells the owner and raises a
+`drift` notice (§4.16); `core.drift()` gives the counts.
 
 ### 4.8 The owner
 
 The owner of the instance (D19) is told of what the core does on its own (a plugin failed, a stop
-for drift) and of what a plugin asks to say (`notify`): through the core, to the owner's chat
-surface, and never while the instance is off. **Which surface is the graph's** (bot-os.md D56): the
-first node, in load order, whose instance offers a chat surface, which is a `telegram-bot` node
-configured with its `owner` (the owner's Telegram user id: the owner's private chat with the bot,
-§5); a notice made before it has started waits for it, in order. A wiring may name the node itself
-(`CoreOptions.owner`, tests); without a surface, notices go to `CoreOptions.notify`, or are printed
-(`core: not told …`) when the wiring gives none, as the image's does. Only the owner's chat may use
-the owner's commands and their buttons: the surface answers them to the owner alone (`Asker.owner`),
-never in a group. The owner's controls are the core's (§4.11).
+for drift) and of what a plugin asks to say (`notify`), at once and one by one (an `owner-notice`
+node, §4.16, tells more kinds, grouped and paced, through any connector): through the core, to the
+owner's chat surface, and never while the instance is off. **Which surface is the graph's**
+(bot-os.md D56): the first node, in load order, whose instance offers a chat surface, which is a
+`telegram-bot` node configured with its `owner` (the owner's Telegram user id: the owner's private
+chat with the bot, §5); a notice made before it has started waits for it, in order. A wiring may
+name the node itself (`CoreOptions.owner`, tests); without a surface, notices go to
+`CoreOptions.notify`, or are printed (`core: not told …`) when the wiring gives none, as the image's
+does. Only the owner's chat may use the owner's commands and their buttons: the surface answers them
+to the owner alone (`Asker.owner`), never in a group. The owner's controls are the core's (§4.11).
 
 ### 4.9 Secrets
 
@@ -1566,20 +1571,47 @@ interface Reaction {
 event type nobody registers, and a message trigger on a chat-in input no edge binds. `valueAt`,
 `matches` and `fill` (the dotted paths, `when` and the templates) are exported beside it.
 
+### 4.16 The owner's notices
+
+What needs the owner's attention is **raised as a notice** (bot-os.md D91,
+`packages/core/src/notices.ts`), where it happens, so that a node can tell the owner without reading
+the log: `{ kind, t, node?, text, detail? }`, its `text` one owner-facing line naming nodes by id,
+its `detail` the fields a listener groups by. **The core raises** `failed` (a node failed: at its
+start, at `ready`, at runtime through `ctx.fail`, such as a script killed as hung, D81, D85, D87, or
+because a node it requires failed; `detail.reason`), `cascade` (each node a runtime stop makes
+inactive, D65; `detail.reason`, `needs actor (stopped)`), `drift` (a parser past its threshold,
+§4.7, about the parser; `detail.paused`, the actors stopped), `coalesced` (a queued send that joined
+another node's same text for the same chat, D73, about the node that joined; `detail`: `account`,
+`chat`, `text`, `with`, the other nodes) and `warning` (each warning of the graph's check at the
+load, D89, D90, about its node if it names one). **A plugin raises** its own through
+`ctx.notice(kind, text, detail?)`, about its node: a state node raises `refused` for each event it
+refuses (D72; `detail`: `event`, `at`, `reason`). A kind is lower-case words and dashes; raising one
+sends nothing. **A plugin whose manifest declares `notices: true`** gets `ctx.notices`:
+`subscribe(handler)` hears the notices raised since the instance started first (the newest
+`NOTICES_KEPT`, 200), so that the load's warnings and a node failed at its start reach a node
+started after them, then each as it is raised, while its node is up; the time its handler takes is
+its node's (D77). The notices live in memory (`core.notices()` lists them); the log has the records
+each was raised beside (`core.plugin`, `core.drift`, `core.queue`, `<id>.refused`).
+
+**A kind to come** is raised the same way: the outbox's `notice` option (`OutboxOptions.notice`, the
+core's own) is where a send-queue watchdog (#41) will raise the node it pauses, and `owner-notice`
+(§5) tells a kind it does not name as `other`.
+
 ## 5. The shell's own plugins
 
-| Plugin          | Kinds        | Package                       | What it is                                                                                       |
-| --------------- | ------------ | ----------------------------- | ------------------------------------------------------------------------------------------------ |
-| `irc`           | connector    | `@megabottron1999/connectors` | An IRC account through a ZNC bouncer, with its flood limits and a health endpoint                |
-| `telegram-bot`  | connector    | `@megabottron1999/connectors` | A Telegram bot (grammY), and the owner's chat surface                                            |
-| `telegram-user` | connector    | `@megabottron1999/connectors` | A Telegram user account (GramJS), reading and sending in the chats it monitors                   |
-| `anthropic`     | connector    | `@megabottron1999/connectors` | The Claude API: `ask`, with structured output (§4.13)                                            |
-| (service)       | connector    | `@megabottron1999/connectors` | `ServiceConnector`: the connector of a plugin that holds secrets for an API client, no chat      |
-| (turn parsers)  | parser       | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives     |
-| `turn-actor`    | actor        | `@megabottron1999/turns`      | One game bot's turns, at a person's pace, run as one instance per bot                            |
-| `reactor`       | actor        | `@megabottron1999/turns`      | One reaction (§4.15) from its config: a command sent when an event is heard or a message matches |
-| `script`        | actor, stats | `@megabottron1999/turns`      | TypeScript typed in the editor, on the ports its config declares, in a worker thread of its own  |
-| (states)        | stats        | `@megabottron1999/turns`      | `statePlugin`: a game's player state, kept from its parsers' events, from a spec a game gives    |
+| Plugin          | Kinds        | Package                       | What it is                                                                                        |
+| --------------- | ------------ | ----------------------------- | ------------------------------------------------------------------------------------------------- |
+| `irc`           | connector    | `@megabottron1999/connectors` | An IRC account through a ZNC bouncer, with its flood limits and a health endpoint                 |
+| `telegram-bot`  | connector    | `@megabottron1999/connectors` | A Telegram bot (grammY), and the owner's chat surface                                             |
+| `telegram-user` | connector    | `@megabottron1999/connectors` | A Telegram user account (GramJS), reading and sending in the chats it monitors                    |
+| `anthropic`     | connector    | `@megabottron1999/connectors` | The Claude API: `ask`, with structured output (§4.13)                                             |
+| (service)       | connector    | `@megabottron1999/connectors` | `ServiceConnector`: the connector of a plugin that holds secrets for an API client, no chat       |
+| (turn parsers)  | parser       | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives      |
+| `turn-actor`    | actor        | `@megabottron1999/turns`      | One game bot's turns, at a person's pace, run as one instance per bot                             |
+| `reactor`       | actor        | `@megabottron1999/turns`      | One reaction (§4.15) from its config: a command sent when an event is heard or a message matches  |
+| `script`        | actor, stats | `@megabottron1999/turns`      | TypeScript typed in the editor, on the ports its config declares, in a worker thread of its own   |
+| `owner-notice`  | stats        | `@megabottron1999/turns`      | Tells the owner what needs attention (§4.16), grouped and paced per kind, through a chat-out edge |
+| (states)        | stats        | `@megabottron1999/turns`      | `statePlugin`: a game's player state, kept from its parsers' events, from a spec a game gives     |
 
 - **`irc`** (`packages/connectors/src/plugins/irc.ts`, on the IRC client of
   `packages/connectors/src/transport/irc-client.ts`): one IRC account through ZNC, its configuration
@@ -1682,6 +1714,32 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   editor adds one node per bot, each on its own instance, its `chat` edges from and to the owner's
   `telegram-user` node and its `parser` edge to its bot's parser. The turn parsers are not the
   image's: each is made from a game's grammar, so a game's module offers it.
+- **`owner-notice`** (`packages/turns/src/owner-notice.ts`, bot-os.md D91): tells the owner what
+  needs attention, from the notices (§4.16), through its `chat` output (chat-out, on any network): a
+  `telegram-bot` node, its edge sending to the owner's private chat with the bot (the owner's user
+  id), or an `irc` node, to a nick or a channel. Its sends are queued as any node's (`enqueue`,
+  D73), so a dry-run edge (as a new one is drawn, D64) logs each as `core.send` with outcome
+  `dry-run` and sends nothing. Its configuration (`ownerNoticeConfig`): `chat`, where it tells (one
+  of its edge's `sends`); `report`, each kind on or off (`refused`, `coalesced`, `drift`, `cascade`,
+  `failed`, `warning`, and `other` for every kind it does not name), all on by default; `pace`, per
+  kind, `gatherS`, how long the kind's first notice waits for others of its kind, and `everyMin`,
+  the least minutes between two of its messages, what comes meanwhile going in the next
+  (`DEFAULT_PACE`: `failed`, `drift` and `cascade` 10 s and 5 min; `refused` 60 s and 10 min;
+  `coalesced` 60 s and 30 min; `warning` 30 s and 60 min; `other` 60 s and 10 min; a field left out
+  keeps its default); and `maxLines`, the most items a message lists (5), the rest counted. A kind's
+  message is plain text: one notice is its own line (`script-1 failed: its script hung: …`);
+  several, a title with their count and, past a minute, how long they took, then an item each, alike
+  ones counted once (`inventory refused 5 events in the last 10 min:` and `- quest.gain: … (×3)`),
+  grouped by node for `refused` and `coalesced`. It tells nothing of itself (a notice about its
+  node, or a send it shared), so its own sends cannot feed it. The load's warnings it has told are
+  kept in its store (`warned`), and the next start tells only new ones. Each message is recorded as
+  `owner-notice.told` (`kind`, `count`, `chat`, `text`). Nothing it holds survives a restart: what
+  waits is dropped when its node stops. The core's own tells to the owner's chat surface (§4.8) stay
+  as they are, so a `telegram-bot` with an `owner` tells a failure or a drift at once, and
+  `owner-notice` again, grouped: turn its `failed` and `drift` off to hear them once. **Next** (not
+  built): the owner's periodic summary and its start notice (#46) are to be its messages too, on a
+  timer of their own through the same send, each plugin adding its lines; a send-queue watchdog
+  (#41) is to raise a notice kind of its own (§4.16).
 - **`reactor`** (`packages/turns/src/reactor.ts`): one reaction (`react`, §4.15) made from its
   node's config, with no code, run as one instance per reaction. An actor: whether it sends for real
   is its chat-out edge's (a dry run as the editor draws it, D64). Its configuration
@@ -1849,7 +1907,8 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
     until it is applied too. A crash before the write: the next start reads both from the log again.
     A fresh instance reads the whole log. An event the reducer throws on, or whose result the schema
     refuses, leaves the state as it was, is passed (the cursor moves past it) and recorded
-    (`<id>.refused`, with why), never retried.
+    (`<id>.refused`, with why), never retried; and raised as a `refused` notice (§4.16, bot-os.md
+    D91), for a node that tells the owner.
   - **Announced** after the write: each applied event that changed a section's value or freshness as
     `<id>.changed`, `{ sections, refreshed, event: { type, t } }`; a catch-up at start as one, its
     sections summed, with no event. A crash between the write and the announcement: the batch kept

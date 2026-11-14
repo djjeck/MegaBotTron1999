@@ -159,6 +159,11 @@ export const manifestSchema = z
       ])
       .optional(),
     /**
+     * It hears the owner's notices (bot-os.md D91, `ctx.notices`): what the core and the plugins
+     * raise for the owner's attention, for a node that tells the owner (`owner-notice`).
+     */
+    notices: z.boolean().default(false),
+    /**
      * Keys of its config whose every change a save of the graph records in the event log
      * (`core.config`, bot-os.md D75): who saved it, when, and its SHA-256, never its value (a
      * script node's code).

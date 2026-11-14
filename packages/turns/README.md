@@ -1,7 +1,7 @@
 # @megabottron1999/turns
 
 The base plugins for automation: two for a game bot that is played one turn at a time, one reaction,
-a game's player state, and the script node.
+a game's player state, the script node, and the node that tells the owner what needs attention.
 
 - `turnParserPlugin` (`src/turn-parser.ts`): a parser of one bot's answers on a Telegram user
   account (a chat-in input: it reads, never sends), from a grammar the game provides with its bot's
@@ -31,6 +31,13 @@ a game's player state, and the script node.
   event did (D83), offers `get`, `freshness` and the queries, and its view, which the web UI draws
   from the schema alone. It never sends.
 
+- `ownerNoticePlugin` (`src/owner-notice.ts`): `owner-notice`, a node that tells the owner what
+  needs attention (docs/bot-os.md D91, #40): the notices the core and the plugins raise (refused
+  events, coalesced sends, drift, cascades, failures, the graph's warnings, and plugins' own kinds),
+  each kind on or off, grouped and paced per kind (`pace`: a burst gathered for `gatherS`, at most
+  one message every `everyMin`), in plain text naming nodes by id, through its chat-out edge to its
+  `chat` (a `telegram-bot` to the owner's private chat, or `irc`), queued as any send, so a dry-run
+  edge sends nothing. The owner's periodic summary (#46) is to be its messages too.
 - `scriptPlugin` (`src/script-plugin.ts`): the `script` node, TypeScript the owner types in the web
   UI (docs/bot-os.md D76), on the ports its config declares (events and interface inputs, chat-out
   outputs with their commands, events of its own; several of a kind, each its own name, D84), its

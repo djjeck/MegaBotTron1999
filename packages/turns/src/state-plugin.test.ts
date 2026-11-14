@@ -434,6 +434,16 @@ describe('statePlugin', () => {
       'no such item',
       expect.stringContaining('a state its schema refuses'),
     ]);
+    // Each raised for the owner's attention (D91), about its node.
+    expect(
+      run.core
+        .notices()
+        .filter((n) => n.kind === 'refused')
+        .map((n) => [n.node, n.text, n.detail?.['event']])
+    ).toEqual([
+      ['quest-state', 'quest-state refused quest.gain: no such item', 'quest.gain'],
+      ['quest-state', expect.stringContaining('a state its schema refuses'), 'quest.gain'],
+    ]);
     await run.core.stop();
     const again = await boot({ plugins: [questParser(), questState({ reduce: reducer })] });
     expect(again.read('get', { path: 'profile.level' })).toBe(2);
