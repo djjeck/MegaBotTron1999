@@ -316,6 +316,61 @@ const H = 60 * MIN;
 const WARNING =
   'node reader: input port chat reads #elsewhere, which irc does not monitor (its chats: #lobby) (edge irc.chat → reader.chat)';
 
+describe('owner-notice: the plugins’ messages (D94)', () => {
+  const GO = [[{ label: 'Go', action: '/go' }]];
+  const sentWithButtons = (r: Awaited<ReturnType<typeof run>>) =>
+    r.bot.sent.map((m) => [
+      m.text,
+      m.buttons
+        ?.flat()
+        .map((b) => b.label)
+        .join() ?? '',
+    ]);
+
+  it('holds those heard as it starts, tells them after the start notice, then each at once', async () => {
+    const r = await run({ config: { summaryEveryMin: 0 } });
+    r.ctx('a').notify('Pick one', GO);
+    r.at(START_WAIT_MS - 1);
+    expect(r.sent()).toEqual([]);
+    r.at(START_WAIT_MS);
+    expect(sentWithButtons(r)).toEqual([
+      [expect.stringMatching(/^Started/u) as string, ''],
+      ['Pick one', 'Go'],
+    ]);
+    // After the start: at once, each its own message, never grouped nor paced.
+    r.ctx('a').notify('first');
+    r.ctx('b').notify('second', GO);
+    r.at(START_WAIT_MS);
+    expect(sentWithButtons(r).slice(2)).toEqual([
+      ['first', ''],
+      ['second', 'Go'],
+    ]);
+    expect(r.records(`${OWNER_NOTICE}.told`).slice(-1)).toMatchObject([
+      { kind: 'told', count: 1, chat: OWNER, text: 'second' },
+    ]);
+    expect(r.kit.core.controls.view('notice')).toMatchObject({
+      value: { state: { lastTold: { told: T0 + START_WAIT_MS } } },
+    });
+  });
+
+  it('tells none with told off, nor while the instance is off', async () => {
+    const off = await d91({ config: { report: { told: false } } });
+    off.ctx('a').notify('quiet');
+    off.at(H);
+    expect(off.sent()).toEqual([]);
+    const r = await d91();
+    r.at(START_WAIT_MS);
+    r.kit.core.controls.turnOff();
+    r.ctx('a').notify('while off');
+    r.at(H);
+    expect(r.sent()).toEqual([]);
+    // Raised all the same, for the events panel.
+    expect(r.records('core.notice')).toContainEqual(
+      expect.objectContaining({ kind: 'told', node: 'a', text: 'while off' })
+    );
+  });
+});
+
 describe('owner-notice: the start notice (D92)', () => {
   const quiet = { summaryEveryMin: 0 };
 
@@ -357,7 +412,7 @@ describe('owner-notice: the start notice (D92)', () => {
     ]);
   });
 
-  it('names a failure’s state alone when the core tells it (failed off), and lists the rest', async () => {
+  it('names each node not running with why, even with failed off: the core tells no chat (D94)', async () => {
     const r = await run({
       config: { ...quiet, report: { failed: false, warning: false } },
       crash: true,
@@ -370,8 +425,8 @@ describe('owner-notice: the start notice (D92)', () => {
         `${OWNER}: Started`,
         '5 nodes running: bot, irc, b, reader, notice',
         'Not running:',
-        '- a: failed',
-        '- crashy: failed',
+        '- a: failed (its script hung)',
+        '- crashy: failed (boom)',
       ].join('\n'),
     ]);
     // After it, a failure is told as D91 tells it, when its kind is on.
@@ -393,8 +448,7 @@ describe('owner-notice: the start notice (D92)', () => {
         nodes: ['a', 'b', 'c'].map((id) => ({ id, plugin: 'x', state: 'disabled' })),
       },
       { fresh: ['w1', 'w2', 'w3'], told: 2 },
-      2,
-      () => true
+      2
     );
     expect(text).toBe(
       [

@@ -31,6 +31,7 @@
  */
 import { z } from 'zod';
 import { type Clock, type TimerHandle } from './clock.ts';
+import { type Buttons } from './commands.ts';
 import { type Connector } from './connector.ts';
 import { type Notice } from './notices.ts';
 import { type Store } from './store.ts';
@@ -274,6 +275,12 @@ export interface SendOptions {
    * output's edge reaches, and makes it a dry run or not; none: every edge to this account.
    */
   port?: string;
+  /**
+   * Rows of buttons, each a command a tap runs (bot-os.md D94, `owner-notice` telling a `told`
+   * notice): a connector that can run them in that chat sends them, any other the text alone. A
+   * queued send with buttons is never coalesced.
+   */
+  buttons?: Buttons;
 }
 
 /** How a text is written: Markdown, or plain when not said. */
@@ -477,7 +484,7 @@ export class Outbox {
         ? v.refused
         : stalled !== undefined
           ? stalled
-          : this.attempt(chat, text, v.dryRun);
+          : this.attempt(chat, text, v.dryRun, options.buttons);
     this.sent(chat, text, result);
     if (result.outcome === 'sent') this.went(plugin, chat, text);
     this.log(plugin, chat, options, result, v.mode);
@@ -527,16 +534,21 @@ export class Outbox {
     if (result.outcome === 'sent') {
       const connector = this.o.connector();
       const now = this.o.clock.now();
-      if (connector?.deliver === undefined) result = this.attempt(chat, text, false);
+      if (connector?.deliver === undefined)
+        result = this.attempt(chat, text, false, options.buttons);
       else if (connector.status().state !== 'connected')
         result = { text, outcome: 'refused', reason: 'not connected' };
       else {
         this.recent.push(now);
         try {
+          const extra = {
+            ...(options.format === undefined ? {} : { format: options.format }),
+            ...(options.buttons === undefined ? {} : { buttons: options.buttons }),
+          };
           const { id } = await connector.deliver(
             chat,
             text,
-            options.format === undefined ? undefined : { format: options.format }
+            Object.keys(extra).length === 0 ? undefined : extra
           );
           result = { text, outcome: 'sent', ...(id === undefined ? {} : { id }) };
         } catch (e) {
@@ -671,9 +683,16 @@ export class Outbox {
     if (deadline !== undefined) member.deadline = deadline;
     // Coalesced with the same text for the same chat, wherever it waits, but only another node's:
     // a node's own repeated send (buying an item twice) stays a send of its own.
-    const same = this.waitingList.find(
-      (w) => w.chat === chat && w.text === text && !w.members.some((m) => m.plugin === plugin)
-    );
+    // A send with buttons stays its own: its buttons are its sender's.
+    const same =
+      sendOptions.buttons === undefined
+        ? this.waitingList.find(
+            (w) =>
+              w.chat === chat &&
+              w.text === text &&
+              !w.members.some((m) => m.plugin === plugin || m.options.buttons !== undefined)
+          )
+        : undefined;
     if (same === undefined)
       this.waitingList.push({
         chat,
@@ -859,7 +878,7 @@ export class Outbox {
     }
     const lead = going.find((g) => !g.dryRun) ?? going[0];
     if (lead === undefined) return;
-    const result = this.attempt(w.chat, w.text, lead.dryRun);
+    const result = this.attempt(w.chat, w.text, lead.dryRun, lead.m.options.buttons);
     this.sent(w.chat, w.text, result);
     const others = [
       ...new Set(going.filter((g) => g.m.plugin !== lead.m.plugin).map((g) => g.m.plugin)),
@@ -988,7 +1007,7 @@ export class Outbox {
   }
 
   /** A send the checks allow, against the clock and the network. */
-  private attempt(chat: string, text: string, dryRun: boolean): SendResult {
+  private attempt(chat: string, text: string, dryRun: boolean, buttons?: Buttons): SendResult {
     const refuse = (reason: string): SendResult => ({ text, outcome: 'refused', reason });
     const admitted = this.admit(text, dryRun);
     if (admitted !== undefined) return admitted;
@@ -996,7 +1015,10 @@ export class Outbox {
     const connector = this.o.connector();
     let sent: boolean;
     try {
-      sent = connector?.send(chat, text) ?? false;
+      sent =
+        (buttons === undefined
+          ? connector?.send(chat, text)
+          : connector?.send(chat, text, { buttons })) ?? false;
     } catch (e) {
       if (!(e instanceof FloodWait)) throw e;
       this.heldUntil = now + e.ms;

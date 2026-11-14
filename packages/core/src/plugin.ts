@@ -86,8 +86,10 @@ export interface PluginContext {
   /** A parser's reports of the messages it read and could not read (§4.7). */
   readonly drift: DriftReporter;
   /**
-   * Tells the owner (§4.8), with buttons that each run a command again (§2); nothing while the
-   * instance is off.
+   * A message for the owner (§4.8), with buttons that each run a command (§2): raised as a `told`
+   * notice about its node (§4.16, bot-os.md D94), which a node that tells the owner (`owner-notice`)
+   * sends at once, with its buttons where its chat can run them; with no such node, the editor's
+   * events panel alone shows it. The core sends it to no chat itself.
    */
   notify(text: string, buttons?: Buttons): void;
   /**
@@ -126,7 +128,7 @@ export interface PluginContext {
   /**
    * Fails its node at runtime (§3), for what it cannot run on (a script that hung, or ran out of
    * memory): its events, messages and timers cut at once, its sends refused, its `stop` called,
-   * and the nodes that require it failed too; the owner is told, with why. A failure is not kept
+   * and the nodes that require it failed too; a `failed` notice says why (§4.16). A failure is not kept
    * across restarts: the next start starts it again.
    */
   fail(reason: string): void;

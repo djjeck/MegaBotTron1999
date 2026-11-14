@@ -7,7 +7,7 @@
  * `/data/modules/<id>/` (docs/bot-os.md D49, docs/bot-os-api.md §7), so the image offers them; the
  * graph is the saved one, `/data/graph.json` (D50, docs/bot-os-api.md §2.3), each node's state in
  * its instance under `/data/instances/`. No file: no node runs until the owner adds one. A file
- * refused: no node runs, and the owner is told why.
+ * refused: no node runs, and a `graph-refused` notice says why, in the editor's events panel.
  */
 import { anthropicPlugin } from '@megabottron1999/connectors/plugins/anthropic.ts';
 import { ircPlugin } from '@megabottron1999/connectors/plugins/irc.ts';

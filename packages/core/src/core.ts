@@ -21,19 +21,8 @@ import path from 'node:path';
 import { type z } from 'zod';
 import { Bus, type BusEvent, type BusHandle } from './bus.ts';
 import { type Clock } from './clock.ts';
-import {
-  type Buttons,
-  type ChatCommand,
-  type CommandButton,
-  type CommandHandler,
-} from './commands.ts';
-import {
-  type ChatSurface,
-  type Connector,
-  handleOf,
-  type Inbound,
-  type ReadFilter,
-} from './connector.ts';
+import { type ChatCommand, type CommandButton, type CommandHandler } from './commands.ts';
+import { type Connector, handleOf, type Inbound, type ReadFilter } from './connector.ts';
 import { Controls, type StopRecord, type StopSource } from './controls.ts';
 import { Costs, type NodeCost, type OwnCost } from './costs.ts';
 import { DEFAULT_DRIFT, type DriftCounts, DriftMonitor, type DriftRecord } from './drift.ts';
@@ -164,8 +153,6 @@ export interface CoreOptions {
   secrets?: Secrets;
   /** Whether events are checked against their schemas: by default, outside production. */
   validateEvents?: boolean;
-  /** Tells the owner, with buttons that each run a command; nothing while the instance is off. */
-  notify?: (text: string, buttons?: Buttons) => void;
   /**
    * The instances the saved graph references (bot-os-api.md §2.2), beyond the running graph's: kept
    * from the orphans' expiry. Undefined when the saved graph cannot be read: nothing is deleted then.
@@ -178,12 +165,6 @@ export interface CoreOptions {
   graphFile?: GraphFile;
   /** The way back to the owner's main card, at the foot of the core's own cards (§4.11). */
   home?: CommandButton;
-  /**
-   * The node whose chat surface is the owner's (§4.8): the owner's notices go there, waiting for
-   * it to start. Without it, the graph says: the first node, in load order, whose instance offers a
-   * chat surface (a `telegram-bot` node configured with its `owner`); without one, `notify`.
-   */
-  owner?: string;
   /**
    * The data volume: each instance's store is `<dataDir>/instances/<instance>/`, the core's own
    * `<dataDir>/core/`. Without it the stores live in memory, for tests.
@@ -303,10 +284,6 @@ export class Core {
   private refused: GraphProblem[] = [];
   private readonly outboxes = new Map<string, Outbox>();
   private readonly driftMonitor: DriftMonitor;
-  /** The owner's notices waiting for the owner's surface to start. */
-  private readonly pendingTells: [string, Buttons | undefined][] = [];
-  /** Every plugin has started (`start`): a notice with no surface to wait for is printed. */
-  private startedAll = false;
   /** The secrets the core stores itself, encrypted at rest (§4.9); none without a data volume. */
   readonly secretStore?: SecretStore;
   /** The owner's controls (§4.11), from which every control surface is made. */
@@ -325,7 +302,7 @@ export class Core {
 
   constructor(given: CoreOptions) {
     const secrets = given.secrets;
-    // Whatever the core prints, records or tells passes through the redaction of the secrets.
+    // Whatever the core prints or records passes through the redaction of the secrets.
     this.o =
       secrets === undefined
         ? given
@@ -339,12 +316,6 @@ export class Core {
               : {
                   record: (r: Parameters<NonNullable<CoreOptions['record']>>[0]) =>
                     given.record?.(secrets.redactDeep(r)),
-                }),
-            ...(given.notify === undefined
-              ? {}
-              : {
-                  notify: (text: string, buttons?: Buttons) =>
-                    given.notify?.(secrets.redact(text), buttons),
                 }),
           };
     const options = this.o;
@@ -420,7 +391,7 @@ export class Core {
     this.driftMonitor = new DriftMonitor({
       clock: options.clock,
       ...(options.record === undefined ? {} : { record: options.record }),
-      notify: (text) => this.tell(text),
+      notice: (parser, text, detail) => this.notice({ kind: 'drift', node: parser, text, detail }),
       threshold: (parser) => this.entries.get(parser)?.manifest.drift ?? DEFAULT_DRIFT,
       pause: (parser, reason) => {
         const paused = this.stopActorsOf(parser, reason);
@@ -679,51 +650,15 @@ export class Core {
   }
 
   /**
-   * Tells the owner, unless the instance is off (§4.8, §4.11): through the owner's chat surface
-   * (`owner`), waiting for it to start, or `notify`.
+   * Raises a notice for the owner's attention (D91), now: heard by the nodes that tell the owner,
+   * and recorded (`core.notice`), for the editor's events panel, whether a node tells it or not
+   * (D94: the core tells no chat itself).
    */
-  notify(text: string, buttons?: Buttons): void {
-    this.tell(text, buttons);
-  }
-
-  private tell(text: string, buttons?: Buttons): void {
-    if (this.controls.off) return;
-    const surface = this.ownerSurface();
-    if (surface !== undefined) surface.tell(this.redact(text), buttons);
-    else if (this.o.owner === undefined && this.o.notify !== undefined)
-      this.o.notify(text, buttons);
-    else if (this.o.owner === undefined && this.startedAll)
-      this.print(`core: not told (no node offers the owner's chat): ${this.redact(text)}`);
-    else this.pendingTells.push([this.redact(text), buttons]);
-  }
-
-  /**
-   * The owner's chat surface, once its plugin has made it: the `owner` node's, or, without one,
-   * the first running node's, in load order, that offers one.
-   */
-  private ownerSurface(): ChatSurface | undefined {
-    const live = (e: Entry | undefined): e is Entry => e?.up === true;
-    if (this.o.owner !== undefined) {
-      const e = this.entries.get(this.o.owner);
-      return live(e) ? e.instance?.surface : undefined;
-    }
-    for (const e of this.entries.values())
-      if (live(e) && e.instance?.surface !== undefined) return e.instance.surface;
-    return undefined;
-  }
-
-  private print(line: string): void {
-    (this.o.print ?? (() => {}))(line);
-  }
-
-  private redact(text: string): string {
-    return this.o.secrets?.redact(text) ?? text;
-  }
-
-  /** Raises a notice for the owner's attention (D91), now. */
   private notice(n: Omit<Notice, 't'>): void {
-    this.noticeFeed.raise({ ...n, t: this.o.clock.now() });
+    const t = this.o.clock.now();
+    this.noticeFeed.raise({ ...n, t });
     this.summaries.noticed(n.kind);
+    this.o.record?.({ type: 'core.notice', t, ...n });
   }
 
   /** The owner's notices raised since the start (D91), the newest kept, in order. */
@@ -820,11 +755,6 @@ export class Core {
       }
     }
     this.sweepDaily();
-    this.startedAll = true;
-    // Notices for an owner's surface that never started are printed, not lost silently.
-    const none = this.o.owner ?? "node offers the owner's chat";
-    for (const [text] of this.pendingTells.splice(0))
-      this.print(`core: not told (no ${none}): ${text}`);
   }
 
   /**
@@ -857,7 +787,12 @@ export class Core {
         event: 'refused',
         problems: why,
       });
-      this.tell(`The saved graph is refused, and no node runs: ${why.join('; ')}`);
+      // Raised, with no node to hear it: the editor's events panel shows it (D94).
+      this.notice({
+        kind: 'graph-refused',
+        text: `The saved graph is refused, and no node runs: ${why.join('; ')}`,
+        detail: { problems: why },
+      });
     }
     // A warning refuses nothing (D89): printed, for the log, and shown by the editor's check.
     if (compiled.warnings.length > 0)
@@ -1454,13 +1389,6 @@ export class Core {
     // A plugin that stopped itself as it started stays stopped.
     if ((entry.status.state as PluginState) === 'starting') this.set(entry, 'running');
     entry.scheduler?.arm();
-    // The owner's notices made before its surface existed, in order.
-    const surface =
-      id === this.o.owner || (this.o.owner === undefined && entry.instance?.surface !== undefined)
-        ? this.ownerSurface()
-        : undefined;
-    for (const [text, buttons] of surface === undefined ? [] : this.pendingTells.splice(0))
-      surface?.tell(text, buttons);
   }
 
   private async readyOne(entry: Entry): Promise<void> {
@@ -1627,7 +1555,16 @@ export class Core {
         kept: () => this.settings.of(id)?.kept() ?? {},
         set: (key, raw) => this.settings.set(`${id}.${key}`, raw),
       },
-      notify: (text, buttons) => this.tell(text, buttons),
+      // A message for the owner, raised as a notice (D94): a node that tells the owner sends it.
+      notify: (text, buttons) =>
+        this.notice({
+          kind: 'told',
+          node: id,
+          text,
+          ...(buttons === undefined || buttons.length === 0
+            ? {}
+            : { detail: { buttons: buttons.map((row) => row.map((b) => ({ ...b }))) } }),
+        }),
       notice: (kind, text, detail) =>
         this.notice({ kind, node: id, text, ...(detail === undefined ? {} : { detail }) }),
       ...(entry.manifest.notices
@@ -1853,7 +1790,6 @@ export class Core {
     this.noticeFeed.drop(entry.id);
     this.set(entry, 'failed', reason);
     this.logger(entry.id).error(`failed: ${reason}`);
-    this.tell(`Plugin ${entry.id} failed: ${reason}`);
     this.notice({
       kind: 'failed',
       node: entry.id,

@@ -4,8 +4,9 @@
  *
  * - The parser contract: each message a parser sees is `not-mine` (not its bot's), `read`, or
  *   `unread` (its bot's, in a form it does not know).
- * - Each unread message is logged (`core.drift`, with its text), counted per parser, and told to
- *   the owner: the first at once, then at most once an hour, with how many came meanwhile.
+ * - Each unread message is logged (`core.drift`, with its text), counted per parser, and raised as
+ *   a notice for the owner (`drift`, bot-os.md D91, D94): the first at once, then at most once an
+ *   hour, with how many came meanwhile.
  * - Unrecoverable (bot-os.md D21): more than `unreadAt` (5) unread messages from one parser within
  *   `windowMin` (15) minutes. Then `pause` is called once with why, and not again until the rate
  *   has fallen back under the threshold.
@@ -56,7 +57,11 @@ export interface DriftRecord {
 export interface DriftOptions {
   clock: Clock;
   record?: (r: DriftRecord) => void;
-  notify?: (text: string) => void;
+  /**
+   * Raises a notice about a parser (bot-os.md D91, D94): a message it could not read, at most once an
+   * hour per parser, the ones since counted. Its pause is the core's notice, raised by `pause`.
+   */
+  notice?: (parser: string, text: string, detail: Readonly<Record<string, unknown>>) => void;
   /** The threshold of a parser: its manifest's, or the default. */
   threshold?: (parser: string) => DriftThreshold;
   /** Stops what acts on the parser (bot-os.md D64); returns the plugins stopped. */
@@ -150,7 +155,14 @@ export class DriftMonitor {
     });
     if (now - c.toldAt >= HOUR) {
       const more = c.untold === 0 ? '' : ` (and ${c.untold} more since the last told)`;
-      this.o.notify?.(`Drift: ${parser} could not read a message${more}: ${excerpt(text)}`);
+      this.o.notice?.(
+        parser,
+        `Drift: ${parser} could not read a message${more}: ${excerpt(text)}`,
+        {
+          unread: excerpt(text),
+          more: c.untold,
+        }
+      );
       c.toldAt = now;
       c.untold = 0;
     } else c.untold++;
@@ -165,10 +177,5 @@ export class DriftMonitor {
     const reason = `drift: ${parser} could not read ${recent} messages in ${windowMin} minutes`;
     const paused = this.o.pause(parser, reason);
     this.o.record?.({ type: 'core.drift', t: now, plugin: parser, event: 'pause', reason, paused });
-    this.o.notify?.(
-      paused.length === 0
-        ? `Drift: ${reason}; nothing that acts depends on it`
-        : `Drift: ${reason}; stopped ${paused.join(', ')} until you clear the stop in the editor`
-    );
   }
 }

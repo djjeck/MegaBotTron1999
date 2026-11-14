@@ -19,6 +19,7 @@ import { type Buttons } from './commands.ts';
 import {
   type Connector,
   ConnectorBase,
+  type ConnectorSendOptions,
   type Inbound,
   type Surface,
   type SurfaceQuery,
@@ -49,8 +50,8 @@ export type Heard = Omit<Inbound, 'account' | 'network' | 'playback'> & { playba
 
 /** A connector of any network, driven by a test or a simulator. */
 export class FakeConnector extends ConnectorBase implements Connector {
-  /** Every send, in order. */
-  readonly sent: { chat: string; text: string }[] = [];
+  /** Every send, in order, with the buttons a send carried (`SendOptions.buttons`). */
+  readonly sent: { chat: string; text: string; buttons?: Buttons }[] = [];
   private readonly onSend: ((chat: string, text: string) => boolean) | undefined;
   private readonly admins: readonly string[];
   /** Its surfaces, as a test sets them; undefined: none (it cannot list them). */
@@ -97,8 +98,12 @@ export class FakeConnector extends ConnectorBase implements Connector {
     this.received({ ...m, playback: m.playback ?? false });
   }
 
-  send(chat: string, text: string): boolean {
-    this.sent.push({ chat, text });
+  send(chat: string, text: string, options?: ConnectorSendOptions): boolean {
+    this.sent.push({
+      chat,
+      text,
+      ...(options?.buttons === undefined ? {} : { buttons: options.buttons }),
+    });
     return this.onSend?.(chat, text) ?? true;
   }
 }
@@ -148,8 +153,6 @@ export interface DevKitOptions {
   history?: readonly LogEntry[];
   /** Where log lines go; nowhere by default. */
   print?: (line: string) => void;
-  /** Where the owner's notifications go; nowhere by default. */
-  notify?: (text: string, buttons?: Buttons) => void;
   /** Whether events are checked against their schemas (by default, outside production). */
   validateEvents?: boolean;
   /** Whether an archived plugin may run (`CoreOptions.allowArchived`): off unless said. */
@@ -183,7 +186,6 @@ export class DevKit {
       ...(o.graph === undefined ? {} : { graph: o.graph }),
       ...(o.documents === undefined ? {} : { documents: o.documents }),
       ...(o.print === undefined ? {} : { print: o.print }),
-      ...(o.notify === undefined ? {} : { notify: o.notify }),
       ...(o.validateEvents === undefined ? {} : { validateEvents: o.validateEvents }),
       ...(o.allowArchived === undefined ? {} : { allowArchived: o.allowArchived }),
       ...(o.build === undefined ? {} : { build: o.build }),

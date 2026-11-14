@@ -100,8 +100,21 @@ function instance(more: Partial<ConstructorParameters<typeof Core>[0]> = {}) {
   let ctx: PluginContext | undefined;
   const core = new Core({
     clock: new VirtualClock(1000),
-    notify: (t, b) => told.push(b === undefined ? t : `${t} [${b.flat().map((x) => x.label)}]`),
-    record: (r) => records.push(r as CoreRecord),
+    record: (r) => {
+      records.push(r as CoreRecord);
+      // A plugin's message is a told notice (D94), recorded: with its buttons' labels.
+      if (r.type === 'core.notice' && r['kind'] === 'told') {
+        const b = (r['detail'] as { buttons?: { label: string }[][] } | undefined)?.buttons;
+        told.push(
+          b === undefined
+            ? String(r['text'])
+            : `${String(r['text'])} [${b
+                .flat()
+                .map((x) => x.label)
+                .join()}]`
+        );
+      }
+    },
     print: (l) => lines.push(l),
     home: { label: '← Status', action: 'status' },
     ...more,
@@ -208,8 +221,9 @@ describe('Controls', () => {
     expect(ctx().off()).toBe(true);
     expect(seen).toContain('off');
     expect(lines).toContain('broken: error: cannot stop');
-    ctx().notify('nobody hears this');
-    expect(told).toEqual([]);
+    // Raised all the same, for the events panel: owner-notice sends no told notice while off.
+    ctx().notify('only recorded');
+    expect(told).toEqual(['only recorded']);
     // Kept across a restart.
     await core.stop();
     const again = instance({ dataDir: dir });

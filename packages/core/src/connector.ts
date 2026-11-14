@@ -234,30 +234,47 @@ export interface ConnectorHandle {
 }
 
 /**
- * A chat surface: a connector that answers the plugins' chat commands where they are asked,
- * and carries the owner's notices when it is the owner's (`CoreOptions.owner`). The core serves it
- * the commands once every plugin has started.
+ * A chat surface: a connector that answers the plugins' chat commands where they are asked, the
+ * owner's among them, with their cards and buttons. The core serves it the commands once every
+ * plugin has started. It reports nothing on its own (bot-os.md D94): what the owner is told goes
+ * through a node of the graph (`owner-notice`).
  */
 export interface ChatSurface {
   /** The commands to answer (`core.commands()`), once every plugin has started. */
   serve(commands: readonly ChatCommand[]): void;
-  /** Tells the owner, in order; what comes before `serve` waits for it. */
-  tell(text: string, buttons?: Buttons): void;
+}
+
+/** What a send to a connector may carry beside its text. */
+export interface ConnectorSendOptions {
+  /**
+   * Rows of buttons, each a command a tap runs (bot-os.md D94): sent where the connector can run
+   * them (a `telegram-bot`'s owner's chat), dropped elsewhere.
+   */
+  buttons?: Buttons;
 }
 
 /** A connector, as its plugin implements it. */
 export interface Connector extends ConnectorHandle {
   /** Its account's limits, which the outbox keeps to: below the network's own. */
   readonly limits?: Limits;
-  /** Sends `text` to `chat`; false if it cannot now (not connected). Only the outbox calls it. */
-  send(chat: string, text: string): boolean;
+  /**
+   * Sends `text` to `chat`; false if it cannot now (not connected). Only the outbox calls it. With
+   * `buttons` (`SendOptions.buttons`), a connector whose chat can run them as commands sends them;
+   * any other sends the text alone.
+   */
+  send(chat: string, text: string, options?: ConnectorSendOptions): boolean;
   /**
    * Sends `text` to `chat` and waits for the network's answer: the message's id, where it has one.
    * Rejects if the network refused it (a `FloodWait` when it asks to wait). For networks whose
    * sends answer later (Telegram); only the outbox calls it, through `Outbox.deliver`. With
-   * `format`, the text is Markdown, which a network that formats sends formatted.
+   * `format`, the text is Markdown, which a network that formats sends formatted; `buttons`, as
+   * `send` takes them.
    */
-  deliver?(chat: string, text: string, options?: { format?: TextFormat }): Promise<{ id?: string }>;
+  deliver?(
+    chat: string,
+    text: string,
+    options?: ConnectorSendOptions & { format?: TextFormat }
+  ): Promise<{ id?: string }>;
   /**
    * The chats it can see, most recently active first, those matching `query.search` (bot-os.md
    * D63): what the owner picks the monitored chats and each edge's from. Rejects while it cannot

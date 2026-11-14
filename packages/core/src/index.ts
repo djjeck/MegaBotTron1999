@@ -21,6 +21,7 @@ export {
   type Connector,
   ConnectorBase,
   type ConnectorHandle,
+  type ConnectorSendOptions,
   type ConnectorState,
   type ConnectorStatus,
   DOCUMENT_MAX_BYTES,
@@ -247,6 +248,7 @@ export {
   PLUGIN_API,
 } from './modules.ts';
 export {
+  buttonsOf,
   type CoreNoticeKind,
   type Notice,
   NOTICE_KIND,

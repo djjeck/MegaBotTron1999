@@ -45,12 +45,15 @@ function plugin(
 function core(extra: Partial<ConstructorParameters<typeof Core>[0]> = {}) {
   const records: (CoreRecord | BusEvent)[] = [];
   const lines: string[] = [];
+  /** The notices raised, as the event log records them (D94: the core tells no chat). */
   const told: string[] = [];
   const c = new Core({
     clock: new VirtualClock(1000),
-    record: (r) => records.push(r),
+    record: (r) => {
+      records.push(r);
+      if (r.type === 'core.notice') told.push(String(r['text']));
+    },
     print: (l) => lines.push(l),
-    notify: (t) => told.push(t),
     ...extra,
   });
   return { core: c, records, lines, told };
@@ -138,9 +141,9 @@ describe('Core', () => {
       { id: 'd', state: 'running' },
     ]);
     expect(told).toEqual([
-      'Plugin a failed: no connection',
-      'Plugin b failed: requires a, which failed',
-      'Plugin c failed: bad start',
+      'a failed: no connection',
+      'b failed: requires a, which failed',
+      'c failed: bad start',
     ]);
     expect(lines).toContain('a: error: failed: no connection');
     expect(records).toContainEqual({
@@ -604,9 +607,9 @@ describe('Core', () => {
       'stop c',
     ]);
     expect(told).toEqual([
-      'Plugin a failed: no history',
-      'Plugin b failed: requires a, which failed',
-      'Plugin c failed: requires b, which failed',
+      'a failed: no history',
+      'b failed: requires a, which failed',
+      'c failed: requires b, which failed',
     ]);
   });
 });
@@ -635,10 +638,7 @@ describe('a node failed at runtime (ctx.fail)', () => {
     fail?.('again');
     await c.stop();
     expect(seen.filter((x) => x.startsWith('stop'))).toEqual(['stop a', 'stop b', 'stop d']);
-    expect(told).toEqual([
-      'Plugin a failed: it hung for 2000 ms',
-      'Plugin b failed: requires a, which failed',
-    ]);
+    expect(told).toEqual(['a failed: it hung for 2000 ms', 'b failed: requires a, which failed']);
   });
 
   it('logs a stop that throws as it fails', async () => {
@@ -716,65 +716,65 @@ describe('archived plugins (bot-os.md D32)', () => {
   });
 });
 
-describe('the owner’s notices (bot-os-api.md §4.8)', () => {
+describe('the owner’s messages (bot-os-api.md §4.8, bot-os.md D94)', () => {
   /** A connector whose instance offers a chat surface, as a `telegram-bot` with its `owner` does. */
-  const surfaced = (id: string, told: string[]) =>
+  const surfaced = (id: string, connector: FakeConnector) =>
     definePlugin({
       manifest: {
         id,
         version: '0.1.0',
         kinds: ['connector'],
         description: 'a surface',
-        account: `x:${id}`,
+        account: connector.account,
       },
-      create: () => ({
-        connector: new FakeConnector({ account: `x:${id}` }),
-        surface: { serve: () => {}, tell: (t: string) => told.push(`${id}: ${t}`) },
-      }),
+      create: () => ({ connector, surface: { serve: () => {} } }),
     });
-  /** A plugin that tells the owner as it is made. */
+  /** A plugin that tells the owner as it is made, with a button. */
   const teller = definePlugin({
     manifest: { id: 'teller', version: '0.1.0', kinds: ['stats'], description: 'tells' },
     create: (ctx) => {
-      ctx.notify('made');
+      ctx.notify('made', [[{ label: 'Go', action: '/go' }]]);
+      ctx.notify('plain');
       return {};
     },
   });
 
-  it('go to the first node of the graph that offers a chat surface, waiting for it', async () => {
-    const told: string[] = [];
-    const lines: string[] = [];
-    const core = new Core({
-      clock: new VirtualClock(0),
-      print: (l) => lines.push(l),
+  it('are raised as told notices, with their buttons, and recorded; no chat is sent anything', async () => {
+    const connector = new FakeConnector({ account: 'x:a' });
+    const { core: c, records } = core({
       graph: {
         version: 2,
         nodes: [
           { id: 'teller', plugin: 'teller' },
           { id: 'a', plugin: 'a' },
-          { id: 'b', plugin: 'b' },
         ],
         edges: [],
       },
     });
-    core.register(teller, surfaced('a', told), surfaced('b', told));
-    await core.start();
-    core.notify('later');
-    expect(told).toEqual(['a: made', 'a: later']);
-    expect(lines.filter((l) => l.includes('not told'))).toEqual([]);
-    await core.stop();
-  });
-
-  it('are printed when no node offers one and the wiring gives no other way', async () => {
-    const lines: string[] = [];
-    const core = new Core({ clock: new VirtualClock(0), print: (l) => lines.push(l) });
-    core.register(teller);
-    await core.start();
-    core.notify('after');
-    expect(lines.filter((l) => l.includes('not told'))).toEqual([
-      "core: not told (no node offers the owner's chat): made",
-      "core: not told (no node offers the owner's chat): after",
+    c.register(teller, surfaced('a', connector));
+    await c.start();
+    expect(c.notices()).toEqual([
+      {
+        kind: 'told',
+        node: 'teller',
+        text: 'made',
+        detail: { buttons: [[{ label: 'Go', action: '/go' }]] },
+        t: 1000,
+      },
+      { kind: 'told', node: 'teller', text: 'plain', t: 1000 },
     ]);
-    await core.stop();
+    expect(records.filter((r) => r.type === 'core.notice')).toEqual([
+      {
+        type: 'core.notice',
+        t: 1000,
+        kind: 'told',
+        node: 'teller',
+        text: 'made',
+        detail: { buttons: [[{ label: 'Go', action: '/go' }]] },
+      },
+      { type: 'core.notice', t: 1000, kind: 'told', node: 'teller', text: 'plain' },
+    ]);
+    expect(connector.sent).toEqual([]);
+    await c.stop();
   });
 });

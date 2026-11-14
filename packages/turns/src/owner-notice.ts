@@ -9,8 +9,14 @@
  * D72), sends several nodes shared (`coalesced`, D73), a parser's drift that paused what acts on it
  * (`drift`, P5), the nodes a runtime stop made inactive (`cascade`, D65), the nodes failed (`failed`:
  * a crash, a script killed as hung, D81, D85, D87), the graph's warnings at the load (`warning`,
- * D89, D90), the nodes the send-queue watchdog paused (`stalled`, D93), and the kinds plugins
- * raise of their own (`other`).
+ * D89, D90), the nodes the send-queue watchdog paused (`stalled`, D93), the plugins' messages for
+ * the owner (`told`, `ctx.notify`, D94), and the kinds plugins raise of their own (`other`).
+ *
+ * **The only node that reports to a chat** (D94): the core tells no chat itself. A plugin's
+ * `ctx.notify` is a `told` notice, which it sends at once, each its own message, never grouped
+ * (a plugin's prompt waits for nothing), with its buttons when its chat can run them (a
+ * `telegram-bot`'s owner's chat, through its surface); text alone otherwise (IRC). Those heard as
+ * the instance starts wait for the start notice's wait, and follow it.
  *
  * **Grouped and paced, per kind** (`pace`): a kind's first notice waits `gatherS` for others of its
  * kind, and two messages of one kind are at least `everyMin` apart; what comes meanwhile goes in
@@ -27,6 +33,8 @@
  * go in it, not in messages of their own.
  */
 import {
+  type Buttons,
+  buttonsOf,
   type Clock,
   definePlugin,
   type InstanceSummary,
@@ -56,8 +64,8 @@ export interface SummaryKept {
 /** How long after every node has started the start notice waits, for a failure at the start. */
 export const START_WAIT_MS = 10_000;
 
-/** The kinds it tells by name; any other is `other`. */
-export const REPORTED = [
+/** The kinds it groups and paces, by name; any other is `other`. */
+export const PACED = [
   'refused',
   'coalesced',
   'drift',
@@ -67,6 +75,10 @@ export const REPORTED = [
   'warning',
   'other',
 ] as const;
+export type Paced = (typeof PACED)[number];
+
+/** The kinds it tells: those it paces, and the plugins' messages, told at once (`told`). */
+export const REPORTED = [...PACED, 'told'] as const;
 export type Reported = (typeof REPORTED)[number];
 
 /** How a kind is paced: how long its first notice waits for others, and the least gap. */
@@ -80,7 +92,7 @@ export interface Pace {
  * watchdog stopped) goes within seconds, at most every 5 minutes; a burst of refusals or coalesced sends within a minute, at
  * most every 10 or 30; the graph's warnings, once at the load.
  */
-export const DEFAULT_PACE: Readonly<Record<Reported, Pace>> = {
+export const DEFAULT_PACE: Readonly<Record<Paced, Pace>> = {
   refused: { gatherS: 60, everyMin: 10 },
   coalesced: { gatherS: 60, everyMin: 30 },
   drift: { gatherS: 10, everyMin: 5 },
@@ -100,6 +112,7 @@ const reportHelp: Record<Reported, string> = {
   stalled: 'Nodes stopped for sending a command again and again with no answer (D93)',
   warning: "The graph's warnings at the load (D89)",
   other: 'Notices of any other kind, raised by plugins',
+  told: 'The plugins’ messages for the owner (`ctx.notify`), each at once, with its buttons where the chat can run them',
 };
 
 const paceSchema = z.object({
@@ -124,14 +137,14 @@ export const ownerNoticeConfig = z.object({
     .describe('What it tells, by kind'),
   pace: z
     .object(
-      Object.fromEntries(REPORTED.map((k) => [k, paceSchema.optional()])) as Record<
-        Reported,
+      Object.fromEntries(PACED.map((k) => [k, paceSchema.optional()])) as Record<
+        Paced,
         z.ZodOptional<typeof paceSchema>
       >
     )
-    .default(() => structuredClone(DEFAULT_PACE) as Record<Reported, Pace>)
+    .default(() => structuredClone(DEFAULT_PACE) as Record<Paced, Pace>)
     .describe(
-      'Per kind: how many seconds its first notice waits for others (`gatherS`), and the least minutes between two of its messages (`everyMin`); a kind or a field left out keeps its default'
+      'Per kind: how many seconds its first notice waits for others (`gatherS`), and the least minutes between two of its messages (`everyMin`); a kind or a field left out keeps its default. A plugin’s message (`told`) is not paced: it goes at once'
     ),
   maxLines: z
     .number()
@@ -175,7 +188,7 @@ const after = (text: string, prefix: string): string =>
   text.startsWith(prefix) ? text.slice(prefix.length) : text;
 
 /** The kinds it knows how to word; any other is worded as `other`. */
-export const KINDS: Readonly<Record<Reported, KindSpec>> = {
+export const KINDS: Readonly<Record<Paced, KindSpec>> = {
   refused: {
     byNode: true,
     title: (n, node) => `${String(node)} refused ${plural(n, 'event')}`,
@@ -225,9 +238,9 @@ export const KINDS: Readonly<Record<Reported, KindSpec>> = {
   },
 };
 
-/** What a notice is told as: its kind, or `other`. */
-export const reportedOf = (kind: string): Reported =>
-  (REPORTED as readonly string[]).includes(kind) && kind !== 'other' ? (kind as Reported) : 'other';
+/** What a paced notice is told as: its kind, or `other` (a `told` is not paced). */
+export const reportedOf = (kind: string): Paced =>
+  (PACED as readonly string[]).includes(kind) && kind !== 'other' ? (kind as Paced) : 'other';
 
 /** `ms` in the owner's words: `40 s`, `10 min`, `2 h`, `2 h 30 min`. */
 export function span(ms: number): string {
@@ -245,7 +258,7 @@ export function span(ms: number): string {
  * long they took, and their items, alike ones counted once, at most `maxLines`.
  */
 export function wordNotices(
-  kind: Reported,
+  kind: Paced,
   notices: readonly Notice[],
   now: number,
   maxLines: number
@@ -286,16 +299,16 @@ interface Pending {
 
 /** What the desk holds, for the node's view: the notices waiting by kind, and its last tells. */
 export interface DeskView {
-  waiting: Partial<Record<Reported, { count: number; dueAt: number }>>;
+  waiting: Partial<Record<Paced, { count: number; dueAt: number }>>;
   lastTold: Partial<Record<Reported, number>>;
 }
 
 interface DeskOptions {
   clock: Clock;
-  pace(kind: Reported): Pace;
+  pace(kind: Paced): Pace;
   maxLines: number;
   /** Tells one message of a kind, made of `notices`. */
-  tell(kind: Reported, text: string, notices: readonly Notice[]): void;
+  tell(kind: Paced, text: string, notices: readonly Notice[]): void;
 }
 
 /**
@@ -303,14 +316,14 @@ interface DeskOptions {
  * the later of its gather and its least gap since its last message, which tells all it holds then.
  */
 export class NoticeDesk {
-  private readonly pending = new Map<Reported, Pending>();
+  private readonly pending = new Map<Paced, Pending>();
   private readonly o: DeskOptions;
 
   constructor(options: DeskOptions) {
     this.o = options;
   }
 
-  add(kind: Reported, notice: Notice): void {
+  add(kind: Paced, notice: Notice): void {
     let p = this.pending.get(kind);
     if (p === undefined) this.pending.set(kind, (p = { notices: [] }));
     p.notices.push(notice);
@@ -334,7 +347,7 @@ export class NoticeDesk {
   }
 
   /** Tells what a kind holds now, in one message. */
-  flush(kind: Reported): void {
+  flush(kind: Paced): void {
     const p = this.pending.get(kind);
     if (p === undefined) return;
     p.timer = p.dueAt = undefined;
@@ -385,14 +398,12 @@ export interface StartWarnings {
 
 /**
  * A start notice: the release and commit, the nodes running (at most `maxLines` named), those not
- * with their state and why (`reasons`: false where the core has told the owner already), and the
- * graph's warnings, the new ones listed.
+ * with their state and why, and the graph's warnings, the new ones listed.
  */
 export function wordStart(
   instance: InstanceSummary,
   warnings: StartWarnings | undefined,
-  maxLines: number,
-  reasons: (state: string) => boolean
+  maxLines: number
 ): string {
   const commit = instance.commit === undefined ? '' : ` (${instance.commit.slice(0, 7)})`;
   const out = [instance.version === undefined ? 'Started' : `Started ${instance.version}${commit}`];
@@ -406,10 +417,7 @@ export function wordStart(
   );
   const down = instance.nodes
     .filter((n) => n.state !== 'running')
-    .map(
-      (n) =>
-        `${n.id}: ${n.state}${n.reason !== undefined && reasons(n.state) ? ` (${n.reason})` : ''}`
-    );
+    .map((n) => `${n.id}: ${n.state}${n.reason === undefined ? '' : ` (${n.reason})`}`);
   if (down.length > 0) out.push(...wordSection('Not running', down, maxLines));
   if (warnings !== undefined && warnings.fresh.length > 0)
     out.push(
@@ -438,7 +446,7 @@ const viewState = z.object({
   waiting: z
     .object(
       Object.fromEntries(
-        REPORTED.map((k) => [
+        PACED.map((k) => [
           k,
           z
             .object({
@@ -472,7 +480,7 @@ export function ownerNoticePlugin(): Plugin {
       version: '0.1.0',
       kinds: ['stats'],
       description:
-        'Tells the owner what needs attention (refused events, coalesced sends, drift, cascades, failures, stalled sends, warnings), a summary on a cadence, and a notice at each start',
+        'The one node that reports to a chat: what needs the owner’s attention (refused events, coalesced sends, drift, cascades, failures, stalled sends, warnings), the plugins’ messages with their buttons, a summary on a cadence, and a notice at each start',
       config: ownerNoticeConfig,
       notices: true,
       summary: true,
@@ -495,16 +503,22 @@ export function ownerNoticePlugin(): Plugin {
       let summaryDueAt: number | undefined;
       /** When it last told the owner anything. */
       let toldAt: number | undefined;
+      /** When it last told a plugin's message. */
+      let lastToldNow: number | undefined;
+      /** The plugins' messages heard as the instance starts, told after the start's wait. */
+      let held: Notice[] | undefined = [];
       let kept: SummaryKept = ctx.store.read<SummaryKept>(SUMMARY_DOC) ?? {};
       const summary = (): NonNullable<PluginContext['summary']> => {
         if (ctx.summary === undefined) throw new Error('no summary: its manifest declares it');
         return ctx.summary;
       };
       /** One message, through its single send path: queued, so that a dry-run edge sends nothing. */
-      const send = (kind: string, text: string, count: number): void => {
+      const send = (kind: string, text: string, count: number, buttons?: Buttons): void => {
         ctx.record(`${OWNER_NOTICE}.told`, { kind, count, chat: c.chat, text });
         toldAt = ctx.clock.now();
-        const queued = ctx.outbox('chat').enqueue(c.chat, text);
+        const queued = ctx
+          .outbox('chat')
+          .enqueue(c.chat, text, buttons === undefined ? undefined : { buttons });
         void queued.then((r) => {
           if (r.outcome === 'refused' || r.outcome === 'expired' || r.outcome === 'cancelled')
             ctx.log.warn(
@@ -524,8 +538,20 @@ export function ownerNoticePlugin(): Plugin {
         },
         tell: (kind, text, notices) => send(kind, text, notices.length),
       });
+      /** A plugin's message, at once, with its buttons; none while the instance is off (P8). */
+      const tellNow = (n: Notice): void => {
+        if (ctx.off()) return;
+        lastToldNow = ctx.clock.now();
+        send('told', n.text, 1, buttonsOf(n));
+      };
       const hear = (n: Notice): void => {
         if (ownNotice(n, ctx.id)) return;
+        if (n.kind === 'told') {
+          if (!c.report.told) return;
+          if (held !== undefined) held.push(n);
+          else tellNow(n);
+          return;
+        }
         const kind = reportedOf(n.kind);
         if (n.kind === 'warning') warned.push(n.text);
         // Before the start notice, a failure or a warning is its news, not a message of its own.
@@ -537,8 +563,15 @@ export function ownerNoticePlugin(): Plugin {
         if (!c.report[kind]) return;
         desk.add(kind, n);
       };
-      const tellStart = (): void => {
+      /** The start's wait is over: the start notice, then the plugins' messages held meanwhile. */
+      const afterStart = (): void => {
         startTimer = undefined;
+        if (atStart !== undefined) tellStart();
+        const waiting = held ?? [];
+        held = undefined;
+        for (const n of waiting) tellNow(n);
+      };
+      const tellStart = (): void => {
         const heard = atStart ?? [];
         atStart = undefined;
         const texts = [...new Set(heard.filter((n) => n.kind === 'warning').map((n) => n.text))];
@@ -548,14 +581,7 @@ export function ownerNoticePlugin(): Plugin {
               told: texts.filter((w) => told.has(w)).length,
             }
           : undefined;
-        // A failure's reason is the core's to tell, at once, where it tells the owner; with
-        // `failed` off (D91), the owner hears it there, and the start notice names only the state.
-        const text = wordStart(
-          summary().instance(),
-          warnings,
-          c.maxLines,
-          (state) => state !== 'failed' || c.report.failed
-        );
+        const text = wordStart(summary().instance(), warnings, c.maxLines);
         send('start', text, 1);
       };
       const every = c.summaryEveryMin * 60_000;
@@ -585,6 +611,9 @@ export function ownerNoticePlugin(): Plugin {
         schema: VIEW_SCHEMA,
         state: {
           ...desk.view(),
+          ...(lastToldNow === undefined
+            ? {}
+            : { lastTold: { ...desk.view().lastTold, told: lastToldNow } }),
           startNotice: atStart !== undefined ? 'waiting' : c.startNotice ? 'sent' : 'off',
           summary: {
             everyMin: c.summaryEveryMin,
@@ -617,8 +646,9 @@ export function ownerNoticePlugin(): Plugin {
           }
         },
         ready() {
-          // Every node has started: what the start notice says, once a failure at the start is in.
-          if (atStart !== undefined) startTimer = ctx.clock.setTimeout(tellStart, START_WAIT_MS);
+          // Every node has started: what the start notice says, once a failure at the start is in,
+          // and the plugins' messages held, once its connector has had the time to connect.
+          startTimer = ctx.clock.setTimeout(afterStart, START_WAIT_MS);
         },
         stop() {
           unsubscribe?.();

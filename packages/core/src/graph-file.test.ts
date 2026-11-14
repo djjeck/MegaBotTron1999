@@ -135,7 +135,10 @@ function instance(...more: Plugin[]): {
     dataDir: dir,
     graphFile: file,
     print: (l) => lines.push(l),
-    notify: (t) => told.push(t),
+    // The notices, as the event log records them (D94: the core tells no chat).
+    record: (r) => {
+      if (r.type === 'core.notice') told.push(`${String(r['kind'])}: ${String(r['text'])}`);
+    },
   });
   core.register(
     fakeConnectorPlugin('chat', new FakeConnector({ account: 'chat:me' })),
@@ -333,7 +336,9 @@ describe('the core on the graph file', () => {
       },
     ]);
     expect(lines[0]).toMatch(/^core: the saved graph is refused, no node runs:/u);
-    expect(told[0]).toMatch(/^The saved graph is refused, and no node runs: node actor/u);
+    expect(told[0]).toMatch(
+      /^graph-refused: The saved graph is refused, and no node runs: node actor/u
+    );
     expect(JSON.parse(fs.readFileSync(path.join(dir, 'graph.json'), 'utf8'))).toEqual(bad);
     await core.stop();
     write('graph.json', '{half');

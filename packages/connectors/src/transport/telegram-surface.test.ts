@@ -4,7 +4,7 @@ import { stubBot } from '#test/telegram.ts';
 import { loggerOf, TelegramSurface } from './telegram-surface.ts';
 
 describe('TelegramSurface', () => {
-  it('serves once, tells in order once served, and sets the menus each time it connects', async () => {
+  it('serves once, sends with buttons once served, and sets the menus each time it connects', async () => {
     const stub = stubBot();
     const lines: string[] = [];
     let status: (s: ConnectorStatus) => void = () => {};
@@ -17,14 +17,16 @@ describe('TelegramSurface', () => {
     });
     let listening = false;
     void surface.listening.then(() => (listening = true));
-    surface.tell('before', [[{ label: 'Kill', action: 'kill' }]]);
+    const sent = surface.send('before', [[{ label: 'Kill', action: 'kill' }]]);
     await new Promise((r) => setTimeout(r, 10));
     expect(stub.calls).toEqual([]);
     surface.serve([]);
     surface.serve([]);
-    await new Promise((r) => setTimeout(r, 10));
+    await expect(sent).resolves.toEqual({ id: '101' });
     expect(listening).toBe(true);
     expect(stub.calls.map((c) => c.method)).toEqual(['sendMessage']);
+    expect(stub.calls[0]?.payload['chat_id']).toBe(4242);
+    expect(JSON.stringify(stub.calls[0]?.payload['reply_markup'])).toContain('Kill');
     status({ state: 'connecting', phase: 'restarting' });
     status({ state: 'connected', phase: 'polling' });
     await new Promise((r) => setTimeout(r, 10));

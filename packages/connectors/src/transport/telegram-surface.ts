@@ -1,25 +1,26 @@
 /**
  * A Telegram bot as a chat surface of the core (docs/bot-os-api.md §2, §4.11): the
- * `telegram-bot` connector answers the plugins' commands and carries the owner's notices, on the
- * bot it holds. Once the core serves it the commands (`serve`), it makes the switchboard
+ * `telegram-bot` connector answers the plugins' commands, the owner's with their cards and buttons,
+ * on the bot it holds. Once the core serves it the commands (`serve`), it makes the switchboard
  * (packages/connectors/src/transport/telegram-switchboard.ts), with the owner's private chat
  * as its `author` topic and the group, if any, as `group`; it answers the commands there and
  * in every other private chat (packages/connectors/src/transport/telegram-commands.ts),
  * keeps the menus registered (`CommandMenus`, again once connected), and only then lets the bot
- * poll, so that no update arrives before its handlers. The owner's notices (`tell`) go to the
- * owner's chat in order (packages/connectors/src/transport/telegram-notifier.ts); those told
- * before `serve` wait for the switchboard.
+ * poll, so that no update arrives before its handlers. It reports nothing on its own (bot-os.md
+ * D94): a message with buttons a node sends to the owner's chat through the connector (an
+ * `owner-notice` telling a plugin's `ctx.notify`) goes through its switchboard (`send`), so that a
+ * tap runs the owner's command as a card's does.
  */
 import {
   type Buttons,
   type ChatCommand,
   type ChatSurface,
   type ConnectorStatus,
+  type TextFormat,
 } from '@megabottron1999/core';
 import { type Bot } from 'grammy';
 import { type Logger, type Switchboard } from 'grammy-switchboard';
 import { installPublicCommands, registerPrivateMenu, surfaceOf } from './telegram-commands.ts';
-import { telegramNotify } from './telegram-notifier.ts';
 import {
   AUTHOR_TOPIC,
   CommandMenus,
@@ -58,7 +59,6 @@ export class TelegramSurface implements ChatSurface {
   private listen: () => void = () => {};
   private switchboardIs: (s: Switchboard) => void = () => {};
   private readonly switchboard: Promise<Switchboard>;
-  private readonly notify: (text: string, buttons?: Buttons) => void;
   private menus: CommandMenus | undefined;
   private served = false;
 
@@ -66,14 +66,6 @@ export class TelegramSurface implements ChatSurface {
     this.o = o;
     this.listening = new Promise<void>((r) => (this.listen = r));
     this.switchboard = new Promise<Switchboard>((r) => (this.switchboardIs = r));
-    this.notify = telegramNotify({
-      switchboard: {
-        send: async (m) => (await this.switchboard).send(m),
-        edit: async (m) => (await this.switchboard).edit(m),
-      },
-      topic: AUTHOR_TOPIC,
-      warn: o.log,
-    });
   }
 
   serve(commands: readonly ChatCommand[]): void {
@@ -113,8 +105,21 @@ export class TelegramSurface implements ChatSurface {
     this.listen();
   }
 
-  tell(text: string, buttons?: Buttons): void {
-    this.notify(text, buttons);
+  /**
+   * Sends to the owner's chat with buttons, through the switchboard, whose taps run the owner's
+   * commands; once served. Rejects as the switchboard does.
+   */
+  async send(text: string, buttons: Buttons, format?: TextFormat): Promise<{ id?: string }> {
+    const sent = await (
+      await this.switchboard
+    ).send({
+      topic: AUTHOR_TOPIC,
+      text,
+      ...(format === undefined ? {} : { format }),
+      buttons: buttons.map((row) => [...row]),
+    });
+    const id = sent.messageIds[0];
+    return id === undefined ? {} : { id: String(id) };
   }
 
   /** Stops the menus' retries. */

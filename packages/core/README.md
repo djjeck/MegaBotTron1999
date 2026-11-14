@@ -29,11 +29,13 @@ never their values.
   the instance does, and the merges counted since the start, by pair of nodes; and its watchdog
   (docs/bot-os.md D93), which stops an actor whose sends of a command go unanswered too many times
   in a row.
-- `src/notices.ts`: the owner's notices (docs/bot-os.md D91): what needs the owner's attention,
+- `src/notices.ts`: the owner's notices (docs/bot-os.md D91, D94): what needs the owner's attention,
   raised where it happens (a node failed or made inactive by a stop's cascade, a drift, a send
-  coalesced, a node the send-queue watchdog stopped, the load's warnings, and a plugin's own through
-  `ctx.notice`), and heard by a node whose manifest declares `notices: true` (`ctx.notices`), those
-  since the start first.
+  coalesced, a node the send-queue watchdog stopped, the load's warnings, the saved graph refused, a
+  plugin's own through `ctx.notice`, and a plugin's message through `ctx.notify`, `told`, with its
+  buttons), recorded in the event log (`core.notice`, for the editor's events panel), and heard by a
+  node whose manifest declares `notices: true` (`ctx.notices`), those since the start first. The
+  core sends no chat anything itself: `owner-notice` is the one node that reports.
 - `src/summary.ts`: the owner's summary (docs/bot-os.md D92): the lines each plugin whose manifest
   declares `summary: true` contributes for a window (`ctx.summary.contribute`), after the core's own
   (each node's sends by outcome, the notices by kind), collected by a node that tells them; the

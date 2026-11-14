@@ -20,6 +20,7 @@ import { Stores } from './store.ts';
 class LaterConnector extends ConnectorBase implements Connector {
   answers: (() => Promise<{ id?: string }>)[] = [];
   formats: (string | undefined)[] = [];
+  buttons: unknown[] = [];
   constructor() {
     super('test:me', 'test');
     this.changed({ state: 'connected', phase: 'up' });
@@ -27,8 +28,13 @@ class LaterConnector extends ConnectorBase implements Connector {
   send(): boolean {
     return true;
   }
-  deliver(_chat: string, _text: string, options?: { format?: string }): Promise<{ id?: string }> {
+  deliver(
+    _chat: string,
+    _text: string,
+    options?: { format?: string; buttons?: unknown }
+  ): Promise<{ id?: string }> {
     this.formats.push(options?.format);
+    if (options?.buttons !== undefined) this.buttons.push(options.buttons);
     return (this.answers.shift() ?? (() => Promise.resolve({})))();
   }
   down(): void {
@@ -40,7 +46,9 @@ class FakeConnector extends ConnectorBase implements Connector {
   sent: string[] = [];
   up = true;
   flood: number | undefined;
-  send(chat: string, text: string): boolean {
+  buttons: unknown[] = [];
+  send(chat: string, text: string, options?: { buttons?: unknown }): boolean {
+    if (options?.buttons !== undefined) this.buttons.push(options.buttons);
     if (this.flood !== undefined) {
       const ms = this.flood;
       this.flood = undefined;
@@ -123,6 +131,13 @@ describe('deliver', () => {
     clock.advance(5000);
     await p.deliver('#c', 'b');
     expect(connector.formats).toEqual(['markdown', undefined]);
+  });
+
+  it('hands the connector the buttons of a send (D94)', async () => {
+    const { connector, p } = later();
+    const buttons = [[{ label: 'Go', action: '/go' }]];
+    await p.deliver('#c', 'pick', { buttons });
+    expect(connector.buttons).toEqual([buttons]);
   });
 
   it('counts a send when it leaves, so two at once keep to the limits', async () => {
@@ -271,6 +286,35 @@ describe('Outbox.send', () => {
 });
 
 describe('Outbox.enqueue', () => {
+  it('hands the connector the buttons of a send, and never coalesces one that has them', async () => {
+    const { connector, outbox, modes, clock } = setup();
+    const buttons = [[{ label: 'Go', action: '/go' }]];
+    const q = outbox.as('q');
+    const r = outbox.as('r');
+    modes.set('q', 'live');
+    modes.set('r', 'live');
+    // The account's pace holds the first while the others queue.
+    const sends = [
+      q.enqueue('#c', 'hold'),
+      q.enqueue('#c', 'pick', { buttons }),
+      r.enqueue('#c', 'pick'),
+      r.enqueue('#c', 'pick', { buttons }),
+    ];
+    clock.advanceTo(3_600_000);
+    expect((await Promise.all(sends)).map((x) => x.outcome)).toEqual([
+      'sent',
+      'sent',
+      'sent',
+      'sent',
+    ]);
+    expect(connector.sent).toEqual(['#c hold', '#c pick', '#c pick', '#c pick']);
+    expect(connector.buttons).toEqual([buttons, buttons]);
+    // And `send` hands them too.
+    clock.advance(3000);
+    q.send('#c', 'now', { buttons });
+    expect(connector.buttons).toHaveLength(3);
+  });
+
   it('spaces the queue within the limits, and waits out the hour', async () => {
     const { p, clock, connector, records, outbox } = setup();
     const all = ['!1', '!2', '!3', '!4'].map((t) => p.enqueue('#c', t));

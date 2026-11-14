@@ -128,8 +128,10 @@ describe('secrets in the core', () => {
       clock: new VirtualClock(),
       secrets: secretsWith({ token: 'tok-123456', other: 'other-654321' }),
       print: (l) => lines.push(l),
-      notify: (t) => told.push(t),
-      record: (r) => records.push(r),
+      record: (r) => {
+        records.push(r);
+        if (r.type === 'core.notice') told.push(String(r['text']));
+      },
     });
     core.register(
       connector('conn', ['token'], got),
@@ -150,7 +152,7 @@ describe('secrets in the core', () => {
     // A plugin's error naming a secret is redacted everywhere the core says it.
     expect(core.state('stats')?.reason).toBe(`cannot start without ${REDACTED}`);
     expect(lines.join('\n')).not.toContain('tok-123456');
-    expect(told.join('\n')).not.toContain('tok-123456');
+    expect(told).toEqual([`stats failed: cannot start without ${REDACTED}`]);
     expect(JSON.stringify(records)).not.toContain('tok-123456');
     expect(core.secretStore).toBeUndefined();
   });

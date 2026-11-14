@@ -14,7 +14,7 @@ function monitor(threshold = { unreadAt: 5, windowMin: 15 }) {
   const m = new DriftMonitor({
     clock,
     record: (r) => records.push(r),
-    notify: (t) => told.push(t),
+    notice: (_parser, t) => told.push(t),
     threshold: () => threshold,
     pause: (_parser, reason) => (pauses.push(reason), ['actor']),
   });
@@ -22,7 +22,7 @@ function monitor(threshold = { unreadAt: 5, windowMin: 15 }) {
 }
 
 describe('DriftMonitor', () => {
-  it('logs and counts each unread message, and tells the owner at most once an hour', () => {
+  it('logs and counts each unread message, and raises a notice at most once an hour', () => {
     const { r, m, clock, records, told } = monitor();
     r.read();
     r.unread({ text: 'una riga nuova', lines: ['una riga nuova'] });
@@ -56,9 +56,8 @@ describe('DriftMonitor', () => {
       clock.advance(MIN);
     }
     expect(pauses).toEqual(['drift: game could not read 6 messages in 15 minutes']);
-    expect(told.at(-1)).toBe(
-      'Drift: drift: game could not read 6 messages in 15 minutes; stopped actor until you clear the stop in the editor'
-    );
+    // The pause's notice is the core's (`pause`): the monitor raises only the unread one.
+    expect(told).toEqual(['Drift: game could not read a message: riga 0']);
     expect(records.filter((x) => x.event === 'pause')).toHaveLength(1);
     expect(m.counts()[0]?.tripped).toBe(true);
     clock.advance(20 * MIN);
@@ -68,16 +67,22 @@ describe('DriftMonitor', () => {
     expect(pauses).toHaveLength(2);
   });
 
-  it('says when nothing that acts depends on the parser', () => {
-    const told: string[] = [];
+  it('raises its notice with the message, and how many came since the last', () => {
+    const told: unknown[] = [];
     const m = new DriftMonitor({
       clock: new VirtualClock(),
-      notify: (t) => told.push(t),
+      notice: (parser, text, detail) => told.push({ parser, text, detail }),
       pause: () => [],
     });
     const r = m.reporter('p');
-    for (let i = 0; i < 6; i++) r.unread({ text: 'x' });
-    expect(told.at(-1)).toContain('nothing that acts depends on it');
+    r.unread({ text: 'x' });
+    expect(told).toEqual([
+      {
+        parser: 'p',
+        text: 'Drift: p could not read a message: x',
+        detail: { unread: 'x', more: 0 },
+      },
+    ]);
   });
 });
 

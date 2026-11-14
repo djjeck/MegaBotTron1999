@@ -19,8 +19,10 @@
  */
 import { autoRetry } from '@grammyjs/auto-retry';
 import {
+  type Buttons,
   type Connector,
   ConnectorBase,
+  type ConnectorSendOptions,
   FloodWait,
   type InboundDocument,
   LIVE_GRACE_S,
@@ -35,7 +37,7 @@ import { markdownToTelegramHtml } from 'grammy-switchboard';
 import { SeenLedger } from './seen-ledger.ts';
 
 // A 429 is waited out as Telegram asks, a few times; network errors and 5xx fail the call, so the
-// notifier reports them and the startup retry below keeps its own backoff.
+// outbox reports them and the startup retry below keeps its own backoff.
 export function createBot(token: string, warn: (line: string) => void): Bot {
   const bot = new Bot(token);
   bot.api.config.use(
@@ -171,6 +173,15 @@ export interface BotConnectorOptions {
   liveGraceMs?: number;
   /** Downloads a file by its id (D82); by default, `getFile` and its URL on the Bot API. */
   download?: (fileId: string) => Promise<Uint8Array>;
+  /**
+   * The owner's chat, where a send's buttons can run the owner's commands (bot-os.md D94): its id,
+   * and the way to send there with buttons (its chat surface's, whose taps come back to it). A send
+   * with buttons to any other chat goes as text alone.
+   */
+  ownerChat?: {
+    chat: string;
+    send(text: string, buttons: Buttons, format?: TextFormat): Promise<{ id?: string }>;
+  };
 }
 
 /**
@@ -369,9 +380,9 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
   }
 
   /** Sends without waiting for the answer, which is logged if it fails; `deliver` waits. */
-  send(chat: string, text: string): boolean {
+  send(chat: string, text: string, options: ConnectorSendOptions = {}): boolean {
     if (this.status().state !== 'connected') return false;
-    this.deliver(chat, text).catch((e: unknown) =>
+    this.deliver(chat, text, options).catch((e: unknown) =>
       this.o.log(`send to ${chat} failed: ${String(e)}`)
     );
     return true;
@@ -380,15 +391,19 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
   /**
    * Sends `text` and waits for Telegram's answer. Markdown goes as Telegram HTML, as the
    * switchboard sends it: if Telegram cannot parse the HTML, the text goes again as written, so a
-   * slip of the formatting never costs the message.
+   * slip of the formatting never costs the message. Buttons go only to the owner's chat, through
+   * its chat surface, where a tap runs the owner's command (`ownerChat`); elsewhere, the text alone.
    */
   async deliver(
     chat: string,
     text: string,
-    options: { format?: TextFormat } = {}
+    options: ConnectorSendOptions & { format?: TextFormat } = {}
   ): Promise<{ id?: string }> {
     const to = /^-?\d+$/u.test(chat) ? Number(chat) : chat;
     try {
+      const owner = this.o.ownerChat;
+      if (owner !== undefined && chat === owner.chat && (options.buttons?.length ?? 0) > 0)
+        return await owner.send(text, options.buttons ?? [], options.format);
       if (options.format === 'markdown')
         try {
           const sent = await this.bot.api.sendMessage(to, markdownToTelegramHtml(text), {

@@ -145,10 +145,11 @@ export const greeter = definePlugin({
 - **The image offers** the connectors (`irc`, `telegram-bot`, `telegram-user`, `anthropic`) and the
   `turn-actor`, one node per game bot, and the `reactor`, one node per reaction ("when this event is
   heard, or a message matches, send this command", from its config alone, on `react()`, which any
-  plugin may call too), the `script` node, and `owner-notice`, which tells the owner what needs
-  attention (refused events, coalesced sends, drift, cascades, failures, stalled sends, the graph's
-  warnings), grouped and paced per kind, through a `telegram-bot` to the owner's private chat or
-  through IRC; everything that knows a game comes from a module.
+  plugin may call too), the `script` node, and `owner-notice`, the one node that reports to a chat:
+  it tells the owner what needs attention (refused events, coalesced sends, drift, cascades,
+  failures, stalled sends, the graph's warnings), grouped and paced per kind, and the plugins'
+  messages (`ctx.notify`) at once with their buttons, through a `telegram-bot` to the owner's
+  private chat or through IRC; everything that knows a game comes from a module.
 - **Standard services,** implemented once by the shell (D52): SVG to PNG in every plugin's context
   (`ctx.render.svgToPng`), and asking an LLM through the `anthropic` connector (`ask`, with
   structured output), for the plugins an edge binds to it.
@@ -166,13 +167,18 @@ export const greeter = definePlugin({
   event read from that chat in between (10 times in a row by default, the connector's
   `unansweredAt`, per command `unansweredAtBy`, 0 for never) is stopped the way drift stops it, and
   a `stalled` notice says why; the owner clears the stop in the editor once the parser reads again.
-- **The owner's notices** (D91): what needs the owner's attention is raised where it happens, and an
-  `owner-notice` node tells it. Wire it from the editor: add the node, set its `chat` to where the
-  owner reads (their private chat with the bot, by their Telegram user id), draw its `chat` edge to
-  the `telegram-bot` node with that chat among the edge's sends, and make the edge live once the dry
-  run's log (`core.send`, `dry-run`) reads right. The same node sends a summary of what happened
-  every hour (`summaryEveryMin`; none when nothing did, from lines the core and the plugins add,
-  D92) and a notice at each start: the release, the nodes running and not, the graph's warnings.
+- **The owner's notices** (D91, D94): what needs the owner's attention is raised where it happens,
+  recorded (`core.notice`, in the editor's Events page), and an `owner-notice` node tells it.
+  Nothing reports outside the graph: the core sends no chat anything itself, so **with no
+  `owner-notice`, the Events page alone shows a failure, a drift, a refused saved graph or a
+  plugin's message**; wire one first (the setup wizard, #45, is to do it). The owner's commands,
+  cards and their buttons in the owner's chat are the control surface, not reporting, and work
+  without it. Wire it from the editor: add the node, set its `chat` to where the owner reads (their
+  private chat with the bot, by their Telegram user id), draw its `chat` edge to the `telegram-bot`
+  node with that chat among the edge's sends, and make the edge live once the dry run's log
+  (`core.send`, `dry-run`) reads right. The same node sends a summary of what happened every hour
+  (`summaryEveryMin`; none when nothing did, from lines the core and the plugins add, D92) and a
+  notice at each start: the release, the nodes running and not, the graph's warnings.
 - **The dev kit** (`DevKit`, `FakeConnector`, `VirtualClock`) runs plugins on a virtual clock with
   fake connectors, for tests and simulators.
 

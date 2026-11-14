@@ -86,7 +86,7 @@ describe('the telegram-bot plugin', () => {
     await core.stop();
   });
 
-  it('is the owner’s chat surface: it tells, answers, sets the menus, then polls', async () => {
+  it('is the owner’s chat surface: it answers, sets the menus, then polls; it tells nothing itself', async () => {
     const stub = stubBot();
     let polling = false;
     stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
@@ -96,7 +96,6 @@ describe('the telegram-bot plugin', () => {
       clock: new VirtualClock(),
       secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
       config: { 'telegram-bot': { owner: AUTHOR, group: GROUP, unansweredAtBy: { '/turn': 2 } } },
-      owner: 'telegram-bot',
     });
     core.register(
       telegramBotPlugin({ bot: () => stub.bot }),
@@ -109,22 +108,22 @@ describe('the telegram-bot plugin', () => {
           interface: { commands: { ping: { help: 'ping', menu: 'il ping' } } },
         },
         create: (ctx) => {
-          // Told before the surface is served: it waits, in order.
+          // A notice (D94): no chat is sent it, with no owner-notice in the graph.
           ctx.notify('starting');
           return { commands: { ping: { run: (a) => a.text('pong') } } };
         },
       })
     );
-    core.notify('first');
     await core.start();
     await new Promise((r) => setTimeout(r, 20));
     expect(polling).toBe(true);
     expect(core.connector('telegram-bot')?.limits?.unansweredAtBy).toEqual({ '/turn': 2 });
+    expect(core.notices().map((n) => `${n.kind} ${n.text}`)).toEqual(['told starting']);
     const sent = () =>
       stub.calls
         .filter((c) => c.method === 'sendMessage')
         .map((c) => `${String(c.payload['chat_id'])} ${String(c.payload['text'])}`);
-    expect(sent()).toEqual([`${AUTHOR} first`, `${AUTHOR} starting`]);
+    expect(sent()).toEqual([]);
     // The menus, once connected: the owner's (every command but the hidden), the group's and the
     // other private chats' (the players').
     const menus = stub.calls
@@ -136,24 +135,39 @@ describe('the telegram-bot plugin', () => {
     await stub.bot.handleUpdate(stub.command(GROUP, 7, '/ping'));
     await stub.bot.handleUpdate(stub.command(AUTHOR, AUTHOR, '/plugins'));
     await new Promise((r) => setTimeout(r, 20));
-    expect(sent().slice(2, 3)).toEqual([`${GROUP} pong`]);
-    expect(sent()[3]).toMatch(/^4242 The bot is on\./u);
-    core.controls.turnOff();
-    core.notify('silent');
-    await new Promise((r) => setTimeout(r, 20));
-    expect(sent()).toHaveLength(4);
+    expect(sent().slice(0, 1)).toEqual([`${GROUP} pong`]);
+    expect(sent()[1]).toMatch(/^4242 The bot is on\./u);
     await core.stop();
   });
 
-  it('prints the notices for an owner’s surface that never started', async () => {
-    const lines: string[] = [];
+  it('sends buttons to the owner’s chat through its surface, and text alone elsewhere', async () => {
+    const stub = stubBot();
+    stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
+    stub.bot.start = () => new Promise<void>(() => {});
+    stub.bot.stop = () => Promise.resolve();
     const core = new Core({
       clock: new VirtualClock(),
-      owner: 'telegram-bot',
-      print: (l) => lines.push(l),
+      secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
+      config: { 'telegram-bot': { owner: AUTHOR } },
     });
-    core.notify('lost');
+    core.register(telegramBotPlugin({ bot: () => stub.bot }));
     await core.start();
-    expect(lines).toEqual(['core: not told (no telegram-bot): lost']);
+    await new Promise((r) => setTimeout(r, 20));
+    const c = core.connector('telegram-bot');
+    const buttons = [[{ label: 'Kill', action: 'kill' }]];
+    await c?.deliver?.(String(AUTHOR), 'pick one', { buttons });
+    await c?.deliver?.(String(GROUP), 'no buttons here', { buttons });
+    c?.send(String(AUTHOR), 'sent and forgotten', { buttons });
+    await new Promise((r) => setTimeout(r, 20));
+    const msgs = stub.calls.filter((x) => x.method === 'sendMessage');
+    expect(msgs.map((x) => [x.payload['chat_id'], x.payload['text']])).toEqual([
+      [AUTHOR, 'pick one'],
+      [GROUP, 'no buttons here'],
+      [AUTHOR, 'sent and forgotten'],
+    ]);
+    expect(JSON.stringify(msgs[0]?.payload['reply_markup'])).toContain('Kill');
+    expect(msgs[1]?.payload['reply_markup']).toBeUndefined();
+    expect(JSON.stringify(msgs[2]?.payload['reply_markup'])).toContain('Kill');
+    await core.stop();
   });
 });

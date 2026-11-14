@@ -4,8 +4,10 @@ The networks, each a connector plugin bound to one account, which holds its secr
 other plugins a handle:
 
 - `irc`: an IRC channel through a ZNC bouncer, with its flood limits, and a health endpoint;
-- `telegram-bot`: a Telegram bot (grammY), and the owner's chat surface: notices, buttons, and the
-  plugins' commands in the menus;
+- `telegram-bot`: a Telegram bot (grammY), and the owner's chat surface: the owner's commands, cards
+  and buttons, and the plugins' commands in the menus; it reports nothing on its own (docs/bot-os.md
+  D94), and sends the buttons of an `owner-notice` message to the owner's chat through the surface,
+  so that a tap runs the owner's command;
 - `telegram-user`: a Telegram user account (GramJS), reading and sending in the chats it monitors
   (every chat, until its `chats` config ticks some);
 

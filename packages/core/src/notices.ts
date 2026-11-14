@@ -3,16 +3,21 @@
  * that needs the owner's attention, as it happens, for a node that tells the owner (`owner-notice`)
  * rather than for the owner to find in the log. One feed per instance:
  *
- * - **raised** by the core (`failed`, `cascade`, `drift`, `coalesced`, `warning`, `stalled`) at the point
- *   where it acts, and by a plugin through `ctx.notice` (a state node's `refused`, D72), each with
- *   the node it is about, and one owner-facing line naming nodes by id;
+ * - **raised** by the core (`failed`, `cascade`, `drift`, `coalesced`, `warning`, `stalled`,
+ *   `graph-refused`) at the point where it acts, by a plugin through `ctx.notice` (a state node's
+ *   `refused`, D72) and through `ctx.notify` (`told`, with its buttons, D94), each with the node it
+ *   is about, and one owner-facing line naming nodes by id;
+ * - **recorded** in the event log as it is raised (`core.notice`), so that the editor's events
+ *   panel shows every notice, told or not: with no node to tell the owner, it is all there is
+ *   (D94: the core tells no chat itself);
  * - **heard** by the nodes whose manifest declares `notices: true` (`ctx.notices`): each new
  *   subscriber first hears the notices raised since the instance started (the newest
  *   `NOTICES_KEPT`), so that what happened before it started (the load's warnings, a node failed
  *   as it started) still reaches it; then each as it is raised.
  *
- * Kept in memory only: the event log has the records each notice was raised beside.
+ * Kept in memory for the subscribers; the event log keeps each as `core.notice`.
  */
+import { type Buttons } from './commands.ts';
 
 /** The kinds the core and the shell's plugins raise; a plugin may raise its own. */
 export const NOTICE_KINDS = [
@@ -23,6 +28,8 @@ export const NOTICE_KINDS = [
   'failed',
   'warning',
   'stalled',
+  'told',
+  'graph-refused',
 ] as const;
 export type CoreNoticeKind = (typeof NOTICE_KINDS)[number];
 
@@ -38,8 +45,9 @@ export interface Notice {
    * What happened: an event a state node refused (`refused`), a send several nodes shared
    * (`coalesced`), a parser's drift that paused what acts on it (`drift`), a node a runtime stop's
    * cascade made inactive (`cascade`), a node failed (`failed`), a warning of the graph's check
-   * (`warning`), a node the send-queue watchdog paused (`stalled`, bot-os.md D93), or a plugin's
-   * own kind.
+   * (`warning`), a node the send-queue watchdog paused (`stalled`, bot-os.md D93), a plugin's
+   * message for the owner (`told`, `ctx.notify`, D94), the saved graph refused at the load, no node
+   * running (`graph-refused`, D94), or a plugin's own kind.
    */
   kind: string;
   /** When, in ms. */
@@ -51,9 +59,28 @@ export interface Notice {
   /**
    * What it is, by fields a listener may group by: a refused event's `event` type and `reason`; a
    * coalesced send's `chat`, `text` and the other nodes (`with`); a drift's `paused` nodes; the
-   * reason of a cascade or a failure; a stall's `account`, `chat`, `command`, `count` and `reason`.
+   * reason of a cascade or a failure; a stall's `account`, `chat`, `command`, `count` and `reason`;
+   * a drift's `unread` message; a told message's `buttons`; a refused graph's `problems`.
    */
   detail?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * The buttons a `told` notice carries (`ctx.notify`, D94), each a command a tap runs, for a node
+ * that tells it where a tap can run them; none when it carries none, or not as rows of buttons.
+ */
+export function buttonsOf(notice: Notice): Buttons | undefined {
+  const b = notice.detail?.['buttons'];
+  const isButton = (x: unknown): boolean =>
+    typeof x === 'object' &&
+    x !== null &&
+    typeof (x as { label?: unknown }).label === 'string' &&
+    typeof (x as { action?: unknown }).action === 'string';
+  return Array.isArray(b) &&
+    b.length > 0 &&
+    b.every((row) => Array.isArray(row) && row.every(isButton))
+    ? (b as Buttons)
+    : undefined;
 }
 
 /** A node's way to the notices, when its manifest declares `notices: true`. */

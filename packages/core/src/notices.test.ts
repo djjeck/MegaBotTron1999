@@ -4,7 +4,7 @@ import { VirtualClock } from './clock.ts';
 import { Core } from './core.ts';
 import { FakeConnector } from './devkit.ts';
 import { type GraphInput } from './graph.ts';
-import { type Notice, Notices, NOTICES_KEPT } from './notices.ts';
+import { buttonsOf, type Notice, Notices, NOTICES_KEPT } from './notices.ts';
 import { definePlugin, type PluginContext } from './plugin.ts';
 
 const T0 = Date.UTC(2026, 10, 14, 9);
@@ -179,6 +179,7 @@ describe("the core's notices (D91)", () => {
       ],
       ['coalesced', 'other', 'other queued "/inventory" to #lobby, as actor had: sent once'],
       ['refused', 'other', 'other refused game.gain: no room'],
+      ['drift', 'parser', 'Drift: parser could not read a message: what is this'],
       ['cascade', 'follower', 'follower is inactive: needs actor (stopped)'],
       [
         'drift',
@@ -224,10 +225,30 @@ describe("the core's notices (D91)", () => {
     p.drift.unread({ text: 'x' });
     p.drift.unread({ text: 'y' });
     expect(heard.map((n) => n.text)).toEqual([
+      'Drift: parser could not read a message: x',
       'drift: parser could not read 2 messages in 10 minutes; nothing that acts depends on it',
     ]);
     await core.stop();
     p.notice('other', 'after the stop');
-    expect(heard).toHaveLength(1);
+    expect(heard).toHaveLength(2);
+  });
+});
+
+describe('buttonsOf (D94)', () => {
+  const told = (detail?: Record<string, unknown>): Notice => ({
+    kind: 'told',
+    t: 0,
+    text: 'pick',
+    ...(detail === undefined ? {} : { detail }),
+  });
+
+  it('reads the rows of buttons a told notice carries, and nothing else', () => {
+    const buttons = [[{ label: 'Go', action: '/go' }]];
+    expect(buttonsOf(told({ buttons }))).toEqual(buttons);
+    expect(buttonsOf(told())).toBeUndefined();
+    expect(buttonsOf(told({ buttons: [] }))).toBeUndefined();
+    expect(buttonsOf(told({ buttons: [[{ label: 'Go' }]] }))).toBeUndefined();
+    expect(buttonsOf(told({ buttons: ['Go'] }))).toBeUndefined();
+    expect(buttonsOf(told({ buttons: [[null]] }))).toBeUndefined();
   });
 });

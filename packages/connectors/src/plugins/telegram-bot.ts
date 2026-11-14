@@ -7,8 +7,9 @@
  *
  * Configured with the owner's Telegram user id (`owner`) and, optionally, a group (`group`), it is a
  * chat surface (packages/connectors/src/transport/telegram-surface.ts): it answers the
- * plugins' commands and the owner's, and carries the owner's notices, polling only once the core
- * has served it the commands. The token stays in the connector's secrets, and nothing hands it out:
+ * plugins' commands and the owner's, polling only once the core has served it the commands. It
+ * reports nothing on its own (bot-os.md D94): an `owner-notice` node sends the owner's notices
+ * through it, those with buttons to the owner's chat through its surface, whose taps run them. The token stays in the connector's secrets, and nothing hands it out:
  * no plugin, and not the wiring, gets the bot (P9).
  */
 import {
@@ -37,7 +38,7 @@ export const telegramBotConfig = z.object({
     .int()
     .optional()
     .describe(
-      'The owner’s Telegram user id: their private chat with the bot gets the owner’s notices, and alone answers the owner’s commands'
+      'The owner’s Telegram user id: their private chat with the bot alone answers the owner’s commands, and runs the buttons of the notices an owner-notice node sends there'
     ),
   group: z
     .number()
@@ -75,7 +76,8 @@ export function telegramBotPlugin(
       id: TELEGRAM_BOT,
       version: '0.1.0',
       kinds: ['connector'],
-      description: 'A Telegram bot: the owner’s notices and commands, and the public commands',
+      description:
+        'A Telegram bot: the owner’s commands, the public commands, and the chats it monitors',
       account,
       secrets: [BOT_TOKEN],
       config: telegramBotConfig,
@@ -111,6 +113,15 @@ export function telegramBotPlugin(
         now: () => ctx.clock.now(),
         liveGraceMs: config.liveGraceS * 1000,
         ...(o.sleep === undefined ? {} : { sleep: o.sleep }),
+        // Buttons a node sends to the owner's chat go through the surface, whose taps run them.
+        ...(surface === undefined || config.owner === undefined
+          ? {}
+          : {
+              ownerChat: {
+                chat: String(config.owner),
+                send: (text, buttons, format) => surface.send(text, buttons, format),
+              },
+            }),
       });
       ref.connector = c;
       c.limits = {

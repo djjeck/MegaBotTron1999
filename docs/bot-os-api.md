@@ -132,7 +132,8 @@ sends it in reply to the asker (`Asker`: the network's id and username, and whet
 owner), outside the plugin's outbox. What a plugin sends on its own goes through its outbox, within
 its chat-out edges, each sending for real or as a dry run (§4.6). The surface is a connector's
 (`ChatSurface`): the core serves every running connector that offers one the commands (`serve`),
-once every plugin has started.
+once every plugin has started. A surface is the owner's interactive control (commands, cards and
+their buttons), not a report channel: it tells the owner nothing on its own (bot-os.md D94).
 
 **The owner's commands.** A command may be the owner's (`owner: true`): the core answers it to the
 owner only (`Asker.owner`), and the surface only in the owner's chat, never in a group. A command
@@ -453,8 +454,9 @@ any graph (§2.1), against the plugins `core.available()` lists, their configura
 schemas, their secrets and the instances kept. No file: an empty graph. A file that does not read
 (not JSON), or that the check refuses, never stops the instance, which would only start again and
 fail again: it starts with no nodes, the file is kept as it is, and why is printed, recorded
-(`core.graph`, `event: "refused"`), told to the owner, and reported by `GET /status`
-(`graph.refused`) and `GET /graph/file` (`problems`), for the owner to fix.
+(`core.graph`, `event: "refused"`), raised as a `graph-refused` notice (§4.16, no node running to
+tell it: the editor's events panel shows it), and reported by `GET /status` (`graph.refused`) and
+`GET /graph/file` (`problems`), for the owner to fix.
 
 **The history** (`packages/core/src/graph-history.ts`, bot-os.md D61) keeps every graph written to
 the file, by a save or a rollback, as a version: `/data/graph-history/<id>.json`, the id its time in
@@ -595,8 +597,8 @@ and the reason.
   plugin fails its node itself (`ctx.fail(reason)`, for what it cannot run on: a script that hung or
   ran out of memory, bot-os.md D28; its events, messages and timers cut at once, its sends refused,
   then its `stop` called). That plugin is `failed`, with why; the plugins that require it (a
-  required edge, §2.1) are `failed` too; every other plugin starts. The owner is told, and the
-  failure is logged (`core.plugin`).
+  required edge, §2.1) are `failed` too; every other plugin starts. A `failed` notice is raised
+  (§4.16), for `owner-notice` to tell, and the failure is logged (`core.plugin`).
 - **Start** runs in load order (requirements first), each plugin's `start` awaited before the next
   begins. **Stop** runs in the reverse order, at `SIGTERM` or the owner's restart (§2.3), each
   plugin's `stop` awaited for up to 5 seconds (a stop that fails or takes longer is logged, and the
@@ -672,7 +674,7 @@ interface PluginContext<Config, Settings> {
   use<T>(port: string): T; // the interface an input's edge binds (§2.1)
   useOptional<T>(port: string): T | undefined; // an optional input's, while bound and running
   drift: DriftReporter; // §4.7, parsers only
-  notify(text: string, buttons?: Buttons): void; // the owner (§4.8); nothing while off
+  notify(text: string, buttons?: Buttons): void; // a `told` notice for the owner (§4.8, §4.16)
   notice(kind: string, text: string, detail?: object): void; // for the owner's attention (§4.16)
   notices?: { subscribe(handler: (n: Notice) => void): () => void }; // with `notices: true` (§4.16)
   summary?: { contribute(lines); collect(window); instance() }; // with `summary: true` (§4.17)
@@ -1136,7 +1138,7 @@ sends, as before. The core's own outboxes have no modes.
 A parser sorts every message it sees into one of three (P5): **not its bot's**, **read** (events
 published), or **claimed but unread** (its bot's, in a form it does not know). The parser reports
 the third to `ctx.drift`, with the text; the core logs it (`core.drift`), counts it per parser, and
-tells the owner.
+raises a `drift` notice (§4.16).
 
 **Unrecoverable** (bot-os.md D21): more than 5 unread messages from one parser within 15 minutes, a
 threshold each parser's manifest may change (`drift`: `unreadAt`, `windowMin`). Then the core stops
@@ -1148,24 +1150,29 @@ are only reported.
 
 As built (`packages/core/src/drift.ts`): a parser reports through `ctx.drift` (`read`, `unread` with
 the text and the lines it did not know); the contract's type is `Reading`. Each unread message is
-logged (`event: "unread"`) and told to the owner, the first at once and then at most once an hour
-with the count of those meanwhile. Past the threshold the core stops the actors once until the rate
-falls back, logs it (`event: "pause"`, with the plugins stopped), tells the owner and raises a
-`drift` notice (§4.16); `core.drift()` gives the counts.
+logged (`event: "unread"`) and raised as a `drift` notice (`detail`: `unread`, the text, and `more`,
+those since the last), the first at once and then at most once an hour. Past the threshold the core
+stops the actors once until the rate falls back, logs it (`event: "pause"`, with the plugins
+stopped) and raises a `drift` notice (§4.16, `detail.paused`); `core.drift()` gives the counts.
 
 ### 4.8 The owner
 
-The owner of the instance (D19) is told of what the core does on its own (a plugin failed, a stop
-for drift) and of what a plugin asks to say (`notify`), at once and one by one (an `owner-notice`
-node, §4.16, tells more kinds, grouped and paced, through any connector): through the core, to the
-owner's chat surface, and never while the instance is off. **Which surface is the graph's**
-(bot-os.md D56): the first node, in load order, whose instance offers a chat surface, which is a
-`telegram-bot` node configured with its `owner` (the owner's Telegram user id: the owner's private
-chat with the bot, §5); a notice made before it has started waits for it, in order. A wiring may
-name the node itself (`CoreOptions.owner`, tests); without a surface, notices go to
-`CoreOptions.notify`, or are printed (`core: not told …`) when the wiring gives none, as the image's
-does. Only the owner's chat may use the owner's commands and their buttons: the surface answers them
-to the owner alone (`Asker.owner`), never in a group. The owner's controls are the core's (§4.11).
+The owner of the instance (D19) is **told only through the graph** (bot-os.md D94): the core sends
+no chat anything on its own. What the core does on its own (a plugin failed, a drift, a refused
+saved graph) and what a plugin asks to say (`ctx.notify(text, buttons?)`) are raised as notices
+(§4.16): recorded in the event log (`core.notice`), which the editor's events panel shows (filter
+`core.notice`), and heard by an `owner-notice` node (§5), the one node that reports to a chat.
+`ctx.notify` raises a `told` notice about its node, its buttons in `detail.buttons`; `owner-notice`
+sends it at once, one message each, with its buttons when its chat edge goes to a `telegram-bot`'s
+owner's chat (through the bot's chat surface, so that a tap runs the owner's command as a card's
+does), text alone anywhere else (IRC, another chat), and none while the instance is off. **With no
+`owner-notice` in the graph, nothing is sent anywhere**: the events panel alone shows them; the
+setup wizard (#45) wires one first. The owner's chat surface (bot-os.md D56) is the interactive
+control, not a report channel: a `telegram-bot` node configured with its `owner` (the owner's
+Telegram user id: the owner's private chat with the bot, §5) answers the owner's commands, cards and
+buttons there. Only the owner's chat may use the owner's commands and their buttons: the surface
+answers them to the owner alone (`Asker.owner`), never in a group. The owner's controls are the
+core's (§4.11).
 
 ### 4.9 Secrets
 
@@ -1613,19 +1620,25 @@ its `detail` the fields a listener groups by. **The core raises** `failed` (a no
 start, at `ready`, at runtime through `ctx.fail`, such as a script killed as hung, D81, D85, D87, or
 because a node it requires failed; `detail.reason`), `cascade` (each node a runtime stop makes
 inactive, D65; `detail.reason`, `needs actor (stopped)`), `drift` (a parser past its threshold,
-§4.7, about the parser; `detail.paused`, the actors stopped), `coalesced` (a queued send that joined
-another node's same text for the same chat, D73, about the node that joined; `detail`: `account`,
-`chat`, `text`, `with`, the other nodes), `stalled` (a node the send-queue watchdog stopped, §4.6,
-D93, about that node; `detail`: `account`, `chat`, `command`, `count`, `reason`) and `warning` (each
-warning of the graph's check at the load, D89, D90, about its node if it names one). **A plugin
-raises** its own through `ctx.notice(kind, text, detail?)`, about its node: a state node raises
-`refused` for each event it refuses (D72; `detail`: `event`, `at`, `reason`). A kind is lower-case
-words and dashes; raising one sends nothing. **A plugin whose manifest declares `notices: true`**
-gets `ctx.notices`: `subscribe(handler)` hears the notices raised since the instance started first
-(the newest `NOTICES_KEPT`, 200), so that the load's warnings and a node failed at its start reach a
-node started after them, then each as it is raised, while its node is up; the time its handler takes
-is its node's (D77). The notices live in memory (`core.notices()` lists them); the log has the
-records each was raised beside (`core.plugin`, `core.drift`, `core.queue`, `<id>.refused`).
+§4.7, about the parser; `detail.paused`, the actors stopped; or a message it could not read, at most
+once an hour, `detail.unread`, `detail.more`), `coalesced` (a queued send that joined another node's
+same text for the same chat, D73, about the node that joined; `detail`: `account`, `chat`, `text`,
+`with`, the other nodes), `stalled` (a node the send-queue watchdog stopped, §4.6, D93, about that
+node; `detail`: `account`, `chat`, `command`, `count`, `reason`), `warning` (each warning of the
+graph's check at the load, D89, D90, about its node if it names one) and `graph-refused` (the saved
+graph refused at the load, so that no node runs, D94; `detail.problems`; no node hears it, the
+events panel shows it). **A plugin raises** its own through `ctx.notice(kind, text, detail?)`, about
+its node: a state node raises `refused` for each event it refuses (D72; `detail`: `event`, `at`,
+`reason`); and `told` through `ctx.notify(text, buttons?)` (§4.8, D94; `detail.buttons`, which
+`buttonsOf(notice)` reads). A kind is lower-case words and dashes; raising one sends nothing. **A
+plugin whose manifest declares `notices: true`** gets `ctx.notices`: `subscribe(handler)` hears the
+notices raised since the instance started first (the newest `NOTICES_KEPT`, 200), so that the load's
+warnings and a node failed at its start reach a node started after them, then each as it is raised,
+while its node is up; the time its handler takes is its node's (D77). The notices live in memory
+(`core.notices()` lists them), and **each is recorded** as it is raised (`core.notice`: `kind`,
+`node?`, `text`, `detail?`), so that the editor's events panel shows every notice whether a node
+tells it or not (D94), beside the records it was raised with (`core.plugin`, `core.drift`,
+`core.queue`, `<id>.refused`).
 
 `owner-notice` (§5) tells a kind it does not name as `other`. Its view (`GET /plugins/<id>/view`,
 D72) shows the notices waiting by kind with when each is due, when each kind was last told, whether
@@ -1723,12 +1736,14 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   the plugins; its surfaces are the chats it has seen (§4.5), and the updates Telegram kept while it
   was down come marked `missed` (and `playback` once older than its config's `liveGraceS`, 120 s by
   default, D83). Configured with the owner's Telegram user id and optionally a group (`owner`,
-  `group`, in its node's config), it is the instance's chat surface, and the owner's chat that the
-  core sends the owner's notices to (§4.8, bot-os.md D56) (`telegram-surface.ts`): the switchboard
-  on its bot (`telegram-switchboard.ts`, on grammy-switchboard), the plugins' commands answered in
-  the group, the owner's chat and any other private chat (`telegram-commands.ts`), the menus kept
-  registered, and the owner's notices carried in order (`telegram-notifier.ts`). Nothing hands its
-  bot out (P9).
+  `group`, in its node's config), it is the instance's chat surface, the owner's interactive control
+  (§4.8, bot-os.md D56) (`telegram-surface.ts`): the switchboard on its bot
+  (`telegram-switchboard.ts`, on grammy-switchboard), the plugins' commands answered in the group,
+  the owner's chat and any other private chat (`telegram-commands.ts`), and the menus kept
+  registered. It tells the owner nothing on its own (D94): a send with buttons
+  (`SendOptions.buttons`, an `owner-notice` telling a `told` notice) to the owner's chat goes
+  through the surface's switchboard, whose taps run the owner's commands as a card's do; to any
+  other chat, the text alone. Nothing hands its bot out (P9).
 - **`telegram-user`** (`packages/connectors/src/plugins/telegram-user.ts`, on GramJS in
   `packages/connectors/src/transport/telegram-user.ts`): the owner's own account, from three secrets
   (`telegram_user_api_id`, `telegram_user_api_hash`, `telegram_user_session`). It monitors the chats
@@ -1739,11 +1754,12 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   connection on what its readers' chats said while it was down, each message once (§4.5, D62, D66),
   marked `missed`, and `playback` too once older than its config's `liveGraceS` (120 s by default,
   from the message's time to its delivery, D83): a message missed by a quick restart is news. It
-  starts without waiting, retries every minute, and tells the owner of the first failure; a message
-  carries its id, the one it replies to, and `own` for the owner's own from any device. It sends
-  only through the account's outbox (`deliver`, with the message's id), its queue's default interval
-  between two sends of a command its config's `commandIntervalS` (D73), its watchdog's threshold
-  `unansweredAt` and `unansweredAtBy` (§4.6, D93); GramJS's flood waits become `FloodWait`.
+  starts without waiting, retries every minute, and raises a `told` notice of the first failure
+  (`ctx.notify`, §4.8); a message carries its id, the one it replies to, and `own` for the owner's
+  own from any device. It sends only through the account's outbox (`deliver`, with the message's
+  id), its queue's default interval between two sends of a command its config's `commandIntervalS`
+  (D73), its watchdog's threshold `unansweredAt` and `unansweredAtBy` (§4.6, D93); GramJS's flood
+  waits become `FloodWait`.
 - **`ServiceConnector`** (`packages/connectors/src/plugins/service.ts`): for a connector plugin that
   holds an account's secrets and offers what it makes from them through its declared interface, but
   has no chat: it reads and sends nothing. The `anthropic` connector is one.
@@ -1806,46 +1822,50 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   adds one node per bot, each on its own instance, its `chat` edges from and to the owner's
   `telegram-user` node and its `parser` edge to its bot's parser. The turn parsers are not the
   image's: each is made from a game's grammar, so a game's module offers it.
-- **`owner-notice`** (`packages/turns/src/owner-notice.ts`, bot-os.md D91): tells the owner what
-  needs attention, from the notices (§4.16), through its `chat` output (chat-out, on any network): a
-  `telegram-bot` node, its edge sending to the owner's private chat with the bot (the owner's user
-  id), or an `irc` node, to a nick or a channel. Its sends are queued as any node's (`enqueue`,
-  D73), so a dry-run edge (as a new one is drawn, D64) logs each as `core.send` with outcome
-  `dry-run` and sends nothing. Its configuration (`ownerNoticeConfig`): `chat`, where it tells (one
-  of its edge's `sends`); `report`, each kind on or off (`refused`, `coalesced`, `drift`, `cascade`,
-  `failed`, `stalled`, `warning`, and `other` for every kind it does not name), all on by default;
-  `pace`, per kind, `gatherS`, how long the kind's first notice waits for others of its kind, and
-  `everyMin`, the least minutes between two of its messages, what comes meanwhile going in the next
-  (`DEFAULT_PACE`: `failed`, `drift`, `cascade` and `stalled` 10 s and 5 min; `refused` 60 s and 10
-  min; `coalesced` 60 s and 30 min; `warning` 30 s and 60 min; `other` 60 s and 10 min; a field left
-  out keeps its default); `maxLines`, the most items a message lists (5), the rest counted;
-  `summaryEveryMin` and `startNotice`, below. A kind's message is plain text: one notice is its own
-  line (`script-1 failed: its script hung: …`); several, a title with their count and, past a
-  minute, how long they took, then an item each, alike ones counted once
+- **`owner-notice`** (`packages/turns/src/owner-notice.ts`, bot-os.md D91, D94): the one node that
+  reports to a chat; without one, nothing is (the editor's events panel shows the notices, §4.16).
+  It tells the owner what needs attention, from the notices (§4.16), through its `chat` output
+  (chat-out, on any network): a `telegram-bot` node, its edge sending to the owner's private chat
+  with the bot (the owner's user id), or an `irc` node, to a nick or a channel. Its sends are queued
+  as any node's (`enqueue`, D73), so a dry-run edge (as a new one is drawn, D64) logs each as
+  `core.send` with outcome `dry-run` and sends nothing. Its configuration (`ownerNoticeConfig`):
+  `chat`, where it tells (one of its edge's `sends`); `report`, each kind on or off (`refused`,
+  `coalesced`, `drift`, `cascade`, `failed`, `stalled`, `warning`, `other` for every kind it does
+  not name, and `told`, the plugins' messages), all on by default; `pace`, per kind but `told`,
+  `gatherS`, how long the kind's first notice waits for others of its kind, and `everyMin`, the
+  least minutes between two of its messages, what comes meanwhile going in the next (`DEFAULT_PACE`:
+  `failed`, `drift`, `cascade` and `stalled` 10 s and 5 min; `refused` 60 s and 10 min; `coalesced`
+  60 s and 30 min; `warning` 30 s and 60 min; `other` 60 s and 10 min; a field left out keeps its
+  default); `maxLines`, the most items a message lists (5), the rest counted; `summaryEveryMin` and
+  `startNotice`, below. A kind's message is plain text: one notice is its own line
+  (`script-1 failed: its script hung: …`); several, a title with their count and, past a minute, how
+  long they took, then an item each, alike ones counted once
   (`inventory refused 5 events in the last 10 min:` and `- quest.gain: … (×3)`), grouped by node for
   `refused` and `coalesced`. It tells nothing of itself (a notice about its node, or a send it
   shared), so its own sends cannot feed it. The load's warnings it has told are kept in its store
   (`warned`), and the next start tells only new ones. Each message is recorded as
   `owner-notice.told` (`kind`, `count`, `chat`, `text`; `kind` `summary` and `start` for the two
-  below). What waits in a kind is dropped when its node stops. The core's own tells to the owner's
-  chat surface (§4.8) stay as they are, so a `telegram-bot` with an `owner` tells a failure or a
-  drift at once, and `owner-notice` again, grouped: turn its `failed` and `drift` off to hear them
-  once. **A summary** (bot-os.md D92) every `summaryEveryMin` minutes (60 by default, at most a
-  week; 0: none): what happened since the last summary sent, or since the start when that came
-  later, from `collect` (§4.17), each section titled (`Sends`, `Notices`, a node's id), one line on
-  its title's, several listed, at most `maxLines`; **none when no section has anything to say**, and
-  the next then covers the time since the last one sent. Its own sends are not in it. Kept in its
-  store (`summary`): when it last sent one (`sentAt`) and last looked (`checkedAt`), so that after a
-  restart the next is still due a cadence after the last look (a cadence after the start when that
-  is past), neither sent again nor put off; what happened between the last summary and the stop is
-  in none. **A start notice** at each start (`startNotice`, on by default), 10 s after every node
-  has started (`START_WAIT_MS`), so that a node that fails as it starts is in it: the release and
-  commit, the nodes running (at most `maxLines` named, the rest counted), those not running with
-  their state and why, and the graph's warnings (those new listed, those told at an earlier start
-  counted, with `warning` on). The failures and warnings heard before it are its news, not messages
-  of their own. A failure's reason is the core's to tell, at once, to the owner's chat surface: with
-  `failed` off (as D91 advises an owner who hears the core there), the start notice names a failed
-  node's state alone; the core tells no start of its own. A node the send-queue watchdog stopped
+  below). What waits in a kind is dropped when its node stops. **The plugins' messages** (`told`,
+  `ctx.notify`, §4.8, D94) are neither grouped nor paced, since a plugin's prompt waits for nothing:
+  each is sent at once as its own message, with its buttons (`buttonsOf`) handed to the outbox
+  (`SendOptions.buttons`), which a `telegram-bot` sends to the owner's chat through its surface, so
+  that a tap runs the owner's command, and any other connector drops; none while the instance is
+  off. Those heard as the instance starts wait for the start notice's wait (`START_WAIT_MS`, its
+  connector connected by then) and follow it. **A summary** (bot-os.md D92) every `summaryEveryMin`
+  minutes (60 by default, at most a week; 0: none): what happened since the last summary sent, or
+  since the start when that came later, from `collect` (§4.17), each section titled (`Sends`,
+  `Notices`, a node's id), one line on its title's, several listed, at most `maxLines`; **none when
+  no section has anything to say**, and the next then covers the time since the last one sent. Its
+  own sends are not in it. Kept in its store (`summary`): when it last sent one (`sentAt`) and last
+  looked (`checkedAt`), so that after a restart the next is still due a cadence after the last look
+  (a cadence after the start when that is past), neither sent again nor put off; what happened
+  between the last summary and the stop is in none. **A start notice** at each start (`startNotice`,
+  on by default), 10 s after every node has started (`START_WAIT_MS`), so that a node that fails as
+  it starts is in it: the release and commit, the nodes running (at most `maxLines` named, the rest
+  counted), those not running with their state and why, and the graph's warnings (those new listed,
+  those told at an earlier start counted, with `warning` on). The failures and warnings heard before
+  it are its news, not messages of their own, each node not running named with why; the core tells
+  no start of its own (it tells no chat anything, D94). A node the send-queue watchdog stopped
   (`stalled`, §4.6, D93) is told as its notice says
   (`quest-actor sent /inventory to @QuestBot 10 times with no answer read from it; stopped until you clear the stop in the editor`),
   several as `2 nodes stopped: their commands went unanswered:` and an item each
