@@ -352,6 +352,7 @@ export {
   type Reaction,
   type ReactionPayload,
   type ReactionText,
+  type ReactionTrace,
   valueAt,
 } from './react.ts';
 export { type Render, resvgRender, type SvgToPngOptions } from './render.ts';

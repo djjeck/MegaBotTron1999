@@ -22,7 +22,7 @@
  *   mark, not its age. A reaction may still set `maxAgeMs`, a backstop for a plugin whose replays
  *   are not marked.
  * - **Its trace:** each reaction, sent, refused, dry run or skipped, is written with `ctx.record` as
- *   `record` (a type of its plugin's namespace, `reactor.reaction`).
+ *   `record` (a type of its plugin's namespace, `reactor.reaction`), and told to `observe`.
  *
  * Nothing in here knows of any game.
  */
@@ -68,6 +68,21 @@ export interface Reaction {
    * event is skipped by its mark, whatever its age.
    */
   maxAgeMs?: number;
+  /**
+   * Told each trace as it is recorded (its `outcome`, and its `reason`, `chat` and `text` when it
+   * has them): for a plugin that shows its reactions (the reactor's `status` read, #7).
+   */
+  observe?: (trace: ReactionTrace) => void;
+}
+
+/** One reaction's trace, as recorded (`record`) and told (`observe`). */
+export interface ReactionTrace {
+  readonly reaction: string;
+  readonly on: string;
+  readonly outcome: string;
+  readonly reason?: string;
+  readonly chat?: string;
+  readonly text?: string;
 }
 
 /** A `{path}` placeholder: a name, then dotted names or indices. */
@@ -131,8 +146,11 @@ export function react(ctx: PluginContext, reaction: Reaction): () => void {
   const maxAgeMs = reaction.maxAgeMs ?? Number.POSITIVE_INFINITY;
   const trigger = typeof reaction.on === 'string' ? reaction.on : 'message';
   let live = true;
-  const trace = (fields: Record<string, unknown>): void =>
-    ctx.record(reaction.record, { reaction: name, on: trigger, ...fields });
+  const trace = (fields: Omit<ReactionTrace, 'reaction' | 'on'>): void => {
+    const t: ReactionTrace = { reaction: name, on: trigger, ...fields };
+    ctx.record(reaction.record, { ...t });
+    reaction.observe?.(t);
+  };
 
   const act = (payload: ReactionPayload): void => {
     if (!live || !matches(payload, reaction.when)) return;

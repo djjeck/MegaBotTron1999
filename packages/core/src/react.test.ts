@@ -148,7 +148,13 @@ describe('react on an event', () => {
 
   it('skips, and records, a template whose path has no value', async () => {
     const { quest, on, records, account } = await run();
-    on({ on: 'quest', chat: '{chat}', send: '/look {outcome.item}' });
+    const told: unknown[] = [];
+    on({
+      on: 'quest',
+      chat: '{chat}',
+      send: '/look {outcome.item}',
+      observe: (t) => told.push(t),
+    });
     quest.bus.publish('quest.turn', { chat: BOT, outcome: { kind: 'nothing', bot: 'QuestBot' } });
     quest.bus.publish('quest.other', {});
     await flush();
@@ -156,7 +162,8 @@ describe('react on an event', () => {
     expect(records()).toEqual([
       { reaction: 'react', on: 'quest', outcome: 'skipped', reason: 'no value at outcome.item' },
       { reaction: 'react', on: 'quest', outcome: 'skipped', reason: 'no value at chat' },
-    ]);
+    ]); // Each trace told to observe as it is recorded.
+    expect(told).toEqual(records());
   });
 
   it('reacts to an event of any age by default: only its mark makes it history', async () => {

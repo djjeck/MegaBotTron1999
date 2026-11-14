@@ -7,12 +7,21 @@
  * one (D64; the editor draws a new one so), at the account's pace, each attempt logged as
  * `core.send` and each reaction recorded as `reactor.reaction`.
  *
+ * Its `status` read (#7) gives its last reaction and its reactions by outcome, kept in its store
+ * across restarts, and its node panel shows them (its `view`), its card a line of the counts.
+ *
  * Its `events` input takes its namespace from `on` (§2.1): the namespace of the event type it
  * reacts to, there only with `on` and then required (the check refuses a reactor on events that no
  * edge binds, which would never fire). A reactor on messages has no such port; one on events has no
  * chat-in input (its `chat` input is there only with `match`), and only sends.
  */
-import { definePlugin, type Plugin, react } from '@megabottron1999/core';
+import {
+  definePlugin,
+  type Plugin,
+  react,
+  type ReactionTrace,
+  type StateView,
+} from '@megabottron1999/core';
 import { z } from 'zod';
 
 export const REACTOR = 'reactor';
@@ -46,11 +55,11 @@ export const reactorConfig = z
         'A regular expression the messages read on its chat input must match; its named groups, `(?<item>…)`, go into the payload. Or set `on`'
       ),
     in: z
-      .string()
-      .min(1)
+      // A list (#7), as react() takes; one chat, as 0.1.20 and before saved it, still reads.
+      .union([z.array(z.string().min(1)).min(1), z.string().min(1)])
       .optional()
       .describe(
-        'With `match`: the chat whose messages it reads; every chat its edge reads if unset'
+        'With `match`: the chats whose messages it reads; every chat its edge reads if unset'
       ),
     ignoreCase: z.boolean().default(false).describe('With `match`: case does not matter'),
     when: z
@@ -86,6 +95,38 @@ export const reactorConfig = z
   });
 export type ReactorConfig = z.output<typeof reactorConfig>;
 
+/** Its last reaction, as its trace says it (`ReactionTrace`), with when. */
+const lastReaction = z.object({
+  at: z.string().describe('When, in UTC'),
+  outcome: z.string().describe('What came of it: sent, dry-run, refused, skipped…'),
+  reason: z.string().optional().describe('Why, when it was not sent'),
+  chat: z.string().optional().describe('The chat it sent to'),
+  text: z.string().optional().describe('What it sent'),
+});
+
+/** What its `status` read gives, and its node panel shows (#7). */
+export const reactorStatus = z.object({
+  last: lastReaction.optional().describe('Its last reaction'),
+  counts: z
+    .record(z.string(), z.number())
+    .describe('Its reactions by outcome, since it was first started'),
+  since: z.string().optional().describe('When it first reacted, in UTC'),
+});
+export type ReactorStatus = z.output<typeof reactorStatus>;
+
+/** Where its status is kept, in its instance's store: it survives a restart. */
+const STATUS_DOC = 'status';
+const STATUS_SCHEMA = z.toJSONSchema(reactorStatus, { io: 'output', unrepresentable: 'any' });
+
+/** Its card's line: its counts, sent first (`3 sent, 1 skipped`), or none before a reaction. */
+export function statusLine(status: ReactorStatus): string | undefined {
+  const order = (o: string): number => (o === 'sent' ? 0 : o === 'dry-run' ? 1 : 2);
+  const parts = Object.entries(status.counts)
+    .sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b))
+    .map(([o, n]) => `${n} ${o}`);
+  return parts.length === 0 ? undefined : parts.join(', ');
+}
+
 /** The reactor plugin: one instance per reaction, each node with its own config. */
 export function reactorPlugin(): Plugin {
   return definePlugin({
@@ -102,6 +143,14 @@ export function reactorPlugin(): Plugin {
         { key: 'chat', output: 'chat', template: true },
         { key: 'in', input: 'chat' },
       ],
+      interface: {
+        state: {
+          status: {
+            help: 'Its last reaction, and its reactions by outcome',
+            output: reactorStatus,
+          },
+        },
+      },
       inputs: {
         chat: {
           type: 'chat-in',
@@ -127,20 +176,45 @@ export function reactorPlugin(): Plugin {
     create: (ctx) => {
       const c = ctx.config as ReactorConfig;
       let stop: (() => void) | undefined;
+      let status: ReactorStatus = ctx.store.read<ReactorStatus>(STATUS_DOC) ?? { counts: {} };
+      const observe = (t: ReactionTrace): void => {
+        const now = new Date(ctx.clock.now()).toISOString();
+        status = {
+          last: {
+            at: now,
+            outcome: t.outcome,
+            ...(t.reason === undefined ? {} : { reason: t.reason }),
+            ...(t.chat === undefined ? {} : { chat: t.chat }),
+            ...(t.text === undefined ? {} : { text: t.text }),
+          },
+          counts: { ...status.counts, [t.outcome]: (status.counts[t.outcome] ?? 0) + 1 },
+          since: status.since ?? now,
+        };
+        ctx.store.write(STATUS_DOC, status);
+      };
+      const view = (): StateView => ({
+        schema: STATUS_SCHEMA,
+        state: status,
+        ...(status.last === undefined ? {} : { updatedAt: Date.parse(status.last.at) }),
+        pin: ['last'],
+      });
       return {
+        interface: { state: { status: () => status } },
+        view: { read: view, summary: () => statusLine(status) },
         start() {
           stop = react(ctx, {
             on:
               c.on ??
               ({
                 match: new RegExp(c.match as string, c.ignoreCase ? 'iu' : 'u'),
-                ...(c.in === undefined ? {} : { chats: [c.in] }),
+                ...(c.in === undefined ? {} : { chats: typeof c.in === 'string' ? [c.in] : c.in }),
               } as const),
             when: c.when,
             chat: c.chat,
             send: c.send,
             record: `${REACTOR}.reaction`,
             name: ctx.id,
+            observe,
             ...(c.maxAgeS === undefined ? {} : { maxAgeMs: c.maxAgeS * 1000 }),
           });
         },

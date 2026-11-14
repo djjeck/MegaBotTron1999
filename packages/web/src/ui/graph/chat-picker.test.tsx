@@ -263,7 +263,11 @@ describe('a config key that names a chat (D96)', () => {
     chat.configChats = [{ key: 'owner', kinds: ['private'] }];
     actor.configSchema = {
       type: 'object',
-      properties: { to: { type: 'string' }, group: { type: 'array', items: { type: 'string' } } },
+      properties: {
+        to: { type: 'string' },
+        // A list, or one chat as saved before (the reactor's in, #7): picked as a list.
+        group: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }] },
+      },
     };
     actor.configChats = [
       { key: 'to', output: 'chat', template: true },

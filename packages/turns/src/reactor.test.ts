@@ -12,7 +12,13 @@ import {
 } from '@megabottron1999/core';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { REACTOR, reactorConfig, reactorPlugin } from './reactor.ts';
+import {
+  REACTOR,
+  reactorConfig,
+  reactorPlugin,
+  type ReactorStatus,
+  statusLine,
+} from './reactor.ts';
 
 const T0 = Date.UTC(2026, 10, 8, 12);
 const BOT = '@QuestBot';
@@ -76,12 +82,16 @@ const ON_GAIN = {
   send: '/look {outcome.item}',
 };
 
-async function run(config: Record<string, unknown>, o: { live?: boolean; events?: boolean } = {}) {
+async function run(
+  config: Record<string, unknown>,
+  o: { live?: boolean; events?: boolean; documents?: Record<string, Record<string, unknown>> } = {}
+) {
   const account = new FakeConnector({ account: 'telegram:alice' });
   const seen: { ctx?: PluginContext } = {};
   const kit = new DevKit({
     start: T0,
     graph: graph(config, o.events, o.live),
+    ...(o.documents === undefined ? {} : { documents: o.documents }),
     plugins: [fakeConnectorPlugin('tg', account), questParser(seen), reactorPlugin()],
   });
   await kit.start();
@@ -266,5 +276,57 @@ describe('the reactor', () => {
       optional: false,
     });
     expect(view.kinds).toEqual(['actor']);
+  });
+
+  it('tells its last reaction and its counts by outcome, kept across a restart (#7)', async () => {
+    const { kit, quest } = await run(ON_GAIN, { live: true });
+    const status = (k = kit): ReactorStatus => {
+      const r = k.core.controls.read('look', 'status');
+      return ('value' in r ? r.value : r) as ReactorStatus;
+    };
+    expect(status()).toEqual({ counts: {} });
+    expect(
+      kit.core.controls.status().plugins.find((p) => p.id === 'look')?.summary
+    ).toBeUndefined();
+    quest.bus.publish('quest.turn', gain('lantern'));
+    quest.bus.publish('quest.turn', { ...gain('rope'), playback: true });
+    quest.bus.publish('quest.turn', gain('rope'));
+    await flush();
+    expect(status()).toEqual({
+      last: { at: new Date(T0).toISOString(), outcome: 'sent', chat: BOT, text: '/look rope' },
+      counts: { sent: 2, skipped: 1 },
+      since: new Date(T0).toISOString(),
+    });
+    expect(kit.core.controls.status().plugins.find((p) => p.id === 'look')?.summary).toBe(
+      '2 sent, 1 skipped'
+    );
+    expect(kit.core.controls.view('look')).toMatchObject({
+      value: { state: status(), updatedAt: T0, pin: ['last'] },
+    });
+    // Its store is read back at the next start.
+    const again = await run(ON_GAIN, {
+      live: true,
+      documents: { look: { status: status() } },
+    });
+    expect(status(again.kit).counts).toEqual({ sent: 2, skipped: 1 });
+  });
+
+  it('says its counts with what was sent first', () => {
+    expect(statusLine({ counts: {} })).toBeUndefined();
+    expect(statusLine({ counts: { skipped: 2, refused: 1, 'dry-run': 3, sent: 1 } })).toBe(
+      '1 sent, 3 dry-run, 1 refused, 2 skipped'
+    );
+  });
+
+  it('reads the messages of a list of chats, and one chat as saved before (#7)', async () => {
+    const config = { match: 'draw opens', chat: BOT, send: '/look' };
+    for (const chats of [[BOT, '@OtherBot'], BOT]) {
+      const { account } = await run({ ...config, in: chats }, { live: true, events: false });
+      account.hear({ chat: '@Elsewhere', sender: 'QuestBot', text: 'draw opens', time: T0 });
+      account.hear({ chat: BOT, sender: 'QuestBot', text: 'draw opens', time: T0 });
+      await flush();
+      expect(account.sent).toEqual([{ chat: BOT, text: '/look' }]);
+    }
+    expect(reactorConfig.safeParse({ ...config, in: [] }).success).toBe(false);
   });
 });

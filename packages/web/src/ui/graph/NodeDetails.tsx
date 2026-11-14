@@ -100,7 +100,9 @@ function chatControls(
   return Object.fromEntries(
     specs.map((spec): [string, CustomControl] => {
       const type = props[spec.key]?.['type'];
-      const many = type === 'array';
+      // A list, or a list or one chat (the reactor's `in`, #7): picked as a list.
+      const options = (props[spec.key]?.['anyOf'] ?? []) as JsonSchema[];
+      const many = type === 'array' || options.some((o) => o['type'] === 'array');
       const numeric = type === 'integer' || type === 'number';
       const connector = chatConnector(node, spec, edges);
       return [
