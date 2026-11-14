@@ -157,8 +157,9 @@ the server that guards them.
   minutes, and that address waits; behind a proxy every visitor shares the proxy's address, so the
   limit is the whole instance's.
 
-A POST, a PUT or a DELETE must carry JSON (a DELETE its type alone) and come from the UI's own
-origin. Every response carries a strict Content Security Policy and refuses to be framed.
+A POST, a PUT or a DELETE must carry JSON, or no body at all (a bare `POST /api/restart`), and come
+from the UI's own origin; the 403 that refuses one says which it missed. Every response carries a
+strict Content Security Policy and refuses to be framed.
 
 The app is tested with Vitest on happy-dom and Testing Library, against a fake of the API
 (`test/fake-api.ts`; a fake of the editor's routes in `test/fake-core.ts`, on a made-up instance in

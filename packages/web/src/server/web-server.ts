@@ -14,8 +14,9 @@
  *   the app is not built.
  *
  * Fail closed: without the `web_ui_password` secret, or with one too short, there is no server at
- * all (`startWebUi`), and the instance runs as without a UI. A POST or a PUT must come from the UI's
- * own origin and carry JSON, so that no other site's page can make one (beside SameSite=Strict). The
+ * all (`startWebUi`), and the instance runs as without a UI. A POST, a PUT or a DELETE must come from
+ * the UI's own origin and carry JSON or no body at all, so that no other site's page can make one
+ * (beside SameSite=Strict; a form always sends a body, and a type that is not JSON). The
  * cookie is `Secure` when the request came over HTTPS (TLS here, or `X-Forwarded-Proto: https`
  * from the proxy in front).
  */
@@ -98,20 +99,29 @@ function overHttps(req: http.IncomingMessage): boolean {
   return (req.socket as { encrypted?: boolean }).encrypted === true || first === 'https';
 }
 
+/** Whether a request carries no body: no length, or a zero one, and no chunked one. */
+function bodiless(req: http.IncomingMessage): boolean {
+  const length = req.headers['content-length'];
+  return req.headers['transfer-encoding'] === undefined && (length === undefined || length === '0');
+}
+
 /**
- * Whether a POST or a PUT is the UI's own: JSON, and from the page's origin when the browser says where
- * from (`Origin`, or `Sec-Fetch-Site`).
+ * Why a POST, a PUT or a DELETE is not the UI's own, or undefined when it is: a body must be JSON
+ * (an empty one needs no type: a bare `POST /restart`), and the request from the page's origin when
+ * the browser says where from (`Origin`, or `Sec-Fetch-Site`).
  */
-function sameOrigin(req: http.IncomingMessage): boolean {
-  const type = req.headers['content-type'] ?? '';
-  if (!/^application\/json\b/iu.test(type)) return false;
+function notOwn(req: http.IncomingMessage): string | undefined {
+  const type = req.headers['content-type'];
+  if (type === undefined ? !bodiless(req) : !/^application\/json\b/iu.test(type))
+    return 'not from this page: a body must be sent as content-type: application/json';
   const origin = req.headers.origin;
+  const foreign = 'not from this page: sent from another origin';
   if (origin !== undefined) {
     const host = req.headers.host ?? '';
-    return origin === `http://${host}` || origin === `https://${host}`;
+    return origin === `http://${host}` || origin === `https://${host}` ? undefined : foreign;
   }
   const site = req.headers['sec-fetch-site'];
-  return site === undefined || site === 'same-origin' || site === 'none';
+  return site === undefined || site === 'same-origin' || site === 'none' ? undefined : foreign;
 }
 
 async function readBody(req: http.IncomingMessage, max: number): Promise<string | undefined> {
@@ -225,7 +235,8 @@ export function webHandler(o: WebOptions): Handler {
       // Every request that changes something (a POST, the graph's PUT, a module's DELETE) is the
       // page's own.
       const change = req.method !== 'GET' && req.method !== 'HEAD';
-      if (change && !sameOrigin(req)) return json(res, 403, { error: 'not from this page' });
+      const refused = change ? notOwn(req) : undefined;
+      if (refused !== undefined) return json(res, 403, { error: refused });
       const token = cookies(req)[SESSION_COOKIE];
       if (route === '/api/session')
         return json(res, 200, { authenticated: sessions.valid(token), boot });

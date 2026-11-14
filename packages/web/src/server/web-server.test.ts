@@ -207,6 +207,40 @@ describe('webHandler', () => {
       headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
     });
     expect(put.status).toBe(403);
+    // Each refusal says what is wrong.
+    expect(await (await post({ 'content-type': 'text/plain' })).json()).toEqual({
+      error: 'not from this page: a body must be sent as content-type: application/json',
+    });
+    expect(
+      await (
+        await post({ 'content-type': 'application/json', origin: 'https://evil.example' })
+      ).json()
+    ).toEqual({ error: 'not from this page: sent from another origin' });
+  });
+
+  it('takes a POST with no body and no type, but not from another origin', async () => {
+    const seen: string[] = [];
+    const api = (req: http.IncomingMessage, res: http.ServerResponse) => {
+      seen.push(`${req.method ?? ''} ${req.url ?? ''}`);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{"restarting":true}');
+    };
+    const base = await serve(webHandler({ password: PASSWORD, dist: dist(), api }));
+    const login = await fetch(`${base}/api/login`, {
+      method: 'POST',
+      body: JSON.stringify({ password: PASSWORD }),
+      headers: { 'content-type': 'application/json' },
+    });
+    const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+    const restart = await fetch(`${base}/api/restart`, { method: 'POST', headers: { cookie } });
+    expect(restart.status).toBe(200);
+    expect(seen).toEqual(['POST /restart']);
+    const foreign = await fetch(`${base}/api/restart`, {
+      method: 'POST',
+      headers: { cookie, origin: 'https://evil.example' },
+    });
+    expect(foreign.status).toBe(403);
+    expect(seen).toHaveLength(1);
   });
 
   it('marks the cookie Secure behind HTTPS', async () => {
