@@ -14,6 +14,7 @@
  */
 import type { GraphEdge, GraphNode, PortView } from '#src/ui/api.ts';
 import type { EdgeChange } from './draft.ts';
+import { Payloads } from './Payloads.tsx';
 import { CHATS_KEY, EdgeChats, RowsField, Senders } from './Surfaces.tsx';
 
 /** The connector's monitored chats, as its config lists them; undefined: every chat. */
@@ -235,6 +236,16 @@ export function EdgeDetails(props: {
       ) : (
         <p className="muted">It carries nothing to set: the binding is the permission.</p>
       )}
+      {props.output?.type === 'events' ? (
+        <section aria-label="what it carries">
+          <h3>What it carries</h3>
+          <p className="muted small">
+            Each event type and its payload’s fields, by the path a reaction’s <code>when</code> and{' '}
+            <code>send</code> name (<code>{'{outcome.item}'}</code>).
+          </p>
+          <Payloads types={props.output.types ?? []} />
+        </section>
+      ) : null}
       <p>
         <button type="button" className="danger" onClick={props.remove}>
           Remove edge

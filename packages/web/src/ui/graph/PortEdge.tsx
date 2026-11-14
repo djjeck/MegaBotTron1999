@@ -29,6 +29,8 @@ export interface PortEdgeData extends Record<string, unknown> {
   warning?: string | undefined;
   /** A chat-out edge that is a dry run (D64): nothing it sends goes out. */
   dryRun?: boolean | undefined;
+  /** An events edge's: its event types and their payloads, a line each (#3). */
+  carries?: string | undefined;
   /** Dimmed by a hover elsewhere (D69): its rhombus too. */
   dimmed?: boolean | undefined;
 }
@@ -131,7 +133,7 @@ export function PortEdge(props: EdgeProps<PortEdgeType>) {
           style={{ transform: at, '--edge-colour': colour } as CSSProperties}
           aria-label={`edge ${name}`}
           aria-pressed={selected}
-          title={`${name}${data?.type === undefined ? '' : ` (${data.type})`}${dryRun ? ', a dry run: nothing goes out' : ''}: open its settings${problem === undefined ? '' : `\n✗ ${problem}`}${warning === undefined ? '' : `\n⚠ ${warning}`}`}
+          title={`${name}${data?.type === undefined ? '' : ` (${data.type})`}${dryRun ? ', a dry run: nothing goes out' : ''}: open its settings${data?.carries === undefined ? '' : `\n${data.carries}`}${problem === undefined ? '' : `\n✗ ${problem}`}${warning === undefined ? '' : `\n⚠ ${warning}`}`}
           onClick={select}
         >
           <span className="rhombus" aria-hidden="true" />

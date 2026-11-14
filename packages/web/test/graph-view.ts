@@ -86,7 +86,25 @@ export const VIEW: GraphViewData = {
         events: {
           type: 'events',
           namespace: 'game',
-          types: [{ type: 'game.message', help: 'a line of the game' }, { type: 'game.win' }],
+          types: [
+            {
+              type: 'game.message',
+              help: 'a line of the game',
+              schema: {
+                type: 'object',
+                properties: {
+                  text: { type: 'string' },
+                  outcome: {
+                    type: 'object',
+                    properties: { kind: { enum: ['gain', 'loss'] }, item: { type: 'string' } },
+                    required: ['kind'],
+                  },
+                },
+                required: ['text', 'outcome'],
+              },
+            },
+            { type: 'game.win' },
+          ],
           label: 'events of game',
           optional: false,
         },

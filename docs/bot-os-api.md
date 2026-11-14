@@ -1525,31 +1525,35 @@ commands, each with its spacing (bot-os.md D74); an interface output, its member
 opening on each one's signature (from its schemas:
 `actions.sent({ chat: string, id?: string, t: number })`,
 `state.rest() → { until: number, why: string }`) and help; another output, its port in words. An
-edge selected, what it carries: a chat-in edge its `reads` alone, a chat-out edge its `sends` and
-`commands`, with each command's spacing for its queued sends (`minIntervalS`, empty for the
-connector's default, D73); a running connector's panel lists its queue. **States and dry runs**
-(bot-os.md D64, §2.1): a node is drawn greyed while disabled in the draft (its panel's **Enabled**
-switch), in red tones with a warning icon and its reason while stopped, greyed with the node it
-needs while inactive (from `GET /status`); a stopped node's panel says why, when and by what, with
-**Clear stop**. A node added starts disabled, and a chat-out edge drawn starts a dry run: its
-rhombus hollow and its part from the rhombus to the connector greyed and dashed, its panel's
-**Dry-run / Send for real** switch setting `dryRun`. All of these are changes of the draft, listed
-in the review (a stop cleared as "Stops cleared") and made by Apply. A connector is drawn as two
-cards (`cards.ts`, bot-os.md D60), one node in the graph all the same: its **in** card
-(`telegram-user · in`) at the left, with its chat-in output and its other ports, and its **out**
-card (`telegram-user · out`) in a column of its own at the right, with its chat-out input, where the
-senders' edges end. Each card is placed on its own; selecting either selects the node and opens its
-panel (the other card shows itself selected too); removing it removes both, after a confirmation
-that names them. The split lives in the editor's view alone: the graph file holds one node. Each
-edge has a rhombus at its midpoint in its port type's colour (`PortEdge.tsx`, React Flow's
-`EdgeLabelRenderer`), a button named after the edge (`edge irc.chat → dice.channel`) that selects it
-and opens its panel, by a click or the keyboard. Its review shows the diff and two actions: Apply,
-`PUT /graph/file`, then `POST /plugins/<id>/clear-stop` for each stop cleared, then `POST /restart`
-(none if the core refuses the graph, which the review says, nor if the saved graph is what runs
-already and no stop was cleared), and Revert, the draft back to the saved graph; a banner offers
-Apply (`POST /restart`) when the saved file differs from what runs (`differs`). After a restart the
-page waits on `GET /session` for the new process (another `boot` id), and comes back to the page,
-still logged in. One or several running nodes selected can be killed, each by
+events edge, and the events input of the node it enters, show what it carries (#3): each event type
+with its payload's fields by dotted path and type (`outcome.item?: string`), from its schema
+(`types[].schema`), so that a reaction's `when` and `send` paths are written against it, narrowed in
+the node's panel to the type its config names (the reactor's `on`); the edge's rhombus says it in
+its title, a line per type. An edge selected, what it carries: a chat-in edge its `reads` alone, a
+chat-out edge its `sends` and `commands`, with each command's spacing for its queued sends
+(`minIntervalS`, empty for the connector's default, D73); a running connector's panel lists its
+queue. **States and dry runs** (bot-os.md D64, §2.1): a node is drawn greyed while disabled in the
+draft (its panel's **Enabled** switch), in red tones with a warning icon and its reason while
+stopped, greyed with the node it needs while inactive (from `GET /status`); a stopped node's panel
+says why, when and by what, with **Clear stop**. A node added starts disabled, and a chat-out edge
+drawn starts a dry run: its rhombus hollow and its part from the rhombus to the connector greyed and
+dashed, its panel's **Dry-run / Send for real** switch setting `dryRun`. All of these are changes of
+the draft, listed in the review (a stop cleared as "Stops cleared") and made by Apply. A connector
+is drawn as two cards (`cards.ts`, bot-os.md D60), one node in the graph all the same: its **in**
+card (`telegram-user · in`) at the left, with its chat-in output and its other ports, and its
+**out** card (`telegram-user · out`) in a column of its own at the right, with its chat-out input,
+where the senders' edges end. Each card is placed on its own; selecting either selects the node and
+opens its panel (the other card shows itself selected too); removing it removes both, after a
+confirmation that names them. The split lives in the editor's view alone: the graph file holds one
+node. Each edge has a rhombus at its midpoint in its port type's colour (`PortEdge.tsx`, React
+Flow's `EdgeLabelRenderer`), a button named after the edge (`edge irc.chat → dice.channel`) that
+selects it and opens its panel, by a click or the keyboard. Its review shows the diff and two
+actions: Apply, `PUT /graph/file`, then `POST /plugins/<id>/clear-stop` for each stop cleared, then
+`POST /restart` (none if the core refuses the graph, which the review says, nor if the saved graph
+is what runs already and no stop was cleared), and Revert, the draft back to the saved graph; a
+banner offers Apply (`POST /restart`) when the saved file differs from what runs (`differs`). After
+a restart the page waits on `GET /session` for the new process (another `boot` id), and comes back
+to the page, still logged in. One or several running nodes selected can be killed, each by
 `POST /plugins/<id>/kill`: stopped, until their stops are cleared. Its **Text** toggle shows the
 draft printed (the check's `text`), read-only, with a copy button. The rollback is not the editor's:
 it is the admin page's **Graph history** (`#/graph-history`), which lists the versions newest first

@@ -33,6 +33,7 @@ import { ChatPicker } from './ChatPicker.tsx';
 import { withDefaults } from './defaults.ts';
 import type { PortChange } from './draft.ts';
 import { endOf, instanceOf } from './draft.ts';
+import { heardTypes, Payloads } from './Payloads.tsx';
 import { ConnectorQueue } from './Queue.tsx';
 import type { CustomControl } from './SchemaForm.tsx';
 import { SchemaForm } from './SchemaForm.tsx';
@@ -141,7 +142,13 @@ function chatControls(
   );
 }
 
-function Ports(props: { title: string; ports: Record<string, PortView> }) {
+function Ports(props: {
+  title: string;
+  ports: Record<string, PortView>;
+  /** What each events input hears through its edges (#3), by port. */
+  heard?: Readonly<Record<string, EventTypeView[]>>;
+  config?: Readonly<Record<string, unknown>> | undefined;
+}) {
   const entries = Object.entries(props.ports);
   if (entries.length === 0) return null;
   return (
@@ -153,6 +160,12 @@ function Ports(props: { title: string; ports: Record<string, PortView> }) {
             <code>{name}</code> {p.label}
             {p.optional ? <span className="muted"> (optional)</span> : null}
             {p.help === undefined ? null : <span className="muted"> — {p.help}</span>}
+            {p.type === 'events' && props.heard?.[name] !== undefined ? (
+              <details className="heard" open>
+                <summary>What it hears</summary>
+                <Payloads types={heardTypes(props.heard[name], p, props.config)} />
+              </details>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -455,6 +468,8 @@ export function NodeDetails(props: {
   problems: string[];
   /** The check's warnings on it (D89): they refuse nothing. */
   warnings?: string[];
+  /** The event types each of its events inputs hears through its edges (#3), by port. */
+  heard?: Readonly<Record<string, EventTypeView[]>>;
   configErrors: Record<string, string[]>;
   settingErrors: Record<string, string[]>;
   secretNames: readonly string[];
@@ -702,7 +717,12 @@ export function NodeDetails(props: {
       </section>
       <section>
         <h3>Interface</h3>
-        <Ports title="Inputs" ports={view.inputs} />
+        <Ports
+          title="Inputs"
+          ports={view.inputs}
+          heard={props.heard ?? {}}
+          config={withDefaults(view.configSchema, node.config)}
+        />
         <Outputs ports={view.outputs} view={view} />
         <Members title="Reads" members={i.reads} />
         <Members title="Actions" members={i.actions} />

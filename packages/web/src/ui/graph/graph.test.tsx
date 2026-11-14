@@ -156,6 +156,35 @@ describe('GraphPage', () => {
     expect(within(off).getByText('disabled until the next Apply')).toBeDefined();
   });
 
+  it('shows an events edge’s payloads: on its rhombus, in its panel and its node’s (#3)', async () => {
+    fakeCore();
+    render(<GraphPage loggedOut={loggedOut} checkAfterMs={0} />);
+    const rhombus = await screen.findByRole(
+      'button',
+      { name: 'edge parser.events → actor-a.game-events' },
+      slow
+    );
+    expect(rhombus.getAttribute('title')).toContain(
+      'game.message { text: string, outcome: { kind: "gain" | "loss", item?: string } }\ngame.win (payload not described)'
+    );
+    fireEvent.click(rhombus);
+    const edge = await screen.findByLabelText(
+      'details of edge parser.events → actor-a.game-events'
+    );
+    const carried = within(edge).getByRole('list', { name: 'payload of game.message' });
+    expect(
+      within(carried)
+        .getAllByRole('listitem')
+        .map((l) => l.textContent)
+    ).toEqual(['text: string', 'outcome.kind: "gain" | "loss"', 'outcome.item?: string']);
+    expect(within(edge).getByText('(payload not described)')).toBeDefined();
+    // The node it enters: what its input hears.
+    fireEvent.click(screen.getByLabelText('node actor-a'));
+    const actor = await screen.findByLabelText('details of actor-a');
+    expect(within(actor).getByText('What it hears')).toBeDefined();
+    expect(within(actor).getByRole('list', { name: 'payload of game.message' })).toBeDefined();
+  });
+
   it('lists what a node’s outputs carry: its event types, and its members folded', async () => {
     fakeCore();
     render(<GraphPage loggedOut={loggedOut} checkAfterMs={0} />);

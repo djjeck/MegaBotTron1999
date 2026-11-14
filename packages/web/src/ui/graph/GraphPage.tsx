@@ -56,6 +56,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AvailablePlugin,
   DriftCounts,
+  EventTypeView,
   Graph,
   GraphCheckView,
   GraphFileView,
@@ -64,6 +65,7 @@ import type {
   GraphViewData,
   InstanceInfo,
   PortTypeInfo,
+  PortView,
   Status,
 } from '#src/ui/api.ts';
 import { api, ApiError, seg } from '#src/ui/api.ts';
@@ -108,6 +110,7 @@ import type { Placed } from './layout.ts';
 import { layout, swimlanes } from './layout.ts';
 import { NodeDetails } from './NodeDetails.tsx';
 import { Palette } from './Palette.tsx';
+import { payloadLine } from './Payloads.tsx';
 import type { PluginNodeType } from './PluginNode.tsx';
 import { nodeHeight, PluginNode } from './PluginNode.tsx';
 import type { PortEdgeData, PortEdgeType } from './PortEdge.tsx';
@@ -144,6 +147,12 @@ const EDGE_KEYS = [
 /** What the canvas draws: the cards, and the lanes that hold them (D69). */
 type CanvasNode = PluginNodeType | LaneNodeType;
 const EDGE_TYPES = { port: PortEdge };
+
+/** What an events output carries, a line per event type and its payload (#3); else undefined. */
+const carriesOf = (output: PortView | undefined): string | undefined =>
+  output?.type === 'events' && (output.types ?? []).length > 0
+    ? (output.types ?? []).map(payloadLine).join('\n')
+    : undefined;
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -447,6 +456,9 @@ export function GraphPage({
           problem: problems[0],
           warning: warnings[0],
           dryRun: e.type === 'chat-out' && e.dryRun === true,
+          carries: carriesOf(
+            from.port === undefined ? undefined : outputs.get(from.node)?.[from.port]
+          ),
         },
         // The rhombus at its midpoint is the edge's handle for the keyboard and the screen reader
         // (`PortEdge.tsx`); the line stays clickable.
@@ -675,6 +687,19 @@ export function GraphPage({
     setSelected({ nodes: [], edges: [key] });
   };
 
+  /** The event types each events input of a node hears through its edges (#3), by port. */
+  const heardBy = (id: string): Record<string, EventTypeView[]> => {
+    const out: Record<string, EventTypeView[]> = {};
+    for (const e of draft?.edges ?? []) {
+      const [from, to] = [endOf(e.from), endOf(e.to)];
+      if (to.node !== id || to.port === undefined || from.port === undefined) continue;
+      const output = viewsById.get(from.node)?.outputs[from.port];
+      if (output?.type === 'events')
+        out[to.port] = [...(out[to.port] ?? []), ...(output.types ?? [])];
+    }
+    return out;
+  };
+
   if (draft === undefined) return <p className="muted">{file.error ?? 'Loading…'}</p>;
   const dirty = saved === undefined || !sameGraph(draft, saved) || clears.size > 0;
   const refused = status.data?.graph?.refused ?? [];
@@ -742,6 +767,7 @@ export function GraphPage({
           ...[...placed.ports].flatMap(([k, t]) => (k.startsWith(`${shownNode.id}.`) ? t : [])),
         ]}
         warnings={warned.nodes.get(shownNode.id) ?? []}
+        heard={heardBy(shownNode.id)}
         configErrors={placed.config.get(shownNode.id) ?? {}}
         settingErrors={placed.settings.get(shownNode.id) ?? {}}
         secretNames={secrets.data?.names ?? []}
