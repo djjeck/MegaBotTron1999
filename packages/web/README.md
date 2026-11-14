@@ -15,9 +15,9 @@ the server that guards them.
   state and drift (docs/bot-os.md D64): disabled, greyed; stopped, in red tones with a warning icon
   and its reason; inactive, greyed with the node it needs. The page is the map, filling the area
   between the bars: its minimap at the top right; what the draft needs (**Review changes**, the
-  problems, the selection and **Kill selected**) at the top left; the zoom controls and the legend
-  at the bottom left; and **Add a node**, a floating "+" button, at the bottom right. The panel of
-  what is selected opens beside the map (below it on a phone). Chats flow left to right
+  problems and warnings, the selection and **Kill selected**) at the top left; the zoom controls and
+  the legend at the bottom left; and **Add a node**, a floating "+" button, at the bottom right. The
+  panel of what is selected opens beside the map (below it on a phone). Chats flow left to right
   (docs/bot-os.md D60): a connector is drawn as two cards (`cards.ts`), its **in** card
   (`telegram-user · in`) at the left, whose chat-in output feeds the readers, and its **out** card
   (`telegram-user · out`) in a column of its own at the right, whose chat-out input takes the
@@ -62,6 +62,9 @@ the server that guards them.
   the start with the pairs of nodes that shared them; a chat-out edge's panel sets each command's
   spacing (`minIntervalS`, empty for the connector's default). Every change is checked by the core,
   and each refusal shown on its edge, port, node or field (`draft.ts`, the draft's pure changes);
+  each warning (docs/bot-os.md D89: a chat-in edge reading a chat its connector does not monitor),
+  which refuses nothing, in amber and dashed on its edge, its port and its node, listed in their
+  panels and the review, and counted in the map's bar (`N warnings`), Apply offered all the same;
   typing in a panel keeps its field focused, and the cards and edges that draw as before are kept as
   drawn (`stable.ts`), so the map does not redraw at each keystroke. **Review changes** opens a
   dialog with the diff and two actions (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`)

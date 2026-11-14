@@ -1735,3 +1735,49 @@ label.block {
   width: 6rem;
   margin: 0;
 }
+
+/* A warning of the check (D89): it refuses nothing, drawn in amber, dashed, beside the problems. */
+ul.warnings {
+  color: var(--warn);
+  padding-left: 1.2rem;
+}
+
+.plugin-node.warned {
+  border-color: var(--warn);
+  border-style: dashed;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 40%, transparent);
+}
+
+.plugin-node .head .warning {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: normal;
+}
+
+.react-flow__handle.port.warned {
+  outline: 2px dashed var(--warn);
+  outline-offset: 2px;
+}
+
+.port-name.warned {
+  color: var(--warn);
+}
+
+.edge-handle.warned .rhombus {
+  background: var(--warn);
+}
+
+/* A warning names its node, edge and chat at length: cut short on the map, whole in its title. */
+.edge-warning {
+  position: absolute;
+  pointer-events: none;
+  font-size: 0.75rem;
+  color: var(--warn);
+  background: var(--bg);
+  padding: 0 0.25rem;
+  white-space: nowrap;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

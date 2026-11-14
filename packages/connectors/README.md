@@ -19,14 +19,17 @@ day) and from `telegram-user`, which at each connection fetches back the chats i
 read, back to what it has accounted for in each (kept in its store, `last-seen` and `seen-above`),
 at most 1000 a chat (D62). Each message reaches the readers once, across live delivery, the catch-up
 and restarts, and a gap whose fetch failed is fetched again until it is filled; `telegram-bot` keeps
-the last message it delivered in each chat, against Telegram's deliveries again (D66). The three
-chat connectors' configs give their account's queue its default interval between two queued sends of
-a command in one chat (`commandIntervalS`, 0 by default, D73), where a chat-out edge names none. A
-message's file comes as its `document` (D82): both Telegram connectors download a text file of at
-most 256 KiB, in UTF-8, and give its text beside the caption; any other file, its name, type and
-size only. The catch-up downloads it as live. A message the Telegram connectors catch up on is
-`missed`, and played back (`playback`: history, which nothing acts on) only once older than their
-config's `liveGraceS` (120 s by default, D83), so that a quick restart costs nothing.
+the last message it delivered in each chat, against Telegram's deliveries again (D66). Each manifest
+says which chats its node monitors (`monitors`, D89): the Telegram ones their `chats` (unset: every
+chat), `irc` its `channel`; the graph's check warns of a chat-in edge reading a chat its connector
+does not monitor. The three chat connectors' configs give their account's queue its default interval
+between two queued sends of a command in one chat (`commandIntervalS`, 0 by default, D73), where a
+chat-out edge names none. A message's file comes as its `document` (D82): both Telegram connectors
+download a text file of at most 256 KiB, in UTF-8, and give its text beside the caption; any other
+file, its name, type and size only. The catch-up downloads it as live. A message the Telegram
+connectors catch up on is `missed`, and played back (`playback`: history, which nothing acts on)
+only once older than their config's `liveGraceS` (120 s by default, D83), so that a quick restart
+costs nothing.
 
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
   structured output by a zod schema.

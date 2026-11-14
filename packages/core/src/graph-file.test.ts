@@ -10,7 +10,7 @@ import { Core, STATES_DOC } from './core.ts';
 import { FakeConnector, fakeConnectorPlugin } from './devkit.ts';
 import { type GraphInput } from './graph.ts';
 import { graphDiff, GraphFile, graphFileControls, locateProblem } from './graph-file.ts';
-import { definePlugin } from './plugin.ts';
+import { definePlugin, type Plugin } from './plugin.ts';
 import { shutdown } from './shutdown.ts';
 
 /** A game's parser that offers its score. */
@@ -55,6 +55,35 @@ const good: GraphInput = {
   ],
 };
 
+/** A connector that says which chats it monitors (D89): its config's `chats`. */
+const watcher = definePlugin({
+  manifest: {
+    id: 'watcher',
+    version: '0.1.0',
+    kinds: ['connector'],
+    description: 'monitors its chats',
+    account: 'chat:watcher',
+    config: z.object({ chats: z.array(z.string()).optional() }),
+    monitors: { config: 'chats' },
+  },
+  create: () => ({ connector: new FakeConnector({ account: 'chat:watcher' }) }),
+});
+
+/** The good graph on the watcher, whose actor reads a chat it does not monitor. */
+const warned: GraphInput = {
+  version: 2,
+  nodes: [
+    { id: 'watch', plugin: 'watcher', config: { chats: ['#lobby'] } },
+    { id: 'scorer', plugin: 'scorer' },
+    { id: 'actor', plugin: 'actor', config: { every: 2 } },
+  ],
+  edges: [
+    { from: 'watch', to: 'actor.chat', reads: ['#lobby', '#games'] },
+    { from: 'actor.chat', to: 'watch.chat', sends: ['#lobby'] },
+    { from: 'scorer', to: 'actor.score' },
+  ],
+};
+
 /** The good graph as version 1 wrote it: one chat edge for the reads and the sends. */
 const versionOne = {
   ...good,
@@ -89,7 +118,12 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function instance(): { core: Core; lines: string[]; told: string[]; file: GraphFile } {
+function instance(...more: Plugin[]): {
+  core: Core;
+  lines: string[];
+  told: string[];
+  file: GraphFile;
+} {
   const lines: string[] = [];
   const told: string[] = [];
   const file = new GraphFile(dir, () => clock.now());
@@ -106,7 +140,8 @@ function instance(): { core: Core; lines: string[]; told: string[]; file: GraphF
   core.register(
     fakeConnectorPlugin('chat', new FakeConnector({ account: 'chat:me' })),
     scorer,
-    actor
+    actor,
+    ...more
   );
   return { core, lines, told, file };
 }
@@ -384,7 +419,10 @@ describe('the graph API', () => {
         ),
       },
     ]);
-    expect(await call('/graph/file', 'PUT', good)).toEqual([200, { saved: true, restart: true }]);
+    expect(await call('/graph/file', 'PUT', good)).toEqual([
+      200,
+      { saved: true, restart: true, warnings: [] },
+    ]);
     const [, saved] = await call('/graph/file');
     expect(saved).toMatchObject({
       exists: true,
@@ -395,7 +433,10 @@ describe('the graph API', () => {
     // The saved graph names the instance it will run on: it is in use, though nothing runs on it.
     clock.advance(1000);
     const next = { ...good, nodes: good.nodes.slice(0, 2), edges: [] };
-    expect(await call('/graph/file', 'PUT', next)).toEqual([200, { saved: true, restart: true }]);
+    expect(await call('/graph/file', 'PUT', next)).toEqual([
+      200,
+      { saved: true, restart: true, warnings: [] },
+    ]);
     const first = '2026-11-01T00-00-00.000Z';
     const second = '2026-11-01T00-00-01.000Z';
     const [, history] = await call('/graph/history');
@@ -492,6 +533,54 @@ describe('the graph API', () => {
     await core.stop();
   });
 
+  it('warns of a chat its connector does not monitor, and saves and runs the graph all the same', async () => {
+    const { core, file } = instance(watcher);
+    await core.start();
+    const call = await serve(core, file);
+    const warning = {
+      text: 'node actor: input port chat reads #games, which watch does not monitor (its chats: #lobby) (edge watch → actor.chat)',
+      node: 'actor',
+      port: 'chat',
+      edge: { from: 'watch', to: 'actor.chat' },
+    };
+    expect((await call('/graph/check', 'POST', warned))[1]).toMatchObject({
+      ok: true,
+      problems: [],
+      warnings: [warning],
+    });
+    // A graph refused still says its warnings.
+    const refused = { ...warned, nodes: [...warned.nodes, { id: 'lost', plugin: 'gone' }] };
+    expect((await call('/graph/check', 'POST', refused))[1]).toMatchObject({
+      ok: false,
+      problems: [{ node: 'lost' }],
+      warnings: [warning],
+    });
+    expect(await call('/graph/file', 'PUT', warned)).toEqual([
+      200,
+      { saved: true, restart: true, warnings: [warning] },
+    ]);
+    // The file writes each edge out: its warning names the edge so.
+    expect((await call('/graph/file'))[1]).toMatchObject({
+      warnings: [
+        {
+          text: warning.text.replace('edge watch →', 'edge watch.chat →'),
+          edge: { from: 'watch.chat', to: 'actor.chat' },
+        },
+      ],
+    });
+    expect((await call('/graph/file'))[1]).not.toHaveProperty('problems');
+    await core.stop();
+    // Run at the next start, the warning printed.
+    const again = instance(watcher);
+    await again.core.start();
+    expect(again.core.graphProblems()).toEqual([]);
+    expect(again.core.nodes().map((n) => n.id)).toContain('actor');
+    expect(again.lines).toContain(
+      `core: the graph warns:\n${warning.text.replace('edge watch →', 'edge watch.chat →')}`
+    );
+    await again.core.stop();
+  });
+
   it('runs the saved graph after a restart, its file the same, and says why one is refused', async () => {
     write('graph.json', good);
     const { core, file } = instance();
@@ -500,8 +589,14 @@ describe('the graph API', () => {
     const call = await serve(core, file, () => restarts++);
     expect((await call('/graph/file'))[1]).toMatchObject({ differs: false });
     // Saved as the core holds it (each edge's ends and type written out), then unchanged.
-    expect(await call('/graph/file', 'PUT', good)).toEqual([200, { saved: true, restart: false }]);
-    expect(await call('/graph/file', 'PUT', good)).toEqual([200, { saved: false, restart: false }]);
+    expect(await call('/graph/file', 'PUT', good)).toEqual([
+      200,
+      { saved: true, restart: false, warnings: [] },
+    ]);
+    expect(await call('/graph/file', 'PUT', good)).toEqual([
+      200,
+      { saved: false, restart: false, warnings: [] },
+    ]);
     expect(await call('/restart', 'POST')).toEqual([200, { restarting: true }]);
     expect(restarts).toBe(1);
     expect((await call('/instances'))[1]).toMatchObject([
@@ -584,7 +679,11 @@ describe('a graph file of version 1', () => {
       diff: { edges: { added: [], removed: [], changed: [] } },
     });
     // Saved, as version 2: the same graph, so it is no new version.
-    expect(await call('/graph/file', 'PUT', versionOne)).toEqual({ saved: true, restart: false });
+    expect(await call('/graph/file', 'PUT', versionOne)).toEqual({
+      saved: true,
+      restart: false,
+      warnings: [],
+    });
     expect(JSON.parse(fs.readFileSync(file.file, 'utf8'))).toMatchObject({
       version: 2,
       edges: converted,

@@ -1,6 +1,7 @@
 import { Core, definePlugin, VirtualClock } from '@megabottron1999/core';
 import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
 import { describe, expect, it } from 'vitest';
+import { readWarnings } from '#test/monitors.ts';
 import { BOT_INFO, stubBot } from '#test/telegram.ts';
 import { telegramBotPlugin } from './telegram-bot.ts';
 
@@ -37,6 +38,14 @@ describe('the telegram-bot plugin', () => {
     expect(connector?.status().state).toBe('connected');
     await core.stop();
     expect(polling).toBe(false);
+  });
+
+  it('monitors the chats of its config, or every chat: the check warns of one read beside (D89)', () => {
+    const plugin = telegramBotPlugin();
+    expect(readWarnings(plugin, undefined, ['@QuestBot', String(GROUP)])).toEqual([]);
+    expect(readWarnings(plugin, { chats: [String(GROUP)] }, [String(GROUP), '@QuestBot'])).toEqual([
+      `node quest: input port chat reads @QuestBot, which conn does not monitor (its chats: ${GROUP}) (edge conn → quest.chat)`,
+    ]);
   });
 
   it('makes a real grammY bot by default', async () => {

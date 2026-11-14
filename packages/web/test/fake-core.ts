@@ -1,7 +1,7 @@
 /**
  * A fake of the core's control API for the graph editor's tests (`test/fake-api.ts` underneath):
- * the saved graph file, a check that refuses what `refuse` says (and prints the draft: its node ids,
- * a line each), a save, the instances kept, the secrets' names, and a restart, after
+ * the saved graph file, a check that refuses what `refuse` says and warns of what `warn` says (and
+ * prints the draft: its node ids, a line each), a save, the instances kept, the secrets' names, and a restart, after
  * which a new process answers, the session kept. Synthetic: made-up plugins (`test/graph-view.ts`).
  */
 import {
@@ -36,6 +36,8 @@ export function fakeCore(
   o: {
     file?: Graph | undefined;
     refuse?: (g: Graph) => GraphProblem[];
+    /** What the check warns of (D89): it refuses nothing. */
+    warn?: (g: Graph) => GraphProblem[];
     available?: AvailablePlugin[];
     instances?: InstanceInfo[];
     status?: Status;
@@ -43,6 +45,7 @@ export function fakeCore(
   } = {}
 ): FakeCore {
   const refuse = o.refuse ?? (() => []);
+  const warn = o.warn ?? (() => []);
   const core: FakeCore = {
     api: fakeApi({}),
     file: 'file' in o ? o.file : VIEW.graph,
@@ -76,6 +79,7 @@ export function fakeCore(
         {
           ok: problems.length === 0,
           problems,
+          warnings: warn(g),
           text: `nodes:\n${g.nodes.map((n) => `  ${n.id} (${n.plugin})\n`).join('')}edges:`,
           diff: {
             nodes: {
@@ -102,7 +106,7 @@ export function fakeCore(
       const problems = refuse(g);
       if (problems.length > 0) return [400, { error: 'the graph is refused', problems }];
       core.file = g;
-      return [200, { saved: true, restart: !same(g, core.running) }];
+      return [200, { saved: true, restart: !same(g, core.running), warnings: warn(g) }];
     },
     'POST /restart': () => {
       core.restarted = true;

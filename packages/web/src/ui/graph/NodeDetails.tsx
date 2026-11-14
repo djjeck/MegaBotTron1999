@@ -361,6 +361,8 @@ export function NodeDetails(props: {
   /** The instance it names, if it is kept already. */
   instance?: InstanceInfo | undefined;
   problems: string[];
+  /** The check's warnings on it (D89): they refuse nothing. */
+  warnings?: string[];
   configErrors: Record<string, string[]>;
   settingErrors: Record<string, string[]>;
   secretNames: readonly string[];
@@ -415,6 +417,13 @@ export function NodeDetails(props: {
         <ul className="problems" aria-label={`problems of ${view.id}`}>
           {props.problems.map((p) => (
             <li key={p}>{p}</li>
+          ))}
+        </ul>
+      )}
+      {(props.warnings ?? []).length === 0 ? null : (
+        <ul className="warnings" aria-label={`warnings of ${view.id}`}>
+          {(props.warnings ?? []).map((w) => (
+            <li key={w}>{w}</li>
           ))}
         </ul>
       )}

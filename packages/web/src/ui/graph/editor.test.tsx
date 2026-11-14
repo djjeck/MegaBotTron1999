@@ -497,6 +497,65 @@ describe('the graph editor', () => {
     expect(screen.queryByRole('complementary', { name: 'the draft as text' })).toBeNull();
   });
 
+  it('shows what the check warns of in its own style, and applies the graph all the same (D89)', async () => {
+    const text =
+      'node actor-a: input port chat reads #b, which chat does not monitor (its chats: #a) (edge chat.chat → actor-a.chat)';
+    const core = fakeCore({
+      warn: () => [
+        { text, node: 'actor-a', port: 'chat', edge: { from: 'chat.chat', to: 'actor-a.chat' } },
+        { text: 'graph: something to know' },
+      ],
+    });
+    vi.stubGlobal('confirm', () => true);
+    const { container } = render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    const actor = await screen.findByLabelText('node actor-a', {}, slow);
+    // Its node, its port and its edge in the warning's style, never the refusal's.
+    await waitFor(() => expect(actor.className).toContain('warned'));
+    expect(actor.className).not.toContain('refused');
+    expect(within(actor).getByText(`⚠ ${text}`)).toBeDefined();
+    expect(within(actor).getByTestId('port in chat').className).toContain('warned');
+    expect(within(actor).getByTestId('port in chat').getAttribute('title')).toContain(`⚠ ${text}`);
+    expect(screen.getByText('2 warnings')).toBeDefined();
+    expect(screen.queryByText(/problems?$/u)).toBeNull();
+    expect(
+      within(screen.getByLabelText('other warnings')).getByText('graph: something to know')
+    ).toBeDefined();
+    await waitFor(() => expect(container.querySelector('.react-flow__edge.warned')).not.toBeNull());
+    const rhombus = screen.getByRole('button', { name: 'edge chat.chat → actor-a.chat' });
+    expect(rhombus.className).toContain('warned');
+    expect(rhombus.getAttribute('title')).toContain(`⚠ ${text}`);
+    // The panels list them.
+    fireEvent.click(rhombus);
+    const edge = await screen.findByLabelText('details of edge chat.chat → actor-a.chat');
+    expect(
+      within(within(edge).getByLabelText('warnings of the edge')).getByText(text)
+    ).toBeDefined();
+    fireEvent.click(screen.getByLabelText('node actor-a'));
+    const details = await screen.findByLabelText('details of actor-a');
+    expect(
+      within(within(details).getByLabelText('warnings of actor-a')).getByText(text)
+    ).toBeDefined();
+    // A change reviewed: the warnings said, and Apply offered; the save takes it.
+    fireEvent.click(within(details).getByRole('switch', { name: 'enabled' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Review changes' }));
+    const review = await screen.findByRole('dialog', { name: 'review changes' });
+    expect(within(review).getByText('Warnings: it applies all the same')).toBeDefined();
+    expect(within(within(review).getByLabelText('warnings')).getByText(text)).toBeDefined();
+    core.api.routes['PUT /graph/file'] = [
+      200,
+      { saved: true, restart: false, warnings: [{ text }] },
+    ];
+    await waitFor(() =>
+      expect(
+        (within(review).getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled
+      ).toBe(false)
+    );
+    fireEvent.click(within(review).getByRole('button', { name: 'Apply' }));
+    expect(
+      await screen.findByText('Saved: it is what runs already, so no restart is needed.')
+    ).toBeDefined();
+  }, 20_000);
+
   it('applies a draft the saved graph matches what runs without a restart, and says why an Apply is refused', async () => {
     const core = fakeCore({
       refuse: (g) => (g.nodes.length === 1 ? [{ text: 'node chat: alone', node: 'chat' }] : []),

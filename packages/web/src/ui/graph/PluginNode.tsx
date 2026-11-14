@@ -5,7 +5,8 @@
  * stop, drift, the owner's kill or stop), in red tones with a warning icon and its reason;
  * **inactive** for a node it needs that is down, greyed with its reason; failed, with why; or not
  * running (added, or not applied yet). An edge is dragged from an output to an input; a node or a
- * port the check refuses is marked, with why. A connector is drawn as two cards, its in card and
+ * port the check refuses is marked, with why; one it warns of (D89), in the warning's own colour,
+ * with what. A connector is drawn as two cards, its in card and
  * its out card (`cards.ts`, D60): each is titled with its side, and shows itself selected while
  * its twin is. A node that keeps a state (D72) shows a line of it, from its pins.
  */
@@ -27,6 +28,9 @@ export interface PluginNodeData extends Record<string, unknown> {
   /** The check's problems with the node itself, and with each of its ports by name. */
   problems?: string[];
   portProblems?: Record<string, string[]>;
+  /** The check's warnings (D89) on the node, and on each of its ports by name: they refuse nothing. */
+  warnings?: string[];
+  portWarnings?: Record<string, string[]>;
   /** A connector's in or out card; none for a node of one card. */
   side?: CardSide;
   /** Its node is selected through its other card. */
@@ -51,13 +55,15 @@ function Port(props: {
   index: number;
   info: PortTypeInfo | undefined;
   problems: string[] | undefined;
+  warnings: string[] | undefined;
 }) {
-  const { name, port, side, index, info, problems = [] } = props;
+  const { name, port, side, index, info, problems = [], warnings = [] } = props;
   const top = HEAD_HEIGHT + PORT_ROW * index + PORT_ROW / 2;
   const title =
     `${name}: ${port.label}${port.optional ? ' (optional)' : ''}${port.help === undefined ? '' : ` — ${port.help}`}` +
-    problems.map((p) => `\n✗ ${p}`).join('');
-  const refused = problems.length > 0 ? ' refused' : '';
+    problems.map((p) => `\n✗ ${p}`).join('') +
+    warnings.map((w) => `\n⚠ ${w}`).join('');
+  const refused = problems.length > 0 ? ' refused' : warnings.length > 0 ? ' warned' : '';
   return (
     <>
       <Handle
@@ -114,7 +120,17 @@ export function stateOf(
 }
 
 export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
-  const { view, live, drift, portTypes, problems = [], portProblems = {}, side } = data;
+  const {
+    view,
+    live,
+    drift,
+    portTypes,
+    problems = [],
+    portProblems = {},
+    warnings = [],
+    portWarnings = {},
+    side,
+  } = data;
   const state = stateOf(live, data.disabled === true, data.cleared === true);
   const greyed = state.look === 'disabled' || state.look === 'inactive';
   const title = cardTitle(view.id, side);
@@ -123,7 +139,7 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
   const outputs = Object.entries(view.outputs);
   return (
     <div
-      className={`plugin-node${state.look === '' ? '' : ` state-${state.look.replace(' ', ' state-')}`}${shown ? ' selected' : ''}${problems.length > 0 ? ' refused' : ''}${side === undefined ? '' : ` card-${side}`}`}
+      className={`plugin-node${state.look === '' ? '' : ` state-${state.look.replace(' ', ' state-')}`}${shown ? ' selected' : ''}${problems.length > 0 ? ' refused' : warnings.length > 0 ? ' warned' : ''}${side === undefined ? '' : ` card-${side}`}`}
       style={{ height: nodeHeight(view) }}
       aria-label={`node ${title}`}
       aria-disabled={greyed}
@@ -165,6 +181,10 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
           <div className="error small" title={problems.join('\n')}>
             ✗ {problems[0]}
           </div>
+        ) : warnings.length > 0 ? (
+          <div className="warning small" title={warnings.join('\n')}>
+            ⚠ {warnings[0]}
+          </div>
         ) : null}
       </div>
       {inputs.map(([name, port], i) => (
@@ -176,6 +196,7 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
           index={i}
           info={portTypes[port.type]}
           problems={portProblems[name]}
+          warnings={portWarnings[name]}
         />
       ))}
       {outputs.map(([name, port], i) => (
@@ -187,6 +208,7 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
           index={i}
           info={portTypes[port.type]}
           problems={portProblems[name]}
+          warnings={portWarnings[name]}
         />
       ))}
     </div>

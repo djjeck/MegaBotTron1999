@@ -187,6 +187,8 @@ export function ircPlugin(
       description: 'An IRC account through ZNC',
       account: `irc:${o.nick ?? 'irc'}`,
       config: ircConfig,
+      // Its one channel (D89).
+      monitors: { config: 'channel' },
       // The ZNC login's password (P9): the plugin alone receives it.
       secrets: [ZNC_PASSWORD],
       games: { registers: [IRC] },

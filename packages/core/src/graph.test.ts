@@ -6,6 +6,7 @@ import {
   GraphError,
   type GraphInput,
   loadOrder,
+  monitoredChats,
   requiredOf,
   type ResolvedNode,
   resolveGraph,
@@ -584,5 +585,94 @@ describe('chat-in and chat-out', () => {
       ],
     });
     expect(upgradeGraph({ version: 1 }, plugins)).toEqual({ version: 2 });
+  });
+});
+
+describe('the chats a connector monitors (D89)', () => {
+  /** Three connectors that say what they monitor, one that does not, and a reader. */
+  const plugins = new Map(
+    [
+      m('tg', {
+        kinds: ['connector'],
+        account: 'telegram:alice',
+        config: z.object({ chats: z.array(z.string()).optional() }),
+        monitors: { config: 'chats' },
+      }),
+      m('irc', {
+        kinds: ['connector'],
+        account: 'irc:alice',
+        config: z.object({ channel: z.string().default('#lobby') }),
+        monitors: { config: 'channel' },
+      }),
+      m('every', { kinds: ['connector'], account: 'telegram-bot:QuestBot', monitors: 'all' }),
+      m('quiet', {
+        kinds: ['connector'],
+        account: 'telegram:bob',
+        config: z.object({ chats: z.array(z.string()).optional() }),
+      }),
+      m('reader', { kinds: ['parser'], inputs: { chat: { type: 'chat-in' } } }),
+    ].map((x) => [x.id, x])
+  );
+  const reading = (
+    connector: string,
+    config: Record<string, unknown> | undefined,
+    reads: string[] | '*'
+  ): GraphInput => ({
+    version: 2,
+    nodes: [
+      { id: 'conn', plugin: connector, ...(config === undefined ? {} : { config }) },
+      { id: 'quest', plugin: 'reader' },
+    ],
+    edges: [{ from: 'conn', to: 'quest.chat', reads }],
+  });
+  const warnings = (g: GraphInput): string[] => resolveGraph(g, plugins).warnings;
+
+  it('warns of a chat read that its connector’s list does not name, and accepts the graph', () => {
+    const g = reading('tg', { chats: ['-1001', '@QuestBot'] }, ['@questbot', '@DiceBot', '-1002']);
+    const { graph, warnings: said } = resolveGraph(g, plugins);
+    expect(graph.edges).toHaveLength(1);
+    expect(said).toEqual([
+      'node quest: input port chat reads @DiceBot, which conn does not monitor (its chats: -1001, @QuestBot) (edge conn → quest.chat)',
+      'node quest: input port chat reads -1002, which conn does not monitor (its chats: -1001, @QuestBot) (edge conn → quest.chat)',
+    ]);
+    // An empty list monitors nothing.
+    expect(warnings(reading('tg', { chats: [] }, ['@QuestBot']))).toEqual([
+      'node quest: input port chat reads @QuestBot, which conn does not monitor (its chats: none) (edge conn → quest.chat)',
+    ]);
+  });
+
+  it('warns of nothing for every chat: the list unset, `all` declared, or any chat read', () => {
+    expect(warnings(reading('tg', undefined, ['@QuestBot']))).toEqual([]);
+    expect(warnings(reading('every', undefined, ['@QuestBot']))).toEqual([]);
+    expect(warnings(reading('tg', { chats: ['-1001'] }, '*'))).toEqual([]);
+  });
+
+  it('reads one chat from a string key, its default included', () => {
+    expect(warnings(reading('irc', { channel: '#Lobby' }, ['#lobby']))).toEqual([]);
+    expect(warnings(reading('irc', undefined, ['#games']))).toEqual([
+      'node quest: input port chat reads #games, which conn does not monitor (its channel: #lobby) (edge conn → quest.chat)',
+    ]);
+  });
+
+  it('says nothing of a connector that does not declare what it monitors: unknown, not wrong', () => {
+    expect(warnings(reading('quiet', { chats: ['-1001'] }, ['@QuestBot']))).toEqual([]);
+    expect(monitoredChats(plugins.get('quiet') as Manifest, { chats: [] })).toBeUndefined();
+  });
+
+  it('takes the config as written when its schema refuses it, and keeps the warnings of a graph refused', () => {
+    expect(
+      monitoredChats(plugins.get('tg') as Manifest, { chats: ['-1001', 7] as unknown[] })
+    ).toEqual({ key: 'chats', chats: ['-1001'] });
+    const g = reading('tg', { chats: ['-1001'] }, ['@QuestBot']);
+    try {
+      resolveGraph({ ...g, nodes: [...g.nodes, { id: 'lost', plugin: 'gone' }] }, plugins);
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(GraphError);
+      expect((e as GraphError).problems).toEqual([
+        'node lost: its plugin gone is not in the image',
+      ]);
+      expect((e as GraphError).warnings).toHaveLength(1);
+    }
   });
 });

@@ -25,6 +25,8 @@ export interface PortEdgeData extends Record<string, unknown> {
   type?: string | undefined;
   /** The first of the check's problems with it, if it has one. */
   problem?: string | undefined;
+  /** The first of the check's warnings on it (D89), if it has one and no problem. */
+  warning?: string | undefined;
   /** A chat-out edge that is a dry run (D64): nothing it sends goes out. */
   dryRun?: boolean | undefined;
   /** Dimmed by a hover elsewhere (D69): its rhombus too. */
@@ -85,6 +87,7 @@ export function PortEdge(props: EdgeProps<PortEdgeType>) {
   const name = data?.name ?? id;
   const colour = data?.colour ?? 'gray';
   const problem = data?.problem;
+  const warning = problem === undefined ? data?.warning : undefined;
   const dryRun = data?.dryRun === true;
   const halves = dryRun ? splitBezier(path) : undefined;
   const select = (): void => {
@@ -124,11 +127,11 @@ export function PortEdge(props: EdgeProps<PortEdgeType>) {
       <EdgeLabelRenderer>
         <button
           type="button"
-          className={`edge-handle nodrag nopan${selected ? ' selected' : ''}${problem === undefined ? '' : ' refused'}${dryRun ? ' dry-run' : ''}${data?.dimmed === true ? ' dimmed' : ''}`}
+          className={`edge-handle nodrag nopan${selected ? ' selected' : ''}${problem === undefined ? '' : ' refused'}${warning === undefined ? '' : ' warned'}${dryRun ? ' dry-run' : ''}${data?.dimmed === true ? ' dimmed' : ''}`}
           style={{ transform: at, '--edge-colour': colour } as CSSProperties}
           aria-label={`edge ${name}`}
           aria-pressed={selected}
-          title={`${name}${data?.type === undefined ? '' : ` (${data.type})`}${dryRun ? ', a dry run: nothing goes out' : ''}: open its settings${problem === undefined ? '' : `\n✗ ${problem}`}`}
+          title={`${name}${data?.type === undefined ? '' : ` (${data.type})`}${dryRun ? ', a dry run: nothing goes out' : ''}: open its settings${problem === undefined ? '' : `\n✗ ${problem}`}${warning === undefined ? '' : `\n⚠ ${warning}`}`}
           onClick={select}
         >
           <span className="rhombus" aria-hidden="true" />
@@ -139,6 +142,14 @@ export function PortEdge(props: EdgeProps<PortEdgeType>) {
             style={{ transform: `translate(-50%, 0) translate(${x}px, ${y + 12}px)` }}
           >
             ✗ {problem}
+          </div>
+        )}
+        {warning === undefined ? null : (
+          <div
+            className="edge-warning"
+            style={{ transform: `translate(-50%, 0) translate(${x}px, ${y + 12}px)` }}
+          >
+            ⚠ {warning}
           </div>
         )}
       </EdgeLabelRenderer>

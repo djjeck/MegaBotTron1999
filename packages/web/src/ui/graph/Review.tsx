@@ -1,7 +1,8 @@
 /**
  * "Review changes" (D55), a dialog: what the draft changes from the saved graph, as
  * `POST /graph/check` says it (nodes and edges added, removed, changed), with every problem the
- * check finds, the stops cleared (D64), and two actions:
+ * check finds and every warning (D89, which applies all the same), the stops cleared (D64), and two
+ * actions:
  *
  * - **Apply**: the draft saved (`PUT /graph/file`), each stop cleared
  *   (`POST /plugins/<id>/clear-stop`), then the instance restarted on it, with the reconnect
@@ -127,6 +128,16 @@ export function Review(props: {
             <ul className="problems" aria-label="problems">
               {check.problems.map((p) => (
                 <li key={p.text}>{p.text}</li>
+              ))}
+            </ul>
+          </>
+        )}
+        {(check?.warnings ?? []).length === 0 ? null : (
+          <>
+            <h4 className="warn">Warnings: it applies all the same</h4>
+            <ul className="warnings" aria-label="warnings">
+              {(check?.warnings ?? []).map((w) => (
+                <li key={w.text}>{w.text}</li>
               ))}
             </ul>
           </>

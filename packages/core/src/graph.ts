@@ -130,12 +130,39 @@ export type Graph = z.output<typeof graphSchema>;
 export type GraphNode = Graph['nodes'][number];
 export type GraphEdge = Graph['edges'][number];
 
+/**
+ * A graph refused, with every problem; `warnings`, what the check would warn of as well (bot-os.md
+ * D89), as far as it got.
+ */
 export class GraphError extends Error {
   readonly problems: string[];
-  constructor(problems: string[]) {
+  readonly warnings: string[];
+  constructor(problems: string[], warnings: string[] = []) {
     super(problems.join('\n'));
     this.problems = problems;
+    this.warnings = warnings;
   }
+}
+
+/**
+ * The chats a connector's node monitors, as its manifest's `monitors` reads them from its config
+ * (bot-os.md D89), as written there, with the key: `'all'`, every chat (declared so, or the key
+ * unset); none when the manifest does not say (unknown).
+ */
+export function monitoredChats(
+  manifest: Manifest,
+  config: Readonly<Record<string, unknown>> | undefined
+): { key: string; chats: string[] } | 'all' | undefined {
+  const m = manifest.monitors;
+  if (m === undefined || m === 'all') return m;
+  const parsed = manifest.config?.safeParse(config ?? {});
+  const made = parsed?.success === true ? (parsed.data as Record<string, unknown>) : config;
+  const value = made?.[m.config];
+  if (value === undefined || value === null) return 'all';
+  const chats = (Array.isArray(value) ? (value as unknown[]) : [value]).filter(
+    (c): c is string => typeof c === 'string'
+  );
+  return { key: m.config, chats };
 }
 
 /** A chat-in's reads, copied: `'*'` as it is, a list anew. */
@@ -466,15 +493,17 @@ function upgradeChats(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unk
 
 /**
  * Checks a graph against the manifests of the plugins the image has (by plugin id): the graph as
- * the core holds it (each edge's ends and type written out), and its nodes, in the graph's order.
- * A GraphError lists every problem, each naming its node and port.
+ * the core holds it (each edge's ends and type written out), its nodes, in the graph's order, and
+ * its warnings (bot-os.md D89), which refuse nothing: a chat-in edge that reads a chat its
+ * connector's config does not monitor (`monitoredChats`). A GraphError lists every problem, each
+ * naming its node and port.
  */
 export function resolveGraph(
   raw: unknown,
   plugins: ReadonlyMap<string, Manifest>,
   /** The plugin of an instance kept already, by its id; undefined for a fresh one. */
   instanceOf: (instance: string) => string | undefined = () => undefined
-): { graph: Graph; nodes: ResolvedNode[] } {
+): { graph: Graph; nodes: ResolvedNode[]; warnings: string[] } {
   const parsed = graphSchema.safeParse(upgradeGraph(raw, plugins));
   if (!parsed.success)
     throw new GraphError(
@@ -483,6 +512,7 @@ export function resolveGraph(
       )
     );
   const problems: string[] = [];
+  const warnings: string[] = [];
   const nodes = new Map<string, ResolvedNode>();
   const accounts = new Map<string, string>();
   const instances = new Map<string, string>();
@@ -688,6 +718,19 @@ export function resolveGraph(
       ...dryRun,
     });
     edges.push({ from: `${fromNode}.${port}`, to: e.to, type: input.type, ...(written ?? {}) });
+    // A chat read that its connector does not monitor is never heard (D89): warned of, not refused.
+    const monitored =
+      input.type === 'chat-in' && Array.isArray(e.reads)
+        ? monitoredChats(from.manifest, from.config)
+        : undefined;
+    if (monitored !== undefined && monitored !== 'all') {
+      const lower = new Set(monitored.chats.map((c) => c.toLowerCase()));
+      for (const chat of e.reads as string[])
+        if (!lower.has(chat.toLowerCase()))
+          warnings.push(
+            `node ${toNode}: input port ${toPort} reads ${chat}, which ${fromNode} does not monitor (its ${monitored.key}: ${monitored.chats.length === 0 ? 'none' : monitored.chats.join(', ')}) (edge ${e.from} → ${e.to})`
+          );
+    }
   }
   for (const n of nodes.values())
     for (const [port, input] of Object.entries(n.ports)) {
@@ -720,10 +763,11 @@ export function resolveGraph(
           (target === undefined || nodes.has(target) ? '' : `: ${target} is not in the graph`)
       );
     }
-  if (problems.length > 0) throw new GraphError(problems);
+  if (problems.length > 0) throw new GraphError(problems, warnings);
   return {
     graph: { version: parsed.data.version, nodes: parsed.data.nodes, edges },
     nodes: [...nodes.values()],
+    warnings,
   };
 }
 

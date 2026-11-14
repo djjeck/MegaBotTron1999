@@ -70,6 +70,8 @@ export function telegramBotPlugin(
       account,
       secrets: [BOT_TOKEN],
       config: telegramBotConfig,
+      // The chats its config lists; unset, every chat (D89).
+      monitors: { config: 'chats' },
     },
     create: (ctx) => {
       const log = (line: string): void => ctx.log.info(line);

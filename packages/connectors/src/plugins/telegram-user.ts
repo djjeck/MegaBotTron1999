@@ -79,6 +79,8 @@ export function telegramUserPlugin(
       description: "The owner's own Telegram account: the chats it monitors",
       account,
       config: telegramUserConfig,
+      // The chats its config lists; unset, every chat (D89).
+      monitors: { config: 'chats' },
       secrets: [...USER_SECRETS],
     },
     create: (ctx) => {

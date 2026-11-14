@@ -37,30 +37,31 @@ can make as many as they like, and one plugin can run as several instances (§2.
 Validated with zod when the instance loads; a bad manifest names the plugin and the field, and the
 instance does not start.
 
-| Field           | Meaning                                                                                                                                                                                                                                                                                                                               |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`            | Lower-case words and dashes (`dice-roller`), unique in the instance; the name of its store, its settings and its log lines. `core` is reserved                                                                                                                                                                                        |
-| `version`       | Semver of the plugin                                                                                                                                                                                                                                                                                                                  |
-| `kinds`         | One or more of `connector`, `parser`, `actor`, `stats` (stats and commands), `agent`, `simulator` (bot-os.md §1)                                                                                                                                                                                                                      |
-| `description`   | One line, for the UI and the agents                                                                                                                                                                                                                                                                                                   |
-| `archived`      | An archive (bot-os.md D32): built and tested, but refused in every instance's graph; only a run that says `allowArchived` (a test, the dev kit, a manual-test tool) runs it                                                                                                                                                           |
-| `inputs`        | Its input ports, by name (§2.1): what it consumes, each of a port type, with the binding the default graph gives it                                                                                                                                                                                                                   |
-| `outputs`       | Its declared output ports, by name (§2.1): its `chat-out`s, what it sends through a connector's account, with the binding the default graph gives each. Its other outputs are derived                                                                                                                                                 |
-| `requires`      | Shorthand (§2.1): the plugins it needs started first, by id, read as input ports. The load order follows them; a missing one or a cycle fails the start, naming it                                                                                                                                                                    |
-| `games`         | `registers`: the namespaces whose event types it defines (its game's, or its own id); `consumes`: those whose events it reads (P7)                                                                                                                                                                                                    |
-| `events`        | The event types it registers, `<namespace>.<name>` → zod schema of the payload (§4.4)                                                                                                                                                                                                                                                 |
-| `uses`          | Shorthand (§2.1): the other plugins' interfaces it calls, by id and member (`{ dice: ['state.game'] }`): reviewed with both (P6)                                                                                                                                                                                                      |
-| `reach`         | Shorthand (§2.1): what it reads and sends, per connector: `{ connector, reads: chats, sends: chats, commands }`, read as a chat-in input and a chat-out output. The outbox refuses a send outside it (§4.6)                                                                                                                           |
-| `config`        | A zod object: what is set at deploy. The core validates it at load; a bad value names the plugin and the key. Every default is in the schema, per field (`.default()`, nested ones included), never merged in code after parsing, and each field says what it is (`.describe()`): the editor shows both                               |
-| `settings`      | A zod object: what the owner changes at runtime, each key with its default and its help (`.describe()`). Kept in the plugin's store, offered to every control surface (P11)                                                                                                                                                           |
-| `secrets`       | The secrets it needs, by name (`znc_password`). Only a `connector` may declare any (P9); the manifest of any other kind that does is refused                                                                                                                                                                                          |
-| `configSecrets` | The keys of its `config` whose values name a secret (§4.9): a connector run as several nodes, each with a credential its node's config names. Only a `connector`                                                                                                                                                                      |
-| `state`         | `{ version, migrations }`: the schema version of its store and the steps from each older one (§4.2)                                                                                                                                                                                                                                   |
-| `drift`         | The parser's threshold for an unrecoverable rate of unread messages (§4.7)                                                                                                                                                                                                                                                            |
-| `interface`     | What it offers people, commands and agents (P11): `commands` (chat commands: name, help, arguments), `actions` (typed calls that change something: zod input and output) and `state` (typed reads, by name: zod output). The web UI, the chat commands and the agent interface are all made from these descriptions, and nothing else |
-| `node`          | Optional: each node's own manifest, from its config and its id, for a plugin whose ports its node's config declares (below, bot-os.md D74)                                                                                                                                                                                            |
-| `configInputs`  | Optional, with `node`: where its nodes declare their own inputs, `{ key, types }`: the key of its `config` holding a record of input ports by name, written as a manifest's, and the types it takes there (`events`, `interface`); the editor adds one there for an edge dropped on such a node (below, bot-os.md D80)                |
-| `audit`         | Optional: keys of its `config` whose every change a save or rollback of the graph records in the event log (`core.config`: who, when, the value's SHA-256, never the value; §2.3, bot-os.md D75)                                                                                                                                      |
+| Field           | Meaning                                                                                                                                                                                                                                                                                                                                                                             |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`            | Lower-case words and dashes (`dice-roller`), unique in the instance; the name of its store, its settings and its log lines. `core` is reserved                                                                                                                                                                                                                                      |
+| `version`       | Semver of the plugin                                                                                                                                                                                                                                                                                                                                                                |
+| `kinds`         | One or more of `connector`, `parser`, `actor`, `stats` (stats and commands), `agent`, `simulator` (bot-os.md §1)                                                                                                                                                                                                                                                                    |
+| `description`   | One line, for the UI and the agents                                                                                                                                                                                                                                                                                                                                                 |
+| `archived`      | An archive (bot-os.md D32): built and tested, but refused in every instance's graph; only a run that says `allowArchived` (a test, the dev kit, a manual-test tool) runs it                                                                                                                                                                                                         |
+| `inputs`        | Its input ports, by name (§2.1): what it consumes, each of a port type, with the binding the default graph gives it                                                                                                                                                                                                                                                                 |
+| `outputs`       | Its declared output ports, by name (§2.1): its `chat-out`s, what it sends through a connector's account, with the binding the default graph gives each. Its other outputs are derived                                                                                                                                                                                               |
+| `requires`      | Shorthand (§2.1): the plugins it needs started first, by id, read as input ports. The load order follows them; a missing one or a cycle fails the start, naming it                                                                                                                                                                                                                  |
+| `games`         | `registers`: the namespaces whose event types it defines (its game's, or its own id); `consumes`: those whose events it reads (P7)                                                                                                                                                                                                                                                  |
+| `events`        | The event types it registers, `<namespace>.<name>` → zod schema of the payload (§4.4)                                                                                                                                                                                                                                                                                               |
+| `uses`          | Shorthand (§2.1): the other plugins' interfaces it calls, by id and member (`{ dice: ['state.game'] }`): reviewed with both (P6)                                                                                                                                                                                                                                                    |
+| `reach`         | Shorthand (§2.1): what it reads and sends, per connector: `{ connector, reads: chats, sends: chats, commands }`, read as a chat-in input and a chat-out output. The outbox refuses a send outside it (§4.6)                                                                                                                                                                         |
+| `config`        | A zod object: what is set at deploy. The core validates it at load; a bad value names the plugin and the key. Every default is in the schema, per field (`.default()`, nested ones included), never merged in code after parsing, and each field says what it is (`.describe()`): the editor shows both                                                                             |
+| `settings`      | A zod object: what the owner changes at runtime, each key with its default and its help (`.describe()`). Kept in the plugin's store, offered to every control surface (P11)                                                                                                                                                                                                         |
+| `secrets`       | The secrets it needs, by name (`znc_password`). Only a `connector` may declare any (P9); the manifest of any other kind that does is refused                                                                                                                                                                                                                                        |
+| `configSecrets` | The keys of its `config` whose values name a secret (§4.9): a connector run as several nodes, each with a credential its node's config names. Only a `connector`                                                                                                                                                                                                                    |
+| `monitors`      | Optional, a connector's: which chats its node monitors, so that the check warns of a chat-in edge reading one it does not (§2.3, bot-os.md D89): `'all'`, every chat it hears; or `{ config: key }`, the key of its `config` holding the chat (a string) or the chats (a list), unset meaning every chat; chats compare without case. Undeclared: unknown, and nothing is warned of |
+| `state`         | `{ version, migrations }`: the schema version of its store and the steps from each older one (§4.2)                                                                                                                                                                                                                                                                                 |
+| `drift`         | The parser's threshold for an unrecoverable rate of unread messages (§4.7)                                                                                                                                                                                                                                                                                                          |
+| `interface`     | What it offers people, commands and agents (P11): `commands` (chat commands: name, help, arguments), `actions` (typed calls that change something: zod input and output) and `state` (typed reads, by name: zod output). The web UI, the chat commands and the agent interface are all made from these descriptions, and nothing else                                               |
+| `node`          | Optional: each node's own manifest, from its config and its id, for a plugin whose ports its node's config declares (below, bot-os.md D74)                                                                                                                                                                                                                                          |
+| `configInputs`  | Optional, with `node`: where its nodes declare their own inputs, `{ key, types }`: the key of its `config` holding a record of input ports by name, written as a manifest's, and the types it takes there (`events`, `interface`); the editor adds one there for an edge dropped on such a node (below, bot-os.md D80)                                                              |
+| `audit`         | Optional: keys of its `config` whose every change a save or rollback of the graph records in the event log (`core.config`: who, when, the value's SHA-256, never the value; §2.3, bot-os.md D75)                                                                                                                                                                                    |
 
 A connector's manifest also names its **account** (§4.5): the network and the identity it holds.
 
@@ -509,22 +510,33 @@ told, the `node`, the `edge` (`{ from, to }`), the `port`, and the `config` or `
 about, so that the editor marks it there. An edge between ports of two types is refused with why
 (`node actor: input port score: chat-in of chat cannot bind interface of scorer (edge chat.chat → actor.score)`).
 
+**A warning** (bot-os.md D89) has a problem's shape, and refuses nothing: a graph with warnings and
+no problem checks `ok`, saves, applies and runs. The check gives them with its result, refused or
+not (`GraphCheck.warnings`), and the load prints them (`core: the graph warns:`). One check warns
+for now: **a chat-in edge that reads a chat its connector does not monitor**, which its node would
+never hear, by the connector's manifest's `monitors` (§2) read from its node's config, without case
+(`node quest: input port chat reads @DiceBot, which tg does not monitor (its chats: -1001000000001, @QuestBot) (edge tg.chat → quest.chat)`),
+one warning per chat; an edge reading `'*'`, a connector monitoring every chat, or one whose
+manifest does not say, warns of nothing. The built-in connectors declare theirs: `telegram-user` and
+`telegram-bot` their `chats` (unset: every chat), `irc` its `channel`. Other checks may add warnings
+in the same list.
+
 **The control API's graph routes** (§4.11), the owner's alone:
 
 - `GET /graph/file`: the saved file (`graph`, as written, a version 1 file as version 2) and its
   `text` (`graphText`, §4.12), whether there is one (`exists`), why it does not read (`error`) or is
-  refused (`problems`), and whether it differs from the graph running (`differs`: a restart would
-  change what runs).
+  refused (`problems`), its `warnings` if it has any, and whether it differs from the graph running
+  (`differs`: a restart would change what runs).
 - `POST /graph/check`, a graph as the body: checked as the load would, nothing saved: `ok`, its
-  `problems`, its `text`, and its `diff` from the saved file: the nodes `added`, `removed` and
-  `changed` (with the fields that changed), and the edges `added`, `removed` and `changed` (with the
-  fields that changed), by their two ends; and `views`, each node whose ports its config declares
-  (§2, bot-os.md D74) as the editor draws it (`describePlugin` of its own manifest), whether or not
-  the graph checks.
+  `problems`, its `warnings` (none: `[]`), its `text`, and its `diff` from the saved file: the nodes
+  `added`, `removed` and `changed` (with the fields that changed), and the edges `added`, `removed`
+  and `changed` (with the fields that changed), by their two ends; and `views`, each node whose
+  ports its config declares (§2, bot-os.md D74) as the editor draws it (`describePlugin` of its own
+  manifest), whether or not the graph checks.
 - `PUT /graph/file`, a graph as the body: checked, then saved as the core holds it (each edge's ends
-  and type written out), and kept as a version of the history; `saved` (false when nothing changed)
-  and `restart` (whether it differs from what runs). A graph refused is not saved: 400, with its
-  `problems`.
+  and type written out), and kept as a version of the history; `saved` (false when nothing changed),
+  `restart` (whether it differs from what runs) and its `warnings` (saved all the same). A graph
+  refused is not saved: 400, with its `problems`.
 - `GET /graph/history`: the history, without the graphs: `versions`, newest first, each its `id`,
   `time`, `source`, `summary`, and `restores` and `start` if any; `current`, the id of the version
   that is the saved file, if one is; `lastGood`, the newest whose last start `ran`; and `keep`
@@ -898,7 +910,9 @@ GramJS's `ignoreMigrated` keeps those alone, and dropped every user, bot, channe
 its id or `@username`, asked of Telegram (`getChat`) and kept, since the Bot API cannot list a bot's
 chats; `irc` its channel. A connector's `chats` config (the two Telegram ones) is what it
 **monitors**: unset, every chat it has; each chat-in edge reads a subset (`reads`, `"*"` for all of
-them). A connector not running lists nothing.
+them). Its manifest says where its config names them (`monitors`, §2: `chats` for the two Telegram
+ones, `channel` for `irc`), so that the check warns of an edge reading a chat its connector does not
+monitor (§2.3, bot-os.md D89). A connector not running lists nothing.
 
 **Missed messages** (bot-os.md D62): what was said while the instance was down is the connector's to
 deliver once, marked `playback` (so nothing acts on it: the reactor skips it, and the replies'
@@ -1295,16 +1309,18 @@ the JSON Schemas of its `config`, its `settings` and its actions' inputs and out
 outputs, zod's `toJSONSchema`), with the node's own id, account and config; the port types' looks
 come from `GET /graph/view` (`PORT_TYPE_INFO`). It polls `GET /status` and `GET /drift` for each
 node's live state and drift. Each change of the draft is checked (`POST /graph/check`) and every
-problem shown where it is located (§2.3). A node's config starts filled with its schema's defaults
-(nested objects within), written to the draft as if typed; a node opened shows the defaults of the
-fields its config leaves unset filled in, unmarked, and writes them with its first change, so that
-merely opening a node changes nothing. A field's description is its help. A node selected shows its
-forms, editable, a key of `configSecrets` as a choice of `GET /secrets`, and what each of its
-outputs carries, not its type, which the graph draws (bot-os.md D71): an events output, the event
-types its plugin registers in that namespace (`types` of its port in `GET /available`), each with
-its schema's description (§4.4) and its payload's JSON Schema (`schema`); a chat-out output that
-declares its commands, each with its spacing (bot-os.md D74); an interface output, its members'
-names, folded, opening on each one's signature (from its schemas:
+problem shown where it is located (§2.3); every warning too (bot-os.md D89), in amber, dashed, on
+its edge, its port and its node, listed in their panels and in the review, and counted in the map's
+bar beside the problems (`N warnings`), without keeping Apply from the draft. A node's config starts
+filled with its schema's defaults (nested objects within), written to the draft as if typed; a node
+opened shows the defaults of the fields its config leaves unset filled in, unmarked, and writes them
+with its first change, so that merely opening a node changes nothing. A field's description is its
+help. A node selected shows its forms, editable, a key of `configSecrets` as a choice of
+`GET /secrets`, and what each of its outputs carries, not its type, which the graph draws (bot-os.md
+D71): an events output, the event types its plugin registers in that namespace (`types` of its port
+in `GET /available`), each with its schema's description (§4.4) and its payload's JSON Schema
+(`schema`); a chat-out output that declares its commands, each with its spacing (bot-os.md D74); an
+interface output, its members' names, folded, opening on each one's signature (from its schemas:
 `actions.sent({ chat: string, id?: string, t: number })`,
 `state.rest() → { until: number, why: string }`) and help; another output, its port in words. An
 edge selected, what it carries: a chat-in edge its `reads` alone, a chat-out edge its `sends` and

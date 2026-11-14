@@ -32,8 +32,9 @@ never their values.
   cursor into the log (a length read per day file) for a reader that resumes where it left it.
 - `src/rng.ts`: a seeded generator, so that a simulated run repeats exactly.
 - `src/graph.ts`, `src/ports.ts`: the graph, its port types (`chat-in`, `chat-out`, `events`,
-  `interface`) and its check; a graph file of version 1 is converted to version 2 as it loads
-  (`upgradeGraph`, docs/bot-os.md D60).
+  `interface`) and its check, with its problems, which refuse it, and its warnings, which do not (a
+  chat-in edge reading a chat its connector's `monitors` leaves out, docs/bot-os.md D89); a graph
+  file of version 1 is converted to version 2 as it loads (`upgradeGraph`, docs/bot-os.md D60).
 - `src/graph-file.ts`, `src/graph-history.ts`: the graph file of the data volume, its check, diff
   and rollback for the control API, and its history: every graph written kept as a version for 7
   days (never fewer than the 5 latest), with what changed and whether the instance started on it

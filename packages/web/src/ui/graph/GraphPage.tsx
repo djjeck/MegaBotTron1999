@@ -12,7 +12,7 @@
  *   edge's chats and commands, set in its panel; a new chat-out edge is a dry run until the owner
  *   sends for real (D64). Every change is checked by the core as the load would
  *   (`POST /graph/check`), and each refusal shown where it is: on the edge, the port, the node or
- *   the field.
+ *   the field; each warning (D89), which refuses nothing, on its edge, port and node, in amber.
  * - **Configure it**: enabled or disabled, its config, settings and account in forms made from its
  *   schemas; a config key that names a secret is a choice of the secrets' names (`GET /secrets`).
  * - **Clear a stop** (D64): a stopped node's stop, cleared at the next Apply.
@@ -26,7 +26,7 @@
  *   printed (`POST /graph/check`'s `text`), read-only, with a copy button.
  *
  * The page is the map, filling the area between the app's bars: its minimap at the top right, what
- * the draft needs (its review, its problems, the selection and its kill) at the top left, the zoom
+ * the draft needs (its review, its problems and warnings, the selection and its kill) at the top left, the zoom
  * controls and the legend at the bottom left, and Add a node, a floating button, at the bottom
  * right. The panel of what is selected opens beside it (below it on a phone).
  *
@@ -85,6 +85,7 @@ import {
   endOf,
   instanceOf,
   placeProblems,
+  placeWarnings,
   portChanged,
   removeEdge,
   removeNode,
@@ -232,6 +233,9 @@ export function GraphPage({
   );
   const drifts = useMemo(() => new Map((drift.data ?? []).map((d) => [d.parser, d])), [drift.data]);
   const placed = useMemo(() => placeProblems(check?.problems ?? []), [check]);
+  // The warnings (D89) refuse nothing: drawn in their own colour, beside the problems.
+  const warned = useMemo(() => placeWarnings(check?.warnings ?? []), [check]);
+  const warningCount = check?.warnings?.length ?? 0;
   const kept = useMemo(
     () => new Map((instances.data ?? []).map((i) => [i.id, i])),
     [instances.data]
@@ -337,6 +341,12 @@ export function GraphPage({
             const port = key.slice(c.node.length + 1);
             if (port in c.view.inputs || port in c.view.outputs) portProblems[port] = texts;
           }
+        const portWarnings: Record<string, string[]> = {};
+        for (const [key, texts] of warned.ports)
+          if (key.startsWith(`${c.node}.`)) {
+            const port = key.slice(c.node.length + 1);
+            if (port in c.view.inputs || port in c.view.outputs) portWarnings[port] = texts;
+          }
         const kept = was.get(c.id);
         // A card new to the drawing is selected when its node is (a node just added); a connector,
         // by its in card.
@@ -363,6 +373,8 @@ export function GraphPage({
             cleared: clears.has(c.node),
             problems: placed.nodes.get(c.node) ?? [],
             portProblems,
+            warnings: warned.nodes.get(c.node) ?? [],
+            portWarnings,
             side: c.side,
             twinSelected: !selectedHere && c.side !== undefined && chosen.has(c.node),
           },
@@ -379,6 +391,7 @@ export function GraphPage({
     live,
     drifts,
     placed,
+    warned,
     portTypes,
     clears,
     setNodes,
@@ -402,12 +415,15 @@ export function GraphPage({
           ? from.port !== undefined && outputs.get(from.node)?.[from.port]?.optional === true
           : input?.optional === true;
       const problems = placed.edges.get(edgeKey(e)) ?? [];
+      const warnings = warned.edges.get(edgeKey(e)) ?? [];
       const colour =
         problems.length > 0
           ? '#b91c1c'
-          : e.type === undefined
-            ? 'gray'
-            : (portTypes[e.type]?.colour ?? 'gray');
+          : warnings.length > 0
+            ? '#b45309'
+            : e.type === undefined
+              ? 'gray'
+              : (portTypes[e.type]?.colour ?? 'gray');
       return {
         id: edgeKey(e),
         type: 'port',
@@ -415,13 +431,14 @@ export function GraphPage({
         ...(from.port === undefined ? {} : { sourceHandle: from.port }),
         target: targetCard(e, viewsById),
         ...(to.port === undefined ? {} : { targetHandle: to.port }),
-        className: `${e.type ?? ''}${optional ? ' optional' : ''}${problems.length > 0 ? ' refused' : ''}`,
+        className: `${e.type ?? ''}${optional ? ' optional' : ''}${problems.length > 0 ? ' refused' : warnings.length > 0 ? ' warned' : ''}`,
         style: { stroke: colour, strokeWidth: 2, ...(optional ? { strokeDasharray: '6 4' } : {}) },
         data: {
           name: edgeKey(e),
           colour,
           type: e.type,
           problem: problems[0],
+          warning: warnings[0],
           dryRun: e.type === 'chat-out' && e.dryRun === true,
         },
         // The rhombus at its midpoint is the edge's handle for the keyboard and the screen reader
@@ -438,7 +455,7 @@ export function GraphPage({
         EDGE_KEYS
       );
     });
-  }, [draft, views, viewsById, placed, portTypes, setEdges]);
+  }, [draft, views, viewsById, placed, warned, portTypes, setEdges]);
 
   // A hover dims what it does not reach (D69): the nodes and edges drawn with `dimmed`.
   const shown = useMemo(() => {
@@ -676,6 +693,7 @@ export function GraphPage({
           ...(placed.nodes.get(shownNode.id) ?? []),
           ...[...placed.ports].flatMap(([k, t]) => (k.startsWith(`${shownNode.id}.`) ? t : [])),
         ]}
+        warnings={warned.nodes.get(shownNode.id) ?? []}
         configErrors={placed.config.get(shownNode.id) ?? {}}
         settingErrors={placed.settings.get(shownNode.id) ?? {}}
         secretNames={secrets.data?.names ?? []}
@@ -722,6 +740,7 @@ export function GraphPage({
         key={edgeKey(shownEdge)}
         edge={shownEdge}
         problems={placed.edges.get(edgeKey(shownEdge)) ?? []}
+        warnings={warned.edges.get(edgeKey(shownEdge)) ?? []}
         connector={draft.nodes.find(
           (n) =>
             n.id === (shownEdge.type === 'chat-out' ? shownEdge.to : shownEdge.from).split('.')[0]
@@ -738,6 +757,7 @@ export function GraphPage({
   const needs =
     dirty ||
     (check !== undefined && !check.ok) ||
+    warningCount > 0 ||
     status.data?.off === true ||
     selection.length > 0;
 
@@ -780,6 +800,13 @@ export function GraphPage({
           <ul className="problems" aria-label="other problems">
             {placed.other.map((p) => (
               <li key={p}>{p}</li>
+            ))}
+          </ul>
+        )}
+        {warned.other.length === 0 ? null : (
+          <ul className="warnings" aria-label="other warnings">
+            {warned.other.map((w) => (
+              <li key={w}>{w}</li>
             ))}
           </ul>
         )}
@@ -829,6 +856,14 @@ export function GraphPage({
                 {check === undefined || check.ok ? null : (
                   <span className="error">
                     {check.problems.length} problem{check.problems.length === 1 ? '' : 's'}
+                  </span>
+                )}
+                {warningCount === 0 ? null : (
+                  <span
+                    className="warn"
+                    title={(check?.warnings ?? []).map((w) => w.text).join('\n')}
+                  >
+                    {warningCount} warning{warningCount === 1 ? '' : 's'}
                   </span>
                 )}
                 {status.data?.off === true ? <span className="badge off">instance off</span> : null}

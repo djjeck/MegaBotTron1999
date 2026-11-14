@@ -111,6 +111,8 @@ export interface GraphFileView {
   graph?: unknown;
   error?: string;
   problems?: GraphProblem[];
+  /** What its check warns of (bot-os.md D89); none: nothing. */
+  warnings?: GraphProblem[];
   /** Whether a restart would change what runs. */
   differs: boolean;
   /** The graph printed (`graphText`), when the file reads. */
@@ -118,12 +120,14 @@ export interface GraphFileView {
 }
 
 /**
- * A graph checked, as `POST /graph/check` gives it: its problems, its diff from the saved file, and
- * the graph printed (`graphText`).
+ * A graph checked, as `POST /graph/check` gives it: its problems, its warnings, its diff from the
+ * saved file, and the graph printed (`graphText`).
  */
 export interface GraphCheckView {
   ok: boolean;
   problems: GraphProblem[];
+  /** What it warns of (bot-os.md D89), which refuses nothing; none: nothing. */
+  warnings?: GraphProblem[];
   diff: GraphDiff;
   text?: string;
   /**

@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { type IrcClientOptions } from '#src/transport/irc-client.ts';
 import { type ChannelLine, type TransportEvents, transportOver } from '#src/transport/transport.ts';
 import { IRC_CONFIG, IRC_OPTIONS, IRC_SECRETS } from '#test/irc.ts';
+import { readWarnings } from '#test/monitors.ts';
 import { healthServer, IrcConnector, ircPlugin } from './irc.ts';
 
 /** An IRC connector on a fake client: what it was told, and its events to play. */
@@ -199,6 +200,14 @@ describe('the irc plugin in the core', () => {
     await expect(core.start()).rejects.toThrow(
       /^plugin irc: config port: .*\nplugin irc: config channel: expected a channel, such as #lobby$/su
     );
+  });
+
+  it('monitors its channel: the check warns of an edge reading another (D89)', () => {
+    const plugin = ircPlugin({ nick: 'alice' });
+    expect(readWarnings(plugin, IRC_CONFIG, [IRC_CONFIG.channel.toUpperCase()])).toEqual([]);
+    expect(readWarnings(plugin, IRC_CONFIG, ['#games'])).toEqual([
+      `node quest: input port chat reads #games, which conn does not monitor (its channel: ${IRC_CONFIG.channel}) (edge conn → quest.chat)`,
+    ]);
   });
 
   it('runs on its node’s account, from its config alone', async () => {

@@ -6,6 +6,7 @@ import {
   type RawMessage,
   type UserCredentials,
 } from '#src/transport/telegram-user.ts';
+import { readWarnings } from '#test/monitors.ts';
 import { telegramUserPlugin, userCredentials } from './telegram-user.ts';
 
 const USER = {
@@ -89,6 +90,16 @@ describe('the telegram-user plugin', () => {
     expect(core.connector('me')?.account).toBe('telegram:bob');
     expect(telegramUserPlugin().manifest.account).toBe('telegram:owner');
     await core.stop();
+  });
+
+  it('monitors the chats of its config, or every chat: the check warns of one read beside (D89)', () => {
+    const plugin = telegramUserPlugin({ self: 'alice', client });
+    expect(readWarnings(plugin, undefined, ['@QuestBot'])).toEqual([]);
+    expect(
+      readWarnings(plugin, { chats: [GROUP, '@questbot'] }, ['@QuestBot', '@DiceBot'])
+    ).toEqual([
+      `node quest: input port chat reads @DiceBot, which conn does not monitor (its chats: ${GROUP}, @questbot) (edge conn → quest.chat)`,
+    ]);
   });
 
   it('refuses a chat that is neither a group id nor a username', () => {

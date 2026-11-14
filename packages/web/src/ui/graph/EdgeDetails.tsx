@@ -69,6 +69,8 @@ function Spacing(props: {
 export function EdgeDetails(props: {
   edge: GraphEdge;
   problems: string[];
+  /** The check's warnings on it (D89): they refuse nothing. */
+  warnings?: string[];
   /** The connector node at its chat end, if it is a chat edge. */
   connector?: GraphNode | undefined;
   change: (change: EdgeChange) => void;
@@ -90,6 +92,13 @@ export function EdgeDetails(props: {
         <ul className="problems" aria-label="problems of the edge">
           {props.problems.map((p) => (
             <li key={p}>{p}</li>
+          ))}
+        </ul>
+      )}
+      {(props.warnings ?? []).length === 0 ? null : (
+        <ul className="warnings" aria-label="warnings of the edge">
+          {(props.warnings ?? []).map((w) => (
+            <li key={w}>{w}</li>
           ))}
         </ul>
       )}

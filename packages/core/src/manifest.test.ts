@@ -174,6 +174,29 @@ describe('parseManifest', () => {
     expect(() => parseManifest({ ...base, extra: 1 })).toThrow(/extra/u);
   });
 
+  it('lets a connector say which chats it monitors, from a key of its config (D89)', () => {
+    const tg = {
+      id: 'tg',
+      version: '0.1.0',
+      kinds: ['connector'],
+      description: 'tg',
+      account: 'telegram:alice',
+    };
+    const config = z.object({ chats: z.array(z.string()).optional() });
+    expect(parseManifest({ ...tg, config, monitors: { config: 'chats' } }).monitors).toEqual({
+      config: 'chats',
+    });
+    expect(parseManifest({ ...tg, monitors: 'all' }).monitors).toBe('all');
+    expect(parseManifest(tg).monitors).toBeUndefined();
+    expect(() => parseManifest({ ...tg, config, monitors: { config: 'channel' } })).toThrow(
+      'its config has no key channel'
+    );
+    expect(() =>
+      parseManifest({ ...tg, kinds: ['parser'], account: undefined, monitors: 'all' })
+    ).toThrow('only a connector monitors chats');
+    expect(() => parseManifest({ ...tg, monitors: 'some' })).toThrow();
+  });
+
   it('keeps secrets for connectors, and accounts too', () => {
     expect(() => parseManifest({ ...base, secrets: ['token'] })).toThrow(
       /secrets: only a connector may hold secrets/u

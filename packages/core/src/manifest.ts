@@ -141,6 +141,21 @@ export const manifestSchema = z
       })
       .optional(),
     /**
+     * A connector's: which chats its node monitors, as its config says (bot-os.md D89), so that the
+     * check warns of a chat-in edge that reads a chat its connector does not monitor. `'all'`: every
+     * chat it hears; `{ config: key }`: the key of its config that holds the chat (a string) or the
+     * chats (a list of strings), unset meaning every chat. Chats compare without case. Undeclared:
+     * unknown, and nothing is warned of.
+     */
+    monitors: z
+      .union([
+        z.literal('all'),
+        z.strictObject({
+          config: z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key'),
+        }),
+      ])
+      .optional(),
+    /**
      * Keys of its config whose every change a save of the graph records in the event log
      * (`core.config`, bot-os.md D75): who saved it, when, and its SHA-256, never its value (a
      * script node's code).
@@ -209,6 +224,18 @@ export const manifestSchema = z
         code: 'custom',
         path: ['configInputs', 'key'],
         message: `its config has no key ${m.configInputs.key}`,
+      });
+    if (m.monitors !== undefined && !connector)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['monitors'],
+        message: 'only a connector monitors chats',
+      });
+    if (typeof m.monitors === 'object' && !Object.hasOwn(m.config?.shape ?? {}, m.monitors.config))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['monitors', 'config'],
+        message: `its config has no key ${m.monitors.config}`,
       });
     if (m.requires.includes(m.id))
       ctx.addIssue({

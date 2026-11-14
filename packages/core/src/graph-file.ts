@@ -40,7 +40,10 @@ import {
   writeGraphFile,
 } from './graph-view.ts';
 
-/** One problem of a graph, located where it can be. */
+/**
+ * One problem of a graph, located where it can be; a warning (bot-os.md D89) has the same shape,
+ * and refuses nothing.
+ */
 export interface GraphProblem {
   /** The problem, in words, as the load says it. */
   text: string;
@@ -65,8 +68,13 @@ export interface GraphDiff {
   };
 }
 
-/** A graph checked: the graph as the core holds it, or the problems. */
-export type GraphCheck = { ok: true; graph: Graph } | { ok: false; problems: GraphProblem[] };
+/**
+ * A graph checked: the graph as the core holds it, or the problems; and, either way, its warnings
+ * (bot-os.md D89), which refuse nothing (none given: none).
+ */
+export type GraphCheck =
+  | { ok: true; graph: Graph; warnings?: GraphProblem[] }
+  | { ok: false; problems: GraphProblem[]; warnings?: GraphProblem[] };
 
 /** What the graph's file needs of the core. */
 export interface GraphChecker {
@@ -574,6 +582,7 @@ export function graphFileControls(
         ...(r.exists && 'raw' in r ? { graph: current(r.raw), text: textOf(r.raw) } : {}),
         ...(r.exists && 'error' in r ? { error: r.error } : {}),
         ...(checked !== undefined && !checked.ok ? { problems: checked.problems } : {}),
+        ...((checked?.warnings?.length ?? 0) > 0 ? { warnings: checked?.warnings } : {}),
         differs,
       });
     },
@@ -582,6 +591,7 @@ export function graphFileControls(
       return redact({
         ok: checked.ok,
         problems: checked.ok ? [] : checked.problems,
+        warnings: checked.warnings ?? [],
         diff: graphDiff(current(saved() ?? EMPTY), current(raw)),
         text: checked.ok ? graphText(checked.graph) : textOf(raw),
         // The nodes whose ports their config declares (D74), drawn as the draft declares them.
@@ -594,7 +604,12 @@ export function graphFileControls(
       const before = current(saved() ?? EMPTY);
       const changed = file.save(checked.graph, { upgrade: current });
       if (changed) written(before, checked.graph, 'save', by);
-      return { saved: changed, restart: !sameGraph(checked.graph, core.graph()) };
+      return {
+        saved: changed,
+        restart: !sameGraph(checked.graph, core.graph()),
+        // Saved all the same (D89): a warning refuses nothing.
+        warnings: checked.warnings ?? [],
+      };
     },
     rollback: (by) => {
       // The version before the current one: the second newest, or the newest when the file is

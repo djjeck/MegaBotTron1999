@@ -198,7 +198,14 @@ export interface CoreOptions {
   events?: EventReader;
 }
 
-export class StartError extends Error {}
+/** A deployment refused; `warnings`, what the graph's check warns of as well (bot-os.md D89). */
+export class StartError extends Error {
+  readonly warnings: string[];
+  constructor(message: string, warnings: string[] = []) {
+    super(message);
+    this.warnings = warnings;
+  }
+}
 
 /**
  * A plugin the instance offers: the image's, or a module's (`module`), as the editor shows it
@@ -218,6 +225,8 @@ interface Compiled {
   entries: Map<string, Entry>;
   graph: Graph;
   bus: Bus;
+  /** What the graph's check warns of (bot-os.md D89): it refuses nothing. */
+  warnings: string[];
 }
 
 interface Entry {
@@ -744,6 +753,9 @@ export class Core {
       });
       this.tell(`The saved graph is refused, and no node runs: ${why.join('; ')}`);
     }
+    // A warning refuses nothing (D89): printed, for the log, and shown by the editor's check.
+    if (compiled.warnings.length > 0)
+      (this.o.print ?? (() => {}))(`core: the graph warns:\n${compiled.warnings.join('\n')}`);
     this.entries = compiled.entries;
     this.loadedGraph = compiled.graph;
     this.bus = compiled.bus;
@@ -1067,10 +1079,15 @@ export class Core {
    */
   check(raw: unknown): GraphCheck {
     try {
-      return { ok: true, graph: this.compile(raw).graph };
+      const { graph, warnings } = this.compile(raw);
+      return { ok: true, graph, warnings: warnings.map((w) => locateProblem(w, raw)) };
     } catch (e) {
       if (!(e instanceof StartError)) throw e;
-      return { ok: false, problems: e.message.split('\n').map((p) => locateProblem(p, raw)) };
+      return {
+        ok: false,
+        problems: e.message.split('\n').map((p) => locateProblem(p, raw)),
+        warnings: e.warnings.map((w) => locateProblem(w, raw)),
+      };
     }
   }
 
@@ -1200,13 +1217,17 @@ export class Core {
       plugins.set(manifest.id, { plugin, manifest });
     }
     const manifests = new Map([...plugins].map(([id, p]) => [id, p.manifest]));
-    let resolved: ReturnType<typeof resolveGraph>;
+    let resolved: ReturnType<typeof resolveGraph> | undefined;
     let ordered: ResolvedNode[];
     try {
       resolved = resolveGraph(raw, manifests, (instance) => this.registry.meta(instance)?.plugin);
       ordered = loadOrder(resolved.nodes);
     } catch (e) {
-      if (e instanceof GraphError) throw new StartError([...problems, ...e.problems].join('\n'));
+      if (e instanceof GraphError)
+        throw new StartError(
+          [...problems, ...e.problems].join('\n'),
+          e.warnings.length > 0 ? e.warnings : (resolved?.warnings ?? [])
+        );
       throw e;
     }
     if (this.o.allowArchived !== true)
@@ -1260,8 +1281,8 @@ export class Core {
       });
     }
     problems.push(...commandProblems([...entries.values()]));
-    if (problems.length > 0) throw new StartError(problems.join('\n'));
-    return { entries, graph: resolved.graph, bus };
+    if (problems.length > 0) throw new StartError(problems.join('\n'), resolved.warnings);
+    return { entries, graph: resolved.graph, bus, warnings: resolved.warnings };
   }
 
   private async startOne(entry: Entry): Promise<void> {

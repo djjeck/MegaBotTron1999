@@ -303,6 +303,34 @@ export function placeProblems(problems: readonly GraphProblem[]): PlacedProblems
   return out;
 }
 
+/** Where each warning is shown (bot-os.md D89): its edge, and its node and port as well. */
+export interface PlacedWarnings {
+  /** On a node, whatever else it names. */
+  nodes: Map<string, string[]>;
+  /** On a port, by `node.port`. */
+  ports: Map<string, string[]>;
+  /** On an edge, by its key. */
+  edges: Map<string, string[]>;
+  /** Nowhere in particular. */
+  other: string[];
+}
+
+/**
+ * Where each warning is shown: unlike a problem, which is shown at the one place it names, a
+ * warning marks its edge, its node and its port alike, so that the node shows it in its own style.
+ */
+export function placeWarnings(warnings: readonly GraphProblem[]): PlacedWarnings {
+  const out: PlacedWarnings = { nodes: new Map(), ports: new Map(), edges: new Map(), other: [] };
+  for (const w of warnings) {
+    if (w.edge !== undefined) push(out.edges, edgeKey(w.edge), w.text);
+    if (w.node !== undefined) push(out.nodes, w.node, w.text);
+    if (w.node !== undefined && w.port !== undefined)
+      push(out.ports, `${w.node}.${w.port}`, w.text);
+    if (w.edge === undefined && w.node === undefined) out.other.push(w.text);
+  }
+  return out;
+}
+
 /** A node as the editor draws it: its plugin's declarations, with the node's own. */
 /** A namespace, as the core's ids are written. */
 const NAMESPACE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;

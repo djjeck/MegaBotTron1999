@@ -26,11 +26,12 @@
  * - `GET /graph/view`: what the web UI's graph view draws: the graph, the port types' looks,
  *   and each node's ports, interface and the JSON Schemas of its config and settings.
  * - `GET /graph/file`: the saved graph (`<data>/graph.json`, §2.3) and its text, whether it
- *   differs from the one running, and its problems if it is refused.
- * - `POST /graph/check` with a graph as the body: its problems, each located (node, edge, port,
- *   config or setting), its text, and how it differs from the saved file; nothing is saved.
+ *   differs from the one running, its problems if it is refused, and its warnings (D89).
+ * - `POST /graph/check` with a graph as the body: its problems and its warnings (bot-os.md D89,
+ *   which refuse nothing), each located (node, edge, port, config or setting), its text, and how
+ *   it differs from the saved file; nothing is saved.
  * - `PUT /graph/file` with a graph as the body: checked, then saved, and kept as a version of the
- *   history; 400 with its problems when refused.
+ *   history, with its warnings; 400 with its problems when refused.
  * - `GET /graph/history`: the history's versions, newest first, each with its time, its summary
  *   and how the instance started on it; which one is current, and the last one that ran.
  * - `GET /graph/history/<id>`: one version: its graph and text, and the diff from the current

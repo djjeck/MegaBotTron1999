@@ -118,6 +118,7 @@ export {
   graphSchema,
   type InstanceInput,
   loadOrder,
+  monitoredChats,
   type NodeDown,
   nodeInputs,
   nodeManifest,
