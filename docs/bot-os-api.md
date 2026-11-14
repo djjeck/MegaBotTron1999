@@ -1608,21 +1608,22 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   Its configuration: `chat` (the bot's `@username`), `command` (the bot's turn command; `/play` when
   unset), `schedule` (the planner's pace, each field with its default in the schema,
   `DEFAULT_SCHEDULE` of `packages/turns/src/schedule.ts`: 17–20 minutes between turns, some skipped,
-  nights off in its `timeZone`), `nightSalt` (the instances with one salt sleep the same nights) and
-  `seed`. It plans from the owner's last turn with the bot (kept in its store; a turn sent by hand
-  counts too), as the durable timer `turn` (dropped if it came due more than 10 minutes before a
-  start); when it is due, it asks its parser whether the bot rests and, if so, comes back a few
-  minutes after; through a live chat-out edge it waits for the account to be connected, sends
-  through its outbox and tells its parser the message's id; through a dry-run edge (bot-os.md D64,
-  as a new one is drawn) it logs its turn (`sent`, `/play (dry run)`) and sends nothing; a failed
-  send is tried again two minutes later. It plays while its node runs and the instance is on; its
-  safety stop (`kill`) stops its node (`ctx.stop`), which drops its plan until the owner clears the
-  stop in the editor. It needs no `ctx.mode`. It declares no chat command, since two instances would
-  clash: the owner reaches each with `/plugins <id>` and its read `status`. Each step is published
-  as `turn-actor.step`. The image offers it (`src/main.ts`): the editor adds one node per bot, each
-  on its own instance, its `chat` edges from and to the owner's `telegram-user` node and its
-  `parser` edge to its bot's parser. The turn parsers are not the image's: each is made from a
-  game's grammar, so a game's module offers it.
+  nights off: asleep from `bedtime` to the next `wake`, wall-clock times in its `timeZone`, a night
+  that may cross midnight or not, the two times never equal), `nightSalt` (the instances with one
+  salt sleep the same nights) and `seed`. It plans from the owner's last turn with the bot (kept in
+  its store; a turn sent by hand counts too), as the durable timer `turn` (dropped if it came due
+  more than 10 minutes before a start); when it is due, it asks its parser whether the bot rests
+  and, if so, comes back a few minutes after; through a live chat-out edge it waits for the account
+  to be connected, sends through its outbox and tells its parser the message's id; through a dry-run
+  edge (bot-os.md D64, as a new one is drawn) it logs its turn (`sent`, `/play (dry run)`) and sends
+  nothing; a failed send is tried again two minutes later. It plays while its node runs and the
+  instance is on; its safety stop (`kill`) stops its node (`ctx.stop`), which drops its plan until
+  the owner clears the stop in the editor. It needs no `ctx.mode`. It declares no chat command,
+  since two instances would clash: the owner reaches each with `/plugins <id>` and its read
+  `status`. Each step is published as `turn-actor.step`. The image offers it (`src/main.ts`): the
+  editor adds one node per bot, each on its own instance, its `chat` edges from and to the owner's
+  `telegram-user` node and its `parser` edge to its bot's parser. The turn parsers are not the
+  image's: each is made from a game's grammar, so a game's module offers it.
 - **`reactor`** (`packages/turns/src/reactor.ts`): one reaction (`react`, §4.15) made from its
   node's config, with no code, run as one instance per reaction. An actor: whether it sends for real
   is its chat-out edge's (a dry run as the editor draws it, D64). Its configuration

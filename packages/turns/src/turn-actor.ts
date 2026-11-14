@@ -70,8 +70,15 @@ const scheduleShape = z
     bedtime: z
       .string()
       .default(D.bedtime)
-      .describe('When the night starts, HH:MM in timeZone, after midnight: no turn until wake'),
-    wake: z.string().default(D.wake).describe('When the night ends, HH:MM in timeZone'),
+      .describe(
+        'When it goes to sleep, HH:MM on the clock of timeZone: no turn from bedtime until wake'
+      ),
+    wake: z
+      .string()
+      .default(D.wake)
+      .describe(
+        'When it wakes up, HH:MM on the clock of timeZone, not equal to bedtime; earlier than bedtime means the next morning (bedtime 23:00, wake 07:00)'
+      ),
     jitterMin: z
       .number()
       .default(D.jitterMin)

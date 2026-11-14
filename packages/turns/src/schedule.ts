@@ -7,10 +7,12 @@
  * - each send comes 17–20 minutes (uniform) after the owner's last turn with that bot, whoever sent
  *   it, and never sooner; after a rest the bot states, a few minutes after it ends (`after`);
  * - about 8% of turns are forgotten: that send comes one more interval later;
- * - it sleeps from about 01:30 to 08:30 in its time zone (`timeZone`, by default Europe/Rome),
- *   bedtime and waking each moved by up to 45 minutes, drawn once a day, and after waking it
- *   waits up to 10 more minutes. With a `nightSalt` the day's night is drawn from the date and the salt alone, so that the planners of every bot
- *   (one person) sleep the same night, and a restart keeps it.
+ * - it sleeps from bedtime to the next wake, wall-clock times in its time zone (`timeZone`): by
+ *   default from about 01:30 to 08:30 in Europe/Rome. A night may cross midnight (23:00 to 07:00)
+ *   or not (01:30 to 08:30); wake at or before bedtime on the clock means the next day's. Bedtime
+ *   and waking each move by up to 45 minutes, drawn once a night, and after waking it waits up to
+ *   10 more minutes. With a `nightSalt` the night is drawn from its date and the salt alone, so
+ *   that the planners of every bot (one person) sleep the same night, and a restart keeps it.
  *
  * Pure: the clock is the caller's, and the draws come from the seeded `Rng`, so a simulation over
  * many days can check all of the above.
@@ -23,7 +25,10 @@ export interface ScheduleParams {
   maxGapMin: number;
   /** The chance that a turn is forgotten. */
   skipChance: number;
-  /** The night, `HH:MM` in `timeZone`, both after midnight: asleep from bedtime to waking. */
+  /**
+   * The night, `HH:MM` wall-clock times in `timeZone`: asleep from bedtime to the next wake, which
+   * is the next day's when it is not later on the clock than bedtime (23:00 to 07:00).
+   */
   bedtime: string;
   wake: string;
   /** How far bedtime and waking may each move, either way, in minutes. */
@@ -45,6 +50,7 @@ export const DEFAULT_SCHEDULE: ScheduleParams = {
 };
 
 const MINUTE = 60_000;
+const DAY_MIN = 24 * 60;
 
 /** Minutes after midnight of an `HH:MM`, or undefined if it is not one. */
 export function clockMinutes(hhmm: string): number | undefined {
@@ -63,13 +69,14 @@ export function scheduleProblem(p: ScheduleParams): string | undefined {
   if (p.maxGapMin < p.minGapMin) return 'maxGapMin must not be under minGapMin';
   if (p.skipChance >= 1) return 'skipChance must be under 1';
   if (bed === undefined || wake === undefined) return 'bedtime and wake must be HH:MM';
-  // The whole night, jitter included, stays within one calendar day.
-  if (
-    bed - p.jitterMin < 0 ||
-    wake + p.jitterMin >= 24 * 60 ||
-    bed + p.jitterMin >= wake - p.jitterMin
-  )
-    return 'bedtime and wake, moved by jitterMin, must stay after midnight and in order';
+  if (bed === wake) return 'bedtime and wake must differ';
+  // Each night and each day between two nights stays longer than the jitter can take from it, so
+  // that the nights, however drawn, keep their order and never overlap.
+  const night = (wake - bed + DAY_MIN) % DAY_MIN;
+  if (night <= 2 * p.jitterMin)
+    return 'the night, bedtime to wake, must be longer than 2 × jitterMin';
+  if (DAY_MIN - night <= 2 * p.jitterMin + p.wakeDelayMaxMin)
+    return 'the day, wake to bedtime, must be longer than 2 × jitterMin + wakeDelayMaxMin';
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: p.timeZone });
   } catch {
@@ -113,6 +120,12 @@ export function zonedInstant(date: string, minutes: number, timeZone: string): n
   return wall - zoned(first, timeZone).offset;
 }
 
+/** The calendar date `days` after `date` (YYYY-MM-DD). */
+export function addDays(date: string, days: number): string {
+  const [y, mo, d] = date.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, mo - 1, d + days)).toISOString().slice(0, 10);
+}
+
 /** The local calendar date of `t` in `timeZone`. */
 export function localDate(t: number, timeZone: string): string {
   return zoned(t, timeZone).date;
@@ -146,25 +159,45 @@ export class Planner {
     return (lo + this.rng.next() * (hi - lo)) * MINUTE;
   }
 
-  /** The night of local `date`: from bedtime to waking, each moved by the day's jitter. */
+  /**
+   * The night whose bedtime falls on local `date`: from bedtime that day to the next wake (the
+   * same day, or the next when it crosses midnight), each moved by the night's jitter. Both are
+   * wall-clock times, so a change of the clock in between makes the night an hour shorter or
+   * longer, as it would a person's.
+   */
   night(date: string): { from: number; to: number } {
     let n = this.nights.get(date);
     if (n === undefined) {
       const { jitterMin: j, timeZone } = this.p;
       const rng =
         this.nightSalt === undefined ? this.rng : new Rng(hash(`${this.nightSalt}${date}`));
-      const bed = (clockMinutes(this.p.bedtime) as number) + (rng.next() * 2 - 1) * j;
-      const wake = (clockMinutes(this.p.wake) as number) + (rng.next() * 2 - 1) * j;
+      const bedAt = clockMinutes(this.p.bedtime) as number;
+      let wakeAt = clockMinutes(this.p.wake) as number;
+      if (wakeAt <= bedAt) wakeAt += DAY_MIN;
+      const bed = bedAt + (rng.next() * 2 - 1) * j;
+      const wake = wakeAt + (rng.next() * 2 - 1) * j;
       n = { from: zonedInstant(date, bed, timeZone), to: zonedInstant(date, wake, timeZone) };
       this.nights.set(date, n);
     }
     return n;
   }
 
-  /** Whether `t` falls in its day's night. */
+  /**
+   * The night `t` falls in, if any. Its bedtime is on `t`'s local date, the day before (a night
+   * across midnight) or the day after (a bedtime just after midnight, drawn before it).
+   */
+  private nightOf(t: number): { from: number; to: number } | undefined {
+    const date = localDate(t, this.p.timeZone);
+    for (const d of [-1, 0, 1]) {
+      const n = this.night(addDays(date, d));
+      if (t >= n.from && t < n.to) return n;
+    }
+    return undefined;
+  }
+
+  /** Whether `t` falls in a night. */
   asleep(t: number): boolean {
-    const n = this.night(localDate(t, this.p.timeZone));
-    return t >= n.from && t < n.to;
+    return this.nightOf(t) !== undefined;
   }
 
   /**
@@ -197,8 +230,8 @@ export class Planner {
 
   /** `at`, or the morning after the night it falls in. */
   private awake(at: number, skipped: number): Plan {
-    const n = this.night(localDate(at, this.p.timeZone));
-    if (at < n.from || at >= n.to) return { at, skipped, afterSleep: false };
+    const n = this.nightOf(at);
+    if (n === undefined) return { at, skipped, afterSleep: false };
     return { at: n.to + this.minutes(0, this.p.wakeDelayMaxMin), skipped, afterSleep: true };
   }
 }
