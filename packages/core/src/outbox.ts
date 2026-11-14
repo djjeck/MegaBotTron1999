@@ -321,10 +321,16 @@ export interface OutboxHandle {
   /** Sends now or refuses, and waits for the network's answer: the message's id. */
   deliver(chat: string, text: string, options?: SendOptions): Promise<DeliverResult>;
   /**
-   * The account's owner's own chat, where its connector has one (a telegram-bot's `owner`): where
-   * a node tells the owner when it names no chat. Undefined while the connector does not run.
+   * The account's owner's own chat, where its connector has one (a telegram-bot's `owner`).
+   * Undefined while the connector does not run.
    */
   owner(): string | undefined;
+  /**
+   * The chats it may send to (bot-os.md D97): those its edges name, or, for an edge that names
+   * none from an output that sends to the owner's (`owner`), the owner's chat while the connector
+   * runs. A node whose edge is its only setting (owner-notice, the turn actor) sends there.
+   */
+  chats(): string[];
 }
 
 /** An event as a cancel tests it: the bus's, `{ type, t, ...payload }`. */
@@ -527,7 +533,14 @@ export class Outbox {
       enqueue: (chat, text, options = {}) => this.enqueue(plugin, chat, text, via(options)),
       deliver: (chat, text, options = {}) => this.deliver(plugin, chat, text, via(options)),
       owner: () => this.o.connector()?.owner?.(),
+      chats: () => this.chatsOf(plugin, port),
     };
+  }
+
+  /** The chats a sender's edges let it send to on this account, each once (`OutboxHandle.chats`). */
+  private chatsOf(plugin: string, port?: string): string[] {
+    const reaches = this.reachesOf(this.o.policy?.(plugin, port)) ?? [];
+    return [...new Set(reaches.flatMap((r) => r.sends))];
   }
 
   /** How many sends wait in the queue (a coalesced one once). */

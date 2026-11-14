@@ -11,16 +11,19 @@ a game's player state, the script node, and the node that tells the owner what n
   from what it parsed, kept in its store, never by re-reading the chat (docs/bot-os.md D62).
 - `turnActorPlugin` (`src/turn-actor.ts`): an actor that sends one bot's turn command in the private
   chat with it, at a person's pace (`src/schedule.ts`: intervals drawn from a range, skipped turns,
-  nights off), waiting out the rest its parser reads. One plugin, run as one instance per bot.
-  Through a dry-run chat-out edge it logs each turn and sends nothing; through a live one it waits
-  for the account to be connected. Its safety stop (the kill switch) stops its node (`ctx.stop`,
+  nights off), waiting out the rest its parser reads. One plugin, run as one instance per bot. Its
+  bot's chat is its edges' alone (docs/bot-os.md D97): its chat-out edge names that one chat, the
+  bot's `@username`, and its chat-in edge reads it and no other; its config names none. Through a
+  dry-run chat-out edge it logs each turn and sends nothing; through a live one it waits for the
+  account to be connected. Its safety stop (the kill switch) stops its node (`ctx.stop`,
   docs/bot-os.md D64), until the owner clears the stop in the editor.
 - `reactorPlugin` (`src/reactor.ts`): the `reactor`, one reaction (`react()` of the core) from its
   node's config: when an event of its `on` type is heard (on its events input, there only with `on`
   and then required: the check refuses a reactor on events that no edge binds), or a message on its
   chat-in input (there only with `match`) matches its `match`, and the payload's fields equal its
-  `when`, it sends its `send` template to its `chat`, through its chat-out output's outbox. One
-  plugin, run as one instance per reaction.
+  `when`, it sends its `send` template to its `chat`, through its chat-out output's outbox; a fixed
+  `chat` picked in the editor is written on its edge too (D97). One plugin, run as one instance per
+  reaction.
 - `statePlugin` (`src/state-plugin.ts`): a game's player state (an inventory, a profile), from a
   spec the game gives: the state's zod schema, its initial value, the event types it applies (a
   required events input per namespace, so that its parser stopped takes it down), a pure reducer,
@@ -37,15 +40,17 @@ a game's player state, the script node, and the node that tells the owner what n
   sends, drift, cascades, failures, nodes the send-queue watchdog stopped (`stalled`, D93), the
   graph's warnings, and plugins' own kinds), each kind on or off, grouped and paced per kind
   (`pace`: a burst gathered for `gatherS`, at most one message every `everyMin`), in plain text
-  naming nodes by id, through its chat-out edge to its `chat` (a `telegram-bot` to the owner's
-  private chat, or `irc`), queued as any send, so a dry-run edge sends nothing. The plugins'
-  messages (`ctx.notify`, a `told` notice) go at once, one each, with their buttons where the chat
-  can run them (a `telegram-bot`'s owner's chat), text alone elsewhere. It also sends a summary
-  every `summaryEveryMin` (60) minutes, none when nothing happened, from the lines the core and the
+  naming nodes by id, to every chat its chat-out edges name (docs/bot-os.md D97: one edge per
+  connector, a `telegram-bot` and `irc` at once; an edge naming none, its connector's owner's
+  private chat), queued as any send, so a dry-run edge sends nothing. The plugins' messages
+  (`ctx.notify`, a `told` notice) go at once, one each, with their buttons where the chat can run
+  them (a `telegram-bot`'s owner's chat), text alone elsewhere. It also sends a summary every
+  `summaryEveryMin` (60) minutes, none when nothing happened, from the lines the core and the
   plugins contribute (docs/bot-os.md D92, #46), and a notice at each start (`startNotice`). The
   state plugins, the turn parsers and `turn-actor` contribute their lines (events applied and
   refused, answers read, turns). Its view, in its node's panel, shows what waits to be told and
-  when, its last tells, the start notice's and the summary's times.
+  when, its last tells, the start notice's and the summary's times, and the last message each chat
+  refused (`notSent`, D95).
 - `scriptPlugin` (`src/script-plugin.ts`): the `script` node, TypeScript the owner types in the web
   UI (docs/bot-os.md D76), on the ports its config declares (events and interface inputs, chat-out
   outputs with their commands, events of its own; several of a kind, each its own name, D84), its

@@ -214,6 +214,14 @@ export type PortView = (
       /** A chat-out output's: the commands it declares it sends, and their spacing (D74). */
       commands?: string[];
       minIntervalS?: Record<string, number>;
+      /** A chat-out output's (D97): several edges, one per connector. */
+      many?: true;
+      /** A chat-out output's (D97): an edge naming no chat sends to its connector's owner's. */
+      owner?: true;
+      /** A chat-out output's (D97): its edge names exactly one chat, `expected` saying which. */
+      single?: { pattern?: string; expected?: string };
+      /** A chat-in input's (D97): the chat-out output whose one chat its edge reads. */
+      sameAs?: string;
     }
   | {
       type: 'events';
@@ -295,6 +303,8 @@ export interface ConfigChatView {
   input?: string;
   kinds?: ('private' | 'group' | 'channel' | 'bot')[];
   template?: true;
+  /** A connector's key that names its owner's chat (D97). */
+  owner?: true;
 }
 
 /** One node of the graph, as the graph view shows it: its plugin's declarations, and its own. */
@@ -322,6 +332,7 @@ function inputView(
       type: p.type,
       ...(p.network === undefined ? {} : { network: p.network }),
       ...(p.type === 'chat-in' && p.when !== undefined ? { when: p.when.config } : {}),
+      ...(p.type === 'chat-in' && p.sameAs !== undefined ? { sameAs: p.sameAs } : {}),
       ...base,
     };
   if (p.type === 'events') {
@@ -373,6 +384,16 @@ function outputView(p: OutputPort, events: Manifest['events']): PortView {
     ...(p.network === undefined ? {} : { network: p.network }),
     ...(p.commands === undefined ? {} : { commands: [...p.commands] }),
     ...(p.minIntervalS === undefined ? {} : { minIntervalS: { ...p.minIntervalS } }),
+    ...(p.many === true ? { many: true as const } : {}),
+    ...(p.owner === true ? { owner: true as const } : {}),
+    ...(p.single === undefined
+      ? {}
+      : {
+          single: {
+            ...(p.single.pattern === undefined ? {} : { pattern: p.single.pattern }),
+            ...(p.single.expected === undefined ? {} : { expected: p.single.expected }),
+          },
+        }),
     label: describePort(p),
     optional: p.optional,
     ...(p.help === undefined ? {} : { help: p.help }),

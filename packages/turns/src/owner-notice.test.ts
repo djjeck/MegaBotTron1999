@@ -32,6 +32,8 @@ const MIN = 60 * S;
 const T0 = Date.UTC(2026, 10, 14, 9);
 /** The owner's private chat with the bot, by the owner's (made-up) user id. */
 const OWNER = '1000000002';
+/** A group the bot is in (a made-up id). */
+const GROUP = '-1000000000003';
 
 /**
  * A node that raises what the test says, or fails; and adds to the owner's summary what it counted
@@ -129,6 +131,12 @@ interface RunOptions {
   build?: { version: string; commit?: string };
   /** The bot refuses the sends to these chats, as Telegram does to a chat it cannot reach. */
   refuses?: string[];
+  /** Its edge to the bot's chats (D97): the owner's by default; none, no edge to the bot. */
+  sends?: string[] | null;
+  /** An edge to the IRC account too, naming these chats. */
+  irc?: string[];
+  /** The graph's own node of it, as a saved graph holds it (a migration's). */
+  node?: Record<string, unknown>;
 }
 
 /** Its D91 tells alone: no start notice, no summary, unless a test asks. */
@@ -144,6 +152,7 @@ async function run(o: RunOptions = {}) {
       ? new FakeConnector({ account: 'telegram-bot:ExampleBot', owner: OWNER })
       : new Refusing(o.refuses);
   const irc = new FakeConnector({ account: 'irc:alice' });
+  irc.open();
   const graph: GraphInput = {
     version: 2,
     nodes: [
@@ -153,7 +162,7 @@ async function run(o: RunOptions = {}) {
       { id: 'b', plugin: 'noisy' },
       { id: 'reader', plugin: 'reader' },
       ...(o.crash === true ? [{ id: 'crashy', plugin: 'crashy' }] : []),
-      { id: 'notice', plugin: OWNER_NOTICE, config: { chat: OWNER, ...o.config } },
+      { id: 'notice', plugin: OWNER_NOTICE, config: { ...o.config }, ...o.node },
     ],
     edges: [
       {
@@ -162,13 +171,20 @@ async function run(o: RunOptions = {}) {
         type: 'chat-in',
         reads: o.warn === true ? ['#lobby', '#elsewhere'] : ['#lobby'],
       },
-      {
-        from: 'notice.chat',
-        to: 'bot.chat',
-        type: 'chat-out',
-        sends: [OWNER],
-        ...(o.live === false ? { dryRun: true } : {}),
-      },
+      ...(o.sends === null
+        ? []
+        : [
+            {
+              from: 'notice.chat',
+              to: 'bot.chat',
+              type: 'chat-out' as const,
+              sends: o.sends ?? [OWNER],
+              ...(o.live === false ? { dryRun: true } : {}),
+            },
+          ]),
+      ...(o.irc === undefined
+        ? []
+        : [{ from: 'notice.chat', to: 'irc.chat', type: 'chat-out' as const, sends: o.irc }]),
     ],
   };
   const kit = new DevKit({
@@ -195,9 +211,10 @@ async function run(o: RunOptions = {}) {
   const store = () => stores.get('notice') as Store;
   const at = (t: number) => kit.runUntil(start + t);
   const sent = () => bot.sent.map((m) => `${m.chat}: ${m.text}`);
+  const said = () => irc.sent.map((m) => `${m.chat}: ${m.text}`);
   const records = (type: string) =>
     kit.log.recordsSince(0, Number.MAX_SAFE_INTEGER).filter((r) => r.type === type);
-  return { kit, bot, ctx, count, store, at, sent, records };
+  return { kit, graph, bot, ctx, count, store, at, sent, said, records };
 }
 
 const refused = (ctx: PluginContext, event: string, reason: string) =>
@@ -363,18 +380,74 @@ describe('owner-notice: sends that cannot reach their chat (D95)', () => {
     expect(r.records('core.notice').filter((n) => n['kind'] === 'unreachable')).toEqual([]);
     expect(r.kit.core.controls.view('notice')).toMatchObject({
       value: {
-        state: { notSent: { chat: OWNER, reason: 'failed: 400: Bad Request: chat not found' } },
+        state: {
+          notSent: [
+            {
+              account: 'telegram-bot:ExampleBot',
+              chat: OWNER,
+              reason: 'failed: 400: Bad Request: chat not found',
+            },
+          ],
+        },
         pin: ['notSent', 'waiting'],
       },
     });
-    expect(line()).toBe('not sent: failed: 400: Bad Request: chat not found');
+    expect(line()).toBe(`not sent to ${OWNER}: failed: 400: Bad Request: chat not found`);
   });
 
-  it("tells the connector's owner when it names no chat", async () => {
-    const r = await d91({ config: { chat: undefined } });
+  it('keeps a failure per chat: one that went is not marked, the next that goes clears its own', async () => {
+    const r = await d91({ sends: [OWNER, GROUP], refuses: [GROUP] });
+    const state = () =>
+      (r.kit.core.controls.view('notice') as { value: { state: { notSent?: unknown[] } } }).value
+        .state.notSent;
+    r.ctx('a').fail('crashed');
+    r.at(10 * S);
+    await new Promise((done) => setImmediate(done));
+    expect(r.sent()).toEqual([`${OWNER}: a failed: crashed`, `${GROUP}: a failed: crashed`]);
+    expect(state()).toMatchObject([{ chat: GROUP }]);
+  });
+});
+
+describe('owner-notice: its edges are its chats (D97)', () => {
+  it("tells the connector's owner through an edge that names no chat", async () => {
+    const r = await d91({ sends: [] });
     r.ctx('a').fail('crashed');
     r.at(10 * S);
     expect(r.sent()).toEqual([`${OWNER}: a failed: crashed`]);
+  });
+
+  it('tells every chat of every edge: the bot’s and the IRC channel', async () => {
+    const r = await d91({ sends: [OWNER, GROUP], irc: ['#lobby'] });
+    r.ctx('a').fail('crashed');
+    r.at(10 * S);
+    expect(r.sent()).toEqual([`${OWNER}: a failed: crashed`, `${GROUP}: a failed: crashed`]);
+    expect(r.said()).toEqual(['#lobby: a failed: crashed']);
+    expect(r.records(`${OWNER_NOTICE}.told`).map((t) => t['chat'])).toEqual([
+      OWNER,
+      GROUP,
+      '#lobby',
+    ]);
+  });
+
+  it('tells nobody through an edge naming no chat to a connector with no owner, and shows why', async () => {
+    const r = await d91({ sends: null, irc: [] });
+    r.ctx('a').fail('crashed');
+    r.at(10 * S);
+    expect(r.said()).toEqual([]);
+    expect(r.kit.core.controls.view('notice')).toMatchObject({
+      value: { state: { notSent: [{ chat: '', reason: expect.stringContaining('no chat') }] } },
+    });
+  });
+
+  it('runs a graph saved by 0.1.19, its chat in its config and on its edge, as before', async () => {
+    // As 0.1.19 saved it: the chat in its config, and the same on its edge's sends.
+    const r = await d91({ node: { config: { chat: OWNER, ...D91_ONLY } } });
+    r.ctx('a').fail('crashed');
+    r.at(10 * S);
+    expect(r.sent()).toEqual([`${OWNER}: a failed: crashed`]);
+    const shown = r.kit.core.upgrade(r.graph) as GraphInput;
+    expect(shown.nodes.find((n) => n.id === 'notice')?.config).toEqual(D91_ONLY);
+    expect(shown.edges?.find((e) => e.from === 'notice.chat')?.sends).toEqual([OWNER]);
   });
 });
 

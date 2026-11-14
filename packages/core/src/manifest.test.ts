@@ -16,6 +16,7 @@ describe('parseManifest', () => {
       secrets: [],
       configSecrets: [],
       configChats: [],
+      movedChats: [],
       notices: false,
       summary: false,
       audit: [],
@@ -243,6 +244,47 @@ describe('parseManifest', () => {
     expect(() =>
       parseManifest({ ...teller, configChats: [{ key: 'chat', input: 'out' }] })
     ).toThrow('it has no chat-in input out');
+    // A connector's owner key (D97), its own alone.
+    expect(
+      parseManifest({ ...tg, configChats: [{ key: 'owner', owner: true }] }).configChats
+    ).toEqual([{ key: 'owner', owner: true }]);
+    expect(() =>
+      parseManifest({ ...teller, configChats: [{ key: 'chat', output: 'out', owner: true }] })
+    ).toThrow("only a connector's own key names its owner's chat");
+  });
+
+  it('declares the chats moved onto its edges, and the ports of one chat and of many edges (D97)', () => {
+    const teller = {
+      ...base,
+      outputs: { out: { type: 'chat-out', single: { pattern: '^@', expected: 'a bot' } } },
+      inputs: { in: { type: 'chat-in', sameAs: 'out' } },
+    };
+    const m = parseManifest({
+      ...teller,
+      movedChats: [
+        { key: 'chat', output: 'out' },
+        { key: 'chat', input: 'in' },
+      ],
+    });
+    expect(m.movedChats).toHaveLength(2);
+    expect(() => parseManifest({ ...teller, movedChats: [{ key: 'chat' }] })).toThrow(
+      'a moved chat names the output or input whose edge now holds it'
+    );
+    expect(() => parseManifest({ ...teller, movedChats: [{ key: 'chat', output: 'in' }] })).toThrow(
+      'it has no chat-out output in'
+    );
+    expect(() =>
+      parseManifest({ ...teller, inputs: { in: { type: 'chat-in', sameAs: 'nope' } } })
+    ).toThrow('it has no chat-out output nope of one chat (single)');
+    expect(() =>
+      parseManifest({
+        ...teller,
+        outputs: { out: { type: 'chat-out', many: true, single: {} } },
+      })
+    ).toThrow('an output of one chat (single) has one edge, not many');
+    expect(() =>
+      parseManifest({ ...teller, outputs: { out: { type: 'chat-out', single: { pattern: '(' } } } })
+    ).toThrow('expected a regular expression');
   });
 
   it('keeps secrets for connectors, and accounts too', () => {

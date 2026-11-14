@@ -164,7 +164,12 @@ export const manifestSchema = z
      * connector's `owner`), or the one at the other end of its chat-out `output` or chat-in `input`
      * edge. A string, or a list of them, holds the chats as the connector names them (`Surface.id`);
      * a number, a chat by its numeric id. `kinds`: the kinds of chat it takes (a bot's owner is a
-     * `private` chat); `template`: a `{path}` template may stand for the chat instead (a reaction's).
+     * `private` chat); `template`: a `{path}` template may stand for the chat instead (a reaction's);
+     * `owner`: a connector's key that names its account's owner's chat, the one its `owner()` gives
+     * (`telegram-bot`'s `owner`), which the editor fills into a new edge from an output that sends
+     * there when it names no chat (`owner`, D97). A key with an `output` or an `input` that holds a
+     * chat (not a template) is copied by the editor into that edge's `sends` or `reads` as the owner
+     * picks it, and replaced there when the pick changes (D97): the edge is what lets it send.
      */
     configChats: z
       .array(
@@ -177,6 +182,22 @@ export const manifestSchema = z
             .min(1)
             .optional(),
           template: z.literal(true).optional(),
+          owner: z.literal(true).optional(),
+        })
+      )
+      .default([]),
+    /**
+     * Keys its config had in an earlier release that named a chat its edge now names alone
+     * (bot-os.md D97): a graph saved with one is migrated as it loads (`upgradeGraph`), the chat
+     * added to the `sends` of the edge from its chat-out `output`, or to the `reads` of the edge to
+     * its chat-in `input`, where not there already, and the key dropped.
+     */
+    movedChats: z
+      .array(
+        z.strictObject({
+          key: z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key'),
+          output: z.string().min(1).optional(),
+          input: z.string().min(1).optional(),
         })
       )
       .default([]),
@@ -272,15 +293,32 @@ export const manifestSchema = z
         path: ['monitors', 'config'],
         message: `its config has no key ${m.monitors.config}`,
       });
-    for (const [i, c] of m.configChats.entries()) {
-      const where = ['configChats', i];
-      if (!Object.hasOwn(m.config?.shape ?? {}, c.key))
+    const chatKeys = [
+      ...m.configChats.map((c, i) => ({ c, where: ['configChats', i] })),
+      // A key moved onto its edge (D97) is gone from its config, and leads to its connector.
+      ...m.movedChats.map((c, i) => ({ c, where: ['movedChats', i] })),
+    ];
+    for (const { c, where } of chatKeys) {
+      const moved = where[0] === 'movedChats';
+      if (!moved && !Object.hasOwn(m.config?.shape ?? {}, c.key))
         ctx.addIssue({
           code: 'custom',
           path: [...where, 'key'],
           message: `its config has no key ${c.key}`,
         });
-      if (c.output !== undefined && c.input !== undefined)
+      if ('owner' in c && c.owner === true && (c.output !== undefined || c.input !== undefined))
+        ctx.addIssue({
+          code: 'custom',
+          path: [...where, 'owner'],
+          message: "only a connector's own key names its owner's chat",
+        });
+      if (moved && c.output === undefined && c.input === undefined)
+        ctx.addIssue({
+          code: 'custom',
+          path: where,
+          message: 'a moved chat names the output or input whose edge now holds it',
+        });
+      else if (c.output !== undefined && c.input !== undefined)
         ctx.addIssue({ code: 'custom', path: where, message: 'an output or an input, not both' });
       else if (c.output === undefined && c.input === undefined && !connector)
         ctx.addIssue({
@@ -331,7 +369,31 @@ export const manifestSchema = z
         path: ['games', 'registers'],
         message: 'the core namespace is the core’s',
       });
+    for (const [port, p] of Object.entries(m.outputs)) {
+      if (p.type === 'chat-out' && p.many === true && p.single !== undefined)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['outputs', port],
+          message: 'an output of one chat (single) has one edge, not many',
+        });
+      const pattern = p.type === 'chat-out' ? p.single?.pattern : undefined;
+      if (pattern !== undefined && regexProblem(pattern) !== undefined)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['outputs', port, 'single', 'pattern'],
+          message: `expected a regular expression: ${regexProblem(pattern)}`,
+        });
+    }
     for (const [port, p] of Object.entries(m.inputs)) {
+      if (p.type === 'chat-in' && p.sameAs !== undefined && m.node === undefined) {
+        const out = m.outputs[p.sameAs];
+        if (out?.type !== 'chat-out' || out.single === undefined)
+          ctx.addIssue({
+            code: 'custom',
+            path: ['inputs', port, 'sameAs'],
+            message: `it has no chat-out output ${p.sameAs} of one chat (single)`,
+          });
+      }
       if (p.type === 'interface' && p.plugin === m.id && p.bind === undefined)
         ctx.addIssue({
           code: 'custom',
@@ -379,6 +441,16 @@ export const manifestSchema = z
         });
   })
   .transform(normalise);
+
+/** Why `pattern` is not a regular expression, or undefined. */
+function regexProblem(pattern: string): string | undefined {
+  try {
+    new RegExp(pattern, 'u');
+    return undefined;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+}
 
 /**
  * The manifest with its shorthand read as ports (§2.1), and its output ports derived: `requires`

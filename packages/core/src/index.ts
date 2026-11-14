@@ -121,6 +121,7 @@ export {
   type InstanceInput,
   loadOrder,
   monitoredChats,
+  moveChats,
   type NodeDown,
   nodeInputs,
   nodeManifest,

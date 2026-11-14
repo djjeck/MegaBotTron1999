@@ -148,8 +148,9 @@ export const greeter = definePlugin({
   plugin may call too), the `script` node, and `owner-notice`, the one node that reports to a chat:
   it tells the owner what needs attention (refused events, coalesced sends, drift, cascades,
   failures, stalled sends, the graph's warnings), grouped and paced per kind, and the plugins'
-  messages (`ctx.notify`) at once with their buttons, through a `telegram-bot` to the owner's
-  private chat or through IRC; everything that knows a game comes from a module.
+  messages (`ctx.notify`) at once with their buttons, to every chat its edges name (a
+  `telegram-bot`'s owner's private chat, an IRC channel, both at once); everything that knows a game
+  comes from a module.
 - **Standard services,** implemented once by the shell (D52): SVG to PNG in every plugin's context
   (`ctx.render.svgToPng`), and asking an LLM through the `anthropic` connector (`ask`, with
   structured output), for the plugins an edge binds to it.
@@ -173,12 +174,12 @@ export const greeter = definePlugin({
   `owner-notice`, the Events page alone shows a failure, a drift, a refused saved graph or a
   plugin's message**; wire one first (the setup wizard, #45, is to do it). The owner's commands,
   cards and their buttons in the owner's chat are the control surface, not reporting, and work
-  without it. Wire it from the editor: add the node, draw its `chat` edge to the `telegram-bot` node
-  with the owner's private chat among the edge's sends, leave its `chat` unset (the bot's owner's
-  chat) or pick another, and make the edge live once the dry run's log (`core.send`, `dry-run`)
-  reads right. The same node sends a summary of what happened every hour (`summaryEveryMin`; none
-  when nothing did, from lines the core and the plugins add, D92) and a notice at each start: the
-  release, the nodes running and not, the graph's warnings.
+  without it. Wire it from the editor: add the node and draw its `chat` edge to the `telegram-bot`
+  node; the edge starts with the bot's owner's private chat (D97: the edge is its only chat setting;
+  pick others there, or draw a second edge to `irc` to be told there too), and make it live once the
+  dry run's log (`core.send`, `dry-run`) reads right. The same node sends a summary of what happened
+  every hour (`summaryEveryMin`; none when nothing did, from lines the core and the plugins add,
+  D92) and a notice at each start: the release, the nodes running and not, the graph's warnings.
 - **A send the network refuses** (D95), such as a chat the bot cannot reach, is recorded
   (`core.send-failed`, on the Events page) and raised as an `unreachable` notice that names the
   node, the chat and what to do; `owner-notice`'s own failures are only recorded and shown on its

@@ -35,32 +35,39 @@ the server that guards them.
   colour (`PortEdge.tsx`), is a button that selects it and opens its panel (`EdgeDetails.tsx`),
   where a chat-in edge's `reads` (or all the chats its connector monitors) and its `senders`
   (anyone, or a list with _me_), or a chat-out edge's `sends` and `commands`, are set, the chats
-  picked among its connector's monitored chats and the words as rows (`Surfaces.tsx`, D62, D63), and
-  where **Remove edge** removes it alone; a connector's own `chats`, what it monitors, are every
-  chat or those picked. **Every chat is picked in one chat picker** (`ChatPicker.tsx`, D96), never
-  typed: an edge's `reads` and `sends`, a connector's `chats`, and each config key a plugin's
-  manifest names (`configChats`: `telegram-bot`'s `owner` and `group`, `owner-notice`'s `chat`, the
-  turn actor's and the reactor's), from the chats of its connector (its own node, or the one along
-  the node's chat edge; until that edge is drawn, it says to draw it). Each chat shows by its name,
-  its kind by an icon in a colour of its own (a person, a bot, a group, a channel), a person's or a
-  bot's `@username` beside it, and when it was last active (`3 days ago`); the chats picked come
-  first; a search finds a chat by its name, its `@username` or its id, and an id is never shown for
-  a chat that has a name. What is kept is the name its connector sends to (`Surface.id`; a number
-  for a key whose schema is one). A chat saved otherwise (an id, a `@username`) is found by any of
-  its names, from the lists or a search for it (`useLookups`), so after a reload too, and shown as
-  saved only when no search finds it, with why. A chat its connector says it cannot reach shows why
-  (`unreachable`), and so do the chats only another connector of its network lists (`peers`: the
-  owner's account knows people and groups a bot never saw); picked, one is first asked of the
-  connector, which lists it if it can reach it, else it is picked by its id with why it cannot. A
-  connector that cannot list its chats at all is the one place a chat is typed. Once the draft
-  changes a connector's chats, a reminder beside them says that the edges which should read a chat
-  need it ticked too (P6: the edges filter again), naming the chat-in edges with a `reads` list that
-  miss a chat added or still read one removed, each a link that opens its panel. A connector not
-  running yet says to apply first. A new node starts **disabled** and a new chat-out edge a **dry
-  run**: its rhombus hollow and its part from the rhombus to the connector greyed and dashed; its
-  panel's **Dry-run / Send for real** switch, and a node's **Enabled** switch, are changes of the
-  draft, applied with Apply. A node's config, settings and account are forms made from its schemas,
-  each field's description as its help; a new node's config starts filled with its schema's
+  read picked among its connector's monitored chats, those sent to among all its chats (sending
+  needs no monitoring, D97), and the words as rows (`Surfaces.tsx`, D62, D63), and where **Remove
+  edge** removes it alone; a connector's own `chats`, what it monitors, are every chat or those
+  picked. **Every chat is picked in one chat picker** (`ChatPicker.tsx`, D96), never typed: an
+  edge's `reads` and `sends`, a connector's `chats`, and each config key a plugin's manifest names
+  (`configChats`: `telegram-bot`'s `owner` and `group`, the reactor's `chat` and `in`), from the
+  chats of its connector (its own node, or the one along the node's chat edge; until that edge is
+  drawn, it says to draw it). **A chat named once** (D97): a chat a config key picks for its chat
+  edge is written on that edge too (`draft.ts`'s `syncEdgeChats`: its `sends` or `reads`), replaced
+  there when the pick changes, the chats added to the edge by hand kept; a new edge starts with the
+  chats its node's config names (`edgeOf`), and one from an output that sends to the owner
+  (`owner-notice`'s) with its connector's owner's chat, its panel saying so of one left with none.
+  `owner-notice` and the turn actor have no chat key: their edges are their only chat setting, the
+  turn actor's naming its bot's one chat (its panel says so, and the check). Each chat shows by its
+  name, its kind by an icon in a colour of its own (a person, a bot, a group, a channel), a person's
+  or a bot's `@username` beside it, and when it was last active (`3 days ago`); the chats picked
+  come first; a search finds a chat by its name, its `@username` or its id, and an id is never shown
+  for a chat that has a name. What is kept is the name its connector sends to (`Surface.id`; a
+  number for a key whose schema is one). A chat saved otherwise (an id, a `@username`) is found by
+  any of its names, from the lists or a search for it (`useLookups`), so after a reload too, and
+  shown as saved only when no search finds it, with why. A chat its connector says it cannot reach
+  shows why (`unreachable`), and so do the chats only another connector of its network lists
+  (`peers`: the owner's account knows people and groups a bot never saw); picked, one is first asked
+  of the connector, which lists it if it can reach it, else it is picked by its id with why it
+  cannot. A connector that cannot list its chats at all is the one place a chat is typed. Once the
+  draft changes a connector's chats, a reminder beside them says that the edges which should read a
+  chat need it ticked too (P6: the edges filter again), naming the chat-in edges with a `reads` list
+  that miss a chat added or still read one removed, each a link that opens its panel. A connector
+  not running yet says to apply first. A new node starts **disabled** and a new chat-out edge a
+  **dry run**: its rhombus hollow and its part from the rhombus to the connector greyed and dashed;
+  its panel's **Dry-run / Send for real** switch, and a node's **Enabled** switch, are changes of
+  the draft, applied with Apply. A node's config, settings and account are forms made from its
+  schemas, each field's description as its help; a new node's config starts filled with its schema's
   defaults, and an opened node shows its unset ones filled in, written with its first change
   (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a secret a choice
   of the secrets' names. Its outputs say what they carry (docs/bot-os.md D71): an events output its

@@ -59,6 +59,7 @@ import {
   isMode,
   type Mode,
   Outbox,
+  type OutboxHandle,
   type QueuedSend,
   type QueueRecord,
   type SenderPolicy,
@@ -571,10 +572,16 @@ export class Core {
     const reaches = sendsOf(entry.node)
       .filter(([p, b]) => b.node === holder?.id && (port === undefined || p === port))
       .map(([p, b]) => {
-        const chat = b.chat ?? { reads: [], sends: [] };
+        const listed = b.chat ?? { reads: [], sends: [] };
         // The spacing its output declares (D74), under its edge's own.
         const output = entry.manifest.outputs[p];
         const declared = output?.type === 'chat-out' ? output.minIntervalS : undefined;
+        // An edge that names no chat, from an output that then sends to the owner's (D95, D97).
+        const owner =
+          output?.type === 'chat-out' && output.owner === true && listed.sends.length === 0
+            ? this.connector(b.node)?.owner?.()
+            : undefined;
+        const chat = owner === undefined ? listed : { ...listed, sends: [owner] };
         return {
           ...chat,
           ...(declared === undefined
@@ -1478,6 +1485,50 @@ export class Core {
       },
     });
     entry.scheduler = scheduler;
+    /**
+     * Its way out through one chat-out edge (`bound`): through that output's edge alone when
+     * `port` names it (D64: its dry run is its own); refused when none binds an account.
+     */
+    const outboxOf = (
+      bound: [string, Binding] | undefined,
+      port: string | undefined,
+      key: string
+    ): OutboxHandle => {
+      const holder = bound === undefined ? undefined : this.entries.get(bound[1].node);
+      if (holder?.node.account === undefined)
+        throw new Error(`${id} has no reach on the account ${key}: no edge binds a chat-out of it`);
+      const outbox = this.outbox(holder.node.account);
+      const handle = outbox.as(id, port);
+      // A queued send's cancel on events (D73): heard on its node's own bus, as it hears any.
+      return {
+        ...handle,
+        enqueue: (chat, text, options = {}) => {
+          const on = options.cancel?.on;
+          const types = on === undefined ? [] : typeof on === 'string' ? [on] : [...on];
+          if (types.length === 0) return handle.enqueue(chat, text, options);
+          const heard: (() => void)[] = [];
+          // Subscribed before it is queued, so that a refusal queues nothing.
+          const ref: { queued?: QueuedSend } = {};
+          const hear = (e: BusEvent): void => {
+            const c = options.cancel;
+            if (ref.queued === undefined || !holds(e, c?.when) || c?.test?.(e) === false) return;
+            outbox.cancelQueued(ref.queued.id, `cancelled by ${e.type}`, e);
+          };
+          try {
+            for (const t of types) heard.push(bus.subscribe(t, hear));
+          } catch (e) {
+            for (const u of heard) u();
+            throw e;
+          }
+          const queued = handle.enqueue(chat, text, options);
+          ref.queued = queued;
+          void queued.result.then(() => {
+            for (const u of heard) u();
+          });
+          return queued;
+        },
+      };
+    };
     return {
       id,
       log,
@@ -1492,43 +1543,19 @@ export class Core {
       drift: this.driftMonitor.reporter(id),
       outbox: (key) => {
         const bound = this.chatEnd(sendsOf(node), key);
-        const holder = bound === undefined ? undefined : this.entries.get(bound[1].node);
-        if (holder?.node.account === undefined)
-          throw new Error(
-            `${id} has no reach on the account ${key}: no edge binds a chat-out of it`
-          );
-        // Through that output's edge alone, when named by the port (D64: its dry run is its own).
-        const outbox = this.outbox(holder.node.account);
-        const handle = outbox.as(id, bound?.[0] === key ? key : undefined);
-        // A queued send's cancel on events (D73): heard on its node's own bus, as it hears any.
-        return {
-          ...handle,
-          enqueue: (chat, text, options = {}) => {
-            const on = options.cancel?.on;
-            const types = on === undefined ? [] : typeof on === 'string' ? [on] : [...on];
-            if (types.length === 0) return handle.enqueue(chat, text, options);
-            const heard: (() => void)[] = [];
-            // Subscribed before it is queued, so that a refusal queues nothing.
-            const ref: { queued?: QueuedSend } = {};
-            const hear = (e: BusEvent): void => {
-              const c = options.cancel;
-              if (ref.queued === undefined || !holds(e, c?.when) || c?.test?.(e) === false) return;
-              outbox.cancelQueued(ref.queued.id, `cancelled by ${e.type}`, e);
-            };
-            try {
-              for (const t of types) heard.push(bus.subscribe(t, hear));
-            } catch (e) {
-              for (const u of heard) u();
-              throw e;
-            }
-            const queued = handle.enqueue(chat, text, options);
-            ref.queued = queued;
-            void queued.result.then(() => {
-              for (const u of heard) u();
-            });
-            return queued;
-          },
-        };
+        return outboxOf(bound, bound?.[0] === key ? key : undefined, key);
+      },
+      // Every edge of an output (D97), one handle per connector it binds.
+      outboxes: (port) => {
+        const seen = new Set<string>();
+        return sendsOf(node)
+          .filter(([p, b]) => {
+            const account = this.entries.get(b.node)?.node.account;
+            if (p !== port || account === undefined || seen.has(account)) return false;
+            seen.add(account);
+            return true;
+          })
+          .map((bound) => outboxOf(bound, port, port));
       },
       connector: (key) => {
         const bound = this.chatEnd(chatsOf(node), key);

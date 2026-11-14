@@ -3,6 +3,11 @@ import {
   Core,
   FakeConnector,
   fakeConnectorPlugin,
+  GraphError,
+  type GraphInput,
+  moveChats,
+  parseManifest,
+  resolveGraph,
   VirtualClock,
   withInstances,
 } from '@megabottron1999/core';
@@ -69,7 +74,7 @@ async function run(
         {
           id: 'quest-turns',
           // One interval, 17 minutes: a plan "at once" is at once.
-          config: { chat: CHAT, seed: 7, schedule: { maxGapMin: 17 }, ...o.config },
+          config: { seed: 7, schedule: { maxGapMin: 17 }, ...o.config },
           edges: [
             { from: TELEGRAM_USER, to: 'quest-turns.chat', reads: [CHAT] },
             {
@@ -106,20 +111,103 @@ async function run(
   return { core, clock, account, steps, events, status, until, summary };
 }
 
+describe('its bot’s chat, its edges’ alone (D97)', () => {
+  const manifests = new Map(
+    [
+      fakeConnectorPlugin(TELEGRAM_USER, new FakeConnector({ account: 'telegram:alice' })),
+      questPlugin(),
+      turnActorPlugin(),
+    ].map((p) => {
+      const m = parseManifest(p.manifest);
+      return [m.id, m];
+    })
+  );
+  const graph = (sends: string[], reads: string[] | '*', config = {}): GraphInput => ({
+    version: 2,
+    nodes: [
+      { id: TELEGRAM_USER, plugin: TELEGRAM_USER },
+      { id: QUEST, plugin: QUEST },
+      { id: 'quest-turns', plugin: TURN_ACTOR, config },
+    ],
+    edges: [
+      { from: `${TELEGRAM_USER}.chat`, to: `${QUEST}.chat`, type: 'chat-in', reads: [CHAT] },
+      { from: `${TELEGRAM_USER}.chat`, to: 'quest-turns.chat', type: 'chat-in', reads },
+      { from: 'quest-turns.chat', to: `${TELEGRAM_USER}.chat`, type: 'chat-out', sends },
+      { from: `${QUEST}.interface`, to: 'quest-turns.parser', type: 'interface' },
+    ],
+  });
+  const problems = (g: GraphInput): string[] => {
+    try {
+      resolveGraph(g, manifests);
+      return [];
+    } catch (e) {
+      return e instanceof GraphError ? e.problems : [String(e)];
+    }
+  };
+
+  it('takes the one chat its chat-out edge names, which its chat-in edge reads', () => {
+    expect(problems(graph([CHAT], [CHAT]))).toEqual([]);
+    // Without case, as the networks compare names.
+    expect(problems(graph([CHAT], [CHAT.toLowerCase()]))).toEqual([]);
+  });
+
+  it('refuses an edge of no chat, of two, or of a chat not a bot’s @username', () => {
+    expect(problems(graph([], [CHAT]))).toEqual([
+      `node quest-turns: output port chat sends to one chat, its bot's @username: its edge names none (edge quest-turns.chat → ${TELEGRAM_USER}.chat)`,
+    ]);
+    expect(problems(graph([CHAT, '@OtherBot'], [CHAT]))[0]).toContain(
+      `its edge names ${CHAT}, @OtherBot`
+    );
+    expect(problems(graph(['5000001'], ['5000001']))).toEqual([
+      `node quest-turns: output port chat sends to its bot's @username, not 5000001 (edge quest-turns.chat → ${TELEGRAM_USER}.chat)`,
+    ]);
+  });
+
+  it('refuses a chat-in edge that reads another chat, more, or every chat', () => {
+    const said = (reads: string[] | '*') => problems(graph([CHAT], reads));
+    expect(said(['@OtherBot'])).toEqual([
+      `node quest-turns: input port chat reads ${CHAT}, the chat its output chat sends to, and no other: its edge reads @OtherBot (edge ${TELEGRAM_USER}.chat → quest-turns.chat)`,
+    ]);
+    expect(said([CHAT, '@OtherBot'])[0]).toContain(`its edge reads ${CHAT}, @OtherBot`);
+    expect(said('*')[0]).toContain('its edge reads every chat');
+    expect(said([])[0]).toContain('its edge reads none');
+  });
+
+  it('moves the chat of a graph saved by 0.1.19 from its config onto its edges', () => {
+    const saved = graph([], [], { chat: CHAT, seed: 3 });
+    expect(problems(saved)).toEqual([]);
+    const moved = moveChats(saved, manifests) as GraphInput;
+    expect(moved.nodes.find((n) => n.id === 'quest-turns')?.config).toEqual({ seed: 3 });
+    expect(
+      moved.edges?.filter((e) => e.from === 'quest-turns.chat' || e.to === 'quest-turns.chat')
+    ).toMatchObject([{ reads: [CHAT] }, { sends: [CHAT] }]);
+    // A chat there already, by any case, is not added again; nothing else moved, nothing changed.
+    const again = moveChats(
+      graph([CHAT], [CHAT.toLowerCase()], { chat: CHAT }),
+      manifests
+    ) as GraphInput;
+    expect(again.edges?.[1]?.reads).toEqual([CHAT.toLowerCase()]);
+    expect(again.edges?.[2]?.sends).toEqual([CHAT]);
+    expect(again.nodes[2]).toEqual({ id: 'quest-turns', plugin: TURN_ACTOR });
+    const plain = graph([CHAT], [CHAT]);
+    expect(moveChats(plain, manifests)).toBe(plain);
+  });
+});
+
 describe('turnActorConfig', () => {
-  it('takes its chat, command and pace, and refuses a pace under the bots’ rest', () => {
+  it('takes its command and pace, no chat (its edge’s, D97), and refuses a pace under the bots’ rest', () => {
     const c = turnActorConfig.parse({ chat: CHAT, schedule: { maxGapMin: 25 } });
-    expect(c).toMatchObject({ chat: CHAT, command: '/play', nightSalt: '' });
+    expect(c).toMatchObject({ command: '/play', nightSalt: '' });
+    expect(c).not.toHaveProperty('chat');
     expect(c.schedule).toMatchObject({ minGapMin: 17, maxGapMin: 25 });
-    expect(() => turnActorConfig.parse({ chat: QUESTBOT })).toThrow('@username');
-    expect(() => turnActorConfig.parse({ chat: CHAT, schedule: { minGapMin: 10 } })).toThrow(
+    expect(() => turnActorConfig.parse({ schedule: { minGapMin: 10 } })).toThrow(
       'minGapMin must be at least 15'
     );
   });
 
   it('carries every default in its schema, the schedule’s included, and applies them as before', () => {
-    expect(turnActorConfig.parse({ chat: CHAT }).schedule).toEqual(DEFAULT_SCHEDULE);
-    expect(turnActorConfig.parse({ chat: CHAT, schedule: {} }).schedule).toEqual(DEFAULT_SCHEDULE);
+    expect(turnActorConfig.parse({}).schedule).toEqual(DEFAULT_SCHEDULE);
+    expect(turnActorConfig.parse({ schedule: {} }).schedule).toEqual(DEFAULT_SCHEDULE);
     const json = z.toJSONSchema(turnActorConfig, { io: 'input' }) as {
       properties: Record<string, { default?: unknown; description?: string; properties?: object }>;
     };
@@ -131,11 +219,11 @@ describe('turnActorConfig', () => {
       DEFAULT_SCHEDULE
     );
     expect(json.properties['command']?.default).toBe('/play');
-    expect(json.properties['chat']?.description).toContain('@username');
+    expect(json.properties['chat']).toBeUndefined();
     // The default is a copy each time: a parse cannot change the next one's.
-    const a = turnActorConfig.parse({ chat: CHAT });
+    const a = turnActorConfig.parse({});
     a.schedule.minGapMin = 99;
-    expect(turnActorConfig.parse({ chat: CHAT }).schedule.minGapMin).toBe(17);
+    expect(turnActorConfig.parse({}).schedule.minGapMin).toBe(17);
   });
 });
 
@@ -354,13 +442,13 @@ describe('several turn-actor nodes', () => {
             id: 'quest-a',
             plugin: TURN_ACTOR,
             instance: 'turns-a',
-            config: { chat: CHAT, seed: 1, schedule: { maxGapMin: 17 } },
+            config: { seed: 1, schedule: { maxGapMin: 17 } },
           },
           {
             id: 'quest-b',
             plugin: TURN_ACTOR,
             disabled: true,
-            config: { chat: CHAT, seed: 2, command: '/quest' },
+            config: { seed: 2, command: '/quest' },
           },
         ],
         edges: [

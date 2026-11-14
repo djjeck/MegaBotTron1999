@@ -5,6 +5,7 @@ import type { GraphEdge, Surface } from '#src/ui/api.ts';
 import { fakeCore } from '#test/fake-core.ts';
 import { VIEW } from '#test/graph-view.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
+import { EdgeDetails } from './EdgeDetails.tsx';
 import { GraphPage } from './GraphPage.tsx';
 import { edgesToUpdate, sameChats, unlistedNote } from './Surfaces.tsx';
 
@@ -252,5 +253,88 @@ describe('chats picked from lists', () => {
     expect(unlistedNote({ state: 'error', error: 'not connected' })).toBe(
       'Its chats cannot be listed now: not connected'
     );
+  });
+});
+
+describe('an edge whose chats are its node’s only setting (D97)', () => {
+  const port = (type: 'chat-in' | 'chat-out', more = {}) => ({
+    type,
+    label: type,
+    optional: false,
+    ...more,
+  });
+
+  it('says an edge naming no chat tells the owner, and names the owner on a click', async () => {
+    fakeCore({ routes: { 'GET /accounts/bot/surfaces?peers=1': [...listed([])] } });
+    const change = vi.fn();
+    const edge: GraphEdge = { from: 'notice.chat', to: 'bot.chat', type: 'chat-out' };
+    const { rerender } = render(
+      <EdgeDetails
+        edge={edge}
+        problems={[]}
+        connector={{ id: 'bot', plugin: 'bot' }}
+        output={port('chat-out', { owner: true, many: true })}
+        owner="1000000002"
+        change={change}
+        remove={vi.fn()}
+      />
+    );
+    const note = await screen.findByRole('note', { name: 'sends to the owner' });
+    expect(note.textContent).toContain('it sends to the private chat of bot’s owner');
+    fireEvent.click(within(note).getByRole('button', { name: 'Name it here' }));
+    expect(change).toHaveBeenCalledWith({ sends: ['1000000002'] });
+    // A connector with no owner: a chat to name.
+    rerender(
+      <EdgeDetails
+        edge={edge}
+        problems={[]}
+        connector={{ id: 'bot', plugin: 'bot' }}
+        output={port('chat-out', { owner: true })}
+        change={change}
+        remove={vi.fn()}
+      />
+    );
+    expect(screen.getByRole('note', { name: 'sends to the owner' }).textContent).toContain(
+      'has none set: name a chat above'
+    );
+    // A chat named: no note.
+    rerender(
+      <EdgeDetails
+        edge={{ ...edge, sends: ['#a'] }}
+        problems={[]}
+        connector={{ id: 'bot', plugin: 'bot' }}
+        output={port('chat-out', { owner: true })}
+        change={change}
+        remove={vi.fn()}
+      />
+    );
+    expect(screen.queryByRole('note', { name: 'sends to the owner' })).toBeNull();
+  });
+
+  it('says an output of one chat, and an input that reads it, need that one chat', () => {
+    fakeCore({ routes: { 'GET /accounts/user/surfaces?peers=1': [...listed([])] } });
+    render(
+      <EdgeDetails
+        edge={{ from: 'turns.chat', to: 'user.chat', type: 'chat-out' }}
+        problems={[]}
+        connector={{ id: 'user', plugin: 'user' }}
+        output={port('chat-out', { single: { expected: "its bot's @username" } })}
+        change={vi.fn()}
+        remove={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/It sends to exactly one chat, its bot's @username/u)).toBeDefined();
+    cleanup();
+    render(
+      <EdgeDetails
+        edge={{ from: 'user.chat', to: 'turns.chat', type: 'chat-in' }}
+        problems={[]}
+        connector={{ id: 'user', plugin: 'user' }}
+        input={port('chat-in', { sameAs: 'chat' })}
+        change={vi.fn()}
+        remove={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/It reads the one chat its/u).textContent).toContain('chat output');
   });
 });

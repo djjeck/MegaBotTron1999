@@ -71,6 +71,12 @@ export interface PluginContext {
    */
   outbox(port: string): OutboxHandle;
   /**
+   * Its ways out through every edge of its chat-out output `port` (bot-os.md D97), one per
+   * connector it binds: for an output of several edges (`many`), owner-notice's on Telegram and
+   * IRC at once. None while no edge binds it.
+   */
+  outboxes(port: string): OutboxHandle[];
+  /**
    * The interface its input `port` is bound to (§2.1 `interface`, P6): only the members the input
    * uses, as the other instance offers them; `port` may also name the instance bound. Refused for
    * an input it does not have, unbound, or whose other end is not running.

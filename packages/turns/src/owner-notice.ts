@@ -1,9 +1,11 @@
 /**
  * The owner's notices, told (docs/bot-os-api.md §5, bot-os.md D91, #40): a node that hears what the
  * core and the plugins raise for the owner's attention (`ctx.notices`, §4.16) and tells the owner,
- * through its `chat` output, in its `chat`: a `telegram-bot` node to the owner's private chat, or
- * `irc` to a nick or a channel. Its sends are queued as any node's (`enqueue`, D73), so a dry-run
- * edge (a new one is) logs them and sends nothing (D64).
+ * through its `chat` output, in **every chat its edges name** (D97: the edge is its only setting):
+ * an edge to a `telegram-bot` and one to `irc` tell both. An edge that names no chat tells its
+ * connector's owner's private chat (a `telegram-bot`'s `owner`, D95), which the editor writes on
+ * the edge as it is drawn. Its sends are queued as any node's (`enqueue`, D73), so a dry-run edge
+ * (a new one is) logs them and sends nothing (D64).
  *
  * **What it tells,** each kind on or off (`report`): the events a state node refused (`refused`,
  * D72), sends several nodes shared (`coalesced`, D73), a parser's drift that paused what acts on it
@@ -125,13 +127,6 @@ const paceSchema = z.object({
 });
 
 export const ownerNoticeConfig = z.object({
-  chat: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      "The chat it tells the owner in, picked among its connector's (its chat edge must send there too); unset: the connector's owner's private chat, where it has one (a telegram-bot's `owner`)"
-    ),
   report: z
     .object(
       Object.fromEntries(
@@ -442,6 +437,14 @@ export function wordStart(
   return out.join('\n');
 }
 
+/** A message of its that did not go to a chat (D95), for its panel. */
+interface NotSent {
+  t: number;
+  account: string;
+  chat: string;
+  reason: string;
+}
+
 /** Whether a notice is about the node itself: it would tell of its own sends, in a loop. */
 function ownNotice(n: Notice, id: string): boolean {
   const others = n.detail?.['with'];
@@ -480,13 +483,18 @@ const viewState = z.object({
     .describe('Summary'),
   warnings: z.array(z.string()).describe("The graph's warnings at this start"),
   notSent: z
-    .object({
-      t: z.number().describe('When'),
-      chat: z.string().describe('Chat'),
-      reason: z.string().describe('Why'),
-    })
+    .array(
+      z.object({
+        t: z.number().describe('When'),
+        account: z.string().describe('Account'),
+        chat: z.string().describe('Chat'),
+        reason: z.string().describe('Why'),
+      })
+    )
     .optional()
-    .describe('Its last message not sent (D95): its own failures are never told, only shown here'),
+    .describe(
+      'Its last message not sent, per chat (D95): its own failures are never told, only shown here'
+    ),
 });
 const VIEW_SCHEMA = z.toJSONSchema(viewState, { io: 'output', unrepresentable: 'any' });
 
@@ -502,12 +510,15 @@ export function ownerNoticePlugin(): Plugin {
       config: ownerNoticeConfig,
       notices: true,
       summary: true,
-      // Its chat is picked among its connector's (D96).
-      configChats: [{ key: 'chat', output: 'chat' }],
+      // Its chats are those its edges name (D97); its config's `chat` of 0.1.19 moves there.
+      movedChats: [{ key: 'chat', output: 'chat' }],
       outputs: {
         chat: {
           type: 'chat-out',
-          help: "The account it tells the owner through: a telegram-bot to the owner's private chat, or irc",
+          // An edge per connector, each telling the chats it names; none named, the owner's.
+          many: true,
+          owner: true,
+          help: "The accounts it tells the owner through, each in the chats its edge names: a telegram-bot (no chat named: the owner's private chat), irc",
         },
       },
     },
@@ -532,30 +543,45 @@ export function ownerNoticePlugin(): Plugin {
         if (ctx.summary === undefined) throw new Error('no summary: its manifest declares it');
         return ctx.summary;
       };
-      /** Its last message that did not go, for its panel and card (D95): never told, no loop. */
-      let notSent: { t: number; chat: string; reason: string } | undefined;
-      /** One message, through its single send path: queued, so that a dry-run edge sends nothing. */
+      /**
+       * Its last message that did not go, per account and chat, for its panel and card (D95): never
+       * told, no loop; the chat's next message that goes clears it. `''`: it had nowhere to send.
+       */
+      const notSent = new Map<string, NotSent>();
+      /**
+       * One message, through its single send path, to every chat its edges name (D97): queued, so
+       * that a dry-run edge sends nothing.
+       */
       const send = (kind: string, text: string, count: number, buttons?: Buttons): void => {
-        const out = ctx.outbox('chat');
-        // Its chat, or its connector's owner's (a telegram-bot's), when it names none.
-        const chat = c.chat ?? out.owner();
-        if (chat === undefined) {
-          notSent = { t: ctx.clock.now(), chat: '', reason: 'no chat: pick one in its config' };
-          ctx.log.warn(`not told (no chat, and its connector has no owner): ${text}`);
+        const outs = ctx.outboxes('chat');
+        // Each edge's chats; one that names none, its connector's owner's (a telegram-bot's).
+        const targets = outs.flatMap((out) => out.chats().map((chat) => ({ out, chat })));
+        if (targets.length === 0) {
+          const reason =
+            outs.length === 0
+              ? 'no edge: draw one from its chat output to a connector'
+              : 'no chat: name one on its edge (its connector has no owner)';
+          notSent.set('', { t: ctx.clock.now(), account: '', chat: '', reason });
+          ctx.log.warn(`not told (${reason}): ${text}`);
           return;
         }
-        ctx.record(`${OWNER_NOTICE}.told`, { kind, count, chat, text });
+        notSent.delete('');
         toldAt = ctx.clock.now();
-        const queued = out.enqueue(chat, text, buttons === undefined ? undefined : { buttons });
-        void queued.then((r) => {
-          if (r.outcome === 'sent' || r.outcome === 'dry-run') {
-            notSent = undefined;
-            return;
-          }
-          const reason = r.reason === undefined ? r.outcome : `${r.outcome}: ${r.reason}`;
-          if (r.outcome !== 'cancelled') notSent = { t: ctx.clock.now(), chat, reason };
-          ctx.log.warn(`not told (${reason}): ${text}`);
-        });
+        for (const { out, chat } of targets) {
+          ctx.record(`${OWNER_NOTICE}.told`, { kind, count, chat, text });
+          const key = `${out.account} ${chat}`;
+          const queued = out.enqueue(chat, text, buttons === undefined ? undefined : { buttons });
+          void queued.then((r) => {
+            if (r.outcome === 'sent' || r.outcome === 'dry-run') {
+              notSent.delete(key);
+              return;
+            }
+            const reason = r.reason === undefined ? r.outcome : `${r.outcome}: ${r.reason}`;
+            if (r.outcome !== 'cancelled')
+              notSent.set(key, { t: ctx.clock.now(), account: out.account, chat, reason });
+            ctx.log.warn(`not told in ${chat} (${reason}): ${text}`);
+          });
+        }
       };
       const desk = new NoticeDesk({
         clock: ctx.clock,
@@ -652,7 +678,7 @@ export function ownerNoticePlugin(): Plugin {
             ...kept,
           },
           warnings: warned,
-          ...(notSent === undefined ? {} : { notSent }),
+          ...(notSent.size === 0 ? {} : { notSent: [...notSent.values()] }),
         },
         ...(toldAt === undefined ? {} : { updatedAt: toldAt }),
         pin: ['notSent', 'waiting'],
@@ -661,7 +687,13 @@ export function ownerNoticePlugin(): Plugin {
       const waitingLine = (): string | undefined => {
         const n = Object.values(desk.view().waiting).reduce((sum, w) => sum + w.count, 0);
         const waiting = n === 0 ? undefined : `${n} ${n === 1 ? 'notice' : 'notices'} waiting`;
-        const failed = notSent === undefined ? undefined : `not sent: ${notSent.reason}`;
+        const last = [...notSent.values()].sort((a, b) => b.t - a.t)[0];
+        const failed =
+          last === undefined
+            ? undefined
+            : notSent.size === 1
+              ? `not sent${last.chat === '' ? '' : ` to ${last.chat}`}: ${last.reason}`
+              : `not sent to ${notSent.size} chats, last ${last.chat}: ${last.reason}`;
         return [failed, waiting].filter((x) => x !== undefined).join('; ') || undefined;
       };
       return {

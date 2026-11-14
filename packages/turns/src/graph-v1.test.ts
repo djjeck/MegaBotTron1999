@@ -2,7 +2,8 @@
  * A graph saved before chat edges were split (bot-os.md D60), with the shell's own plugins: a
  * connector's three chat edges, all empty, to a parser, a turn-actor and a reactor on events. It
  * converts on load, runs, and is shown as version 2; and, at the first start since the modes went
- * (bot-os.md D64), its senders, which kept no mode (`read-only`), send through dry-run edges.
+ * (bot-os.md D64), its senders, which kept no mode (`read-only`), send through dry-run edges; the
+ * turn-actor's chat moves from its config onto its edges (D97).
  */
 import { TELEGRAM_USER } from '@megabottron1999/connectors/plugins/telegram-user.ts';
 import {
@@ -73,12 +74,17 @@ describe('a version 1 graph of the shell’s plugins', () => {
       ]);
       const edges = [
         { from: `${TELEGRAM_USER}.chat`, to: `${QUEST}.chat`, type: 'chat-in', reads: [] },
-        { from: `${TELEGRAM_USER}.chat`, to: 'quest-turns.chat', type: 'chat-in', reads: [] },
+        {
+          from: `${TELEGRAM_USER}.chat`,
+          to: 'quest-turns.chat',
+          type: 'chat-in',
+          reads: ['@QuestBot'],
+        },
         {
           from: 'quest-turns.chat',
           to: `${TELEGRAM_USER}.chat`,
           type: 'chat-out',
-          sends: [],
+          sends: ['@QuestBot'],
           dryRun: true,
         },
         {
@@ -91,11 +97,14 @@ describe('a version 1 graph of the shell’s plugins', () => {
         { from: `${QUEST}.interface`, to: 'quest-turns.parser', type: 'interface' },
         { from: `${QUEST}.events`, to: 'look.events', type: 'events' },
       ];
-      expect(core.graph()).toEqual({ version: 2, nodes: V1.nodes, edges });
+      const nodes = V1.nodes.map((n) =>
+        n.id === 'quest-turns' ? { id: n.id, plugin: n.plugin } : n
+      );
+      expect(core.graph()).toEqual({ version: 2, nodes, edges });
       // `GET /graph/file` shows it as version 2, what runs.
       expect(graphFileControls(file, core).file()).toEqual({
         exists: true,
-        graph: { version: 2, nodes: V1.nodes, edges },
+        graph: { version: 2, nodes, edges },
         text: expect.stringContaining(`  ${QUEST}.interface → quest-turns.parser (interface)`),
         differs: false,
       });

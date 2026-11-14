@@ -12,18 +12,21 @@ import {
   edgesOfPort,
   EMPTY_GRAPH,
   endOf,
+  fixedChats,
   freeId,
   freeName,
   idProblem,
   inputsOf,
   instanceOf,
   movePort,
+  ownerOf,
   placeProblems,
   portChanged,
   removeEdge,
   removeNode,
   removePort,
   sameGraph,
+  syncEdgeChats,
   updateEdge,
   updateNode,
   viewOf,
@@ -237,6 +240,147 @@ describe('the draft', () => {
       type: 'chat-out',
       commands: ['/look'],
       dryRun: true,
+    });
+  });
+
+  describe('the chats a config names, on its edges (D97)', () => {
+    const port = (type: 'chat-in' | 'chat-out', more = {}) => ({
+      type,
+      label: `${type} of any network`,
+      optional: false,
+      ...more,
+    });
+    const view = (plugin: string, more: Partial<PluginView>): PluginView => ({
+      plugin,
+      version: '0.1.0',
+      description: plugin,
+      kinds: [],
+      inputs: {},
+      outputs: {},
+      interface: { reads: [], actions: [], commands: [] },
+      secrets: [],
+      configSecrets: [],
+      events: [],
+      ...more,
+    });
+    const views = new Map<string, PluginView>([
+      ['bot', view('bot', { kinds: ['connector'], configChats: [{ key: 'owner', owner: true }] })],
+      [
+        'reactor',
+        view('reactor', {
+          inputs: { chat: port('chat-in') },
+          outputs: { chat: port('chat-out') },
+          configChats: [
+            { key: 'chat', output: 'chat', template: true },
+            { key: 'in', input: 'chat' },
+          ],
+        }),
+      ],
+      [
+        'teller',
+        view('teller', { outputs: { chat: port('chat-out', { owner: true, many: true }) } }),
+      ],
+    ]);
+    const g: Graph = {
+      version: 2,
+      nodes: [
+        { id: 'bot', plugin: 'bot', config: { owner: 1000000002 } },
+        { id: 'look', plugin: 'reactor', config: { chat: '@QuestBot', in: '#lobby' } },
+        { id: 'teller', plugin: 'teller' },
+      ],
+      edges: [],
+    };
+
+    it('reads a config key’s chats: a chat, a number, a list; never a template', () => {
+      expect(fixedChats('@QuestBot', {})).toEqual(['@QuestBot']);
+      expect(fixedChats(5, {})).toEqual(['5']);
+      expect(fixedChats(['a', 2, null], {})).toEqual(['a', '2']);
+      expect(fixedChats('{chat}', { template: true })).toEqual([]);
+      expect(fixedChats('', {})).toEqual([]);
+      expect(ownerOf(g.nodes[0], views.get('bot'))).toEqual(['1000000002']);
+      expect(ownerOf(g.nodes[1], views.get('reactor'))).toEqual([]);
+    });
+
+    it('starts a new edge with the chats its node’s config picked, or the owner’s', () => {
+      expect(
+        edgeOf(
+          { source: 'look', sourceHandle: 'chat', target: 'bot::out', targetHandle: 'chat' },
+          views,
+          g
+        )
+      ).toEqual({
+        from: 'look.chat',
+        to: 'bot.chat',
+        type: 'chat-out',
+        sends: ['@QuestBot'],
+        dryRun: true,
+      });
+      expect(
+        edgeOf(
+          { source: 'bot', sourceHandle: 'chat', target: 'look', targetHandle: 'chat' },
+          new Map([...views, ['bot', view('bot', { outputs: { chat: port('chat-in') } })]]),
+          g
+        )
+      ).toMatchObject({ type: 'chat-in', reads: ['#lobby'] });
+      expect(
+        edgeOf(
+          { source: 'teller', sourceHandle: 'chat', target: 'bot::out', targetHandle: 'chat' },
+          views,
+          g
+        )
+      ).toMatchObject({ sends: ['1000000002'] });
+      // A template names no chat ahead.
+      const templated = {
+        ...g,
+        nodes: g.nodes.map((n) => (n.id === 'look' ? { ...n, config: { chat: '{chat}' } } : n)),
+      };
+      expect(
+        edgeOf(
+          { source: 'look', sourceHandle: 'chat', target: 'bot::out', targetHandle: 'chat' },
+          views,
+          templated
+        )
+      ).not.toHaveProperty('sends');
+    });
+
+    it('adds a chat picked to its edge, replaces it when the pick changes, and keeps the rest', () => {
+      const wired: Graph = {
+        ...g,
+        edges: [
+          { from: 'look.chat', to: 'bot.chat', type: 'chat-out', sends: ['@QuestBot', '#extra'] },
+          { from: 'bot.chat', to: 'look.chat', type: 'chat-in', reads: ['#lobby'] },
+        ],
+      };
+      const specs = views.get('reactor')?.configChats ?? [];
+      const before = { chat: '@QuestBot', in: '#lobby' };
+      const after = syncEdgeChats(wired, 'look', specs, before, {
+        chat: '@OtherBot',
+        in: '#lobby',
+      });
+      expect(after.edges[0]?.sends).toEqual(['#extra', '@OtherBot']);
+      expect(after.edges[1]).toBe(wired.edges[1]);
+      // A template in its place takes the chat off; nothing changed, the graph as it was.
+      expect(
+        syncEdgeChats(wired, 'look', specs, before, { chat: '{chat}', in: '#lobby' }).edges[0]
+          ?.sends
+      ).toEqual(['#extra']);
+      expect(syncEdgeChats(wired, 'look', specs, before, before)).toBe(wired);
+      // Its input's: onto the reads, unless it reads every chat.
+      expect(
+        syncEdgeChats(wired, 'look', specs, before, { ...before, in: '#side' }).edges[1]?.reads
+      ).toEqual(['#side']);
+      const every = {
+        ...wired,
+        edges: [wired.edges[0], { ...wired.edges[1], reads: '*' }],
+      } as Graph;
+      expect(
+        syncEdgeChats(every, 'look', specs, before, { ...before, in: '#side' }).edges[1]?.reads
+      ).toBe('*');
+      // Picked where its edge names it already, by any case: named once.
+      expect(
+        syncEdgeChats(wired, 'look', specs, { in: '#lobby' }, { chat: '@questbot', in: '#lobby' })
+          .edges[0]?.sends
+      ).toEqual(['@QuestBot', '#extra']);
     });
   });
 

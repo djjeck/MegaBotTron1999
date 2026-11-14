@@ -48,7 +48,11 @@ never their values.
   `interface`) and its check, with its problems, which refuse it, and its warnings, which do not (a
   chat-in edge reading a chat its connector's `monitors` leaves out, docs/bot-os.md D89, a chat
   matched by any of its names as the running connector tells them, D90); a graph file of version 1
-  is converted to version 2 as it loads (`upgradeGraph`, docs/bot-os.md D60).
+  is converted to version 2 as it loads (`upgradeGraph`, docs/bot-os.md D60), and a chat a node's
+  config held that its plugin moved onto its edges (`movedChats`) moves there (`moveChats`, D97); a
+  chat-out output may take several edges (`many`, `ctx.outboxes`), send to its connector's owner
+  through an edge naming none (`owner`), or need its edge to name one chat that a chat-in input
+  reads alone (`single`, `sameAs`).
 - `src/graph-file.ts`, `src/graph-history.ts`: the graph file of the data volume, its check, diff
   and rollback for the control API, and its history: every graph written kept as a version for 7
   days (never fewer than the 5 latest), with what changed and whether the instance started on it

@@ -422,7 +422,60 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  * The other edges and the nodes are kept as they are. Nothing is checked: `resolveGraph` does.
  */
 export function upgradeGraph(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unknown {
-  return foldModes(upgradeChats(raw, plugins));
+  return moveChats(foldModes(upgradeChats(raw, plugins)), plugins);
+}
+
+/**
+ * A graph whose nodes still hold a chat in a config key their plugin moved onto its edges
+ * (`movedChats`, bot-os.md D97: `owner-notice`'s and the turn actor's `chat`) with that chat on
+ * the edges instead: added to the `sends` of each chat-out edge from the key's `output` (or from
+ * the node named alone, typed `chat-out`), or to the `reads` of each chat-in edge to its `input`
+ * (one that reads every chat, `'*'`, left as it is), where no name there is it already (without
+ * case); then the key dropped, edge or none. Any other graph as it is: nothing is checked.
+ */
+export function moveChats(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unknown {
+  if (!isRecord(raw) || !Array.isArray(raw['nodes']) || !Array.isArray(raw['edges'])) return raw;
+  let edges = raw['edges'] as unknown[];
+  let moved = false;
+  const add = (list: unknown, chat: string): unknown[] => {
+    const was = Array.isArray(list) ? (list as unknown[]) : [];
+    const has = was.some((c) => typeof c === 'string' && c.toLowerCase() === chat.toLowerCase());
+    return has ? was : [...was, chat];
+  };
+  const nodes = (raw['nodes'] as unknown[]).map((n) => {
+    if (!isRecord(n) || typeof n['id'] !== 'string' || typeof n['plugin'] !== 'string') return n;
+    const specs = plugins.get(n['plugin'])?.movedChats ?? [];
+    const config = n['config'];
+    if (specs.length === 0 || !isRecord(config)) return n;
+    const id = n['id'];
+    const keys = new Set<string>();
+    for (const spec of specs) {
+      const value = config[spec.key];
+      if (!(spec.key in config)) continue;
+      keys.add(spec.key);
+      if (typeof value !== 'string' && typeof value !== 'number') continue;
+      const chat = String(value);
+      edges = edges.map((e) => {
+        if (!isRecord(e)) return e;
+        if (
+          spec.output !== undefined &&
+          ((e['from'] === `${id}.${spec.output}` &&
+            (e['type'] === undefined || e['type'] === 'chat-out')) ||
+            (e['from'] === id && e['type'] === 'chat-out'))
+        )
+          return { ...e, sends: add(e['sends'], chat) };
+        if (spec.input !== undefined && e['to'] === `${id}.${spec.input}` && e['reads'] !== '*')
+          return { ...e, reads: add(e['reads'], chat) };
+        return e;
+      });
+    }
+    if (keys.size === 0) return n;
+    moved = true;
+    const rest = Object.fromEntries(Object.entries(config).filter(([k]) => !keys.has(k)));
+    const { config: _, ...node } = n;
+    return Object.keys(rest).length === 0 ? node : { ...node, config: rest };
+  });
+  return moved ? { ...raw, nodes, edges } : raw;
 }
 
 /**
@@ -706,7 +759,9 @@ export function resolveGraph(
       continue;
     }
     const sending = from.outputs.get(port);
-    if (sending !== undefined && sending.length > 0) {
+    // An output of several edges (D97), one per connector: owner-notice's.
+    const many = output.type === 'chat-out' && output.many === true;
+    if (sending !== undefined && sending.length > 0 && !many) {
       problems.push(`node ${fromNode}: output port ${port} is bound twice`);
       continue;
     }
@@ -807,12 +862,55 @@ export function resolveGraph(
           (target === undefined || nodes.has(target) ? '' : `: ${target} is not in the graph`)
       );
     }
+  for (const n of nodes.values()) problems.push(...oneChatProblems(n));
   if (problems.length > 0) throw new GraphError(problems, warnings);
   return {
     graph: { version: parsed.data.version, nodes: parsed.data.nodes, edges },
     nodes: [...nodes.values()],
     warnings,
   };
+}
+
+/**
+ * What a node's ports of one chat refuse (bot-os.md D97): the edge of a chat-out output declared
+ * `single` names exactly one chat, matching its pattern; the edge of a chat-in input `sameAs` that
+ * output reads that chat (any case) and no other. An unbound port is said elsewhere.
+ */
+function oneChatProblems(n: ResolvedNode): string[] {
+  const out: string[] = [];
+  for (const [port, bound] of n.outputs) {
+    const output = n.manifest.outputs[port];
+    const b = bound[0];
+    if (output?.type !== 'chat-out' || output.single === undefined || b === undefined) continue;
+    const sends = b.chat?.sends ?? [];
+    const what = output.single.expected ?? 'the chat it sends to';
+    const edge = `(edge ${n.id}.${port} → ${b.node}.${b.port})`;
+    const pattern = output.single.pattern;
+    if (sends.length !== 1)
+      out.push(
+        `node ${n.id}: output port ${port} sends to one chat, ${what}: its edge names ${sends.length === 0 ? 'none' : sends.join(', ')} ${edge}`
+      );
+    else if (pattern !== undefined && !new RegExp(pattern, 'u').test(sends[0] as string))
+      out.push(
+        `node ${n.id}: output port ${port} sends to ${what}, not ${String(sends[0])} ${edge}`
+      );
+  }
+  for (const [port, input] of Object.entries(n.ports)) {
+    if (input.type !== 'chat-in' || input.sameAs === undefined) continue;
+    const b = n.inputs.get(port)?.[0];
+    const sends = n.outputs.get(input.sameAs)?.[0]?.chat?.sends ?? [];
+    const chat = sends[0];
+    // No one chat to read: the output's problem says why.
+    if (b === undefined || chat === undefined || sends.length !== 1) continue;
+    const reads = b.chat?.reads ?? [];
+    if (reads !== '*' && reads.length === 1 && reads[0]?.toLowerCase() === chat.toLowerCase())
+      continue;
+    const read = reads === '*' ? 'every chat' : reads.length === 0 ? 'none' : reads.join(', ');
+    out.push(
+      `node ${n.id}: input port ${port} reads ${chat}, the chat its output ${input.sameAs} sends to, and no other: its edge reads ${read} (edge ${b.node}.${b.port} → ${n.id}.${port})`
+    );
+  }
+  return out;
 }
 
 /**

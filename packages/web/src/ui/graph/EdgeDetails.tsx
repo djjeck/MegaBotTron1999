@@ -3,14 +3,16 @@
  * and, for a chat, what it carries (bot-os-api.md §2.1, D60–D63), picked from its connector's
  * monitored chats (`Surfaces.tsx`): a chat-in edge, the chats it `reads` (or all of them, `'*'`)
  * and the `senders` it hears (anyone, or a list with `me`), any chat from anyone flagged as broad;
- * a chat-out edge, those it `sends` to and the `commands` sent (their first words), as rows, and
+ * a chat-out edge, those it `sends` to (among all its connector's chats: sending needs no
+ * monitoring; an edge naming none from an output that tells the owner says it sends to the
+ * connector's owner's chat, D97) and the `commands` sent (their first words), as rows, and
  * each command's spacing for the queued sends (D73: the least seconds between two of it in one
  * chat; empty, the connector's default), and
  * whether it is a dry run (D64): **Dry-run** logs what it would send, as sent, and sends nothing;
  * **Send for real** sends. Then its removal. The edges are the permissions (P6): a plugin reads and
  * sends only what its edge says.
  */
-import type { GraphEdge, GraphNode } from '#src/ui/api.ts';
+import type { GraphEdge, GraphNode, PortView } from '#src/ui/api.ts';
 import type { EdgeChange } from './draft.ts';
 import { CHATS_KEY, EdgeChats, RowsField, Senders } from './Surfaces.tsx';
 
@@ -73,6 +75,11 @@ export function EdgeDetails(props: {
   warnings?: string[];
   /** The connector node at its chat end, if it is a chat edge. */
   connector?: GraphNode | undefined;
+  /** The output it leaves, and the input it enters, as their plugins declare them. */
+  output?: PortView | undefined;
+  input?: PortView | undefined;
+  /** The connector's owner's chat, as its config names it (D97). */
+  owner?: string | undefined;
   change: (change: EdgeChange) => void;
   remove: () => void;
 }) {
@@ -108,6 +115,12 @@ export function EdgeDetails(props: {
           {edge.reads === '*' && edge.senders === undefined ? (
             <p className="warning" role="note">
               Broad: it hears any chat its connector monitors, from anyone.
+            </p>
+          ) : null}
+          {props.input?.type === 'chat-in' && props.input.sameAs !== undefined ? (
+            <p className="muted small" role="note">
+              It reads the one chat its <code>{props.input.sameAs}</code> output sends to, and no
+              other (the check says so otherwise).
             </p>
           ) : null}
           <EdgeChats
@@ -155,14 +168,48 @@ export function EdgeDetails(props: {
             Applied with Apply.
           </p>
           <h3>What it sends</h3>
+          {props.output?.type === 'chat-out' && props.output.single !== undefined ? (
+            <p className="muted small" role="note">
+              It sends to exactly one chat
+              {props.output.single.expected === undefined
+                ? ''
+                : `, ${props.output.single.expected}`}
+              : the one named here is its only setting.
+            </p>
+          ) : null}
           <EdgeChats
             name="sends"
-            help="The chats the plugin may send to through the connector; the outbox refuses any other"
+            help={
+              props.output?.type === 'chat-out' && props.output.many === true
+                ? 'The chats it tells, each of them, through this connector; it sends to no other'
+                : 'The chats the plugin may send to through the connector; the outbox refuses any other'
+            }
             connector={connector}
-            monitored={monitored}
+            monitored={undefined}
             value={edge.sends}
             set={(s) => props.change({ sends: s === '*' ? [] : s })}
           />
+          {props.output?.type === 'chat-out' &&
+          props.output.owner === true &&
+          (edge.sends ?? []).length === 0 ? (
+            <p className="note small" role="note" aria-label="sends to the owner">
+              No chat named: it sends to the private chat of {connector ?? 'its connector'}’s owner
+              {props.owner === undefined ? (
+                <>, and {connector ?? 'its connector'} has none set: name a chat above.</>
+              ) : (
+                <>
+                  .{' '}
+                  <button
+                    type="button"
+                    className="link"
+                    onClick={() => props.change({ sends: [props.owner as string] })}
+                  >
+                    Name it here
+                  </button>
+                </>
+              )}
+            </p>
+          ) : null}
           <RowsField
             name="commands"
             help="The commands it may send there, by first word (/play); none: any text"

@@ -7,6 +7,7 @@ import {
   type GraphInput,
   loadOrder,
   monitoredChats,
+  moveChats,
   requiredOf,
   type ResolvedNode,
   resolveGraph,
@@ -429,6 +430,78 @@ describe('chat-in and chat-out', () => {
     expect(matching.graph.edges).toEqual([
       { from: 'tg.chat', to: 'both.chat', type: 'chat-in', reads: [] },
     ]);
+  });
+
+  it('binds an output of many edges to each connector, once each (D97)', () => {
+    const many = new Map(plugins).set(
+      'teller',
+      m('teller', {
+        outputs: { chat: { type: 'chat-out', many: true, owner: true } },
+        movedChats: [{ key: 'chat', output: 'chat' }],
+      })
+    );
+    const nodes = [
+      { id: 'tg', plugin: 'tg' },
+      { id: 'tg-2', plugin: 'tg', account: 'telegram:bob' },
+      { id: 'teller', plugin: 'teller' },
+    ];
+    const { graph: g } = resolveGraph(
+      {
+        version: 2,
+        nodes,
+        edges: [
+          { from: 'teller.chat', to: 'tg.chat', sends: ['1'] },
+          { from: 'teller.chat', to: 'tg-2.chat' },
+        ],
+      },
+      many
+    );
+    expect(g.edges.map((e) => [e.to, e.sends])).toEqual([
+      ['tg.chat', ['1']],
+      ['tg-2.chat', []],
+    ]);
+    expect(
+      problems(
+        {
+          version: 2,
+          nodes,
+          edges: [
+            { from: 'teller.chat', to: 'tg.chat' },
+            { from: 'teller.chat', to: 'tg.chat', sends: ['2'] },
+          ],
+        },
+        many
+      )
+    ).toEqual(['edge teller.chat → tg.chat: twice in the graph']);
+    // A chat its config held moves onto its edges (D97), bare or by port, and the key goes.
+    const saved = {
+      version: 2,
+      nodes: [...nodes.slice(0, 2), { id: 'teller', plugin: 'teller', config: { chat: '7' } }],
+      edges: [
+        { from: 'teller', to: 'tg.chat', type: 'chat-out', sends: ['1'] },
+        { from: 'teller.chat', to: 'tg-2.chat' },
+        'not an edge',
+      ],
+    };
+    expect(moveChats(saved, many)).toEqual({
+      ...saved,
+      nodes: [...nodes.slice(0, 2), { id: 'teller', plugin: 'teller' }],
+      edges: [
+        { from: 'teller', to: 'tg.chat', type: 'chat-out', sends: ['1', '7'] },
+        { from: 'teller.chat', to: 'tg-2.chat', sends: ['7'] },
+        'not an edge',
+      ],
+    });
+    // A key of no chat (null) goes too; a graph with none to move, and anything else, as they are.
+    expect(
+      moveChats(
+        { ...saved, nodes: [{ id: 'teller', plugin: 'teller', config: { chat: null, x: 1 } }] },
+        many
+      )
+    ).toMatchObject({ nodes: [{ id: 'teller', config: { x: 1 } }], edges: saved.edges });
+    const none = { ...saved, nodes: nodes.slice(0, 2) };
+    expect(moveChats(none, many)).toBe(none);
+    expect(moveChats('nope', many)).toBe('nope');
   });
 
   it('refuses a chat-out bound twice, unbound, or the wrong way round', () => {

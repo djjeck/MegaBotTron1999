@@ -134,6 +134,11 @@ export const inputSchema = z.discriminatedUnion('type', [
      * (`resolveInputs`): a reactor reads a chat only with a `match`.
      */
     when: configKey.optional(),
+    /**
+     * The chat-out output of its node whose one chat (its `single`) its edge reads, that chat
+     * alone (bot-os.md D97): the turn actor reads the bot's chat it sends to.
+     */
+    sameAs: z.string().min(1).optional(),
     ...common,
     bind: z
       .strictObject({
@@ -211,6 +216,28 @@ export const outputSchema = z.discriminatedUnion('type', [
      * the plugin needs them (D73, D74): its edge's own `minIntervalS` wins for a command it names.
      */
     minIntervalS: chatBindingSchema.shape.minIntervalS,
+    /**
+     * Several edges may leave it, one per connector (bot-os.md D97): its node sends through each
+     * (`ctx.outboxes`), as `owner-notice` tells the owner on Telegram and IRC at once. Without it,
+     * one edge.
+     */
+    many: z.literal(true).optional(),
+    /**
+     * An edge from it that names no chat sends to its connector's owner's chat (bot-os.md D95,
+     * D97: `Connector.owner()`, a `telegram-bot`'s `owner`), which the outbox lets it reach.
+     */
+    owner: z.literal(true).optional(),
+    /**
+     * Its edge names exactly one chat (bot-os.md D97), the one its node sends to (`OutboxHandle.
+     * chats()`), matching `pattern` (a regular expression) when given; `expected` says what it is,
+     * in the check's words (`the bot's @username`).
+     */
+    single: z
+      .strictObject({
+        pattern: z.string().min(1).optional(),
+        expected: z.string().min(1).optional(),
+      })
+      .optional(),
     ...common,
     bind: z
       .strictObject({

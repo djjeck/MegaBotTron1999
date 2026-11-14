@@ -275,3 +275,62 @@ describe('the context’s connector services', () => {
     ).toThrow('only a connector may hold secrets');
   });
 });
+
+describe('the context’s ways out of an output of many edges (D97)', () => {
+  /** A node that tells through every edge of its output, to the owner where an edge names none. */
+  const teller = (seen: PluginContext[]) =>
+    definePlugin({
+      manifest: {
+        id: 'teller',
+        version: '0.1.0',
+        kinds: ['stats'],
+        description: 'tells',
+        outputs: { chat: { type: 'chat-out', many: true, owner: true } },
+      },
+      create: (ctx) => {
+        seen.push(ctx);
+        return {};
+      },
+    });
+  const connector = (id: string, c: FakeConnector) =>
+    definePlugin({
+      manifest: { id, version: '0.1.0', kinds: ['connector'], description: id, account: c.account },
+      create: () => ({ connector: c }),
+    });
+
+  it('gives one per connector, each with its chats, the owner’s for an edge naming none', async () => {
+    const seen: PluginContext[] = [];
+    const bot = new FakeConnector({ account: 'telegram-bot:ExampleBot', owner: '1000000002' });
+    const irc = new FakeConnector({ account: 'irc:alice' });
+    const kit = new DevKit({
+      start: T0,
+      plugins: [connector('bot', bot), connector('irc', irc), teller(seen)],
+      graph: {
+        version: 2,
+        nodes: [
+          { id: 'bot', plugin: 'bot' },
+          { id: 'irc', plugin: 'irc' },
+          { id: 'teller', plugin: 'teller' },
+        ],
+        edges: [
+          { from: 'teller.chat', to: 'bot.chat', type: 'chat-out' },
+          { from: 'teller.chat', to: 'irc.chat', type: 'chat-out', sends: ['#lobby', 'bob'] },
+        ],
+      },
+    });
+    await kit.start();
+    bot.open();
+    irc.open();
+    const ctx = seen[0] as PluginContext;
+    const outs = ctx.outboxes('chat');
+    expect(outs.map((o) => [o.account, o.chats()])).toEqual([
+      ['telegram-bot:ExampleBot', ['1000000002']],
+      ['irc:alice', ['#lobby', 'bob']],
+    ]);
+    // The owner's chat is let through, as the edge names none; another is not.
+    expect(outs[0]?.send('1000000002', 'hello').outcome).toBe('sent');
+    expect(outs[0]?.send('5', 'hello')).toMatchObject({ outcome: 'refused' });
+    expect(ctx.outboxes('nope')).toEqual([]);
+    await kit.stop();
+  });
+});

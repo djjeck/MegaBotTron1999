@@ -84,12 +84,14 @@ import {
   EMPTY_GRAPH,
   endOf,
   instanceOf,
+  ownerOf,
   placeProblems,
   placeWarnings,
   portChanged,
   removeEdge,
   removeNode,
   sameGraph,
+  syncEdgeChats,
   updateEdge,
   updateNode,
   viewOf,
@@ -700,7 +702,11 @@ export function GraphPage({
         groups={groupsOf(draft.nodes)}
         change={(c, moved) =>
           change((g) => {
-            const next = updateNode(g, shownNode.id, c);
+            const before = g.nodes.find((n) => n.id === shownNode.id)?.config;
+            let next = updateNode(g, shownNode.id, c);
+            // A chat its config picks goes on the edge that lets it send there, or read it (D97).
+            if ('config' in c)
+              next = syncEdgeChats(next, shownNode.id, view.configChats ?? [], before, c.config);
             return moved === undefined ? next : portChanged(next, shownNode.id, moved);
           })
         }
@@ -734,17 +740,29 @@ export function GraphPage({
         }}
       />
     );
-  } else if (shownEdge !== undefined)
+  } else if (shownEdge !== undefined) {
+    const ends = { from: endOf(shownEdge.from), to: endOf(shownEdge.to) };
+    const fromNode = draft.nodes.find((n) => n.id === ends.from.node);
+    const toNode = draft.nodes.find((n) => n.id === ends.to.node);
+    const connector = shownEdge.type === 'chat-out' ? toNode : fromNode;
     side = (
       <EdgeDetails
         key={edgeKey(shownEdge)}
         edge={shownEdge}
         problems={placed.edges.get(edgeKey(shownEdge)) ?? []}
         warnings={warned.edges.get(edgeKey(shownEdge)) ?? []}
-        connector={draft.nodes.find(
-          (n) =>
-            n.id === (shownEdge.type === 'chat-out' ? shownEdge.to : shownEdge.from).split('.')[0]
-        )}
+        connector={connector}
+        output={
+          fromNode === undefined || ends.from.port === undefined
+            ? undefined
+            : pluginOf(fromNode)?.outputs[ends.from.port]
+        }
+        input={
+          toNode === undefined || ends.to.port === undefined
+            ? undefined
+            : pluginOf(toNode)?.inputs[ends.to.port]
+        }
+        owner={connector === undefined ? undefined : ownerOf(connector, pluginOf(connector))[0]}
         change={(c) => change((g) => updateEdge(g, edgeKey(shownEdge), c))}
         remove={() => {
           change((g) => removeEdge(g, edgeKey(shownEdge)));
@@ -752,6 +770,7 @@ export function GraphPage({
         }}
       />
     );
+  }
 
   const selection = [...selected.nodes, ...selected.edges];
   const needs =

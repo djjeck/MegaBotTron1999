@@ -5,6 +5,7 @@
  * apart from React. Nothing here checks the graph: the core does (`POST /graph/check`).
  */
 import type {
+  ConfigChatView,
   Graph,
   GraphEdge,
   GraphNode,
@@ -202,20 +203,126 @@ export function edgeOf(
   views: Readonly<Record<string, PluginView>> = {}
 ): GraphEdge {
   const from = g.nodes.find((n) => n.id === c.source);
-  const output =
-    c.sourceHandle == null
-      ? undefined
-      : (views[c.source] ?? plugins.get(from?.plugin ?? ''))?.outputs[c.sourceHandle];
+  const targetId = c.target.endsWith('::out') ? c.target.slice(0, -'::out'.length) : c.target;
+  const to = g.nodes.find((n) => n.id === targetId);
+  const fromView = views[c.source] ?? plugins.get(from?.plugin ?? '');
+  const toView = views[targetId] ?? plugins.get(to?.plugin ?? '');
+  const output = c.sourceHandle == null ? undefined : fromView?.outputs[c.sourceHandle];
   const type = output?.type;
   // A chat-out output that declares its commands (D74): its edge starts allowing those.
   const commands = output?.type === 'chat-out' ? output.commands : undefined;
+  // The chats its node's config names already (D97): the edge starts with them; one from an
+  // output that tells the owner, naming none, with its connector's owner's chat.
+  const sends =
+    type !== 'chat-out'
+      ? []
+      : configChatsOf(from, fromView, (spec) => spec.output === c.sourceHandle);
+  if (type === 'chat-out' && sends.length === 0 && output?.type === 'chat-out' && output.owner)
+    sends.push(...ownerOf(to, toView));
+  const reads =
+    type === 'chat-in'
+      ? configChatsOf(to, toView, (spec) => spec.input === (c.targetHandle ?? ''))
+      : [];
   return {
     from: c.sourceHandle == null ? c.source : `${c.source}.${c.sourceHandle}`,
-    to: `${c.target.endsWith('::out') ? c.target.slice(0, -'::out'.length) : c.target}.${c.targetHandle ?? ''}`,
+    to: `${targetId}.${c.targetHandle ?? ''}`,
     ...(type === undefined ? {} : { type }),
+    ...(reads.length === 0 ? {} : { reads }),
+    ...(sends.length === 0 ? {} : { sends }),
     ...(commands === undefined ? {} : { commands: [...commands] }),
     ...(type === 'chat-out' ? { dryRun: true } : {}),
   };
+}
+
+const sameName = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+const hasName = (list: readonly string[], chat: string): boolean =>
+  list.some((x) => sameName(x, chat));
+
+/**
+ * The chats a config key holds (D96, D97): a chat, a number for one, or a list of them; never a
+ * template (`{chat}`), which no edge can name ahead.
+ */
+export function fixedChats(value: unknown, spec: Pick<ConfigChatView, 'template'>): string[] {
+  const one = (v: unknown): string[] =>
+    typeof v === 'number'
+      ? [String(v)]
+      : typeof v === 'string' && v !== '' && !(spec.template === true && v.includes('{'))
+        ? [v]
+        : [];
+  return Array.isArray(value) ? value.flatMap(one) : one(value);
+}
+
+/** The chats a node's config keys name (`configChats`) that lead through the port `takes` picks. */
+function configChatsOf(
+  node: GraphNode | undefined,
+  view: PluginView | undefined,
+  takes: (spec: ConfigChatView) => boolean
+): string[] {
+  const out: string[] = [];
+  for (const spec of view?.configChats ?? [])
+    if ((spec.output !== undefined || spec.input !== undefined) && takes(spec))
+      for (const chat of fixedChats(node?.config?.[spec.key], spec))
+        if (!hasName(out, chat)) out.push(chat);
+  return out;
+}
+
+/** A connector node's owner's chat (D97), as its config names it (its `owner` key), if any. */
+export function ownerOf(node: GraphNode | undefined, view: PluginView | undefined): string[] {
+  const spec = view?.configChats?.find((x) => x.owner === true);
+  return spec === undefined ? [] : fixedChats(node?.config?.[spec.key], spec).slice(0, 1);
+}
+
+/**
+ * A node's config changed from `before` to `after` (D97): each chat a key with an `output` or an
+ * `input` (`configChats`) picks is written on that port's edges too, the `sends` of a chat-out
+ * edge from it or the `reads` of a chat-in edge to it (one reading every chat, `'*'`, left as it
+ * is), since the edge is what lets it send or read; a pick replaced takes its chat off them, unless
+ * another key of that port still names it. Chats the owner added to an edge by hand stay.
+ */
+export function syncEdgeChats(
+  g: Graph,
+  node: string,
+  specs: readonly ConfigChatView[],
+  before: Readonly<Record<string, unknown>> | undefined,
+  after: Readonly<Record<string, unknown>> | undefined
+): Graph {
+  let out = g;
+  for (const spec of specs) {
+    if (spec.output === undefined && spec.input === undefined) continue;
+    const was = fixedChats(before?.[spec.key], spec);
+    const now = fixedChats(after?.[spec.key], spec);
+    const added = now.filter((c) => !hasName(was, c));
+    const kept = specs
+      .filter((o) => o !== spec && o.output === spec.output && o.input === spec.input)
+      .flatMap((o) => fixedChats(after?.[o.key], o));
+    const gone = was.filter((c) => !hasName(now, c) && !hasName(kept, c));
+    if (added.length === 0 && gone.length === 0) continue;
+    const moved = (list: readonly string[]): string[] => {
+      const next = list.filter((c) => !hasName(gone, c));
+      for (const c of added) if (!hasName(next, c)) next.push(c);
+      return next;
+    };
+    out = {
+      ...out,
+      edges: out.edges.map((e) => {
+        if (
+          spec.output !== undefined &&
+          e.from === `${node}.${spec.output}` &&
+          (e.type === undefined || e.type === 'chat-out')
+        )
+          return { ...e, sends: moved(e.sends ?? []) };
+        if (
+          spec.input !== undefined &&
+          e.to === `${node}.${spec.input}` &&
+          (e.type === undefined || e.type === 'chat-in') &&
+          e.reads !== '*'
+        )
+          return { ...e, reads: moved(e.reads ?? []) };
+        return e;
+      }),
+    };
+  }
+  return out;
 }
 
 /**

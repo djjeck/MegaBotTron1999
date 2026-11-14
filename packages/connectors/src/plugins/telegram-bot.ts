@@ -86,9 +86,10 @@ export function telegramBotPlugin(
       // The chats its config lists; unset, every chat (D89). A chat goes by its id and its
       // @username, which its connector tells apart (D90).
       monitors: { config: 'chats', aliases: true },
-      // Its owner and its group are picked among its chats, never typed as ids (D96).
+      // Its owner and its group are picked among its chats, never typed as ids (D96); its owner's
+      // chat is where an owner-notice edge naming no chat sends (D97).
       configChats: [
-        { key: 'owner', kinds: ['private'] },
+        { key: 'owner', kinds: ['private'], owner: true },
         { key: 'group', kinds: ['group'] },
       ],
     },

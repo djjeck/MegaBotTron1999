@@ -2,8 +2,10 @@
  * The base turn-actor (docs/bot-os-api.md §5): one plugin, run as one instance per game bot
  * that may be automated (P3, P17), each bound by its ports to the private
  * chat with its bot and to its bot's parser. An instance sends its `command` (by default
- * `/play`; set it to the bot's own turn command) to its `chat`, from the owner's account, at a
- * person's pace:
+ * `/play`; set it to the bot's own turn command) to its bot's chat, from the owner's account, at a
+ * person's pace. **Its bot's chat is its edges' alone** (bot-os.md D97): the one chat its chat-out
+ * edge sends to, the bot's `@username`, which its chat-in edge reads, and no other (the check
+ * refuses anything else); its config names none:
  *
  * - its planner (packages/turns/src/schedule.ts) counts from the owner's last turn with the
  *   bot: its own, or one sent by hand in that chat (from any device), which plans afresh; the last
@@ -107,10 +109,6 @@ const scheduleShape = z
 
 /** An instance's configuration: where it plays, what it sends, and its pace. */
 export const turnActorConfig = z.object({
-  chat: z
-    .string()
-    .regex(/^@\w{4,}$/u, 'expected the bot’s @username')
-    .describe('The private chat with its bot, picked among its account’s bots (by @username)'),
   command: z
     .string()
     .regex(/^\/\w+$/u, 'expected a command')
@@ -174,8 +172,11 @@ export function turnActorPlugin(): Plugin {
       description:
         "A game bot's turn, from the owner's account, in its private chat, at a person's pace",
       config: turnActorConfig,
-      // Its bot's chat is picked among its account's bots (D96).
-      configChats: [{ key: 'chat', output: 'chat', kinds: ['bot'] }],
+      // Its bot's chat is its edges' (D97); its config's `chat` of 0.1.19 moves there.
+      movedChats: [
+        { key: 'chat', output: 'chat' },
+        { key: 'chat', input: 'chat' },
+      ],
       // Its turns since the last summary, for the owner (bot-os.md D92).
       summary: true,
       games: { registers: [TURN_ACTOR] },
@@ -188,7 +189,9 @@ export function turnActorPlugin(): Plugin {
         chat: {
           type: 'chat-in',
           network: 'telegram',
-          help: "the owner's own account: its bot's private chat, where it sees the turns the owner sends by hand",
+          // It reads the one chat it sends to, and no other (D97).
+          sameAs: 'chat',
+          help: "the owner's own account: its bot's private chat, where it sees the turns the owner sends by hand; it reads the chat its chat output sends to",
         },
         parser: {
           type: 'interface',
@@ -200,7 +203,9 @@ export function turnActorPlugin(): Plugin {
         chat: {
           type: 'chat-out',
           network: 'telegram',
-          help: "the owner's own account: the private chat with its bot, and its turn command only",
+          // Its edge names its bot's chat, the one it plays in (D97).
+          single: { pattern: String.raw`^@\w{4,}$`, expected: "its bot's @username" },
+          help: "the owner's own account: the private chat with its bot, the one chat its edge names, and its turn command only",
         },
       },
       interface: {
@@ -225,6 +230,8 @@ export function turnActorPlugin(): Plugin {
 class TurnActor {
   private readonly ctx: PluginContext;
   private readonly c: TurnActorConfig;
+  /** Its bot's private chat, the one its chat-out edge names (D97). */
+  private readonly chat: string;
   private readonly planner: Planner;
   private last: number | undefined;
   private plan: Plan | undefined;
@@ -239,6 +246,7 @@ class TurnActor {
   constructor(ctx: PluginContext) {
     this.ctx = ctx;
     this.c = ctx.config as TurnActorConfig;
+    this.chat = ctx.outbox('chat').chats()[0] ?? '';
     this.turns = new Tally(ctx.clock);
     const seed = this.c.seed ?? (ctx.clock.now() ^ hash(ctx.id)) >>> 0;
     this.planner = new Planner(this.c.schedule, new Rng(seed), this.c.nightSalt);
@@ -247,11 +255,11 @@ class TurnActor {
   }
 
   instance() {
-    const bot = this.c.chat.slice(1);
+    const bot = this.chat.slice(1);
     const commands = [this.c.command];
     // A turn the owner sends by hand in the chat, from any device, restarts the count.
     this.ctx.connector('chat').onMessage((m) => {
-      if (m.own !== true || !inChat(m, this.c.chat)) return;
+      if (m.own !== true || !inChat(m, this.chat)) return;
       if (!isTurnCommand(m.text, commands, bot)) return;
       if (this.last !== undefined && m.time <= this.last) return;
       this.remember(m.time);
@@ -277,12 +285,12 @@ class TurnActor {
         this.settle();
         return this.plan === undefined
           ? undefined
-          : `${this.c.chat}: next ${clock(this.plan.at)} UTC`;
+          : `${this.chat}: next ${clock(this.plan.at)} UTC`;
       },
       // Its safety stop: its node stopped, until the owner clears it in the editor.
       kill: () => {
         this.ctx.stop('safety stop');
-        return `${this.c.chat}: stopped`;
+        return `${this.chat}: stopped`;
       },
       interface: { state: { status: () => this.status() } },
     };
@@ -290,7 +298,7 @@ class TurnActor {
 
   private status(): TurnStatus {
     return {
-      chat: this.c.chat,
+      chat: this.chat,
       command: this.c.command,
       ...(this.last === undefined ? {} : { last: this.last }),
       ...(this.plan === undefined ? {} : { next: this.plan.at }),
@@ -348,7 +356,7 @@ class TurnActor {
     const now = this.ctx.clock.now();
     const rest = this.ctx.use<TurnParserInterface>('parser').state.rest();
     if (rest !== undefined && rest.until > now) {
-      this.setPlan(this.planner.after(rest.until), 'rest', `${this.c.chat} rests: ${rest.why}`);
+      this.setPlan(this.planner.after(rest.until), 'rest', `${this.chat} rests: ${rest.why}`);
       return;
     }
     // Through a dry-run edge, nothing is sent: it waits for no connection (D64).
@@ -367,13 +375,13 @@ class TurnActor {
     this.waiting = false;
     this.sending = true;
     try {
-      const r = await this.ctx.outbox('chat').deliver(this.c.chat, this.c.command);
+      const r = await this.ctx.outbox('chat').deliver(this.chat, this.c.command);
       const t = this.ctx.clock.now();
       if (r.outcome === 'sent' || r.outcome === 'dry-run') {
         if (r.outcome === 'sent')
           this.ctx
             .use<TurnParserInterface>('parser')
-            .actions.sent({ chat: this.c.chat, ...(r.id === undefined ? {} : { id: r.id }), t });
+            .actions.sent({ chat: this.chat, ...(r.id === undefined ? {} : { id: r.id }), t });
         this.remember(t);
         this.turns.add(r.outcome);
         this.step(
@@ -414,7 +422,7 @@ class TurnActor {
   private step(event: TurnStep['event'], detail: string): void {
     this.ctx.bus.publish(`${TURN_ACTOR}.step`, {
       actor: this.ctx.id,
-      chat: this.c.chat,
+      chat: this.chat,
       event,
       detail,
     } satisfies TurnStep);
