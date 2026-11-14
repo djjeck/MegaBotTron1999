@@ -231,9 +231,10 @@ it (its defaults included; as written when the schema refuses it): the key's val
 is the port's everywhere: the graph's check compares it with the output an edge binds
 (`events of dice cannot bind events of cards`), the default graph binds it to the nodes registering
 it, the node's `ctx.bus.subscribe` and `ctx.events.read` allow it, `GET /graph/view` draws it on the
-node (with the `config` key it came from), and the editor resolves it from the draft's config as
-written (`GET /available` gives the key, `config`, and no `namespace`). A node whose config leaves a
-required one unresolved is refused, naming the node
+node (with the `config` key it came from), and the editor draws it as `POST /graph/check` resolves
+it for the draft (its `inputs`, defaults included), reading the draft's config as written only for a
+node the check has not seen yet (`GET /available` gives the key, `config`, and no `namespace`). A
+node whose config leaves a required one unresolved is refused, naming the node
 (`node r: input port events: its namespace comes from config on, which is not set`), and so is one
 whose value names no namespace; an optional one whose key is not set is not there: the node has no
 such port, and an edge to it is refused. `resolveInputs` (`packages/core/src/ports.ts`) resolves
@@ -569,7 +570,9 @@ as written decide. Other checks may add warnings in the same list.
   `added`, `removed` and `changed` (with the fields that changed), and the edges `added`, `removed`
   and `changed` (with the fields that changed), by their two ends; and `views`, each node whose
   ports its config declares (§2, bot-os.md D74) as the editor draws it (`describePlugin` of its own
-  manifest), whether or not the graph checks.
+  manifest), whether or not the graph checks; and `inputs`, each node's input ports by node, as the
+  check resolves them from its config (§2.1: its schema's defaults included, a node's own manifest
+  for such a node), which the editor draws rather than resolving them again (#6).
 - `PUT /graph/file`, a graph as the body: checked, then saved as the core holds it (each edge's ends
   and type written out), and kept as a version of the history; `saved` (false when nothing changed),
   `restart` (whether it differs from what runs) and its `warnings` (saved all the same). A graph

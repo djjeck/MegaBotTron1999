@@ -434,6 +434,29 @@ describe('the draft', () => {
     expect(gone).not.toHaveProperty('account');
   });
 
+  it('draws a node’s inputs as the check resolved them, once it has (#6)', () => {
+    const plugin = {
+      ...(plugins.get('chat') as PluginView),
+      inputs: {
+        heard: { type: 'events', config: 'on', label: 'events of config on', optional: false },
+      },
+    } as PluginView;
+    const node = { id: 'ears', plugin: 'chat' };
+    // Not seen by the check yet: from its config as written, which names no namespace.
+    expect(viewOf(node, plugin).inputs['heard']).not.toHaveProperty('namespace');
+    // The check's: its schema's default resolved.
+    const resolved = {
+      heard: {
+        type: 'events',
+        namespace: 'dice',
+        config: 'on',
+        label: 'events of dice',
+        optional: false,
+      },
+    } as const;
+    expect(viewOf(node, plugin, resolved).inputs).toEqual(resolved);
+  });
+
   it('resolves an events input whose namespace a node’s config names, as the core does', () => {
     const ports = {
       heard: { type: 'events', config: 'on', label: 'events of config on', optional: false },

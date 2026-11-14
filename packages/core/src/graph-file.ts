@@ -88,6 +88,8 @@ export interface GraphChecker {
   graphProblems(): GraphProblem[];
   /** The nodes whose ports their config declares, as the editor draws them (bot-os.md D74). */
   nodeViews?(raw: unknown): Record<string, unknown>;
+  /** Each node's input ports as the check resolves them from its config, by node (#6). */
+  nodeInputs?(raw: unknown): Record<string, unknown>;
   /**
    * A graph written to the file (a save or a rollback), after the one before it: the audited
    * config keys it changed are recorded, with who wrote it (bot-os.md D75).
@@ -596,6 +598,8 @@ export function graphFileControls(
         text: checked.ok ? graphText(checked.graph) : textOf(raw),
         // The nodes whose ports their config declares (D74), drawn as the draft declares them.
         ...(core.nodeViews === undefined ? {} : { views: core.nodeViews(current(raw)) }),
+        // Each node's inputs as the core resolves them from its config, defaults included (#6).
+        ...(core.nodeInputs === undefined ? {} : { inputs: core.nodeInputs(current(raw)) }),
       });
     },
     save: (raw, by) => {

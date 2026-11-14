@@ -272,10 +272,13 @@ export function GraphPage({
     (n: GraphNode) => declared?.[n.id] ?? plugins.get(n.plugin),
     [declared, plugins]
   );
-  const views = useMemo(
-    () => (draft?.nodes ?? []).map((n) => viewOf(n, pluginOf(n))),
-    [draft, pluginOf]
+  // Each node's inputs as the core resolves them (#6), once the check has seen it.
+  const resolved = check?.inputs;
+  const nodeView = useCallback(
+    (n: GraphNode) => viewOf(n, pluginOf(n), resolved?.[n.id]),
+    [pluginOf, resolved]
   );
+  const views = useMemo(() => (draft?.nodes ?? []).map(nodeView), [draft, nodeView]);
   const viewsById = useMemo(() => new Map(views.map((v) => [v.id, v])), [views]);
   /** Each node's cards: one, or a connector's in and out cards (D60). */
   const cards = useMemo(() => views.flatMap(cardsOf), [views]);
@@ -682,7 +685,7 @@ export function GraphPage({
       />
     );
   else if (shownNode !== undefined) {
-    const view = viewOf(shownNode, pluginOf(shownNode));
+    const view = nodeView(shownNode);
     side = (
       <NodeDetails
         key={shownNode.id}
@@ -760,7 +763,7 @@ export function GraphPage({
         input={
           toNode === undefined || ends.to.port === undefined
             ? undefined
-            : pluginOf(toNode)?.inputs[ends.to.port]
+            : nodeView(toNode).inputs[ends.to.port]
         }
         owner={connector === undefined ? undefined : ownerOf(connector, pluginOf(connector))[0]}
         change={(c) => change((g) => updateEdge(g, edgeKey(shownEdge), c))}

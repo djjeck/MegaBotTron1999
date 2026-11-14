@@ -453,6 +453,19 @@ export function describePlugin(m: Manifest): PluginView {
 }
 
 /**
+ * A node's input ports as the editor draws them, resolved from its config (§2.1, `nodeInputs`):
+ * each with what its manifest declared (the config key its namespace comes from, its `when`).
+ */
+export function describeInputs(
+  m: Manifest,
+  ports: Readonly<Record<string, InputPort>>
+): Record<string, PortView> {
+  return Object.fromEntries(
+    Object.entries(ports).map(([k, p]) => [k, inputView(p, m.inputs[k] ?? p)])
+  );
+}
+
+/**
  * Each node of the graph as the graph view shows it: its plugin's manifest (`describePlugin`), with
  * the node's own account and configuration, and its input ports as its config resolves them (§2.1):
  * the ones given, or resolved from the graph's node.
@@ -469,9 +482,7 @@ export function describeNodes(
     return {
       id,
       ...plugin,
-      inputs: Object.fromEntries(
-        Object.entries(resolved).map(([k, p]) => [k, inputView(p, m.inputs[k] ?? p)])
-      ),
+      inputs: describeInputs(m, resolved),
       ...(account === undefined ? {} : { account }),
       ...(node?.config === undefined ? {} : { config: node.config }),
     };

@@ -36,6 +36,7 @@ import {
   GraphError,
   type GraphInput,
   loadOrder,
+  nodeInputs,
   nodeManifest,
   nodeStates,
   requiredOf,
@@ -51,7 +52,13 @@ import {
   sameGraph,
   type SaveBy,
 } from './graph-file.ts';
-import { describePlugin, type PluginView, stableJson } from './graph-view.ts';
+import {
+  describeInputs,
+  describePlugin,
+  type PluginView,
+  type PortView,
+  stableJson,
+} from './graph-view.ts';
 import { type InstanceInfo, InstanceRegistry } from './instance-registry.ts';
 import { type Manifest, parseManifest, SECRET_NAME } from './manifest.ts';
 import { type Notice, Notices } from './notices.ts';
@@ -1189,6 +1196,37 @@ export class Core {
       const config = isObject(n['config']) ? n['config'] : undefined;
       const { manifest, problem } = nodeManifest(base, n['id'], config);
       if (problem === undefined) out[n['id']] = describePlugin(manifest);
+    }
+    return out;
+  }
+
+  /**
+   * Each node's input ports, as the check resolves them (§2.1): from its config as its plugin's
+   * schema makes it, defaults included (as written when the schema refuses it), and from its own
+   * manifest for a node whose ports its config declares (D74); by node, for the editor to draw
+   * what the core will run rather than resolve them again from the config as written (#6). A node
+   * of a plugin not offered is left out (the check says why).
+   */
+  nodeInputs(raw: unknown): Record<string, Record<string, PortView>> {
+    const nodes =
+      isObject(raw) && Array.isArray(raw['nodes'])
+        ? (raw['nodes'] as unknown[])
+        : ([] as unknown[]);
+    const out: Record<string, Record<string, PortView>> = {};
+    for (const n of nodes) {
+      if (!isObject(n) || typeof n['id'] !== 'string' || typeof n['plugin'] !== 'string') continue;
+      const plugin = this.plugins.find((p) => p.manifest.id === n['plugin']);
+      if (plugin === undefined) continue;
+      let base: Manifest;
+      try {
+        base = parseManifest(plugin.manifest);
+      } catch {
+        continue;
+      }
+      const config = isObject(n['config']) ? n['config'] : undefined;
+      const manifest =
+        base.node === undefined ? base : nodeManifest(base, n['id'], config).manifest;
+      out[n['id']] = describeInputs(manifest, nodeInputs(manifest, config).ports);
     }
     return out;
   }

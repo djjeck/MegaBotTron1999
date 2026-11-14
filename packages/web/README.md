@@ -10,42 +10,43 @@ the server that guards them.
   restart); both bars stay, and only the page between them scrolls. The home page is the **Graph**
   (`#/graph`, `src/ui/graph/`), the graph editor (docs/bot-os.md D55), drawn with React Flow
   (`@xyflow/react`): a draft of the saved graph, each plugin instance a node with its input ports on
-  the left and its output ports on the right, each port type in its own shape and colour, each
-  binding an edge in its type's colour, dashed when the input is optional, and on each node its
-  state and drift (docs/bot-os.md D64): disabled, greyed; stopped, in red tones with a warning icon
-  and its reason; inactive, greyed with the node it needs. The page is the map, filling the area
-  between the bars: its minimap at the top right; what the draft needs (**Review changes**, the
-  problems and warnings, the selection and **Kill selected**) at the top left; the zoom controls and
-  the legend at the bottom left; and **Add a node**, a floating "+" button, at the bottom right. The
-  panel of what is selected opens beside the map (below it on a phone). Chats flow left to right
-  (docs/bot-os.md D60): a connector is drawn as two cards (`cards.ts`), its **in** card
-  (`telegram-user · in`) at the left, whose chat-in output feeds the readers, and its **out** card
-  (`telegram-user · out`) in a column of its own at the right, whose chat-out input takes the
-  senders' edges; one node in the graph file all the same. Each card is placed on its own, either
-  selects the node and opens its panel, and removing it removes both, after a confirmation that
-  names them. An empty graph offers its first node, a connector. **Add a node** lists the plugins
-  offered, by the image and each module (`Palette.tsx`), and asks its id and its instance: fresh, or
-  kept (`AddNode.tsx`); the node added is selected, its panel open on it. An edge is dragged from an
-  output to an input; dropped on the card of a node whose inputs its config declares (a script node,
-  docs/bot-os.md D80), not on a port, it is bound to an input of the node that takes it, or to one
-  added to its config for it (`draft.ts`'s `dropOn`: an events input of the output's namespace, or
-  an interface input of its plugin with no member, to pick in its panel); when several of its inputs
-  take it, to the one bound to that output already or the only one free, else to none, the status
-  naming them, to drop it on the port of one (D84); a rhombus at its midpoint, in its port type's
-  colour (`PortEdge.tsx`), is a button that selects it and opens its panel (`EdgeDetails.tsx`),
-  where a chat-in edge's `reads` (or all the chats its connector monitors) and its `senders`
-  (anyone, or a list with _me_), or a chat-out edge's `sends` and `commands`, are set, the chats
-  read picked among its connector's monitored chats, those sent to among all its chats (sending
-  needs no monitoring, D97), and the words as rows (`Surfaces.tsx`, D62, D63), and where **Remove
-  edge** removes it alone; a connector's own `chats`, what it monitors, are every chat or those
-  picked. **Every chat is picked in one chat picker** (`ChatPicker.tsx`, D96), never typed: an
-  edge's `reads` and `sends`, a connector's `chats`, and each config key a plugin's manifest names
-  (`configChats`: `telegram-bot`'s `owner`, `group` and `deny`, the reactor's `chat` and `in`), from
-  the chats of its connector (its own node, or the one along the node's chat edge; until that edge
-  is drawn, it says to draw it). **A chat named once** (D97): a chat a config key picks for its chat
-  edge is written on that edge too (`draft.ts`'s `syncEdgeChats`: its `sends` or `reads`), replaced
-  there when the pick changes, the chats added to the edge by hand kept; a new edge starts with the
-  chats its node's config names (`edgeOf`), and one from an output that sends to the owner
+  the left (as the core's check resolves them from its config, `POST /graph/check`'s `inputs`) and
+  its output ports on the right, each port type in its own shape and colour, each binding an edge in
+  its type's colour, dashed when the input is optional, and on each node its state and drift
+  (docs/bot-os.md D64): disabled, greyed; stopped, in red tones with a warning icon and its reason;
+  inactive, greyed with the node it needs. The page is the map, filling the area between the bars:
+  its minimap at the top right; what the draft needs (**Review changes**, the problems and warnings,
+  the selection and **Kill selected**) at the top left; the zoom controls and the legend at the
+  bottom left; and **Add a node**, a floating "+" button, at the bottom right. The panel of what is
+  selected opens beside the map (below it on a phone). Chats flow left to right (docs/bot-os.md
+  D60): a connector is drawn as two cards (`cards.ts`), its **in** card (`telegram-user · in`) at
+  the left, whose chat-in output feeds the readers, and its **out** card (`telegram-user · out`) in
+  a column of its own at the right, whose chat-out input takes the senders' edges; one node in the
+  graph file all the same. Each card is placed on its own, either selects the node and opens its
+  panel, and removing it removes both, after a confirmation that names them. An empty graph offers
+  its first node, a connector. **Add a node** lists the plugins offered, by the image and each
+  module (`Palette.tsx`), and asks its id and its instance: fresh, or kept (`AddNode.tsx`); the node
+  added is selected, its panel open on it. An edge is dragged from an output to an input; dropped on
+  the card of a node whose inputs its config declares (a script node, docs/bot-os.md D80), not on a
+  port, it is bound to an input of the node that takes it, or to one added to its config for it
+  (`draft.ts`'s `dropOn`: an events input of the output's namespace, or an interface input of its
+  plugin with no member, to pick in its panel); when several of its inputs take it, to the one bound
+  to that output already or the only one free, else to none, the status naming them, to drop it on
+  the port of one (D84); a rhombus at its midpoint, in its port type's colour (`PortEdge.tsx`), is a
+  button that selects it and opens its panel (`EdgeDetails.tsx`), where a chat-in edge's `reads` (or
+  all the chats its connector monitors) and its `senders` (anyone, or a list with _me_), or a
+  chat-out edge's `sends` and `commands`, are set, the chats read picked among its connector's
+  monitored chats, those sent to among all its chats (sending needs no monitoring, D97), and the
+  words as rows (`Surfaces.tsx`, D62, D63), and where **Remove edge** removes it alone; a
+  connector's own `chats`, what it monitors, are every chat or those picked. **Every chat is picked
+  in one chat picker** (`ChatPicker.tsx`, D96), never typed: an edge's `reads` and `sends`, a
+  connector's `chats`, and each config key a plugin's manifest names (`configChats`:
+  `telegram-bot`'s `owner`, `group` and `deny`, the reactor's `chat` and `in`), from the chats of
+  its connector (its own node, or the one along the node's chat edge; until that edge is drawn, it
+  says to draw it). **A chat named once** (D97): a chat a config key picks for its chat edge is
+  written on that edge too (`draft.ts`'s `syncEdgeChats`: its `sends` or `reads`), replaced there
+  when the pick changes, the chats added to the edge by hand kept; a new edge starts with the chats
+  its node's config names (`edgeOf`), and one from an output that sends to the owner
   (`owner-notice`'s) with its connector's owner's chat, its panel saying so of one left with none.
   `owner-notice` and the turn actor have no chat key: their edges are their only chat setting, the
   turn actor's naming its bot's one chat (its panel says so, and the check). Each chat shows by its

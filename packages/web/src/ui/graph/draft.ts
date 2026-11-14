@@ -445,13 +445,13 @@ export function placeWarnings(warnings: readonly GraphProblem[]): PlacedWarnings
   return out;
 }
 
-/** A node as the editor draws it: its plugin's declarations, with the node's own. */
 /** A namespace, as the core's ids are written. */
 const NAMESPACE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
 /**
  * A node's input ports, each events input whose namespace its config names (`config`) resolved
- * from the node's config as written, as the core resolves it (bot-os-api.md §2.1): the value's
+ * from the node's config as written, as the core resolves it (bot-os-api.md §2.1), until the check
+ * says how the core resolves them (its schema's defaults included, #6): the value's
  * namespace, or its event type's. Unresolved, an optional one is not there, and a required one is
  * left for the check to refuse. A chat-in or events input there only with a config key (`when`,
  * the reactor's `match` and `on`) is not there while the key is unset.
@@ -481,7 +481,16 @@ export function inputsOf(
   return out;
 }
 
-export function viewOf(node: GraphNode, plugin: PluginView | undefined): NodeView {
+/**
+ * A node as the editor draws it: its plugin's declarations, with the node's own; its inputs as the
+ * check resolved them (`POST /graph/check`'s `inputs`, #6), or, for a node the check has not seen
+ * yet (one just added), as `inputsOf` reads them from its config as written.
+ */
+export function viewOf(
+  node: GraphNode,
+  plugin: PluginView | undefined,
+  resolved?: Readonly<Record<string, PortView>>
+): NodeView {
   const base: PluginView = plugin ?? {
     plugin: node.plugin,
     version: '?',
@@ -498,7 +507,7 @@ export function viewOf(node: GraphNode, plugin: PluginView | undefined): NodeVie
   const { account: _, ...rest } = base;
   return {
     ...rest,
-    inputs: inputsOf(base.inputs, node.config),
+    inputs: resolved === undefined ? inputsOf(base.inputs, node.config) : { ...resolved },
     id: node.id,
     ...(account === undefined ? {} : { account }),
     ...(node.config === undefined ? {} : { config: node.config }),

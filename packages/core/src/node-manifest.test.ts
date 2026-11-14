@@ -291,4 +291,50 @@ describe('the editor’s views of such nodes', () => {
     expect(Object.keys(checked.views)).toEqual(['look']);
     await kit.stop();
   });
+
+  it('gives each node’s inputs as the check resolves them, its schema’s defaults included', async () => {
+    const listener = definePlugin({
+      manifest: {
+        id: 'listener',
+        version: '0.1.0',
+        kinds: ['stats'],
+        description: 'Hears what its config says, game by default',
+        config: z.object({ on: z.string().default('game.turn') }),
+        inputs: { heard: { type: 'events', namespace: { config: 'on' } } },
+      },
+      create: () => ({}),
+    });
+    const kit = new DevKit({
+      plugins: [game, declaring(), listener],
+      graph: { version: 2, nodes: [] },
+    });
+    await kit.start();
+    const raw = {
+      version: 2,
+      nodes: [
+        // Its config leaves `on` to its default: the editor, reading the config as written,
+        // would not know its namespace.
+        { id: 'ears', plugin: 'listener' },
+        { id: 'look', plugin: 'declared', config: { hears: 'game' } },
+        { id: 'gone', plugin: 'nowhere' },
+        'not a node',
+      ],
+      edges: [],
+    };
+    const inputs = kit.core.nodeInputs(raw);
+    expect(Object.keys(inputs)).toEqual(['ears', 'look']);
+    expect(inputs['ears']?.['heard']).toEqual({
+      type: 'events',
+      namespace: 'game',
+      config: 'on',
+      label: 'events of game',
+      optional: false,
+    });
+    expect(inputs['look']?.['heard']).toMatchObject({ namespace: 'game' });
+    expect(kit.core.nodeInputs(null)).toEqual({});
+    const file = { read: () => ({ exists: false }) } as unknown as GraphFile;
+    const checked = graphFileControls(file, kit.core).check(raw) as { inputs: object };
+    expect(checked.inputs).toEqual(inputs);
+    await kit.stop();
+  });
 });

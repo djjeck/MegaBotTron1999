@@ -621,6 +621,30 @@ describe('the graph editor', () => {
     expect(core.api.calls).not.toContain('POST /restart {}');
   });
 
+  it('draws a node’s inputs as the check resolves them (#6)', async () => {
+    const core = fakeCore();
+    const check = core.api.routes['POST /graph/check'] as (b: unknown) => [number, unknown];
+    // The core resolves a port the plugin's own declaration leaves to the config (a default).
+    core.api.routes['POST /graph/check'] = (body) => {
+      const [code, answer] = check(body);
+      return [
+        code,
+        {
+          ...(answer as object),
+          inputs: {
+            'actor-a': {
+              heard: { type: 'events', namespace: 'dice', label: 'events of dice', optional: true },
+            },
+          },
+        },
+      ];
+    };
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    const actor = await screen.findByLabelText('node actor-a', {}, slow);
+    await waitFor(() => expect(within(actor).getByTestId('port in heard')).toBeDefined(), slow);
+    expect(within(actor).queryByTestId('port in parser')).toBeNull();
+  });
+
   it('shows an opened node’s defaults filled in, and leaves it unchanged until edited', async () => {
     const core = fakeCore();
     render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);

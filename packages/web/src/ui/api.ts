@@ -137,6 +137,11 @@ export interface GraphCheckView {
    * as the draft's config declares it.
    */
   views?: Record<string, PluginView>;
+  /**
+   * Each node's input ports, by id, as the core resolves them from its config, its schema's
+   * defaults included (#6): what the editor draws, rather than resolving them again.
+   */
+  inputs?: Record<string, Record<string, PortView>>;
 }
 
 /** The graph's history, as `GET /graph/history` gives it (docs/bot-os-api.md §2.3). */
