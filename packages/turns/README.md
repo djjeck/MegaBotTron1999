@@ -33,14 +33,15 @@ a game's player state, the script node, and the node that tells the owner what n
 
 - `ownerNoticePlugin` (`src/owner-notice.ts`): `owner-notice`, a node that tells the owner what
   needs attention (docs/bot-os.md D91, #40): the notices the core and the plugins raise (refused
-  events, coalesced sends, drift, cascades, failures, the graph's warnings, and plugins' own kinds),
-  each kind on or off, grouped and paced per kind (`pace`: a burst gathered for `gatherS`, at most
-  one message every `everyMin`), in plain text naming nodes by id, through its chat-out edge to its
-  `chat` (a `telegram-bot` to the owner's private chat, or `irc`), queued as any send, so a dry-run
-  edge sends nothing. It also sends a summary every `summaryEveryMin` (60) minutes, none when
-  nothing happened, from the lines the core and the plugins contribute (docs/bot-os.md D92, #46),
-  and a notice at each start (`startNotice`). The state plugins, the turn parsers and `turn-actor`
-  contribute their lines (events applied and refused, answers read, turns).
+  events, coalesced sends, drift, cascades, failures, nodes the send-queue watchdog stopped
+  (`stalled`, D93), the graph's warnings, and plugins' own kinds), each kind on or off, grouped and
+  paced per kind (`pace`: a burst gathered for `gatherS`, at most one message every `everyMin`), in
+  plain text naming nodes by id, through its chat-out edge to its `chat` (a `telegram-bot` to the
+  owner's private chat, or `irc`), queued as any send, so a dry-run edge sends nothing. It also
+  sends a summary every `summaryEveryMin` (60) minutes, none when nothing happened, from the lines
+  the core and the plugins contribute (docs/bot-os.md D92, #46), and a notice at each start
+  (`startNotice`). The state plugins, the turn parsers and `turn-actor` contribute their lines
+  (events applied and refused, answers read, turns).
 - `scriptPlugin` (`src/script-plugin.ts`): the `script` node, TypeScript the owner types in the web
   UI (docs/bot-os.md D76), on the ports its config declares (events and interface inputs, chat-out
   outputs with their commands, events of its own; several of a kind, each its own name, D84), its

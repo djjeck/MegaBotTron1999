@@ -3,7 +3,7 @@
  * that needs the owner's attention, as it happens, for a node that tells the owner (`owner-notice`)
  * rather than for the owner to find in the log. One feed per instance:
  *
- * - **raised** by the core (`failed`, `cascade`, `drift`, `coalesced`, `warning`) at the point
+ * - **raised** by the core (`failed`, `cascade`, `drift`, `coalesced`, `warning`, `stalled`) at the point
  *   where it acts, and by a plugin through `ctx.notice` (a state node's `refused`, D72), each with
  *   the node it is about, and one owner-facing line naming nodes by id;
  * - **heard** by the nodes whose manifest declares `notices: true` (`ctx.notices`): each new
@@ -22,6 +22,7 @@ export const NOTICE_KINDS = [
   'cascade',
   'failed',
   'warning',
+  'stalled',
 ] as const;
 export type CoreNoticeKind = (typeof NOTICE_KINDS)[number];
 
@@ -37,7 +38,8 @@ export interface Notice {
    * What happened: an event a state node refused (`refused`), a send several nodes shared
    * (`coalesced`), a parser's drift that paused what acts on it (`drift`), a node a runtime stop's
    * cascade made inactive (`cascade`), a node failed (`failed`), a warning of the graph's check
-   * (`warning`), or a plugin's own kind.
+   * (`warning`), a node the send-queue watchdog paused (`stalled`, bot-os.md D93), or a plugin's
+   * own kind.
    */
   kind: string;
   /** When, in ms. */
@@ -49,7 +51,7 @@ export interface Notice {
   /**
    * What it is, by fields a listener may group by: a refused event's `event` type and `reason`; a
    * coalesced send's `chat`, `text` and the other nodes (`with`); a drift's `paused` nodes; the
-   * reason of a cascade or a failure.
+   * reason of a cascade or a failure; a stall's `account`, `chat`, `command`, `count` and `reason`.
    */
   detail?: Readonly<Record<string, unknown>>;
 }

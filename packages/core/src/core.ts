@@ -19,7 +19,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { type z } from 'zod';
-import { Bus, type BusEvent } from './bus.ts';
+import { Bus, type BusEvent, type BusHandle } from './bus.ts';
 import { type Clock } from './clock.ts';
 import {
   type Buttons,
@@ -27,7 +27,13 @@ import {
   type CommandButton,
   type CommandHandler,
 } from './commands.ts';
-import { type ChatSurface, type Connector, handleOf, type ReadFilter } from './connector.ts';
+import {
+  type ChatSurface,
+  type Connector,
+  handleOf,
+  type Inbound,
+  type ReadFilter,
+} from './connector.ts';
 import { Controls, type StopRecord, type StopSource } from './controls.ts';
 import { Costs, type NodeCost, type OwnCost } from './costs.ts';
 import { DEFAULT_DRIFT, type DriftCounts, DriftMonitor, type DriftRecord } from './drift.ts';
@@ -530,10 +536,37 @@ export class Core {
           this.o.record?.(r);
         },
         notice: (n) => this.notice(n),
+        // The send-queue watchdog (D93): an actor's sends to a chat a parser reads, paused as drift
+        // pauses (P5).
+        watch: (plugin, chat) => this.awaitsAnswers(plugin, account, chat),
+        pause: (plugin, reason) => {
+          this.stopNode(plugin, reason, 'stalled');
+        },
       });
       this.outboxes.set(account, outbox);
     }
     return outbox;
+  }
+
+  /**
+   * Whether a node's sends to a chat wait for an answer, for the send-queue watchdog (D93): it acts
+   * (as drift pauses only what acts, P5), and a node up that registers events reads that chat on the
+   * account (a chat-in edge naming it, without case, or every chat): an answer can be heard.
+   */
+  private awaitsAnswers(plugin: string, account: string, chat: string): boolean {
+    if (this.entries.get(plugin)?.manifest.kinds.includes('actor') !== true) return false;
+    const holder = [...this.entries.values()].find((e) => e.node.account === account);
+    const name = chat.toLowerCase();
+    return [...this.entries.values()].some(
+      (e) =>
+        e.up === true &&
+        e.node.manifest.games.registers.length > 0 &&
+        chatsOf(e.node).some(
+          ([, b]) =>
+            b.node === holder?.id &&
+            (b.chat?.reads === '*' || (b.chat?.reads ?? []).some((r) => r.toLowerCase() === name))
+        )
+    );
   }
 
   /**
@@ -1063,7 +1096,10 @@ export class Core {
       reason: typeof doc.reason === 'string' ? doc.reason : 'stopped',
       time: typeof doc.time === 'string' ? doc.time : new Date(0).toISOString(),
       source:
-        doc.source === 'safety' || doc.source === 'drift' || doc.source === 'owner'
+        doc.source === 'safety' ||
+        doc.source === 'drift' ||
+        doc.source === 'stalled' ||
+        doc.source === 'owner'
           ? doc.source
           : 'owner',
     };
@@ -1461,7 +1497,22 @@ export class Core {
     // Handed back once: a crash before the next stop must not restore it a second time.
     kept.backend.delete(RESTORE);
     const log = this.logger(id);
-    const bus = this.bus.handle(id, entry.manifest, sourcesOf(node), log, node.instance);
+    const own = this.bus.handle(id, entry.manifest, sourcesOf(node), log, node.instance);
+    // The message its node is reading now, through a chat-in edge: an event it publishes meanwhile
+    // is an answer heard from that chat, for the send-queue watchdog (D93); its own messages and
+    // history are none.
+    let reading: Inbound | undefined;
+    const bus: BusHandle = {
+      ...own,
+      publish: (type, payload, t) => {
+        if (reading !== undefined) {
+          const m = reading;
+          reading = undefined;
+          this.outboxes.get(m.account)?.heard(m);
+        }
+        own.publish(type, payload, t);
+      },
+    };
     const scheduler = new PluginScheduler({
       clock: this.o.clock,
       load: () => kept.get(TIMERS) as Record<string, KeptTimer> | undefined,
@@ -1556,7 +1607,13 @@ export class Core {
           ...handle,
           onMessage: (h) =>
             handle.onMessage((m) => {
-              if (entry.up === true) this.costs.time(id, () => h(m));
+              if (entry.up !== true) return;
+              reading = m.own === true || m.playback ? undefined : m;
+              try {
+                this.costs.time(id, () => h(m));
+              } finally {
+                reading = undefined;
+              }
             }),
         };
       },

@@ -26,11 +26,14 @@ never their values.
 - `src/outbox.ts`: an account's outbox: the reach, dry runs and the pace of every send, and its
   queue (docs/bot-os.md D73): one per (connector, chat), the same text of different nodes coalesced,
   each command spaced by its interval, each send dropped when its cancel holds, its node stops or
-  the instance does, and the merges counted since the start, by pair of nodes.
+  the instance does, and the merges counted since the start, by pair of nodes; and its watchdog
+  (docs/bot-os.md D93), which stops an actor whose sends of a command go unanswered too many times
+  in a row.
 - `src/notices.ts`: the owner's notices (docs/bot-os.md D91): what needs the owner's attention,
   raised where it happens (a node failed or made inactive by a stop's cascade, a drift, a send
-  coalesced, the load's warnings, and a plugin's own through `ctx.notice`), and heard by a node
-  whose manifest declares `notices: true` (`ctx.notices`), those since the start first.
+  coalesced, a node the send-queue watchdog stopped, the load's warnings, and a plugin's own through
+  `ctx.notice`), and heard by a node whose manifest declares `notices: true` (`ctx.notices`), those
+  since the start first.
 - `src/summary.ts`: the owner's summary (docs/bot-os.md D92): the lines each plugin whose manifest
   declares `summary: true` contributes for a window (`ctx.summary.contribute`), after the core's own
   (each node's sends by outcome, the notices by kind), collected by a node that tells them; the

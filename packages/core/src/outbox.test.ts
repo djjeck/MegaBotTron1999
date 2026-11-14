@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { VirtualClock } from './clock.ts';
 import { type Connector, ConnectorBase } from './connector.ts';
 import { Core } from './core.ts';
+import { type Notice } from './notices.ts';
 import {
+  DEFAULT_UNANSWERED_AT,
   FloodWait,
   isMode,
+  type Limits,
   Modes,
   modesIn,
   Outbox,
@@ -375,5 +378,160 @@ describe('the outboxes of the core', () => {
     );
     expect(records.filter((r) => r.type === 'core.send')).toHaveLength(7);
     expect(connector.sent).toEqual([]);
+  });
+});
+
+describe('the send-queue watchdog (D93)', () => {
+  /** An outbox whose senders are all watched, with every pause and notice kept. */
+  function watched(
+    o: { limits?: Limits; dryRun?: readonly string[]; watch?: (p: string) => boolean } = {}
+  ) {
+    const clock = new VirtualClock(0);
+    const connector = new FakeConnector('test:me', 'test');
+    const paused: [string, string][] = [];
+    const notices: Omit<Notice, 't'>[] = [];
+    const outbox = new Outbox({
+      account: 'test:me',
+      connector: () => connector,
+      limits: () => o.limits,
+      clock,
+      policy: (plugin) => ({
+        reach: {
+          sends: ['#lobby'],
+          ...(o.dryRun?.includes(plugin) === true ? { dryRun: true } : {}),
+        },
+      }),
+      watch: (plugin) => o.watch?.(plugin) ?? true,
+      pause: (plugin, reason) => paused.push([plugin, reason]),
+      notice: (n) => notices.push(n),
+    });
+    return { clock, connector, outbox, paused, notices };
+  }
+
+  it('counts the sends of a command gone unanswered, and pauses the node at the threshold', () => {
+    const { connector, outbox, paused, notices } = watched({ limits: { unansweredAt: 3 } });
+    const p = outbox.as('p');
+    for (let i = 0; i < 3; i++) expect(p.send('#lobby', `/inventory ${i}`).outcome).toBe('sent');
+    // Another command, another count.
+    expect(p.send('#lobby', '/give alice sword').outcome).toBe('sent');
+    const reason = 'stalled: 3 sends of /inventory to #lobby went unanswered';
+    expect(p.send('#lobby', '/inventory')).toEqual({
+      text: '/inventory',
+      outcome: 'refused',
+      reason: `stopped: ${reason}`,
+    });
+    expect(paused).toEqual([['p', reason]]);
+    expect(notices).toEqual([
+      {
+        kind: 'stalled',
+        node: 'p',
+        text: 'p sent /inventory to #lobby 3 times with no answer read from it; stopped until you clear the stop in the editor',
+        detail: { account: 'test:me', chat: '#lobby', command: '/inventory', count: 3, reason },
+      },
+    ]);
+    expect(connector.sent).toHaveLength(4);
+  });
+
+  it('starts again once an event is read from the chat, by any of its names', async () => {
+    const { outbox, paused } = watched({ limits: { unansweredAt: 2 } });
+    const p = outbox.as('p');
+    p.send('#lobby', '/inventory');
+    p.send('#lobby', '/inventory');
+    // Answered, by another of the chat's names, without case.
+    outbox.heard({ chat: '-100123', aliases: ['#LOBBY'] });
+    p.send('#lobby', '/inventory');
+    // Another chat's answer is not this one's.
+    outbox.heard({ chat: '#elsewhere' });
+    expect((await p.deliver('#lobby', '/inventory')).outcome).toBe('sent');
+    expect(paused).toEqual([]);
+    expect((await p.deliver('#lobby', '/inventory')).reason).toBe(
+      'stopped: stalled: 2 sends of /inventory to #lobby went unanswered'
+    );
+    expect(paused).toHaveLength(1);
+  });
+
+  it('keeps each node its own count, per command its threshold, and may be off', () => {
+    const { outbox, paused } = watched({
+      limits: { unansweredAt: 2, unansweredAtBy: { '/look': 0, '/turn': 4 } },
+    });
+    const [p, q] = [outbox.as('p'), outbox.as('q')];
+    for (let i = 0; i < 6; i++) expect(p.send('#lobby', '/look').outcome).toBe('sent');
+    for (let i = 0; i < 4; i++) expect(p.send('#lobby', '/turn').outcome).toBe('sent');
+    expect(p.send('#lobby', '/turn').outcome).toBe('refused');
+    p.send('#lobby', '/buy');
+    q.send('#lobby', '/buy');
+    p.send('#lobby', '/buy');
+    expect(q.send('#lobby', '/buy').outcome).toBe('sent');
+    expect(paused.map(([node]) => node)).toEqual(['p']);
+    expect(p.send('#lobby', '/buy').outcome).toBe('refused');
+    // Off for the whole account.
+    const off = watched({ limits: { unansweredAt: 0 } });
+    for (let i = 0; i < 20; i++) off.outbox.send('p', '#lobby', '/look');
+    expect(off.paused).toEqual([]);
+  });
+
+  it('defaults to DEFAULT_UNANSWERED_AT, and counts no node it does not watch', () => {
+    const { outbox, paused } = watched({ watch: (p) => p === 'p' });
+    for (let i = 0; i < DEFAULT_UNANSWERED_AT; i++) outbox.send('p', '#lobby', '/look');
+    for (let i = 0; i < 2 * DEFAULT_UNANSWERED_AT; i++) outbox.send('q', '#lobby', '/look');
+    expect(paused).toEqual([]);
+    expect(outbox.send('p', '#lobby', '/look').outcome).toBe('refused');
+    expect(paused.map(([node]) => node)).toEqual(['p']);
+  });
+
+  it('never counts a dry run', async () => {
+    const { outbox, paused } = watched({ limits: { unansweredAt: 1 }, dryRun: ['p'] });
+    const p = outbox.as('p');
+    for (let i = 0; i < 5; i++) expect(p.send('#lobby', '/look').outcome).toBe('dry-run');
+    expect((await p.deliver('#lobby', '/look')).outcome).toBe('dry-run');
+    expect((await p.enqueue('#lobby', '/look')).outcome).toBe('dry-run');
+    expect(paused).toEqual([]);
+  });
+
+  it('counts each live node of a coalesced send, and refuses the share of one it pauses', async () => {
+    const { clock, outbox, paused, connector } = watched({
+      limits: { unansweredAt: 2, minIntervalMs: 1000 },
+      dryRun: ['d'],
+      watch: (node) => node !== 'x',
+    });
+    const [p, q, d] = [outbox.as('p'), outbox.as('q'), outbox.as('d')];
+    /** One send for p, q and d, coalesced while the account's pace holds it. */
+    const round = () => {
+      outbox.send('x', '#lobby', '/ping');
+      const all = Promise.all([
+        p.enqueue('#lobby', '/inventory'),
+        q.enqueue('#lobby', '/inventory'),
+        d.enqueue('#lobby', '/inventory'),
+      ]);
+      clock.advance(1000);
+      return all;
+    };
+    expect((await round()).map((r) => r.outcome)).toEqual(['sent', 'sent', 'dry-run']);
+    expect((await round()).map((r) => r.outcome)).toEqual(['sent', 'sent', 'dry-run']);
+    // Both at the threshold: each paused, its share refused; the dry run goes, as a dry run.
+    const third = await round();
+    expect(third.map((r) => r.outcome)).toEqual(['refused', 'refused', 'dry-run']);
+    expect(third[0]?.reason).toBe(
+      'stopped: stalled: 2 sends of /inventory to #lobby went unanswered'
+    );
+    expect(paused.map(([node]) => node)).toEqual(['p', 'q']);
+    expect(connector.sent.filter((s) => s.endsWith('/inventory'))).toHaveLength(2);
+  });
+
+  it('lets the others of a coalesced send go when it pauses one', async () => {
+    const { clock, outbox, paused, connector } = watched({
+      limits: { unansweredAt: 1, minIntervalMs: 1000 },
+    });
+    const [p, q] = [outbox.as('p'), outbox.as('q')];
+    expect((await p.enqueue('#lobby', '/inventory')).outcome).toBe('sent');
+    const both = Promise.all([
+      p.enqueue('#lobby', '/inventory'),
+      q.enqueue('#lobby', '/inventory'),
+    ]);
+    expect(outbox.pending()[0]?.nodes.map((n) => n.plugin)).toEqual(['p', 'q']);
+    clock.advance(1000);
+    expect((await both).map((r) => r.outcome)).toEqual(['refused', 'sent']);
+    expect(paused.map(([node]) => node)).toEqual(['p']);
+    expect(connector.sent).toHaveLength(2);
   });
 });

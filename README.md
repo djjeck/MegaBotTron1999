@@ -12,8 +12,8 @@ chats are read on the left of the graph (chat-in edges, to the parsers) and writ
 ([docs/bot-os.md](docs/bot-os.md) D60). A chat-in edge reads some chats, or any its connector
 monitors, from some senders, or anyone (D62); the chats are picked from the lists the connectors
 give (D63). A node is enabled, disabled by the owner, stopped by exception (a safety stop, drift,
-the owner's kill), or inactive while a node it needs is down; a chat-out edge sends for real or as a
-dry run, logged as sent (D64).
+the send-queue watchdog, the owner's kill), or inactive while a node it needs is down; a chat-out
+edge sends for real or as a dry run, logged as sent (D64).
 
 It knows no game. Games, and what plays them, are plugins on top of it.
 
@@ -146,22 +146,26 @@ export const greeter = definePlugin({
   `turn-actor`, one node per game bot, and the `reactor`, one node per reaction ("when this event is
   heard, or a message matches, send this command", from its config alone, on `react()`, which any
   plugin may call too), the `script` node, and `owner-notice`, which tells the owner what needs
-  attention (refused events, coalesced sends, drift, cascades, failures, the graph's warnings),
-  grouped and paced per kind, through a `telegram-bot` to the owner's private chat or through IRC;
-  everything that knows a game comes from a module.
+  attention (refused events, coalesced sends, drift, cascades, failures, stalled sends, the graph's
+  warnings), grouped and paced per kind, through a `telegram-bot` to the owner's private chat or
+  through IRC; everything that knows a game comes from a module.
 - **Standard services,** implemented once by the shell (D52): SVG to PNG in every plugin's context
   (`ctx.render.svgToPng`), and asking an LLM through the `anthropic` connector (`ask`, with
   structured output), for the plugins an edge binds to it.
 - **States and dry runs** (D64): a node is **enabled**, **disabled** by the owner (in the graph:
-  never started, still checked), **stopped** by exception (a safety stop, drift, the owner's kill or
-  Telegram's stop; kept in its instance across restarts until the owner clears it), or **inactive**
-  while a node its required ports bind is down, at once when that node is stopped at runtime (D65).
-  A chat-out edge that is a **dry run** logs what it would send, as sent, and sends nothing. New
-  nodes start disabled and new chat-out edges dry runs; every state is raised only in the editor,
-  applied with a restart. The modes of before (`read-only`, `dry-run`, `live`) were migrated into
-  them at the first start.
+  never started, still checked), **stopped** by exception (a safety stop, drift, the send-queue
+  watchdog, the owner's kill or Telegram's stop; kept in its instance across restarts until the
+  owner clears it), or **inactive** while a node its required ports bind is down, at once when that
+  node is stopped at runtime (D65). A chat-out edge that is a **dry run** logs what it would send,
+  as sent, and sends nothing. New nodes start disabled and new chat-out edges dry runs; every state
+  is raised only in the editor, applied with a restart. The modes of before (`read-only`, `dry-run`,
+  `live`) were migrated into them at the first start.
 - **Drift:** a parser reports every message it claims but cannot read; past a threshold, the core
   stops the actors that depend on it, and what requires them goes inactive, until the owner looks.
+- **The send-queue watchdog** (D93): an actor that keeps sending one command to a bot's chat with no
+  event read from that chat in between (10 times in a row by default, the connector's
+  `unansweredAt`, per command `unansweredAtBy`, 0 for never) is stopped the way drift stops it, and
+  a `stalled` notice says why; the owner clears the stop in the editor once the parser reads again.
 - **The owner's notices** (D91): what needs the owner's attention is raised where it happens, and an
   `owner-notice` node tells it. Wire it from the editor: add the node, set its `chat` to where the
   owner reads (their private chat with the bot, by their Telegram user id), draw its `chat` edge to

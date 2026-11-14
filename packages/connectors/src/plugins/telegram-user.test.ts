@@ -52,7 +52,13 @@ describe('the telegram-user plugin', () => {
     const made: UserCredentials[] = [];
     const core = new Core({
       clock: new VirtualClock(),
-      config: { 'telegram-user': { chats: [GROUP, '@quiz_bot'] } },
+      config: {
+        'telegram-user': {
+          chats: [GROUP, '@quiz_bot'],
+          unansweredAt: 4,
+          unansweredAtBy: { '/give': 0 },
+        },
+      },
       secrets: secretsWith(USER),
     });
     core.register(telegramUserPlugin({ self: 'alice', client: (c) => (made.push(c), client()) }));
@@ -62,6 +68,11 @@ describe('the telegram-user plugin', () => {
     ]);
     const connector = core.connector('telegram-user');
     expect(connector?.account).toBe('telegram:alice');
+    expect(connector?.limits).toEqual({
+      commandIntervalMs: 0,
+      unansweredAt: 4,
+      unansweredAtBy: { '/give': 0 },
+    });
     await new Promise((r) => setImmediate(r));
     expect(connector?.status().state).toBe('connected');
     await core.stop();

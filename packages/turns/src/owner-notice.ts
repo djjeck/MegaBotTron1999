@@ -9,7 +9,8 @@
  * D72), sends several nodes shared (`coalesced`, D73), a parser's drift that paused what acts on it
  * (`drift`, P5), the nodes a runtime stop made inactive (`cascade`, D65), the nodes failed (`failed`:
  * a crash, a script killed as hung, D81, D85, D87), the graph's warnings at the load (`warning`,
- * D89, D90), and the kinds plugins raise of their own (`other`).
+ * D89, D90), the nodes the send-queue watchdog paused (`stalled`, D93), and the kinds plugins
+ * raise of their own (`other`).
  *
  * **Grouped and paced, per kind** (`pace`): a kind's first notice waits `gatherS` for others of its
  * kind, and two messages of one kind are at least `everyMin` apart; what comes meanwhile goes in
@@ -24,10 +25,6 @@
  * **A start notice at each start** (`startNotice`, D92): the release and commit, the nodes running,
  * those that are not and why, and the graph's warnings; the failures and warnings heard before it
  * go in it, not in messages of their own.
- *
- * **What comes next builds on it** (D91): a send-queue watchdog (#41) raises its own notice kind
- * from the outbox (`OutboxOptions.notice`), which this node tells as `other` until it gets a
- * `KINDS` entry of its own.
  */
 import {
   type Clock,
@@ -65,6 +62,7 @@ export const REPORTED = [
   'drift',
   'cascade',
   'failed',
+  'stalled',
   'warning',
   'other',
 ] as const;
@@ -77,8 +75,8 @@ export interface Pace {
 }
 
 /**
- * Each kind's pace by default: what needs acting on (a failure, a drift, a cascade) goes within
- * seconds, at most every 5 minutes; a burst of refusals or coalesced sends within a minute, at
+ * Each kind's pace by default: what needs acting on (a failure, a drift, a cascade, a node the
+ * watchdog stopped) goes within seconds, at most every 5 minutes; a burst of refusals or coalesced sends within a minute, at
  * most every 10 or 30; the graph's warnings, once at the load.
  */
 export const DEFAULT_PACE: Readonly<Record<Reported, Pace>> = {
@@ -87,6 +85,7 @@ export const DEFAULT_PACE: Readonly<Record<Reported, Pace>> = {
   drift: { gatherS: 10, everyMin: 5 },
   cascade: { gatherS: 10, everyMin: 5 },
   failed: { gatherS: 10, everyMin: 5 },
+  stalled: { gatherS: 10, everyMin: 5 },
   warning: { gatherS: 30, everyMin: 60 },
   other: { gatherS: 60, everyMin: 10 },
 };
@@ -97,6 +96,7 @@ const reportHelp: Record<Reported, string> = {
   drift: "A parser's drift, and what it paused (P5)",
   cascade: 'Nodes a runtime stop made inactive (D65)',
   failed: 'Nodes that failed: a crash, a script killed as hung',
+  stalled: 'Nodes stopped for sending a command again and again with no answer (D93)',
   warning: "The graph's warnings at the load (D89)",
   other: 'Notices of any other kind, raised by plugins',
 };
@@ -201,6 +201,16 @@ export const KINDS: Readonly<Record<Reported, KindSpec>> = {
     byNode: false,
     title: (n) => `${plural(n, 'node')} failed`,
     item: (x) => `${String(x.node)}: ${field(x, 'reason') || x.text}`,
+  },
+  stalled: {
+    byNode: false,
+    title: (n) => `${plural(n, 'node')} stopped: their commands went unanswered`,
+    item: (x) => {
+      const count = x.detail?.['count'];
+      return field(x, 'command') === '' || typeof count !== 'number'
+        ? `${String(x.node)}: ${x.text}`
+        : `${String(x.node)}: ${field(x, 'command')} to ${field(x, 'chat')}, ${plural(count, 'time')}`;
+    },
   },
   warning: {
     byNode: false,
@@ -407,7 +417,7 @@ export function ownerNoticePlugin(): Plugin {
       version: '0.1.0',
       kinds: ['stats'],
       description:
-        'Tells the owner what needs attention (refused events, coalesced sends, drift, cascades, failures, warnings), a summary on a cadence, and a notice at each start',
+        'Tells the owner what needs attention (refused events, coalesced sends, drift, cascades, failures, stalled sends, warnings), a summary on a cadence, and a notice at each start',
       config: ownerNoticeConfig,
       notices: true,
       summary: true,

@@ -39,8 +39,11 @@ export interface PowerDoc {
   off: boolean;
 }
 
-/** Who or what stopped a node (bot-os.md D64). */
-export type StopSource = 'safety' | 'drift' | 'owner';
+/**
+ * Who or what stopped a node (bot-os.md D64): its safety stop, a parser's drift (P5), the
+ * send-queue watchdog (`stalled`, D93), or the owner.
+ */
+export type StopSource = 'safety' | 'drift' | 'stalled' | 'owner';
 
 /** A node's stop, as its instance keeps it (`_stop.json`): why, when, and who or what. */
 export interface StopRecord {

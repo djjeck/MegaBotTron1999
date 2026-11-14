@@ -14,6 +14,12 @@
  *    any hour, dry runs counted;
  * 6. the connector, which may not be connected.
  *
+ * A **watchdog** (bot-os.md D93) stands before a live send of a node that waits for answers (an
+ * actor, to a chat a parser reads): the sends of one command (its first word), by one node, to one
+ * chat, that went without any event read from that chat before the next, are counted; past the
+ * connector's threshold (`unansweredAt`, per command `unansweredAtBy`), the node is paused as drift
+ * pauses (P5) and a `stalled` notice is raised. Dry runs are never counted.
+ *
  * An outbox made outside the core (a module's own, for a game of its own) may still keep its
  * senders' modes (`modes`, module API 1, deprecated): `read-only` refuses, `dry-run` stops before
  * the network, `live` sends.
@@ -47,7 +53,17 @@ export interface Limits {
    * (bot-os.md D73), where the edge names none for it; none: 0.
    */
   commandIntervalMs?: number;
+  /**
+   * How many sends of one command, by one node, to one chat, may go unanswered in a row before the
+   * node is paused (bot-os.md D93); 0: never. None: `DEFAULT_UNANSWERED_AT`.
+   */
+  unansweredAt?: number;
+  /** The same, per command (by first word), over `unansweredAt`; 0 turns a command's off. */
+  unansweredAtBy?: Readonly<Record<string, number>>;
 }
+
+/** How many sends of a command may go unanswered in a row by default (bot-os.md D93). */
+export const DEFAULT_UNANSWERED_AT = 10;
 
 export type SendResult = {
   text: string;
@@ -97,6 +113,26 @@ export const commandIntervalS = z
   .default(0)
   .describe(
     'The least seconds between two queued sends of one command in one chat, where the edge names none (0: only the account’s pace)'
+  );
+
+/**
+ * A connector's send-queue watchdog (bot-os.md D93), fields of its config beside
+ * `commandIntervalS`: how many sends of one command, by one node, to one chat, may go without an
+ * answer in a row before that node is paused; and the same per command.
+ */
+export const unansweredAt = z
+  .number()
+  .int()
+  .min(0)
+  .default(DEFAULT_UNANSWERED_AT)
+  .describe(
+    'How many sends of one command, by one node, to one chat, may go without any event read from that chat before the next, before the node is stopped (0: never)'
+  );
+export const unansweredAtBy = z
+  .record(z.string().min(1), z.number().int().min(0))
+  .optional()
+  .describe(
+    'The same per command, by its first word, such as { "/inventory": 3 }; 0 turns a command’s off'
   );
 
 /**
@@ -211,9 +247,16 @@ export interface OutboxOptions {
   record?: (r: SendRecord | QueueRecord) => void;
   /**
    * What the owner should hear of (bot-os.md D91): a send coalesced across nodes (`coalesced`),
-   * raised as a notice; and any other the queue comes to watch for.
+   * raised as a notice; and a node its watchdog paused (`stalled`, D93).
    */
   notice?: (n: Omit<Notice, 't'>) => void;
+  /**
+   * Whether a sender's sends to a chat wait for an answer (bot-os.md D93): it acts, and a node that
+   * publishes events reads that chat. None: no send is watched.
+   */
+  watch?: (plugin: string, chat: string) => boolean;
+  /** Pauses a node whose sends went unanswered (D93), with why: the core's stop. */
+  pause?: (plugin: string, reason: string) => void;
 }
 
 export interface SendOptions {
@@ -367,6 +410,17 @@ interface Waiting {
   members: Member[];
 }
 
+/** The sends of one command, by one node, to one chat, gone unanswered in a row (D93). */
+interface Unanswered {
+  plugin: string;
+  chat: string;
+  command: string;
+  /** Sends that went without an answer before the next. */
+  count: number;
+  /** The last send waits for its answer still. */
+  open: boolean;
+}
+
 const HOUR = 3_600_000;
 /** A command's first word, as the reach and the intervals name it. */
 const firstWord = (text: string): string => text.split(/\s/u, 1)[0] ?? '';
@@ -387,6 +441,10 @@ export class Outbox {
   /** The sends coalesced since it was made: how many, and per pair of nodes (`[a, b]`, as JSON). */
   private merges = 0;
   private readonly mergedPairs = new Map<string, number>();
+  /** The watchdog's counts (D93), by `[plugin, chat, command]` as JSON, the chat without case. */
+  private readonly unanswered = new Map<string, Unanswered>();
+  /** The queue is being pumped: a pump asked meanwhile (a pause dropping a node's sends) waits. */
+  private pumping = false;
 
   constructor(options: OutboxOptions) {
     this.account = options.account;
@@ -413,8 +471,15 @@ export class Outbox {
 
   send(plugin: string, chat: string, text: string, options: SendOptions = {}): SendResult {
     const v = this.check(plugin, chat, text, options);
-    const result = 'refused' in v ? v.refused : this.attempt(chat, text, v.dryRun);
+    const stalled = 'refused' in v || v.dryRun ? undefined : this.stalled(plugin, chat, text);
+    const result =
+      'refused' in v
+        ? v.refused
+        : stalled !== undefined
+          ? stalled
+          : this.attempt(chat, text, v.dryRun);
     this.sent(chat, text, result);
+    if (result.outcome === 'sent') this.went(plugin, chat, text);
     this.log(plugin, chat, options, result, v.mode);
     return result;
   }
@@ -455,7 +520,10 @@ export class Outbox {
   ): Promise<DeliverResult> {
     const v = this.check(plugin, chat, text, options);
     let result: DeliverResult =
-      'refused' in v ? v.refused : (this.admit(text, v.dryRun) ?? { text, outcome: 'sent' });
+      'refused' in v
+        ? v.refused
+        : ((v.dryRun ? undefined : this.stalled(plugin, chat, text)) ??
+          this.admit(text, v.dryRun) ?? { text, outcome: 'sent' });
     if (result.outcome === 'sent') {
       const connector = this.o.connector();
       const now = this.o.clock.now();
@@ -485,8 +553,72 @@ export class Outbox {
       }
     }
     this.sent(chat, text, result);
+    if (result.outcome === 'sent') this.went(plugin, chat, text);
     this.log(plugin, chat, options, result, v.mode);
     return result;
+  }
+
+  /**
+   * What the chat's parsers read, from a message of `chat` (its `aliases` too, D90) they published
+   * an event for (bot-os.md D93): every send to it waits for an answer no more, and the counts of
+   * its unanswered sends start again.
+   */
+  heard(m: { chat: string; aliases?: readonly string[] | undefined }): void {
+    const names = new Set([m.chat, ...(m.aliases ?? [])].map((c) => c.toLowerCase()));
+    for (const [key, u] of this.unanswered)
+      if (names.has(u.chat.toLowerCase())) this.unanswered.delete(key);
+  }
+
+  private unansweredKey(plugin: string, chat: string, text: string): string {
+    return JSON.stringify([plugin, chat.toLowerCase(), firstWord(text)]);
+  }
+
+  /** The threshold of a command (D93): the connector's for it, else its own, else the default. */
+  private unansweredAt(command: string): number {
+    const limits = this.o.limits?.();
+    return limits?.unansweredAtBy?.[command] ?? limits?.unansweredAt ?? DEFAULT_UNANSWERED_AT;
+  }
+
+  /**
+   * The watchdog (D93), before a live send of a node watched: its sends of the command to the chat
+   * unanswered so far (the last one, still waiting, among them); at the threshold the node is paused
+   * and a `stalled` notice raised, and the send refused with why. Undefined: it may go.
+   */
+  private stalled(plugin: string, chat: string, text: string): SendResult | undefined {
+    if (this.o.watch?.(plugin, chat) !== true) return undefined;
+    const key = this.unansweredKey(plugin, chat, text);
+    const u = this.unanswered.get(key);
+    if (u === undefined) return undefined;
+    const count = u.count + (u.open ? 1 : 0);
+    const at = this.unansweredAt(u.command);
+    if (at <= 0 || count < at) return undefined;
+    this.unanswered.delete(key);
+    const reason = `stalled: ${count} sends of ${u.command} to ${chat} went unanswered`;
+    this.o.pause?.(plugin, reason);
+    this.o.notice?.({
+      kind: 'stalled',
+      node: plugin,
+      text: `${plugin} sent ${u.command} to ${chat} ${count} times with no answer read from it; stopped until you clear the stop in the editor`,
+      detail: { account: this.account, chat, command: u.command, count, reason },
+    });
+    return { text, outcome: 'refused', reason: `stopped: ${reason}` };
+  }
+
+  /**
+   * A live send of a node watched went (D93): it waits for its answer, and the one before it, if
+   * still waiting, is counted unanswered.
+   */
+  private went(plugin: string, chat: string, text: string): void {
+    if (this.o.watch?.(plugin, chat) !== true) return;
+    const key = this.unansweredKey(plugin, chat, text);
+    const u = this.unanswered.get(key);
+    if (u === undefined)
+      this.unanswered.set(key, { plugin, chat, command: firstWord(text), count: 0, open: true });
+    else {
+      // The last one went without an answer before this one.
+      if (u.open) u.count += 1;
+      u.open = true;
+    }
   }
 
   /**
@@ -675,6 +807,17 @@ export class Outbox {
 
   /** Sends the oldest send whose command's interval has passed, when the account may; again. */
   private pump(): void {
+    // A pump asked while one runs (a pause dropping a node's sends as one goes) is the running one's.
+    if (this.pumping) return;
+    this.pumping = true;
+    try {
+      this.pumpNow();
+    } finally {
+      this.pumping = false;
+    }
+  }
+
+  private pumpNow(): void {
     if (this.timer !== undefined) this.o.clock.clearTimeout(this.timer);
     this.timer = undefined;
     for (;;) {
@@ -705,11 +848,14 @@ export class Outbox {
     const going: { m: Member; dryRun: boolean; mode: Mode }[] = [];
     for (const m of w.members) {
       const v = this.check(m.plugin, w.chat, w.text, m.options);
-      if ('refused' in v) {
-        this.log(m.plugin, w.chat, m.options, v.refused, v.mode);
-        m.settle(v.refused);
-        this.queueLog(m.plugin, w.chat, w.text, 'refused', v.refused.reason);
-      } else going.push({ m, dryRun: v.dryRun, mode: v.mode });
+      // A live share of a node its watchdog pauses now (D93) is refused, as a stop's would be.
+      const refused =
+        'refused' in v ? v.refused : v.dryRun ? undefined : this.stalled(m.plugin, w.chat, w.text);
+      if (refused !== undefined) {
+        this.log(m.plugin, w.chat, m.options, refused, v.mode);
+        m.settle(refused);
+        this.queueLog(m.plugin, w.chat, w.text, 'refused', refused.reason);
+      } else if (!('refused' in v)) going.push({ m, dryRun: v.dryRun, mode: v.mode });
     }
     const lead = going.find((g) => !g.dryRun) ?? going[0];
     if (lead === undefined) return;
@@ -727,6 +873,7 @@ export class Outbox {
         ...(result.reason === undefined ? {} : { reason: result.reason }),
       };
       g.m.settle(r);
+      if (outcome === 'sent') this.went(g.m.plugin, w.chat, w.text);
       this.queueLog(g.m.plugin, w.chat, w.text, outcome, result.reason);
     }
   }

@@ -572,6 +572,14 @@ describe('its wording', () => {
         n('failed', 'b', 'b failed'),
       ])
     ).toBe('2 nodes failed:\n- a: x\n- b: b failed');
+    expect(
+      word('stalled', [
+        n('stalled', 'a', 'a sent /look …', { chat: '#lobby', command: '/look', count: 10 }),
+        n('stalled', 'b', 'b sent /turn to @QuestBot 3 times …'),
+      ])
+    ).toBe(
+      '2 nodes stopped: their commands went unanswered:\n- a: /look to #lobby, 10 times\n- b: b sent /turn to @QuestBot 3 times …'
+    );
     expect(word('warning', [n('warning', 'a', 'w1'), n('warning', 'b', 'w2')])).toBe(
       'The graph warns (2):\n- w1\n- w2'
     );
@@ -588,11 +596,12 @@ describe('its wording', () => {
       '3 h',
       '2 h 30 min',
     ]);
-    expect([reportedOf('failed'), reportedOf('watchdog'), reportedOf('other')]).toEqual([
-      'failed',
-      'other',
-      'other',
-    ]);
+    expect([
+      reportedOf('failed'),
+      reportedOf('stalled'),
+      reportedOf('watchdog'),
+      reportedOf('other'),
+    ]).toEqual(['failed', 'stalled', 'other', 'other']);
   });
 
   it('shows each kind’s default pace in its config', () => {

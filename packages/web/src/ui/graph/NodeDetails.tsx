@@ -487,7 +487,9 @@ export function NodeDetails(props: {
               ? 'its safety stop'
               : stop.source === 'drift'
                 ? 'drift'
-                : 'the owner'}{' '}
+                : stop.source === 'stalled'
+                  ? 'the send-queue watchdog'
+                  : 'the owner'}{' '}
             at {stop.time.slice(0, 16).replace('T', ' ')} UTC: {stop.reason}. It stays stopped
             across restarts until its stop is cleared.
           </p>

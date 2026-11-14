@@ -23,6 +23,8 @@ import {
   type Plugin,
   type Surface,
   type SurfaceQuery,
+  unansweredAt,
+  unansweredAtBy,
 } from '@megabottron1999/core';
 import http from 'node:http';
 import { z } from 'zod';
@@ -158,6 +160,8 @@ export const ircConfig = z.object({
     .describe('The least seconds between two sends (the rate limiter)'),
   maxPerHour: z.number().int().min(1).describe('The most sends in any hour (the rate limiter)'),
   commandIntervalS,
+  unansweredAt,
+  unansweredAtBy,
   healthPort: z
     .number()
     .int()
@@ -213,6 +217,8 @@ export function ircPlugin(
           minIntervalMs: c.minIntervalS * 1000,
           maxPerHour: c.maxPerHour,
           commandIntervalMs: c.commandIntervalS * 1000,
+          unansweredAt: c.unansweredAt,
+          ...(c.unansweredAtBy === undefined ? {} : { unansweredAtBy: c.unansweredAtBy }),
         },
       };
       const make = o.client;

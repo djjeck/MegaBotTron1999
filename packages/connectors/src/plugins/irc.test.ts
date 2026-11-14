@@ -144,7 +144,7 @@ describe('the irc plugin in the core', () => {
     };
     const core = new Core({
       clock: new VirtualClock(),
-      config: { irc: IRC_CONFIG },
+      config: { irc: { ...IRC_CONFIG, unansweredAtBy: { '/inventory': 3 } } },
       secrets: secretsWith(IRC_SECRETS),
     });
     core.register(
@@ -183,6 +183,8 @@ describe('the irc plugin in the core', () => {
       minIntervalMs: 3000,
       maxPerHour: 60,
       commandIntervalMs: 0,
+      unansweredAt: 10,
+      unansweredAtBy: { '/inventory': 3 },
     });
     expect(core.connector('reader')).toBeUndefined();
     expect(core.connector('nobody')).toBeUndefined();

@@ -260,6 +260,7 @@ export {
   type CancelWhen,
   type CoalescedView,
   commandIntervalS,
+  DEFAULT_UNANSWERED_AT,
   type DeliverResult,
   FloodWait,
   isMode,
@@ -284,6 +285,8 @@ export {
   type SendRecord,
   type SendResult,
   type TextFormat,
+  unansweredAt,
+  unansweredAtBy,
 } from './outbox.ts';
 export { CORE_COMMANDS, coreCommands, lamp, showValue } from './owner-commands.ts';
 export {

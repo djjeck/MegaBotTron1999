@@ -31,6 +31,8 @@ describe('the telegram-bot plugin', () => {
     expect(tokens).toEqual(['1:abcdef']);
     const connector = core.connector('telegram-bot');
     expect(connector?.account).toBe('telegram-bot:bot');
+    // The send-queue watchdog's threshold, by default (D93).
+    expect(connector?.limits).toEqual({ commandIntervalMs: 0, unansweredAt: 10 });
     expect(connector?.status().state).toBe('connecting');
     listen();
     await new Promise((r) => setImmediate(r));
@@ -93,7 +95,7 @@ describe('the telegram-bot plugin', () => {
     const core = new Core({
       clock: new VirtualClock(),
       secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
-      config: { 'telegram-bot': { owner: AUTHOR, group: GROUP } },
+      config: { 'telegram-bot': { owner: AUTHOR, group: GROUP, unansweredAtBy: { '/turn': 2 } } },
       owner: 'telegram-bot',
     });
     core.register(
@@ -117,6 +119,7 @@ describe('the telegram-bot plugin', () => {
     await core.start();
     await new Promise((r) => setTimeout(r, 20));
     expect(polling).toBe(true);
+    expect(core.connector('telegram-bot')?.limits?.unansweredAtBy).toEqual({ '/turn': 2 });
     const sent = () =>
       stub.calls
         .filter((c) => c.method === 'sendMessage')

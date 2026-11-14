@@ -227,6 +227,27 @@ describe('GraphPage', () => {
     expect(within(parser).getByText('10 read, 2 unread (1 recent)')).toBeDefined();
   });
 
+  it('says in its details that the send-queue watchdog stopped a node (D93)', async () => {
+    const reason = 'stalled: 10 sends of /inventory to #lobby went unanswered';
+    const stop = { reason, time: STOP.time, source: 'stalled' as const };
+    fakeCore({
+      status: {
+        off: false,
+        plugins: status().plugins.map((p) =>
+          p.id === 'actor-a' ? { ...p, state: 'stopped', reason, stop } : p
+        ),
+      },
+    });
+    render(<GraphPage loggedOut={loggedOut} checkAfterMs={0} />);
+    const actor = await screen.findByLabelText('node actor-a', {}, slow);
+    await waitFor(() => expect(actor.className).toContain('state-stopped'), slow);
+    fireEvent.click(actor);
+    const details = await screen.findByLabelText('details of actor-a');
+    expect(
+      within(details).getByText(/by the send-queue watchdog at 2026-11-12 10:00 UTC: stalled: 10/u)
+    ).toBeDefined();
+  });
+
   it('kills the nodes selected, once confirmed, draws a stopped one red, and clears its stop at Apply', async () => {
     let stopped = false;
     const core = fakeCore({
