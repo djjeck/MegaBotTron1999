@@ -16,6 +16,13 @@
  * Telegram delivers an update again when its poll was not confirmed (the process killed before it
  * stopped): each message is delivered to the readers at most once all the same, against the last
  * message id delivered in its chat, kept in its store (`last-seen`, docs/bot-os.md D66).
+ *
+ * Given a deny list (D100, packages/connectors/src/transport/telegram-deny.ts), a command in a group
+ * from someone on it, or their tap on a button there, goes no further: no reader hears it and its
+ * chat surface never answers it; it is counted and recorded (`onDenied`), and answered only with
+ * the owner's reply line, if any. The people it has seen in its groups, which the Bot API cannot
+ * list, it keeps in memory (never in its store) and lists among its surfaces as people it cannot
+ * message, so that the owner picks whom to deny.
  */
 import { autoRetry } from '@grammyjs/auto-retry';
 import {
@@ -32,9 +39,10 @@ import {
   type TextFormat,
 } from '@megabottron1999/core';
 import { Bot, GrammyError } from 'grammy';
-import { type Chat, type Document, type UserFromGetMe } from 'grammy/types';
+import { type Chat, type Document, type Message, type UserFromGetMe } from 'grammy/types';
 import { markdownToTelegramHtml } from 'grammy-switchboard';
 import { SeenLedger } from './seen-ledger.ts';
+import { commandOf, type Denied, type DenyCount, type DenyList } from './telegram-deny.ts';
 
 // A 429 is waited out as Telegram asks, a few times; network errors and 5xx fail the call, so the
 // outbox reports them and the startup retry below keeps its own backoff.
@@ -137,6 +145,11 @@ export const SURFACES_DOC = 'surfaces';
 const SURFACES_LIMIT = 50;
 /** A chat's last activity is kept again only once it moved by this much. */
 const ACTIVE_STEP_MS = 60_000;
+/** How many of the people seen in its groups it keeps in memory, the latest. */
+const MEMBERS_LIMIT = 200;
+/** Why a person seen only in a group is listed as one it cannot message. */
+export const MEMBER_UNREACHABLE =
+  'seen in a group only: the bot can message them once they open it and send it /start';
 
 /** A chat as the bot saw it, as a surface: by its id, the one name a bot can always send to. */
 export function surfaceOf(chat: Chat, lastActive?: number): Surface {
@@ -192,6 +205,10 @@ export interface BotConnectorOptions {
     chat: string;
     send(text: string, buttons: Buttons, format?: TextFormat): Promise<{ id?: string }>;
   };
+  /** Whose commands in a group it drops (D100); none: it drops nothing. */
+  deny?: DenyList;
+  /** Hears each command it drops, once (the event log). */
+  onDenied?: (d: Denied) => void;
 }
 
 /**
@@ -228,6 +245,8 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
   private readonly ledger: SeenLedger;
   /** The chats of `known` Telegram did not give, by id: when it was asked, and why not. */
   private readonly unknown = new Map<string, { at: number; why: string }>();
+  /** The people seen in its groups, by id, in memory only (D100): those it may deny. */
+  private readonly members = new Map<string, Surface>();
 
   constructor(options: BotConnectorOptions) {
     super(options.account, 'telegram');
@@ -246,6 +265,22 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
     this.bot.on('message', async (ctx, next) => {
       const m = ctx.message;
       this.saw(m.chat, m.date * 1000);
+      this.met(m.chat, m.from, m.date * 1000);
+      // A command of someone denied, in a group (D100): dropped, once, and the chain ends here.
+      const sender = this.o.deny?.denies(m.chat, m.from);
+      const command = sender === undefined ? undefined : commandOf(m, this.self());
+      if (sender !== undefined && command !== undefined) {
+        const key = String(m.chat.id);
+        if (this.ledger.covered(key, m.message_id)) return;
+        if (this.monitors(m.chat)) this.ledger.advance(key, m.message_id);
+        const line = this.o.deny?.replyTo(sender);
+        if (line !== undefined)
+          await this.bot.api
+            .sendMessage(m.chat.id, line, { reply_parameters: { message_id: m.message_id } })
+            .catch((e: unknown) => this.o.log(`deny reply failed: ${String(e)}`));
+        this.drop(m.chat, sender, command, line !== undefined);
+        return;
+      }
       const missed = m.date < this.since;
       // News still within its grace (D83): a quick restart costs nothing.
       const grace = this.o.liveGraceMs ?? LIVE_GRACE_S * 1000;
@@ -284,6 +319,59 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
         }
       await next();
     });
+    // A tap of someone denied on a button in a group runs a command too (D100): dropped.
+    this.bot.on('callback_query:data', async (ctx, next) => {
+      const message = ctx.callbackQuery.message;
+      const sender =
+        message === undefined ? undefined : this.o.deny?.denies(message.chat, ctx.from);
+      if (message === undefined || sender === undefined) return next();
+      await ctx.answerCallbackQuery().catch(() => undefined);
+      this.drop(message.chat, sender, ctx.callbackQuery.data.split(' ')[0] ?? '', false);
+    });
+  }
+
+  /** A command dropped (D100): counted, and told to `onDenied`. */
+  private drop(chat: Chat, sender: string, command: string, replied: boolean): void {
+    const d: Denied = {
+      chat: String(chat.id),
+      ...('title' in chat && chat.title !== undefined ? { chatTitle: chat.title } : {}),
+      sender,
+      command,
+      replied,
+    };
+    this.o.deny?.count(d);
+    this.o.log(`denied ${command} of ${sender} in ${d.chatTitle ?? d.chat}`);
+    this.o.onDenied?.(d);
+  }
+
+  /**
+   * A person (or a bot) seen in a group (D100): kept in memory, the latest `MEMBERS_LIMIT`, and
+   * listed among its surfaces as one it cannot message, for the owner's deny list.
+   */
+  private met(chat: Chat, from: Message['from'], at: number): void {
+    if (from === undefined || (chat.type !== 'group' && chat.type !== 'supergroup')) return;
+    const id = String(from.id);
+    const before = this.members.get(id);
+    if (before !== undefined && at - (before.lastActive ?? 0) < ACTIVE_STEP_MS) return;
+    this.members.delete(id);
+    this.members.set(id, {
+      id,
+      title: [from.first_name, from.last_name].filter((x) => x !== undefined).join(' ') || id,
+      kind: from.is_bot ? 'bot' : 'private',
+      ...(from.username === undefined ? {} : { aliases: [`@${from.username}`] }),
+      ...(at === 0 ? {} : { lastActive: at }),
+      unreachable: MEMBER_UNREACHABLE,
+    });
+    // The oldest first, as a Map keeps its insertion order.
+    for (const old of this.members.keys()) {
+      if (this.members.size <= MEMBERS_LIMIT) break;
+      this.members.delete(old);
+    }
+  }
+
+  /** What it has denied since it started (D100): none without a deny list. */
+  denied(): DenyCount {
+    return this.o.deny?.denied() ?? { count: 0 };
   }
 
   /** A message's file (D82): a text file under the limit with its text, any other described. */
@@ -341,6 +429,10 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
     const named = (x: Surface): string[] => [x.title, x.id, ...(x.aliases ?? [])];
     const listed = (): Surface[] => [
       ...Object.values(this.seen),
+      // The people seen in its groups only (D100); one with a private chat is listed by it.
+      ...[...this.members.values()].filter(
+        (x) => this.seen[x.id] === undefined && !this.unknown.has(x.id)
+      ),
       ...[...this.unknown].flatMap(([id, u]): Surface[] => {
         const k = this.o.known?.find((x) => String(x.id) === id);
         if (k === undefined || this.seen[id] !== undefined) return [];

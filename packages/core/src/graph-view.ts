@@ -305,6 +305,8 @@ export interface ConfigChatView {
   template?: true;
   /** A connector's key that names its owner's chat (D97). */
   owner?: true;
+  /** People it recognises, not chats it sends to: picked with no word on reaching them (D100). */
+  sender?: true;
 }
 
 /** One node of the graph, as the graph view shows it: its plugin's declarations, and its own. */

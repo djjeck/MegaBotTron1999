@@ -52,7 +52,12 @@ const view = (surfaces: Surface[], peers?: { connector: string; surfaces: Surfac
   ] as const;
 
 /** The picker over a value it keeps, as a form would. */
-function Harness(props: { initial: string[]; single?: boolean; kinds?: Surface['kind'][] }) {
+function Harness(props: {
+  initial: string[];
+  single?: boolean;
+  kinds?: Surface['kind'][];
+  sender?: boolean;
+}) {
   const [value, setValue] = useState(props.initial);
   return (
     <>
@@ -64,6 +69,7 @@ function Harness(props: { initial: string[]; single?: boolean; kinds?: Surface['
         now={NOW}
         {...(props.single === true ? { single: true } : {})}
         {...(props.kinds === undefined ? {} : { kinds: props.kinds })}
+        {...(props.sender === true ? { sender: true } : {})}
       />
       <output aria-label="value">{JSON.stringify(value)}</output>
     </>
@@ -151,6 +157,29 @@ describe('the chat picker (D96)', () => {
     expect(
       await screen.findByText(/bot cannot reach this chat: a person must message it first/u)
     ).toBeDefined();
+  });
+
+  it('picks people to recognise with no word on reaching them, a peer’s at once (D100)', async () => {
+    const bob: Surface = { id: '@bob_y', title: 'Bob', kind: 'private', aliases: ['6'] };
+    const dan: Surface = { id: '9', title: 'Dan', kind: 'private' };
+    const api = fakeApi({
+      'GET /accounts/bot/surfaces?peers=1': [
+        ...view([OWNER], [{ connector: 'me', surfaces: [bob] }]),
+      ],
+      'GET /accounts/bot/surfaces?search=9&limit=500&peers=1': [
+        ...view([], [{ connector: 'me', surfaces: [dan] }]),
+      ],
+    });
+    render(<Harness initial={['9']} sender />);
+    // A saved one the bot never saw, shown by the name its peer has for them.
+    expect(await screen.findByLabelText('Dan')).toBeDefined();
+    expect(screen.getByLabelText('its owner')).toBeDefined();
+    expect(screen.queryByRole('note')).toBeNull();
+    fireEvent.click(screen.getByLabelText('Bob'));
+    await waitFor(() => expect(valueOf()).toBe('["9","6"]'));
+    expect(screen.getByLabelText('Bob')).toBeDefined();
+    expect(api.calls.filter((c) => c.includes('search=6'))).toEqual([]);
+    expect(screen.queryByRole('note')).toBeNull();
   });
 
   it('shows what is picked while there is no list, and takes a typed chat only where none can be', async () => {

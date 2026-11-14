@@ -3,7 +3,7 @@ import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
 import { describe, expect, it } from 'vitest';
 import { readWarnings } from '#test/monitors.ts';
 import { BOT_INFO, stubBot } from '#test/telegram.ts';
-import { telegramBotPlugin } from './telegram-bot.ts';
+import { telegramBotConfig, telegramBotPlugin } from './telegram-bot.ts';
 
 const AUTHOR = 4242;
 const GROUP = -100123;
@@ -171,5 +171,69 @@ describe('the telegram-bot plugin', () => {
     expect(msgs[1]?.payload['reply_markup']).toBeUndefined();
     expect(JSON.stringify(msgs[2]?.payload['reply_markup'])).toContain('Kill');
     await core.stop();
+  });
+
+  it('drops the group commands of those it denies, records and counts each (D100)', async () => {
+    const stub = stubBot();
+    stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
+    stub.bot.start = () => new Promise<void>(() => {});
+    stub.bot.stop = () => Promise.resolve();
+    const records: { type: string }[] = [];
+    const core = new Core({
+      clock: new VirtualClock(),
+      secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
+      record: (r) => void records.push(r as { type: string }),
+      config: { 'telegram-bot': { owner: AUTHOR, group: GROUP, deny: ['66'] } },
+    });
+    core.register(
+      telegramBotPlugin({ bot: () => stub.bot }),
+      definePlugin({
+        manifest: {
+          id: 'pinger',
+          version: '0.1.0',
+          kinds: ['stats'],
+          description: 'answers',
+          interface: { commands: { ping: { help: 'ping', menu: 'il ping' } } },
+        },
+        create: () => ({ commands: { ping: { run: (a) => a.text('pong') } } }),
+      })
+    );
+    await core.start();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(core.controls.view('telegram-bot')).toMatchObject({ value: { state: { count: 0 } } });
+    expect(core.controls.status().plugins.find((p) => p.id === 'telegram-bot')?.summary).toBe(
+      undefined
+    );
+    await stub.bot.handleUpdate(stub.command(GROUP, 66, '/ping'));
+    await stub.bot.handleUpdate(stub.command(66, 66, '/ping'));
+    await new Promise((r) => setTimeout(r, 20));
+    const sent = stub.calls
+      .filter((c) => c.method === 'sendMessage')
+      .map((c) => `${String(c.payload['chat_id'])} ${String(c.payload['text'])}`);
+    expect(sent).toEqual(['66 pong']);
+    expect(records.filter((r) => r.type === 'telegram-bot.denied')).toEqual([
+      expect.objectContaining({
+        type: 'telegram-bot.denied',
+        chat: String(GROUP),
+        sender: '66',
+        command: '/ping',
+        replied: false,
+      }),
+    ]);
+    expect(core.controls.view('telegram-bot')).toMatchObject({
+      value: { state: { count: 1, last: { sender: '66' } } },
+    });
+    expect(core.controls.status().plugins.find((p) => p.id === 'telegram-bot')?.summary).toBe(
+      '1 command denied'
+    );
+    await core.stop();
+  });
+
+  it('never denies its owner, and replies in one line (D100)', () => {
+    expect(
+      telegramBotConfig.safeParse({ owner: AUTHOR, deny: [String(AUTHOR)] }).error?.issues
+    ).toEqual([expect.objectContaining({ path: ['deny'], message: 'its owner cannot be denied' })]);
+    expect(telegramBotConfig.safeParse({ deny: [String(AUTHOR)] }).success).toBe(true);
+    expect(telegramBotConfig.safeParse({ denyReply: 'one\ntwo' }).success).toBe(false);
   });
 });

@@ -115,6 +115,7 @@ function chatControls(
                 value={template ? [] : chatValues(value)}
                 single={!many}
                 {...(spec.kinds === undefined ? {} : { kinds: spec.kinds })}
+                sender={spec.sender === true}
                 set={(v) => {
                   if (many) set(v.length === 0 ? undefined : v);
                   else if (v[0] === undefined) set(undefined);

@@ -12,6 +12,10 @@
  * (`peers`: the people and groups the owner's account knows and the bot has never seen), the row
  * says so; a chat it does not know at all is shown as such. A peer's chat, picked, is asked of the
  * connector first, which then lists it if it can reach it.
+ *
+ * A picker of people to recognise rather than chats to send to (`sender`, a `telegram-bot`'s deny
+ * list, bot-os.md D100) says nothing of reaching them: a peer's person is picked at once, by id,
+ * and one the connector does not know is still shown by the name a peer has for them.
  */
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
@@ -171,7 +175,9 @@ interface Row {
 export function useLookups(
   connector: string | undefined,
   values: readonly string[],
-  known: readonly Surface[]
+  known: readonly Surface[],
+  /** Look in the network's other connectors' chats too (`peers`). */
+  peers = false
 ): ReadonlyMap<string, Surface | null> {
   const [found, setFound] = useState<ReadonlyMap<string, Surface | null>>(new Map());
   const asked = useRef(new Set<string>());
@@ -192,14 +198,17 @@ export function useLookups(
       asked.current.add(k);
       const done = (s: Surface | undefined): void => setFound((m) => new Map(m).set(k, s ?? null));
       api<SurfacesView>(
-        `/accounts/${seg(connector)}/surfaces?search=${encodeURIComponent(v)}&limit=500`
+        `/accounts/${seg(connector)}/surfaces?search=${encodeURIComponent(v)}&limit=500${peers ? '&peers=1' : ''}`
       ).then(
-        (r) => done(r.surfaces.find((x) => named(x, v))),
+        (r) =>
+          done(
+            [...r.surfaces, ...(r.peers ?? []).flatMap((p) => p.surfaces)].find((x) => named(x, v))
+          ),
         () => done(undefined)
       );
     }
     // `missingKey` stands for `missing`, which each render makes anew.
-  }, [connector, missingKey]);
+  }, [connector, missingKey, peers]);
   const out = new Map<string, Surface | null>();
   for (const v of values) {
     const s = recall(v) ?? found.get(key(v));
@@ -223,6 +232,8 @@ export function ChatPicker(props: {
   single?: boolean;
   /** The kinds of chat it offers; any without. */
   kinds?: readonly Kind[];
+  /** People to recognise, not chats to send to (D100): nothing said of reaching them. */
+  sender?: boolean;
   /** The chats it may offer, by any name; any of the connector's without (an edge's: those monitored). */
   within?: readonly string[];
   /** Why there is no connector to pick from, when `connector` is undefined. */
@@ -244,13 +255,18 @@ export function ChatPicker(props: {
   const listedOf = (s: SurfacesState): Surface[] => (s.state === 'listed' ? s.surfaces : []);
   const peersOf = (s: SurfacesState) => (s.state === 'listed' ? s.peers : []);
   const own = [...listedOf(latest), ...listedOf(found)];
-  const lookups = useLookups(note === undefined ? connector : undefined, value, own);
+  const sender = props.sender === true;
+  // People to recognise may be the peers' too, by any of their names.
+  const known = sender
+    ? [...own, ...[...peersOf(latest), ...peersOf(found)].flatMap((p) => p.surfaces)]
+    : own;
+  const lookups = useLookups(note === undefined ? connector : undefined, value, known, sender);
   const allowed = (s: Surface): boolean =>
     (props.kinds === undefined || props.kinds.includes(s.kind)) &&
     (props.within === undefined || props.within.some((w) => named(s, w)));
   const now = props.now ?? Date.now();
   const reason = (s: Surface): string | undefined =>
-    s.unreachable ?? refused.get(s.id.toLowerCase());
+    sender ? undefined : (s.unreachable ?? refused.get(s.id.toLowerCase()));
 
   // The chats picked first, in their order, each by its name where a list has it.
   const picked: Row[] = value.map((v): Row => {
@@ -259,7 +275,7 @@ export function ChatPicker(props: {
       const peer = borrowed.get(v.toLowerCase());
       const why =
         refused.get(v.toLowerCase()) ??
-        (s === null
+        (s === null && !sender
           ? `${connector ?? 'its connector'} does not know this chat: pick another`
           : undefined);
       return {
@@ -290,9 +306,13 @@ export function ChatPicker(props: {
               value: reachName(s),
               surface: s,
               peer: p.connector,
-              note:
-                refused.get(reachName(s).toLowerCase()) ??
-                `${connector ?? 'its connector'} has never seen this chat (${p.connector} knows it): it can send there only once a person has messaged it, or a group has added it`,
+              ...(sender
+                ? {}
+                : {
+                    note:
+                      refused.get(reachName(s).toLowerCase()) ??
+                      `${connector ?? 'its connector'} has never seen this chat (${p.connector} knows it): it can send there only once a person has messaged it, or a group has added it`,
+                  }),
             }))
         )
       : [];
@@ -303,6 +323,13 @@ export function ChatPicker(props: {
   /** A peer's chat: asked of this connector first, which lists it if it can reach it. */
   const pickPeer = (row: Row): void => {
     if (connector === undefined) return;
+    if (sender) {
+      // Recognised by id, whether or not the connector can reach them.
+      const peer = row.surface;
+      if (peer !== undefined) setBorrowed((m) => new Map(m).set(row.value.toLowerCase(), peer));
+      choose(row.value);
+      return;
+    }
     setAsking(row.value);
     void api<SurfacesView>(
       `/accounts/${seg(connector)}/surfaces?search=${encodeURIComponent(row.value)}&limit=500`

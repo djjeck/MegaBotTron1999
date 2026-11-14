@@ -11,18 +11,25 @@
  * reports nothing on its own (bot-os.md D94): an `owner-notice` node sends the owner's notices
  * through it, those with buttons to the owner's chat through its surface, whose taps run them. The token stays in the connector's secrets, and nothing hands it out:
  * no plugin, and not the wiring, gets the bot (P9).
+ *
+ * Its `deny` list (bot-os.md D100) names the people and bots, picked among its chats, whose
+ * commands in a group it drops before any plugin sees them; each drop is recorded
+ * (`telegram-bot.denied`, on the Events page) and counted in its node's view and on its card.
+ * Silent, unless `denyReply` sets a line to answer with. Its owner is never denied.
  */
 import {
   commandIntervalS,
   definePlugin,
   liveGraceS,
   type Plugin,
+  type StateView,
   unansweredAt,
   unansweredAtBy,
 } from '@megabottron1999/core';
 import { type Bot } from 'grammy';
 import { z } from 'zod';
 import { createBot, TelegramBotConnector } from '#src/transport/telegram-bot.ts';
+import { DenyList } from '#src/transport/telegram-deny.ts';
 import { TelegramSurface } from '#src/transport/telegram-surface.ts';
 
 export const TELEGRAM_BOT = 'telegram-bot';
@@ -32,33 +39,72 @@ export const BOT_TOKEN = 'telegram_bot_token';
  * Its configuration, in its node of the graph (v0's `TELEGRAM_AUTHOR_ID` and `TELEGRAM_GROUP_ID`
  * were environment variables): with an owner, a chat surface, and the owner's chat (bot-os.md D56).
  */
-export const telegramBotConfig = z.object({
-  owner: z
-    .number()
-    .int()
-    .optional()
-    .describe(
-      'The owner, picked among its chats (by their user id): their private chat with the bot alone answers the owner’s commands, and runs the buttons of the notices an owner-notice node sends there'
-    ),
-  group: z
-    .number()
-    .int()
-    .optional()
-    .describe(
-      'A group, picked among its chats, whose members may use the plugins’ public commands'
-    ),
-  chats: z
-    .array(z.string().min(1))
-    .optional()
-    .describe(
-      'The chats it monitors for the plugins, picked among its chats; unset: every chat it hears'
-    ),
-  commandIntervalS,
-  unansweredAt,
-  unansweredAtBy,
-  liveGraceS,
-});
+export const telegramBotConfig = z
+  .object({
+    owner: z
+      .number()
+      .int()
+      .optional()
+      .describe(
+        'The owner, picked among its chats (by their user id): their private chat with the bot alone answers the owner’s commands, and runs the buttons of the notices an owner-notice node sends there'
+      ),
+    group: z
+      .number()
+      .int()
+      .optional()
+      .describe(
+        'A group, picked among its chats, whose members may use the plugins’ public commands'
+      ),
+    chats: z
+      .array(z.string().min(1))
+      .optional()
+      .describe(
+        'The chats it monitors for the plugins, picked among its chats; unset: every chat it hears'
+      ),
+    deny: z
+      .array(z.string().min(1))
+      .optional()
+      .describe(
+        'People and bots whose commands in a group it ignores, picked among its chats (never its owner); private chats are unaffected'
+      ),
+    denyReply: z
+      .string()
+      .min(1)
+      .max(200)
+      .regex(/^[^\n]*$/u, 'one line')
+      .optional()
+      .describe(
+        'One line it answers a denied command with, at most once in 10 minutes per person; unset: it ignores them without a word'
+      ),
+    commandIntervalS,
+    unansweredAt,
+    unansweredAtBy,
+    liveGraceS,
+  })
+  .refine((c) => c.owner === undefined || !(c.deny ?? []).includes(String(c.owner)), {
+    path: ['deny'],
+    message: 'its owner cannot be denied',
+  });
 export type TelegramBotConfig = z.infer<typeof telegramBotConfig>;
+
+/** What its view shows (D100): the commands it denied since it started. */
+const VIEW_SCHEMA = z.toJSONSchema(
+  z.object({
+    count: z.number().describe('Commands denied since it started'),
+    last: z
+      .object({
+        t: z.number().describe('When'),
+        chat: z.string().describe('In the group'),
+        chatTitle: z.string().optional().describe('Its title'),
+        sender: z.string().describe('Of whom, as its deny list names them'),
+        command: z.string().describe('The command'),
+        replied: z.boolean().describe('Answered with its reply line'),
+      })
+      .optional()
+      .describe('The last one'),
+  }),
+  { io: 'output', unrepresentable: 'any' }
+);
 
 export function telegramBotPlugin(
   o: {
@@ -91,6 +137,8 @@ export function telegramBotPlugin(
       configChats: [
         { key: 'owner', kinds: ['private'], owner: true },
         { key: 'group', kinds: ['group'] },
+        // Whom it denies: people and bots it recognises, not chats it sends to (D100).
+        { key: 'deny', kinds: ['private', 'bot'], sender: true },
       ],
     },
     create: (ctx) => {
@@ -111,6 +159,15 @@ export function telegramBotPlugin(
               onStatus: (l) => void ref.connector?.onStatus(l),
             });
       const listen = Promise.all([o.listen, surface?.listening]);
+      const deny =
+        config.deny === undefined || config.deny.length === 0
+          ? undefined
+          : new DenyList({
+              deny: config.deny,
+              owner: config.owner,
+              reply: config.denyReply,
+              now: () => ctx.clock.now(),
+            });
       const c = new TelegramBotConnector({
         account: ctx.account ?? account,
         bot,
@@ -123,6 +180,9 @@ export function telegramBotPlugin(
         ],
         store: ctx.store,
         now: () => ctx.clock.now(),
+        ...(deny === undefined
+          ? {}
+          : { deny, onDenied: (d) => ctx.record(`${TELEGRAM_BOT}.denied`, { ...d }) }),
         liveGraceMs: config.liveGraceS * 1000,
         ...(o.sleep === undefined ? {} : { sleep: o.sleep }),
         // Buttons a node sends to the owner's chat go through the surface, whose taps run them.
@@ -143,6 +203,18 @@ export function telegramBotPlugin(
       };
       return {
         connector: c,
+        // What it denied since it started (D100), for its node's panel and its card.
+        ...(deny === undefined
+          ? {}
+          : {
+              view: {
+                read: (): StateView => ({ schema: VIEW_SCHEMA, state: c.denied() }),
+                summary: () => {
+                  const n = c.denied().count;
+                  return n === 0 ? undefined : `${n} command${n === 1 ? '' : 's'} denied`;
+                },
+              },
+            }),
         ...(surface === undefined ? {} : { surface }),
         start: () => c.start(),
         stop: async () => {

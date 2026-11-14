@@ -260,7 +260,11 @@ function configChatsOf(
 ): string[] {
   const out: string[] = [];
   for (const spec of view?.configChats ?? [])
-    if ((spec.output !== undefined || spec.input !== undefined) && takes(spec))
+    if (
+      (spec.output !== undefined || spec.input !== undefined) &&
+      spec.sender !== true &&
+      takes(spec)
+    )
       for (const chat of fixedChats(node?.config?.[spec.key], spec))
         if (!hasName(out, chat)) out.push(chat);
   return out;
@@ -288,12 +292,15 @@ export function syncEdgeChats(
 ): Graph {
   let out = g;
   for (const spec of specs) {
-    if (spec.output === undefined && spec.input === undefined) continue;
+    // People it recognises (D100) are no chat its edge sends to or reads.
+    if ((spec.output === undefined && spec.input === undefined) || spec.sender === true) continue;
     const was = fixedChats(before?.[spec.key], spec);
     const now = fixedChats(after?.[spec.key], spec);
     const added = now.filter((c) => !hasName(was, c));
     const kept = specs
-      .filter((o) => o !== spec && o.output === spec.output && o.input === spec.input)
+      .filter(
+        (o) => o !== spec && o.sender !== true && o.output === spec.output && o.input === spec.input
+      )
       .flatMap((o) => fixedChats(after?.[o.key], o));
     const gone = was.filter((c) => !hasName(now, c) && !hasName(kept, c));
     if (added.length === 0 && gone.length === 0) continue;

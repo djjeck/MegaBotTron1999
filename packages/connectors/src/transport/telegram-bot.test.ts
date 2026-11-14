@@ -7,12 +7,14 @@ import {
   adminIn,
   createBot,
   downloadFile,
+  MEMBER_UNREACHABLE,
   type Startable,
   startBotWithRetry,
   surfaceOf,
   SURFACES_DOC,
   TelegramBotConnector,
 } from './telegram-bot.ts';
+import { type Denied, DenyList } from './telegram-deny.ts';
 
 describe('createBot', () => {
   it('reports an update a handler fails on, and goes on polling', async () => {
@@ -128,12 +130,14 @@ describe('TelegramBotConnector', () => {
       download?: (fileId: string) => Promise<Uint8Array>;
       /** The time, in ms: what came before its connection was missed. */
       now?: number;
+      deny?: DenyList;
     } = {}
   ) {
     const stub = stubBot();
     const docs: Record<string, unknown> = o.docs ?? {};
     const logs: string[] = [];
     const states: string[] = [];
+    const denied: Denied[] = [];
     let polls = 0;
     // Polling, faked: it runs until the bot stops.
     let stopPolling: () => void = () => {};
@@ -162,9 +166,10 @@ describe('TelegramBotConnector', () => {
       now: () => o.now ?? 10_000,
       sleep: () => Promise.resolve(),
       ...(o.download === undefined ? {} : { download: o.download }),
+      ...(o.deny === undefined ? {} : { deny: o.deny, onDenied: (d) => denied.push(d) }),
     });
     c.onStatus((s) => states.push(`${s.state} ${s.phase}`));
-    return { c, stub, logs, states, docs, polls: () => polls };
+    return { c, stub, logs, states, docs, denied, polls: () => polls };
   }
 
   it('polls once the app listens, and tells its status and its name', async () => {
@@ -536,6 +541,146 @@ describe('TelegramBotConnector', () => {
       )
     );
     await expect(c.deliver('1', 'x')).rejects.toBeInstanceOf(GrammyError);
+  });
+
+  describe('a deny list (D100)', () => {
+    const OWNER = 4242;
+    const LOBBY = -100123;
+    const list = (o: { reply?: string; now?: () => number } = {}) =>
+      new DenyList({
+        deny: ['66', '@Spam_Bot', String(OWNER)],
+        owner: OWNER,
+        reply: o.reply,
+        now: o.now ?? (() => 0),
+      });
+    const sent = (stub: ReturnType<typeof stubBot>) =>
+      stub.calls.filter((x) => x.method === 'sendMessage').map((x) => x.payload['text']);
+
+    it('drops the group commands of those it denies, before any reader or the app', async () => {
+      const { c, stub, logs, denied } = connector({ deny: list() });
+      const heard: string[] = [];
+      c.onMessage((m) => heard.push(`${m.chat} ${m.text}`));
+      stub.bot.on('message', (ctx) => void heard.push(`app ${ctx.message.text ?? ''}`));
+      const update = stub.command(LOBBY, 66, '/roll 3');
+      await stub.bot.handleUpdate(update);
+      // Delivered again (an unconfirmed poll): neither heard nor counted twice.
+      await stub.bot.handleUpdate(update);
+      await stub.bot.handleUpdate(stub.command(LOBBY, 77, '/roll@ExampleBot', 'spam_bot'));
+      expect(heard).toEqual([]);
+      expect(denied).toEqual([
+        {
+          chat: String(LOBBY),
+          chatTitle: 'The Lobby',
+          sender: '66',
+          command: '/roll',
+          replied: false,
+        },
+        {
+          chat: String(LOBBY),
+          chatTitle: 'The Lobby',
+          sender: '@Spam_Bot',
+          command: '/roll',
+          replied: false,
+        },
+      ]);
+      expect(logs).toContain('denied /roll of 66 in The Lobby');
+      expect(c.denied()).toMatchObject({ count: 2, last: { sender: '@Spam_Bot', t: 0 } });
+      expect(sent(stub)).toEqual([]);
+    });
+
+    it('leaves private chats, the owner, other bots’ commands and plain text alone', async () => {
+      const { c, stub, denied } = connector({ deny: list() });
+      const heard: string[] = [];
+      c.onMessage((m) => heard.push(`${m.chat} ${m.text}`));
+      c.start();
+      await flush();
+      await stub.bot.handleUpdate(stub.command(66, 66, '/roll'));
+      await stub.bot.handleUpdate(stub.command(LOBBY, OWNER, '/roll'));
+      await stub.bot.handleUpdate(stub.command(LOBBY, 66, '/roll@OtherBot'));
+      const plain = stub.command(LOBBY, 66, 'hello') as unknown as {
+        message: { entities?: unknown };
+      };
+      delete plain.message.entities;
+      await stub.bot.handleUpdate(plain as never);
+      expect(heard).toEqual([
+        '66 /roll',
+        `${LOBBY} /roll`,
+        `${LOBBY} /roll@OtherBot`,
+        `${LOBBY} hello`,
+      ]);
+      expect(denied).toEqual([]);
+      expect(c.denied()).toEqual({ count: 0 });
+      await c.stop();
+    });
+
+    it('answers with its reply line, at most once in 10 minutes per person', async () => {
+      let now = 0;
+      const { stub, denied, logs } = connector({
+        deny: list({ reply: 'Not for you.', now: () => now }),
+      });
+      await stub.bot.handleUpdate(stub.command(LOBBY, 66, '/roll'));
+      await stub.bot.handleUpdate(stub.command(LOBBY, 66, '/roll'));
+      now = 10 * 60_000;
+      stub.bot.api.sendMessage = () => Promise.reject(new Error('no right to post'));
+      await stub.bot.handleUpdate(stub.command(LOBBY, 66, '/roll'));
+      expect(denied.map((d) => d.replied)).toEqual([true, false, true]);
+      const reply = stub.calls.find((x) => x.method === 'sendMessage')?.payload;
+      expect(reply).toMatchObject({ chat_id: LOBBY, text: 'Not for you.' });
+      expect(logs).toContain('deny reply failed: Error: no right to post');
+    });
+
+    it('drops their taps on buttons in a group, not in a private chat', async () => {
+      const { stub, denied } = connector({ deny: list() });
+      const taps: string[] = [];
+      stub.bot.on('callback_query:data', (ctx) => void taps.push(ctx.callbackQuery.data));
+      await stub.bot.handleUpdate(stub.tap(LOBBY, 66, '/report 8'));
+      await stub.bot.handleUpdate(stub.tap(66, 66, '/report 9'));
+      await stub.bot.handleUpdate(stub.tap(LOBBY, 77, '/report 7'));
+      expect(taps).toEqual(['/report 9', '/report 7']);
+      expect(denied.map((d) => `${d.sender} ${d.command}`)).toEqual(['66 /report']);
+      expect(stub.calls.map((x) => x.method)).toContain('answerCallbackQuery');
+    });
+
+    it('lists the people it saw in its groups, in memory, as people it cannot message', async () => {
+      const { c, stub, docs } = connector();
+      await stub.bot.handleUpdate(stub.command(LOBBY, 66, '/roll', 'mallory_x'));
+      await stub.bot.handleUpdate(stub.command(LOBBY, 66, '/roll', 'mallory_x'));
+      // One who opened the bot is listed by their private chat instead.
+      await stub.bot.handleUpdate(stub.command(LOBBY, 5, '/roll'));
+      await stub.bot.handleUpdate(stub.command(5, 5, '/start'));
+      const people = (await c.surfaces()).filter((x) => x.kind === 'private');
+      expect(people).toEqual([
+        { id: '5', title: 'Ada', kind: 'private' },
+        {
+          id: '66',
+          title: 'Ada',
+          kind: 'private',
+          aliases: ['@mallory_x'],
+          unreachable: MEMBER_UNREACHABLE,
+        },
+      ]);
+      expect(JSON.stringify(docs)).not.toContain('mallory_x');
+      expect((await c.surfaces({ search: 'MALLORY' })).map((x) => x.id)).toEqual(['66']);
+    });
+
+    it('keeps the latest 200 of them, a bot as a bot, and re-dates one seen again later', async () => {
+      const { c, stub } = connector();
+      const at = (u: ReturnType<typeof stub.command>, date: number, bot = false) => {
+        const m = (u as unknown as { message: { date: number; from: { is_bot: boolean } } })
+          .message;
+        m.date = date;
+        m.from.is_bot = bot;
+        return u;
+      };
+      for (let i = 1; i <= 201; i++)
+        await stub.bot.handleUpdate(at(stub.command(LOBBY, 1000 + i, '/roll'), i, i === 201));
+      await stub.bot.handleUpdate(at(stub.command(LOBBY, 1002, '/roll'), 500));
+      const listed = await c.surfaces({ limit: 500 });
+      expect(listed.filter((x) => x.kind !== 'group')).toHaveLength(200);
+      expect(listed.some((x) => x.id === '1001')).toBe(false);
+      expect(listed.find((x) => x.id === '1201')?.kind).toBe('bot');
+      expect(listed.find((x) => x.id === '1002')?.lastActive).toBe(500_000);
+    });
   });
 
   it("sends without waiting, logging a failure, and not while it isn't connected", async () => {

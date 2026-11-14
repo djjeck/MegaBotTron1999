@@ -381,6 +381,18 @@ describe('the draft', () => {
         syncEdgeChats(wired, 'look', specs, { in: '#lobby' }, { chat: '@questbot', in: '#lobby' })
           .edges[0]?.sends
       ).toEqual(['@QuestBot', '#extra']);
+      // People it recognises (D100) go on no edge, nor keep a chat on one.
+      const people = [...specs, { key: 'deny', output: 'chat', sender: true as const }];
+      expect(
+        syncEdgeChats(wired, 'look', people, before, { ...before, deny: ['66'] }).edges[0]?.sends
+      ).toEqual(['@QuestBot', '#extra']);
+      expect(
+        syncEdgeChats(wired, 'look', people, before, {
+          chat: '@OtherBot',
+          in: '#lobby',
+          deny: ['@QuestBot'],
+        }).edges[0]?.sends
+      ).toEqual(['#extra', '@OtherBot']);
     });
   });
 

@@ -7,7 +7,10 @@ other plugins a handle:
 - `telegram-bot`: a Telegram bot (grammY), and the owner's chat surface: the owner's commands, cards
   and buttons, and the plugins' commands in the menus; it reports nothing on its own (docs/bot-os.md
   D94), and sends the buttons of an `owner-notice` message to the owner's chat through the surface,
-  so that a tap runs the owner's command;
+  so that a tap runs the owner's command; its `deny` list (docs/bot-os.md D100, `telegram-deny.ts`),
+  people and bots picked among its chats but never its owner, has their commands in a group and
+  their taps there dropped before any plugin sees them, each recorded (`telegram-bot.denied`) and
+  counted in its node's view, silent unless `denyReply` sets one line;
 - `telegram-user`: a Telegram user account (GramJS), reading and sending in the chats it monitors
   (every chat, until its `chats` config ticks some);
 
@@ -15,14 +18,15 @@ Each lists its surfaces, the chats it can see, for the editor to pick from (`sur
 docs/bot-os.md D63): `telegram-user` its dialogs active in the last 7 days from every folder but the
 archive (and those its `chats` config lists), monitored or not, latest first, and a search finds any
 of them, archived or inactive, whatever its kind or the owner's folder, `telegram-bot` the chats it
-has seen (kept in its store) and one looked up by id, `irc` its channel. What was said while the
-instance was down comes marked `missed` from `telegram-bot` (Telegram keeps a bot's updates for a
-day) and from `telegram-user`, which at each connection fetches back the chats its running readers
-read, back to what it has accounted for in each (kept in its store, `last-seen` and `seen-above`),
-at most 1000 a chat (D62). Each message reaches the readers once, across live delivery, the catch-up
-and restarts, and a gap whose fetch failed is fetched again until it is filled; `telegram-bot` keeps
-the last message it delivered in each chat, against Telegram's deliveries again (D66). Each manifest
-says which chats its node monitors (`monitors`, D89): the Telegram ones their `chats` (unset: every
+has seen (kept in its store), one looked up by id, and the people it saw in its groups (in memory
+only, for its deny list, D100), `irc` its channel. What was said while the instance was down comes
+marked `missed` from `telegram-bot` (Telegram keeps a bot's updates for a day) and from
+`telegram-user`, which at each connection fetches back the chats its running readers read, back to
+what it has accounted for in each (kept in its store, `last-seen` and `seen-above`), at most 1000 a
+chat (D62). Each message reaches the readers once, across live delivery, the catch-up and restarts,
+and a gap whose fetch failed is fetched again until it is filled; `telegram-bot` keeps the last
+message it delivered in each chat, against Telegram's deliveries again (D66). Each manifest says
+which chats its node monitors (`monitors`, D89): the Telegram ones their `chats` (unset: every
 chat), `irc` its `channel`; the graph's check warns of a chat-in edge reading a chat its connector
 does not monitor. A Telegram chat has an id and may have a `@username` (D90): both connectors give a
 message's other names as its `aliases`, so an edge, a reaction or a config naming the chat either
