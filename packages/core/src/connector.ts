@@ -167,16 +167,26 @@ export type SurfaceKind = 'private' | 'group' | 'channel' | 'bot';
 
 /** A chat a connector can see (bot-os-api.md §4.5, bot-os.md D63): what the owner picks from. */
 export interface Surface {
-  /** How the connector's config and the edges name it: a group's id, a `@username`, `#lobby`. */
+  /**
+   * How the connector's config and the edges name it, the name it can send to (bot-os.md D96): a
+   * group's id, a `@username`, `#lobby`; a `telegram-bot`'s chats by id.
+   */
   id: string;
   /** Its title, as the network shows it. */
   title: string;
   kind: SurfaceKind;
+  /** Its other names (D90): its `@username` where `id` is its id, its id where `id` is a name. */
+  aliases?: string[];
   /** When something was last said there, in ms, where the network says. */
   lastActive?: number;
+  /**
+   * Why the connector cannot send there, where it knows it cannot (D96): a bot's owner who never
+   * started it, a group it is not in. Listed so that the owner sees why, not picked blind.
+   */
+  unreachable?: string;
 }
 
-/** Which surfaces to list: those whose title or id has `search` in it, at most `limit`. */
+/** Which surfaces to list: those whose title or any name has `search` in it, at most `limit`. */
 export interface SurfaceQuery {
   search?: string;
   limit?: number;

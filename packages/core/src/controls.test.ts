@@ -739,6 +739,40 @@ describe('controlServer', () => {
     expect(await get('/accounts/nobody/surfaces')).toEqual([404, { error: 'no such connector' }]);
     await core.stop();
   });
+
+  it('lists the chats its network’s other connectors see and it does not (peers, D96)', async () => {
+    const lobby = { id: '-1001', title: 'The Lobby', kind: 'group' as const, aliases: ['@lobby'] };
+    const ada = { id: '@ada_x', title: 'Ada', kind: 'private' as const, aliases: ['5'] };
+    const hall = { id: '-1002', title: 'Guild Hall', kind: 'group' as const };
+    const bot = new FakeConnector({
+      account: 'tg:bot',
+      surfaces: [{ ...lobby }, { id: '5', title: 'Ada', kind: 'private' }],
+    });
+    const user = new FakeConnector({ account: 'tg:user', surfaces: [lobby, ada, hall] });
+    const down = new FakeConnector({ account: 'tg:down', surfaces: [hall] });
+    const other = new FakeConnector({
+      account: 'irc:me',
+      surfaces: [{ id: '#a', title: '#a', kind: 'group' }],
+    });
+    const core = new Core({ clock: new VirtualClock(1000) });
+    core.register(
+      fakeConnectorPlugin('bot', bot),
+      fakeConnectorPlugin('user', user),
+      fakeConnectorPlugin('down', down),
+      fakeConnectorPlugin('irc', other)
+    );
+    core.load();
+    await core.start();
+    for (const c of [bot, user, other]) c.open();
+    expect(await core.controls.surfaces('bot', {}, true)).toEqual({
+      running: true,
+      listed: true,
+      surfaces: [lobby, { id: '5', title: 'Ada', kind: 'private' }],
+      peers: [{ connector: 'user', surfaces: [hall] }],
+    });
+    expect((await core.controls.surfaces('bot'))?.peers).toBeUndefined();
+    await core.stop();
+  });
 });
 
 describe('reads with an input, and a node’s state for the viewer (bot-os.md D72)', () => {

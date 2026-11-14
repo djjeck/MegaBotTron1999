@@ -14,9 +14,10 @@
  *   `commit` its image was built from, when known), the process's uptime, Node's version and
  *   memory, the plugins and the accounts counted by state.
  * - `GET /accounts`: each connector instance, its account and its connection's status.
- * - `GET /accounts/<id>/surfaces?search=&limit=50`: the chats a connector can see, latest first
- *   (bot-os.md D63): `running` false until it runs, `listed` false if it cannot list them; 409
- *   with why when it cannot tell now (not connected).
+ * - `GET /accounts/<id>/surfaces?search=&limit=50&peers=1`: the chats a connector can see, latest
+ *   first (bot-os.md D63): `running` false until it runs, `listed` false if it cannot list them; 409
+ *   with why when it cannot tell now (not connected); with `peers=1`, those the other connectors of
+ *   its network list and it does not (`peers`, D96).
  * - `GET /drift`: each parser's counts of what it read and could not read (§4.7).
  * - `GET /events?limit=100&type=core.&hours=24`: the event log's latest records, newest first,
  *   those whose type starts with `type` (when the wiring gives the log).
@@ -355,7 +356,11 @@ export function controlHandler(
         };
         let view: unknown;
         try {
-          view = await controls.surfaces(decodeURIComponent(surfaces[1] ?? ''), query);
+          view = await controls.surfaces(
+            decodeURIComponent(surfaces[1] ?? ''),
+            query,
+            url.searchParams.get('peers') === '1'
+          );
         } catch (e) {
           return reply(409, { error: e instanceof Error ? e.message : String(e) });
         }

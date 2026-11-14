@@ -8,9 +8,11 @@
  * Editable when given `onChange` (the editor's draft, D55): a field emptied (once left) is taken
  * away, so that its default holds; a key of `secretKeys` (a connector's `configSecrets`, bot-os-api.md §4.9) is a
  * choice of the secrets' names, never a value; `errors` are the check's, by key. Read-only without
- * it (an action's input). Nothing here depends on the node's state, so a stopped node's form is as
- * any other's (D44).
+ * it (an action's input). A key of `custom` is drawn by its own control (a chat, picked in the chat
+ * picker, D96). Nothing here depends on the node's state, so a stopped node's form is as any other's
+ * (D44).
  */
+import type { ReactNode } from 'react';
 import { useState } from 'react';
 import type { JsonSchema } from '#src/ui/api.ts';
 import { plain } from './defaults.ts';
@@ -23,7 +25,11 @@ interface Editing {
   secretKeys: readonly string[];
   secretNames: readonly string[];
   errors: Record<string, string[]>;
+  custom: Readonly<Record<string, CustomControl>>;
 }
+
+/** A field's own control, given its value and the way to set it (undefined: taken away). */
+export type CustomControl = (value: unknown, set: (v: unknown) => void) => ReactNode;
 
 /** A value typed as JSON, kept as typed until it reads. */
 function JsonField(props: {
@@ -125,7 +131,9 @@ function Field(props: {
       </div>
     );
   let control;
-  if (editing?.secretKeys.includes(name) === true && set !== undefined) {
+  const custom = editing?.custom[name];
+  if (custom !== undefined && set !== undefined) control = custom(props.value, set);
+  else if (editing?.secretKeys.includes(name) === true && set !== undefined) {
     const names = [...editing.secretNames];
     if (typeof props.value === 'string' && !names.includes(props.value)) names.push(props.value);
     control = (
@@ -182,11 +190,20 @@ function Field(props: {
   else control = <JsonField name={name} value={value} set={set} />;
   return (
     <div className={`field${errors.length > 0 ? ' refused' : ''}`}>
-      <label>
-        <code>{name}</code>
-        {props.required ? null : <span className="muted"> (optional)</span>}
-        {control}
-      </label>
+      {custom !== undefined && set !== undefined ? (
+        // Its own control holds its inputs, each labelled: no label around them all.
+        <div className="custom-field">
+          <code>{name}</code>
+          {props.required ? null : <span className="muted"> (optional)</span>}
+          {control}
+        </div>
+      ) : (
+        <label>
+          <code>{name}</code>
+          {props.required ? null : <span className="muted"> (optional)</span>}
+          {control}
+        </label>
+      )}
       {description === undefined ? null : <small className="muted">{description}</small>}
       {errors.map((e) => (
         <small key={e} className="error">
@@ -206,6 +223,7 @@ export function SchemaForm(props: {
   secretKeys?: readonly string[];
   secretNames?: readonly string[];
   errors?: Record<string, string[]>;
+  custom?: Readonly<Record<string, CustomControl>>;
 }) {
   const properties = (props.schema['properties'] ?? {}) as Record<string, JsonSchema>;
   const required = (props.schema['required'] ?? []) as string[];
@@ -219,6 +237,7 @@ export function SchemaForm(props: {
           secretKeys: props.secretKeys ?? [],
           secretNames: props.secretNames ?? [],
           errors: props.errors ?? {},
+          custom: props.custom ?? {},
         };
   const setter = (name: string) =>
     onChange === undefined

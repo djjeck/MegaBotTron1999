@@ -133,9 +133,6 @@ function username(entity: unknown): string | undefined {
   return typeof u === 'string' ? u : undefined;
 }
 
-/** A chat the connector monitors: a group's id, a private chat by `@username` or by id. */
-export const USER_CHAT = /^(?:-?\d+|@\w{4,})$/u;
-
 /** How long a failed start waits before the next. */
 export const RETRY_MS = 60_000;
 /** How many of the latest chats the surfaces list without a search. */
@@ -200,7 +197,7 @@ export interface UserConnectorOptions {
   /** `telegram:<name>`. */
   account: string;
   client: GramClient;
-  /** The chats it monitors and may send to (`USER_CHAT`); none given: every chat it has. */
+  /** The chats it monitors and may send to: a group's id, a private chat by `@username` or by id; none given: every chat it has. */
   chats?: readonly string[] | undefined;
   clock: Clock;
   log: (line: string) => void;
@@ -363,10 +360,12 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
         )
           return undefined;
         const title = d.title ?? id;
+        const aliases = this.namesOf(id).slice(1);
         return {
           id,
           title,
           kind: kindOf(d),
+          ...(aliases.length === 0 ? {} : { aliases: [...aliases] }),
           ...(lastActive === undefined ? {} : { lastActive }),
         };
       })
@@ -374,8 +373,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       .filter(
         (x) =>
           search === '' ||
-          x.title.toLowerCase().includes(search) ||
-          x.id.toLowerCase().includes(search)
+          [x.title, x.id, ...(x.aliases ?? [])].some((n) => n.toLowerCase().includes(search))
       )
       .sort((a, b) => (b.lastActive ?? 0) - (a.lastActive ?? 0))
       .slice(0, limit);

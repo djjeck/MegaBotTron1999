@@ -22,7 +22,6 @@ import {
   createTelegramClient,
   type GramClient,
   TelegramUserConnector,
-  USER_CHAT,
   type UserCredentials,
 } from '#src/transport/telegram-user.ts';
 
@@ -39,11 +38,9 @@ export const USER_SECRETS = [
  */
 export const telegramUserConfig = z.object({
   chats: z
-    .array(z.string().regex(USER_CHAT, 'expected a group id (-100…) or a @username'))
+    .array(z.string().min(1))
     .optional()
-    .describe(
-      'The chats it monitors: a group by its id (-100…), a private chat by @username; unset: every chat'
-    ),
+    .describe('The chats it monitors, picked among its chats; unset: every chat'),
   commandIntervalS,
   unansweredAt,
   unansweredAtBy,

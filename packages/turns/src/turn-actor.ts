@@ -110,7 +110,7 @@ export const turnActorConfig = z.object({
   chat: z
     .string()
     .regex(/^@\w{4,}$/u, 'expected the bot’s @username')
-    .describe('The private chat with its bot, by the bot’s @username'),
+    .describe('The private chat with its bot, picked among its account’s bots (by @username)'),
   command: z
     .string()
     .regex(/^\/\w+$/u, 'expected a command')
@@ -174,6 +174,8 @@ export function turnActorPlugin(): Plugin {
       description:
         "A game bot's turn, from the owner's account, in its private chat, at a person's pace",
       config: turnActorConfig,
+      // Its bot's chat is picked among its account's bots (D96).
+      configChats: [{ key: 'chat', output: 'chat', kinds: ['bot'] }],
       // Its turns since the last summary, for the owner (bot-os.md D92).
       summary: true,
       games: { registers: [TURN_ACTOR] },

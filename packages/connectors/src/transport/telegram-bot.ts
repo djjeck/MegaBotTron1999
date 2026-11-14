@@ -138,7 +138,7 @@ const SURFACES_LIMIT = 50;
 /** A chat's last activity is kept again only once it moved by this much. */
 const ACTIVE_STEP_MS = 60_000;
 
-/** A chat as the bot saw it, as a surface. */
+/** A chat as the bot saw it, as a surface: by its id, the one name a bot can always send to. */
 export function surfaceOf(chat: Chat, lastActive?: number): Surface {
   const title =
     chat.type === 'private'
@@ -148,9 +148,13 @@ export function surfaceOf(chat: Chat, lastActive?: number): Surface {
     id: String(chat.id),
     title: title || (chat.username === undefined ? String(chat.id) : `@${chat.username}`),
     kind: chat.type === 'private' ? 'private' : chat.type === 'channel' ? 'channel' : 'group',
+    ...(chat.username === undefined ? {} : { aliases: [`@${chat.username}`] }),
     ...(lastActive === undefined ? {} : { lastActive }),
   };
 }
+
+/** How long a chat Telegram would not give (`getChat`) is not asked for again. */
+const UNKNOWN_TTL_MS = 10 * 60_000;
 
 export interface BotConnectorOptions {
   /** `telegram-bot:<name>`. */
@@ -159,6 +163,12 @@ export interface BotConnectorOptions {
   log: (line: string) => void;
   /** The chats it monitors, by id or `@username`; none: every chat it hears. */
   chats?: readonly string[] | undefined;
+  /**
+   * The chats its config names besides (its `owner`, its `group`), listed among its surfaces even
+   * before it has seen them (bot-os.md D96): asked of Telegram (`getChat`), and listed as not
+   * reachable, with why, when Telegram does not give them.
+   */
+  known?: readonly { id: number; role: 'owner' | 'group' }[];
   /** Where it keeps the chats it has seen, its surfaces, and the last message delivered in each. */
   store?: { read<T>(name: string): T | undefined; write(name: string, value: unknown): void };
   /** The time now, in ms: what came before its connection was missed. */
@@ -216,6 +226,8 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
   private readonly names = new Map<string, readonly string[]>();
   /** The last message id delivered in each chat: one delivered again is not delivered twice. */
   private readonly ledger: SeenLedger;
+  /** The chats of `known` Telegram did not give, by id: when it was asked, and why not. */
+  private readonly unknown = new Map<string, { at: number; why: string }>();
 
   constructor(options: BotConnectorOptions) {
     super(options.account, 'telegram');
@@ -224,6 +236,11 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
     this.chats =
       options.chats === undefined ? undefined : new Set(options.chats.map((c) => c.toLowerCase()));
     this.seen = { ...(options.store?.read<Record<string, Surface>>(SURFACES_DOC) ?? {}) };
+    // The names of the chats seen before, kept with them: a `@username` sends again after a restart.
+    for (const x of Object.values(this.seen)) {
+      const names = [x.id, ...(x.aliases ?? [])];
+      for (const n of names) this.names.set(n.toLowerCase(), names);
+    }
     this.ledger = new SeenLedger(options.store);
     // First in the bot's chain, so it hears every message before the app's handlers.
     this.bot.on('message', async (ctx, next) => {
@@ -309,29 +326,74 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
   }
 
   /**
-   * Its surfaces (bot-os.md D63): the chats it has seen, latest first; with a search, those whose
-   * title or id has it, and, searched by its id or `@username`, a chat it has not seen, from
-   * Telegram (`getChat`), kept from then on.
+   * Its surfaces (bot-os.md D63, D96): the Bot API cannot list a bot's chats, so the chats it has
+   * seen (each by its id, its `@username` an alias), and the chats its config names (`known`: its
+   * owner, its group), asked of Telegram once and listed as not reachable, with why, when it does
+   * not give them; latest first. With a search, those whose title or any name has it, and,
+   * searched by an id or a `@username` no chat seen has, a chat from Telegram (`getChat`), kept
+   * from then on: Telegram gives a bot only a chat it can reach (a person who started it, a group
+   * it is in, a public one).
    */
   async surfaces(query: SurfaceQuery = {}): Promise<Surface[]> {
     const search = query.search?.trim() ?? '';
     const lower = search.toLowerCase();
-    const found = () =>
-      Object.values(this.seen)
-        .filter(
-          (x) =>
-            lower === '' ||
-            x.title.toLowerCase().includes(lower) ||
-            x.id.toLowerCase().includes(lower)
-        )
+    await this.learnKnown();
+    const named = (x: Surface): string[] => [x.title, x.id, ...(x.aliases ?? [])];
+    const listed = (): Surface[] => [
+      ...Object.values(this.seen),
+      ...[...this.unknown].flatMap(([id, u]): Surface[] => {
+        const k = this.o.known?.find((x) => String(x.id) === id);
+        if (k === undefined || this.seen[id] !== undefined) return [];
+        return [
+          {
+            id,
+            title: k.role === 'owner' ? 'its owner' : 'its group',
+            kind: k.role === 'owner' ? 'private' : 'group',
+            unreachable: u.why,
+          },
+        ];
+      }),
+    ];
+    const found = (): Surface[] =>
+      listed()
+        .filter((x) => lower === '' || named(x).some((n) => n.toLowerCase().includes(lower)))
         .sort((a, b) => (b.lastActive ?? 0) - (a.lastActive ?? 0))
         .slice(0, query.limit ?? SURFACES_LIMIT);
-    if (found().length > 0 || !/^(?:-?\d+|@\w{4,})$/u.test(search)) return found();
+    const exact = listed().some((x) =>
+      [x.id, ...(x.aliases ?? [])].some((n) => n.toLowerCase() === lower)
+    );
+    if (exact || !/^(?:-?\d+|@\w{4,})$/u.test(search)) return found();
     const chat = await this.bot.api
       .getChat(/^-?\d+$/u.test(search) ? Number(search) : search)
       .catch(() => undefined);
     if (chat !== undefined) this.saw(chat);
     return found();
+  }
+
+  /**
+   * The chats its config names that it has not seen (its owner, its group): asked of Telegram, each
+   * at most once every `UNKNOWN_TTL_MS` while Telegram does not give it.
+   */
+  private async learnKnown(): Promise<void> {
+    const now = (this.o.now ?? Date.now)();
+    for (const k of this.o.known ?? []) {
+      const id = String(k.id);
+      const before = this.unknown.get(id);
+      if (this.seen[id] !== undefined || (before !== undefined && now - before.at < UNKNOWN_TTL_MS))
+        continue;
+      try {
+        this.saw(await this.bot.api.getChat(k.id));
+        this.unknown.delete(id);
+      } catch {
+        this.unknown.set(id, {
+          at: now,
+          why:
+            k.role === 'owner'
+              ? 'the bot cannot message its owner yet: the owner must open the bot and send it /start'
+              : 'the bot is not in this group: add it to the group',
+        });
+      }
+    }
   }
 
   /** Its owner's private chat with it, by id, where its config names an owner. */
@@ -373,7 +435,11 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
     const id = String(chat.id);
     const before = this.seen[id];
     const active = Math.max(lastActive ?? 0, before?.lastActive ?? 0);
-    if (before !== undefined && active - (before.lastActive ?? 0) < ACTIVE_STEP_MS) return;
+    const renamed =
+      before !== undefined &&
+      JSON.stringify(before.aliases ?? []) !== JSON.stringify(names.slice(1));
+    if (before !== undefined && !renamed && active - (before.lastActive ?? 0) < ACTIVE_STEP_MS)
+      return;
     this.seen[id] = surfaceOf(chat, active === 0 ? undefined : active);
     this.o.store?.write(SURFACES_DOC, this.seen);
   }
@@ -410,10 +476,13 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
     text: string,
     options: ConnectorSendOptions & { format?: TextFormat } = {}
   ): Promise<{ id?: string }> {
-    const to = /^-?\d+$/u.test(chat) ? Number(chat) : chat;
+    // A chat named by a `@username` it has seen goes to its id: the Bot API reaches a person by
+    // id alone (D96); any other `@username` (a public group's, a channel's) as written.
+    const id = this.names.get(chat.toLowerCase())?.[0] ?? chat;
+    const to = /^-?\d+$/u.test(id) ? Number(id) : chat;
     try {
       const owner = this.o.ownerChat;
-      if (owner !== undefined && chat === owner.chat && (options.buttons?.length ?? 0) > 0)
+      if (owner !== undefined && String(to) === owner.chat && (options.buttons?.length ?? 0) > 0)
         return await owner.send(text, options.buttons ?? [], options.format);
       if (options.format === 'markdown')
         try {

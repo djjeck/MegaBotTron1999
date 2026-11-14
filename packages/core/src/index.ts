@@ -158,6 +158,7 @@ export {
   HISTORY_KEEP,
 } from './graph-history.ts';
 export {
+  type ConfigChatView,
   describeNodes,
   describePlugin,
   type DiffLine,

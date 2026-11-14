@@ -96,6 +96,12 @@ export function reactorPlugin(): Plugin {
       description:
         'Sends a command when an event is heard or a message matches, as its config says',
       config: reactorConfig,
+      // The chat it sends to, and the one it reads, are picked among its connectors' (D96); the
+      // chat it sends to may be a template instead (`{chat}`, the event's).
+      configChats: [
+        { key: 'chat', output: 'chat', template: true },
+        { key: 'in', input: 'chat' },
+      ],
       inputs: {
         chat: {
           type: 'chat-in',

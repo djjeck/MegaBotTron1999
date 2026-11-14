@@ -1,69 +1,19 @@
 /**
- * Chats picked from lists (bot-os.md D62, D63): a connector's surfaces, as
- * `GET /accounts/<id>/surfaces` lists them, latest first, for its config's `chats` (what it
- * monitors: every chat while unset) and for each edge's subset (a chat-in's `reads`, `'*'` for all
- * of them, and its `senders`; a chat-out's `sends`). A connector not running yet lists nothing: the
- * owner applies first. Lists of words (commands, senders) are rows to add and remove, not JSON.
+ * Chats picked from lists (bot-os.md D62, D63, D96): a connector's chats, in the one chat picker
+ * (`ChatPicker.tsx`), for its config's `chats` (what it monitors: every chat while unset) and for
+ * each edge's subset (a chat-in's `reads`, `'*'` for all of them; a chat-out's `sends`); a chat-in's
+ * `senders`. A connector not running yet lists nothing: the owner applies first. Lists of words
+ * (commands, senders) are rows to add and remove, not JSON.
  */
-import { useEffect, useRef, useState } from 'react';
-import type { GraphEdge, Surface, SurfacesView } from '#src/ui/api.ts';
-import { api, ApiError, seg } from '#src/ui/api.ts';
+import { useState } from 'react';
+import type { GraphEdge } from '#src/ui/api.ts';
+import { ChatPicker, useSurfaces } from './ChatPicker.tsx';
 import { edgeKey, endOf } from './draft.ts';
+
+export { unlistedNote, useSurfaces } from './ChatPicker.tsx';
 
 /** The config key of a connector that lists the chats it monitors. */
 export const CHATS_KEY = 'chats';
-
-/** What the surfaces' load says: not yet, listed, or why not. */
-export type SurfacesState =
-  | { state: 'loading' }
-  | { state: 'not-running' }
-  | { state: 'unlisted' }
-  | { state: 'error'; error: string }
-  | { state: 'listed'; surfaces: Surface[] };
-
-/** A connector's surfaces, matching `search`; loaded again when either changes. */
-export function useSurfaces(id: string | undefined, search = ''): SurfacesState {
-  const [state, setState] = useState<SurfacesState>({ state: 'loading' });
-  useEffect(() => {
-    if (id === undefined) return;
-    let live = true;
-    const q = search.trim() === '' ? '' : `?search=${encodeURIComponent(search.trim())}`;
-    api<SurfacesView>(`/accounts/${seg(id)}/surfaces${q}`).then(
-      (v) => {
-        if (!live) return;
-        setState(
-          !v.running
-            ? { state: 'not-running' }
-            : v.listed
-              ? { state: 'listed', surfaces: v.surfaces }
-              : { state: 'unlisted' }
-        );
-      },
-      (e: unknown) => {
-        if (!live) return;
-        // A connector the running graph does not have yet (just added) runs nowhere.
-        if (e instanceof ApiError && e.status === 404) setState({ state: 'not-running' });
-        else setState({ state: 'error', error: e instanceof Error ? e.message : String(e) });
-      }
-    );
-    return () => {
-      live = false;
-    };
-  }, [id, search]);
-  return id === undefined ? { state: 'not-running' } : state;
-}
-
-/** Why there is no list to pick from, in words; undefined when there is one. */
-export function unlistedNote(s: SurfacesState): string | undefined {
-  if (s.state === 'listed') return undefined;
-  if (s.state === 'loading') return 'Listing its chats…';
-  if (s.state === 'not-running') return 'Apply first to list its chats.';
-  if (s.state === 'unlisted') return 'This connector cannot list its chats: type them.';
-  return `Its chats cannot be listed now: ${s.error}`;
-}
-
-const when = (t: number | undefined): string =>
-  t === undefined ? '' : new Date(t).toISOString().slice(0, 16).replace('T', ' ');
 
 /** A list of words as rows, each removable, and one more added (no JSON). */
 export function RowsField(props: {
@@ -131,100 +81,8 @@ export function RowsField(props: {
   );
 }
 
-/** Checkboxes over surfaces, ticked when `ticked` has their id (without case). */
-function Checks(props: {
-  label: string;
-  surfaces: readonly Surface[];
-  ticked: (id: string) => boolean;
-  toggle: (id: string, on: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <ul className="checks" aria-label={props.label}>
-      {props.surfaces.map((s) => (
-        <li key={s.id}>
-          <label>
-            <input
-              type="checkbox"
-              aria-label={s.title}
-              checked={props.ticked(s.id)}
-              disabled={props.disabled}
-              onChange={(e) => props.toggle(s.id, e.target.checked)}
-            />{' '}
-            {s.title} <span className="muted small">({s.kind}</span>
-            {s.title === s.id ? null : (
-              <span className="muted small">
-                , <code>{s.id}</code>
-              </span>
-            )}
-            <span className="muted small">
-              {s.lastActive === undefined ? '' : `, ${when(s.lastActive)}`})
-            </span>
-          </label>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 const has = (list: readonly string[], id: string): boolean =>
   list.some((x) => x.toLowerCase() === id.toLowerCase());
-
-/** The chats of a list that the surfaces do not name, shown by their id. */
-const others = (list: readonly string[], surfaces: readonly Surface[]): Surface[] =>
-  list
-    .filter((c) => !surfaces.some((s) => s.id.toLowerCase() === c.toLowerCase()))
-    .map((c) => ({ id: c, title: c, kind: 'group' as const }));
-
-/**
- * The surfaces of the chats in `ids` that `known` does not name: a chat ticked from a search, or
- * one its config lists beyond the latest. Each is remembered from any surface `known` held once
- * (a search's results, ticked and then searched away), else looked up by a search of its id, once,
- * so that its name shows after a reload too; one never found is left out (shown by its id).
- */
-export function useNamed(
-  connector: string | undefined,
-  ids: readonly string[],
-  known: readonly Surface[]
-): Surface[] {
-  // By connector and id (without case): a surface, or null for one looked up and not found.
-  const [named, setNamed] = useState<ReadonlyMap<string, Surface | null>>(new Map());
-  const asked = useRef(new Set<string>());
-  const key = (c: string): string => `${connector ?? ''}\u0000${c.toLowerCase()}`;
-  const knownKey = known.map((s) => `${s.id}\u0000${s.title}`).join('\u0001');
-  useEffect(() => {
-    if (known.length === 0) return;
-    setNamed((m) => {
-      const next = new Map(m);
-      for (const s of known) next.set(key(s.id), s);
-      return next;
-    });
-    // `knownKey` stands for `known`, which each render makes anew.
-  }, [connector, knownKey]);
-  const missing = ids.filter(
-    (c) => !named.has(key(c)) && !known.some((s) => s.id.toLowerCase() === c.toLowerCase())
-  );
-  const missingKey = missing.join('\u0001');
-  useEffect(() => {
-    if (connector === undefined) return;
-    for (const c of missing) {
-      const k = key(c);
-      if (asked.current.has(k)) continue;
-      asked.current.add(k);
-      const done = (s: Surface | undefined): void => setNamed((m) => new Map(m).set(k, s ?? null));
-      api<SurfacesView>(
-        `/accounts/${seg(connector)}/surfaces?search=${encodeURIComponent(c)}&limit=500`
-      ).then(
-        (v) => done(v.surfaces.find((x) => x.id.toLowerCase() === c.toLowerCase())),
-        () => done(undefined)
-      );
-    }
-    // `missingKey` stands for `missing`, which each render makes anew.
-  }, [connector, missingKey]);
-  return ids
-    .map((c) => named.get(key(c)))
-    .filter((s): s is Surface => s !== undefined && s !== null);
-}
 
 /** The same monitored chats, without case or order; undefined (every chat) only equals itself. */
 export function sameChats(
@@ -291,9 +149,9 @@ function ChatsReminder(props: { edges: readonly GraphEdge[]; open?: (key: string
 }
 
 /**
- * A connector's monitored chats (its config's `chats`): every chat while unset; else the ticked
- * ones. Its latest surfaces as checkboxes, and a search to find and tick others. Changed from
- * `saved`, a reminder that its chat-in edges filter again, naming those of `edges` to update.
+ * A connector's monitored chats (its config's `chats`): every chat while unset; else those picked
+ * in the chat picker (D96). Changed from `saved`, a reminder that its chat-in edges filter again,
+ * naming those of `edges` to update.
  */
 export function MonitoredChats(props: {
   connector: string;
@@ -306,26 +164,8 @@ export function MonitoredChats(props: {
   /** Opens an edge's panel, by its key. */
   openEdge?: (key: string) => void;
 }) {
-  const [search, setSearch] = useState('');
   const latest = useSurfaces(props.connector);
-  const found = useSurfaces(search.trim() === '' ? undefined : props.connector, search);
-  const note = unlistedNote(latest);
   const all = props.value === undefined;
-  const listed = latest.state === 'listed' ? latest.surfaces : [];
-  const value = props.value ?? [];
-  // The ticked chats the latest do not name: by their name, found by a search or looked up.
-  const listedIds = listed.map((s) => s.id);
-  const named = useNamed(
-    note === undefined ? props.connector : undefined,
-    value.filter((c) => !has(listedIds, c)),
-    found.state === 'listed' ? found.surfaces : []
-  );
-  const shown = [...listed, ...named];
-  const toggle = (id: string, on: boolean): void => {
-    // From every chat to a list: the ones listed, ticked, but this one.
-    const base = all ? listed.map((s) => s.id) : value;
-    props.set(on ? [...base.filter((c) => !has([id], c)), id] : base.filter((c) => !has([id], c)));
-  };
   return (
     <fieldset className="field surfaces" aria-label="chats it monitors">
       <legend>
@@ -337,80 +177,38 @@ export function MonitoredChats(props: {
           {...(props.openEdge === undefined ? {} : { open: props.openEdge })}
         />
       )}
-      {note === undefined ? (
-        <>
-          <label>
-            <input
-              type="checkbox"
-              aria-label="every chat"
-              checked={all}
-              onChange={(e) => props.set(e.target.checked ? undefined : listed.map((s) => s.id))}
-            />{' '}
-            Every chat it has <span className="muted small">(new chats too)</span>
-          </label>
-          <Checks
-            label="latest chats"
-            surfaces={[...shown, ...others(value, shown)]}
-            ticked={(id) => all || has(value, id)}
-            toggle={toggle}
-          />
-          <input
-            type="search"
-            aria-label="search chats"
-            placeholder="Search its chats by name"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          {found.state === 'listed' ? (
-            found.surfaces.length === 0 ? (
-              <p className="muted small">No chat matches.</p>
-            ) : (
-              <Checks
-                label="chats found"
-                surfaces={found.surfaces}
-                ticked={(id) => all || has(value, id)}
-                toggle={toggle}
-              />
+      <label className="block">
+        <input
+          type="checkbox"
+          aria-label="every chat"
+          checked={all}
+          onChange={(e) =>
+            props.set(
+              e.target.checked
+                ? undefined
+                : latest.state === 'listed'
+                  ? latest.surfaces.map((s) => s.id)
+                  : []
             )
-          ) : null}
-        </>
-      ) : (
-        <>
-          <p className="muted">{note}</p>
-          <RowsField
-            name={CHATS_KEY}
-            help="Unset (no rows): every chat it has. A group by its id, a private chat by @username."
-            value={value}
-            set={(v) => props.set(v.length === 0 ? undefined : v)}
-          />
-        </>
+          }
+        />{' '}
+        Every chat it has <span className="muted small">(new chats too)</span>
+      </label>
+      {all ? null : (
+        <ChatPicker
+          label="monitored chats"
+          connector={props.connector}
+          value={props.value ?? []}
+          set={(v) => props.set(v)}
+        />
       )}
     </fieldset>
   );
 }
 
 /**
- * The chats a connector monitors, as an edge picks from them: those its config lists (titled from
- * its surfaces), or every surface it lists while its config lists none.
- */
-export function monitoredSurfaces(
-  surfaces: readonly Surface[],
-  chats: readonly string[] | undefined
-): Surface[] {
-  if (chats === undefined) return [...surfaces];
-  return chats.map(
-    (c) =>
-      surfaces.find((s) => s.id.toLowerCase() === c.toLowerCase()) ?? {
-        id: c,
-        title: c,
-        kind: 'group',
-      }
-  );
-}
-
-/**
- * An edge's chats (a chat-in's `reads`, a chat-out's `sends`) as checkboxes over its connector's
- * monitored chats; with `any`, a box for all of them (`'*'`).
+ * An edge's chats (a chat-in's `reads`, a chat-out's `sends`) picked among its connector's monitored
+ * chats (all of its chats while its config lists none); with `any`, a box for all of them (`'*'`).
  */
 export function EdgeChats(props: {
   name: 'reads' | 'sends';
@@ -422,57 +220,38 @@ export function EdgeChats(props: {
   set: (v: string[] | '*') => void;
   any?: boolean;
 }) {
-  const s = useSurfaces(props.connector);
-  const note = unlistedNote(s);
   const value = props.value ?? [];
   const list = value === '*' ? [] : value;
   const any = value === '*';
-  const surfaces = s.state === 'listed' ? s.surfaces : [];
-  const surfaceIds = surfaces.map((x) => x.id);
-  // The monitored chats, and the edge's own, that its latest surfaces do not name, looked up.
-  const named = useNamed(
-    note === undefined ? props.connector : undefined,
-    [...(props.monitored ?? []), ...list].filter((c) => !has(surfaceIds, c)),
-    []
-  );
-  const shown =
-    s.state === 'listed' ? monitoredSurfaces([...surfaces, ...named], props.monitored) : [];
+  const latest = useSurfaces(props.connector);
+  // Back from all of them to a list: those it monitors, each picked.
+  const all =
+    props.monitored ?? (latest.state === 'listed' ? latest.surfaces.map((s) => s.id) : []);
   return (
     <fieldset className="field surfaces" aria-label={props.name}>
       <legend>
         <code>{props.name}</code>
       </legend>
       {props.any === true ? (
-        <label>
+        <label className="block">
           <input
             type="checkbox"
             aria-label="all the chats it monitors"
             checked={any}
-            onChange={(e) => props.set(e.target.checked ? '*' : shown.map((x) => x.id))}
+            onChange={(e) => props.set(e.target.checked ? '*' : [...all])}
           />{' '}
           All the chats its connector monitors <span className="muted small">(any chat)</span>
         </label>
       ) : null}
-      {note === undefined ? (
-        <Checks
+      {any ? null : (
+        <ChatPicker
           label={`${props.name} chats`}
-          surfaces={[...shown, ...others(list, shown)]}
-          ticked={(id) => any || has(list, id)}
-          disabled={any}
-          toggle={(id, on) =>
-            props.set(on ? [...list, id] : list.filter((c) => c.toLowerCase() !== id.toLowerCase()))
-          }
+          connector={props.connector}
+          noConnector="Wire it to a connector first."
+          value={list}
+          set={(v) => props.set(v)}
+          {...(props.monitored === undefined ? {} : { within: props.monitored })}
         />
-      ) : any ? null : (
-        <>
-          <p className="muted">{note}</p>
-          <RowsField
-            name={`${props.name} list`}
-            help="A channel, a chat id, a bot’s @username"
-            value={list}
-            set={(v) => props.set(v)}
-          />
-        </>
       )}
       <small className="muted">{props.help}</small>
     </fieldset>

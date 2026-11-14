@@ -15,6 +15,7 @@ describe('parseManifest', () => {
       events: {},
       secrets: [],
       configSecrets: [],
+      configChats: [],
       notices: false,
       summary: false,
       audit: [],
@@ -197,6 +198,51 @@ describe('parseManifest', () => {
       parseManifest({ ...tg, kinds: ['parser'], account: undefined, monitors: 'all' })
     ).toThrow('only a connector monitors chats');
     expect(() => parseManifest({ ...tg, monitors: 'some' })).toThrow();
+  });
+
+  it('names the keys of its config that hold a chat, and the edge to their connector (D96)', () => {
+    const config = z.object({ owner: z.number().optional(), chat: z.string().optional() });
+    const tg = {
+      id: 'tg',
+      version: '0.1.0',
+      kinds: ['connector'],
+      description: 'tg',
+      account: 'telegram:alice',
+      config,
+    };
+    expect(
+      parseManifest({ ...tg, configChats: [{ key: 'owner', kinds: ['private'] }] }).configChats
+    ).toEqual([{ key: 'owner', kinds: ['private'] }]);
+    expect(() => parseManifest({ ...tg, configChats: [{ key: 'nope' }] })).toThrow(
+      'its config has no key nope'
+    );
+    expect(() =>
+      parseManifest({ ...tg, configChats: [{ key: 'chat', output: 'a', input: 'b' }] })
+    ).toThrow('an output or an input, not both');
+    const teller = {
+      ...base,
+      config,
+      outputs: { out: { type: 'chat-out' } },
+      inputs: { in: { type: 'chat-in' } },
+    };
+    expect(
+      parseManifest({
+        ...teller,
+        configChats: [
+          { key: 'chat', output: 'out', template: true },
+          { key: 'owner', input: 'in' },
+        ],
+      }).configChats
+    ).toHaveLength(2);
+    expect(() => parseManifest({ ...teller, configChats: [{ key: 'chat' }] })).toThrow(
+      'only a connector names its own chats'
+    );
+    expect(() =>
+      parseManifest({ ...teller, configChats: [{ key: 'chat', output: 'in' }] })
+    ).toThrow('it has no chat-out output in');
+    expect(() =>
+      parseManifest({ ...teller, configChats: [{ key: 'chat', input: 'out' }] })
+    ).toThrow('it has no chat-in input out');
   });
 
   it('keeps secrets for connectors, and accounts too', () => {

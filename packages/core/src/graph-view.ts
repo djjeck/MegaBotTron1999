@@ -283,6 +283,18 @@ export interface PluginView {
   events: string[];
   /** Where its nodes declare their own inputs in their config, and of which types (D80). */
   configInputs?: { key: string; types: ('events' | 'interface')[] };
+  /** The keys of its config that name a chat, picked from a connector's chats (D96). */
+  configChats?: ConfigChatView[];
+}
+
+/** A key of a config that names a chat (bot-os.md D96), as the editor picks it. */
+export interface ConfigChatView {
+  key: string;
+  /** The chat-out output, or chat-in input, whose edge leads to the connector; none: its own. */
+  output?: string;
+  input?: string;
+  kinds?: ('private' | 'group' | 'channel' | 'bot')[];
+  template?: true;
 }
 
 /** One node of the graph, as the graph view shows it: its plugin's declarations, and its own. */
@@ -411,6 +423,9 @@ export function describePlugin(m: Manifest): PluginView {
     ...(m.configInputs === undefined
       ? {}
       : { configInputs: { key: m.configInputs.key, types: [...m.configInputs.types] } }),
+    ...(m.configChats.length === 0
+      ? {}
+      : { configChats: m.configChats.map((c) => structuredClone(c) as ConfigChatView) }),
   };
 }
 

@@ -123,13 +123,15 @@ describe('TelegramBotConnector', () => {
     o: {
       listen?: Promise<unknown>;
       chats?: string[];
+      known?: { id: number; role: 'owner' | 'group' }[];
+      docs?: Record<string, unknown>;
       download?: (fileId: string) => Promise<Uint8Array>;
       /** The time, in ms: what came before its connection was missed. */
       now?: number;
     } = {}
   ) {
     const stub = stubBot();
-    const docs: Record<string, unknown> = {};
+    const docs: Record<string, unknown> = o.docs ?? {};
     const logs: string[] = [];
     const states: string[] = [];
     let polls = 0;
@@ -150,6 +152,7 @@ describe('TelegramBotConnector', () => {
       log: (l) => logs.push(l),
       ...(o.listen === undefined ? {} : { listen: o.listen }),
       ...(o.chats === undefined ? {} : { chats: o.chats }),
+      ...(o.known === undefined ? {} : { known: o.known }),
       store: {
         read: <T>(name: string) => docs[name] as T | undefined,
         write: (name, value) => {
@@ -396,10 +399,51 @@ describe('TelegramBotConnector', () => {
     ]);
     stub.bot.api.getChat = (() => Promise.reject(new Error('chat not found'))) as never;
     expect(await c.surfaces({ search: '@nowhere_chat' })).toEqual([]);
-    // Titled by any name it saw, for the owner's words (D95); no owner without one.
-    expect(c.chatTitle('-100123')).toBe('The Lobby');
+  });
+
+  it('lists its owner and group before it has seen them, or why it cannot reach them (D96)', async () => {
+    const { c, stub } = connector({
+      known: [
+        { id: 7, role: 'owner' },
+        { id: -100999, role: 'group' },
+      ],
+    });
+    const asked: number[] = [];
+    stub.bot.api.getChat = ((id: number) => {
+      asked.push(id);
+      return id === -100999
+        ? Promise.resolve({ id, type: 'supergroup', title: 'Guild Hall' })
+        : Promise.reject(new Error('400: Bad Request: chat not found'));
+    }) as never;
+    expect(await c.surfaces()).toEqual([
+      { id: '-100999', title: 'Guild Hall', kind: 'group' },
+      {
+        id: '7',
+        title: 'its owner',
+        kind: 'private',
+        unreachable: expect.stringContaining('/start') as unknown,
+      },
+    ]);
+    // Not asked again soon; once the owner writes, it is seen, and reachable.
+    await c.surfaces();
+    expect(asked).toEqual([7, -100999]);
+    await stub.bot.handleUpdate(stub.command(7, 7, '/map', 'ada_x'));
+    expect((await c.surfaces({ search: '@ada_x' })).map((x) => [x.id, x.unreachable])).toEqual([
+      ['7', undefined],
+    ]);
+    expect(c.chatTitle('@ADA_X')).toBe('Ada');
+    expect(c.chatTitle('-100999')).toBe('Guild Hall');
     expect(c.chatTitle('-1')).toBeUndefined();
+  });
+
+  it('sends to a person by the @username it saw, through their id, after a restart too', async () => {
+    const first = connector();
+    await first.stub.bot.handleUpdate(first.stub.command(5, 5, '/map', 'ada_x'));
+    const { c, stub } = connector({ docs: first.docs });
     expect(c.owner()).toBeUndefined();
+    await c.deliver('@Ada_X', 'hello');
+    await c.deliver('@lobby', 'hello');
+    expect(stub.calls.map((x) => x.payload['chat_id'])).toEqual([5, '@lobby']);
   });
 
   it('names a chat by its username when it has no title', () => {
@@ -407,6 +451,7 @@ describe('TelegramBotConnector', () => {
       id: '1',
       title: '@ada_x',
       kind: 'private',
+      aliases: ['@ada_x'],
     });
     expect(surfaceOf({ id: 2, type: 'private', first_name: 'Ada', last_name: 'L' }, 5).title).toBe(
       'Ada L'

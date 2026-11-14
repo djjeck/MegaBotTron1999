@@ -159,6 +159,28 @@ export const manifestSchema = z
       ])
       .optional(),
     /**
+     * The keys of its `config` that name a chat (bot-os.md D96), so that the editor picks each from
+     * its connector's chats rather than have the owner type an id: the connector is its own node (a
+     * connector's `owner`), or the one at the other end of its chat-out `output` or chat-in `input`
+     * edge. A string, or a list of them, holds the chats as the connector names them (`Surface.id`);
+     * a number, a chat by its numeric id. `kinds`: the kinds of chat it takes (a bot's owner is a
+     * `private` chat); `template`: a `{path}` template may stand for the chat instead (a reaction's).
+     */
+    configChats: z
+      .array(
+        z.strictObject({
+          key: z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key'),
+          output: z.string().min(1).optional(),
+          input: z.string().min(1).optional(),
+          kinds: z
+            .array(z.enum(['private', 'group', 'channel', 'bot']))
+            .min(1)
+            .optional(),
+          template: z.literal(true).optional(),
+        })
+      )
+      .default([]),
+    /**
      * It hears the owner's notices (bot-os.md D91, `ctx.notices`): what the core and the plugins
      * raise for the owner's attention, for a node that tells the owner (`owner-notice`).
      */
@@ -250,6 +272,44 @@ export const manifestSchema = z
         path: ['monitors', 'config'],
         message: `its config has no key ${m.monitors.config}`,
       });
+    for (const [i, c] of m.configChats.entries()) {
+      const where = ['configChats', i];
+      if (!Object.hasOwn(m.config?.shape ?? {}, c.key))
+        ctx.addIssue({
+          code: 'custom',
+          path: [...where, 'key'],
+          message: `its config has no key ${c.key}`,
+        });
+      if (c.output !== undefined && c.input !== undefined)
+        ctx.addIssue({ code: 'custom', path: where, message: 'an output or an input, not both' });
+      else if (c.output === undefined && c.input === undefined && !connector)
+        ctx.addIssue({
+          code: 'custom',
+          path: where,
+          message:
+            'only a connector names its own chats: name the output or input to its connector',
+        });
+      else if (
+        c.output !== undefined &&
+        m.node === undefined &&
+        m.outputs[c.output]?.type !== 'chat-out'
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: [...where, 'output'],
+          message: `it has no chat-out output ${c.output}`,
+        });
+      else if (
+        c.input !== undefined &&
+        m.node === undefined &&
+        m.inputs[c.input]?.type !== 'chat-in'
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: [...where, 'input'],
+          message: `it has no chat-in input ${c.input}`,
+        });
+    }
     if (m.requires.includes(m.id))
       ctx.addIssue({
         code: 'custom',

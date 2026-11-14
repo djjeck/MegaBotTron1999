@@ -331,24 +331,25 @@ describe('the graph editor', () => {
       screen.getByRole('button', { name: 'edge chat.chat → actor-a.chat' });
     await waitFor(() => expect(pressed().getAttribute('aria-pressed')).toBe('true'));
     expect(pressed().className).toContain('selected');
-    // Its connector does not run here: its chats as rows, to apply first to pick from a list.
+    // Its connector does not run here: no list to pick from, its chats as picked, to apply first
+    // (D96: never typed).
     expect(await within(panel).findByText('Apply first to list its chats.')).toBeDefined();
-    const readsRows = within(panel).getByRole('group', { name: 'reads list' });
-    expect(within(readsRows).getByText('#a')).toBeDefined();
+    const readsPicked = within(panel).getByRole('list', { name: 'reads chats picked' });
+    const a = within(readsPicked).getByLabelText('#a') as HTMLInputElement;
+    expect(a.checked).toBe(true);
+    expect(within(panel).queryByLabelText('new reads chats')).toBeNull();
     expect(within(panel).getByText('node actor-a: reads #a, which is not its chat')).toBeDefined();
     // A chat-in edge carries its reads and senders alone.
     expect(within(panel).queryByLabelText('sends')).toBeNull();
     expect(within(panel).queryByLabelText('commands')).toBeNull();
-    fireEvent.click(within(readsRows).getByRole('button', { name: 'remove #a' }));
-    fireEvent.change(within(panel).getByLabelText('new reads list'), { target: { value: '#b' } });
-    fireEvent.click(within(readsRows).getByRole('button', { name: 'Add' }));
+    fireEvent.click(a);
     fireEvent.click(within(panel).getByLabelText('only these'));
     await waitFor(() =>
       expect(core.checked.at(-1)?.edges[0]).toEqual({
         from: 'chat.chat',
         to: 'actor-a.chat',
         type: 'chat-in',
-        reads: ['#b'],
+        reads: [],
         senders: ['me'],
       })
     );
@@ -360,7 +361,7 @@ describe('the graph editor', () => {
     const sends = await screen.findByLabelText('details of edge actor-a.chat → chat.chat');
     expect(within(sends).queryByLabelText('reads')).toBeNull();
     expect(
-      within(within(sends).getByRole('group', { name: 'sends list' })).getByText('#a')
+      within(within(sends).getByRole('list', { name: 'sends chats picked' })).getByLabelText('#a')
     ).toBeDefined();
     fireEvent.change(within(sends).getByLabelText('new commands'), {
       target: { value: '/play' },

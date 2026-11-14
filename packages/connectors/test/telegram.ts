@@ -48,9 +48,10 @@ export function stubBot() {
     return { ok: true, result } as never;
   });
   let updateId = 0;
-  const chatOf = (chatId: number) =>
+  // A private chat carries its person's username, as Telegram's does.
+  const chatOf = (chatId: number, username?: string) =>
     chatId > 0
-      ? { id: chatId, type: 'private', first_name: 'Ada' }
+      ? { id: chatId, type: 'private', first_name: 'Ada', ...(username && { username }) }
       : { id: chatId, type: 'supergroup', title: 'The Lobby' };
   /** A `/command` typed in `chatId` by user `from`, with the username given if any. */
   const command = (chatId: number, from: number, text: string, username?: string): Update =>
@@ -59,7 +60,7 @@ export function stubBot() {
       message: {
         message_id: ++messageId,
         date: 0,
-        chat: chatOf(chatId),
+        chat: chatOf(chatId, chatId === from ? username : undefined),
         from: { id: from, is_bot: false, first_name: 'Ada', ...(username && { username }) },
         text,
         entities: [{ type: 'bot_command', offset: 0, length: text.split(' ')[0]?.length ?? 0 }],

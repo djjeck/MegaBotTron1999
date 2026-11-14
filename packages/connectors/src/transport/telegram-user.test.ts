@@ -424,7 +424,13 @@ describe('every chat, and the surfaces', () => {
     await flush();
     // Without a search: those with a message this week; News, with none, is left out.
     expect(await c.surfaces()).toEqual([
-      { id: '@Quiz_bot', title: 'Quiz Bot', kind: 'bot', lastActive: 1_793_000_200_000 },
+      {
+        id: '@Quiz_bot',
+        title: 'Quiz Bot',
+        kind: 'bot',
+        aliases: ['5000001'],
+        lastActive: 1_793_000_200_000,
+      },
       { id: GROUP, title: 'The Lobby', kind: 'group', lastActive: 1_793_000_100_000 },
       { id: '5000002', title: '5000002', kind: 'private', lastActive: 1_793_000_100_000 },
     ]);
@@ -433,6 +439,8 @@ describe('every chat, and the surfaces', () => {
     expect((await c.surfaces({ search: 'news' })).map((x) => x.id)).toEqual(['-1004']);
     expect((await c.surfaces({ search: ' lobby ', limit: 5 })).map((x) => x.id)).toEqual([GROUP]);
     expect((await c.surfaces({ search: 'quiz' })).map((x) => x.id)).toEqual(['@Quiz_bot']);
+    // By any of its names: a bot's id finds it by its @username (D96).
+    expect((await c.surfaces({ search: '5000001' })).map((x) => x.id)).toEqual(['@Quiz_bot']);
     expect(await c.surfaces({ limit: 1 })).toHaveLength(1);
     expect(c.chatTitle('5000001')).toBe('Quiz Bot');
     expect(c.chatTitle('@nobody_here')).toBeUndefined();

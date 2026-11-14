@@ -38,18 +38,20 @@ export const telegramBotConfig = z.object({
     .int()
     .optional()
     .describe(
-      'The owner’s Telegram user id: their private chat with the bot alone answers the owner’s commands, and runs the buttons of the notices an owner-notice node sends there'
+      'The owner, picked among its chats (by their user id): their private chat with the bot alone answers the owner’s commands, and runs the buttons of the notices an owner-notice node sends there'
     ),
   group: z
     .number()
     .int()
     .optional()
-    .describe('A group whose members may use the plugins’ public commands'),
+    .describe(
+      'A group, picked among its chats, whose members may use the plugins’ public commands'
+    ),
   chats: z
-    .array(z.string().regex(/^(?:-?\d+|@\w{4,})$/u, 'expected a chat id or a @username'))
+    .array(z.string().min(1))
     .optional()
     .describe(
-      'The chats it monitors for the plugins, by id or @username; unset: every chat it hears'
+      'The chats it monitors for the plugins, picked among its chats; unset: every chat it hears'
     ),
   commandIntervalS,
   unansweredAt,
@@ -84,6 +86,11 @@ export function telegramBotPlugin(
       // The chats its config lists; unset, every chat (D89). A chat goes by its id and its
       // @username, which its connector tells apart (D90).
       monitors: { config: 'chats', aliases: true },
+      // Its owner and its group are picked among its chats, never typed as ids (D96).
+      configChats: [
+        { key: 'owner', kinds: ['private'] },
+        { key: 'group', kinds: ['group'] },
+      ],
     },
     create: (ctx) => {
       const log = (line: string): void => ctx.log.info(line);
@@ -109,6 +116,10 @@ export function telegramBotPlugin(
         log,
         listen,
         ...(config.chats === undefined ? {} : { chats: config.chats }),
+        known: [
+          ...(config.owner === undefined ? [] : [{ id: config.owner, role: 'owner' as const }]),
+          ...(config.group === undefined ? [] : [{ id: config.group, role: 'group' as const }]),
+        ],
         store: ctx.store,
         now: () => ctx.clock.now(),
         liveGraceMs: config.liveGraceS * 1000,

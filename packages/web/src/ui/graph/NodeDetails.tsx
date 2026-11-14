@@ -3,7 +3,8 @@
  * editable for the draft, whether it is enabled (D64), its account (a connector's), its config
  * and the settings its instance starts with, in forms made from their schemas, each field with the
  * check's errors; a config key that names a secret (`configSecrets`) is a choice of the secrets'
- * names; a connector's `chats` (what it monitors) is picked from its surfaces (D63), and once the
+ * names; a key that names a chat (`configChats`) is picked in the chat picker (D96); a connector's
+ * `chats` (what it monitors) is picked from its surfaces (D63), and once the
  * draft changes them, a reminder names its chat-in edges to update, each opening its panel. Then
  * the interface it declares (P11) and its removal, which keeps its instance. A stopped node (D64)
  * says why, when and by what, with **Clear stop**, a change of the draft that Apply makes; a
@@ -14,6 +15,7 @@
  */
 import { useState } from 'react';
 import type {
+  ConfigChatView,
   DriftCounts,
   EventTypeView,
   GraphEdge,
@@ -27,10 +29,12 @@ import type {
   PortView,
 } from '#src/ui/api.ts';
 import { isSplit } from './cards.ts';
+import { ChatPicker } from './ChatPicker.tsx';
 import { withDefaults } from './defaults.ts';
 import type { PortChange } from './draft.ts';
-import { instanceOf } from './draft.ts';
+import { endOf, instanceOf } from './draft.ts';
 import { ConnectorQueue } from './Queue.tsx';
+import type { CustomControl } from './SchemaForm.tsx';
 import { SchemaForm } from './SchemaForm.tsx';
 import { exportScript } from './script/export.ts';
 import { ExportDialog } from './script/ExportDialog.tsx';
@@ -47,6 +51,93 @@ function withoutChats(schema: JsonSchema | undefined): JsonSchema | undefined {
   if (props?.[CHATS_KEY]?.['type'] !== 'array') return undefined;
   const { [CHATS_KEY]: _, ...rest } = props;
   return { ...schema, properties: rest };
+}
+
+/**
+ * The connector a config key's chat is picked from (D96): the node's own, or the one at the other
+ * end of the edge from its chat-out `output` (or to its chat-in `input`) in the draft.
+ */
+export function chatConnector(
+  node: string,
+  spec: ConfigChatView,
+  edges: readonly GraphEdge[]
+): string | undefined {
+  if (spec.output !== undefined) {
+    const e = edges.find((x) => x.from === `${node}.${spec.output}` && x.type === 'chat-out');
+    return e === undefined ? undefined : endOf(e.to).node;
+  }
+  if (spec.input !== undefined) {
+    const e = edges.find((x) => x.to === `${node}.${spec.input}` && x.type === 'chat-in');
+    return e === undefined ? undefined : endOf(e.from).node;
+  }
+  return node;
+}
+
+/** A chat key's value as the picker holds it: a list of names, whatever its type in the config. */
+const chatValues = (v: unknown): string[] =>
+  Array.isArray(v)
+    ? v
+        .filter((x): x is string | number => typeof x === 'string' || typeof x === 'number')
+        .map(String)
+    : typeof v === 'string' || typeof v === 'number'
+      ? [String(v)]
+      : [];
+
+/**
+ * The controls of a plugin's chat keys (D96, `configChats`): each picked in the chat picker from its
+ * connector's chats; stored as its schema says (a number, a string, a list), and a template typed
+ * where the key takes one (`{chat}`).
+ */
+function chatControls(
+  node: string,
+  specs: readonly ConfigChatView[],
+  schema: JsonSchema | undefined,
+  edges: readonly GraphEdge[]
+): Record<string, CustomControl> {
+  const props = (schema?.['properties'] ?? {}) as Record<string, JsonSchema>;
+  return Object.fromEntries(
+    specs.map((spec): [string, CustomControl] => {
+      const type = props[spec.key]?.['type'];
+      const many = type === 'array';
+      const numeric = type === 'integer' || type === 'number';
+      const connector = chatConnector(node, spec, edges);
+      return [
+        spec.key,
+        (value, set) => {
+          const template =
+            spec.template === true && typeof value === 'string' && value.includes('{');
+          return (
+            <>
+              <ChatPicker
+                label={spec.key}
+                connector={connector}
+                noConnector={`Draw its ${spec.output ?? spec.input ?? ''} edge to a connector first, to pick from its chats.`}
+                value={template ? [] : chatValues(value)}
+                single={!many}
+                {...(spec.kinds === undefined ? {} : { kinds: spec.kinds })}
+                set={(v) => {
+                  if (many) set(v.length === 0 ? undefined : v);
+                  else if (v[0] === undefined) set(undefined);
+                  else set(numeric ? Number(v[0]) : v[0]);
+                }}
+              />
+              {spec.template === true ? (
+                <label className="block small">
+                  or a template of the event{' '}
+                  <input
+                    aria-label={`${spec.key} template`}
+                    placeholder="{chat}"
+                    value={template ? value : ''}
+                    onChange={(e) => set(e.target.value === '' ? undefined : e.target.value)}
+                  />
+                </label>
+              ) : null}
+            </>
+          );
+        },
+      ];
+    })
+  );
 }
 
 function Ports(props: { title: string; ports: Record<string, PortView> }) {
@@ -563,6 +654,12 @@ export function NodeDetails(props: {
             secretKeys={view.configSecrets}
             secretNames={props.secretNames}
             errors={props.configErrors}
+            custom={chatControls(
+              node.id,
+              view.configChats ?? [],
+              view.configSchema,
+              props.edges ?? []
+            )}
           />
         )}
         {picked === undefined ? null : (

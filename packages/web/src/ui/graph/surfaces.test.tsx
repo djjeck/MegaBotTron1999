@@ -6,7 +6,7 @@ import { fakeCore } from '#test/fake-core.ts';
 import { VIEW } from '#test/graph-view.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
 import { GraphPage } from './GraphPage.tsx';
-import { edgesToUpdate, monitoredSurfaces, sameChats, unlistedNote } from './Surfaces.tsx';
+import { edgesToUpdate, sameChats, unlistedNote } from './Surfaces.tsx';
 
 let restore: () => void;
 beforeEach(() => {
@@ -29,28 +29,35 @@ describe('chats picked from lists', () => {
     const core = fakeCore({
       routes: {
         'GET /accounts/chat/surfaces': [...listed([LOBBY, QUEST])],
-        'GET /accounts/chat/surfaces?search=attic': [...listed([ATTIC])],
+        'GET /accounts/chat/surfaces?peers=1': [...listed([LOBBY, QUEST])],
+        'GET /accounts/chat/surfaces?search=attic&peers=1': [...listed([ATTIC])],
       },
     });
     render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
     fireEvent.click(await screen.findByLabelText('node chat · in', {}, slow));
     const details = await screen.findByLabelText('details of chat');
     const picker = within(details).getByRole('group', { name: 'chats it monitors' });
-    // Every chat, by default: each one ticked.
+    // Every chat, by default: no list to pick from.
+    const every = within(picker).getByLabelText('every chat') as HTMLInputElement;
+    expect(every.checked).toBe(true);
+    expect(within(picker).queryByLabelText('The Lobby')).toBeNull();
+    // Unticked, a list of its latest chats, each picked; unticking one leaves the others.
+    await waitFor(() => expect(core.api.calls).toContain('GET /accounts/chat/surfaces'));
+    fireEvent.click(every);
+    await waitFor(() =>
+      expect(core.checked.at(-1)?.nodes[0]?.config).toMatchObject({ chats: ['#a', '@QuestBot'] })
+    );
     const lobby = (await within(picker).findByLabelText('The Lobby')) as HTMLInputElement;
     expect(lobby.checked).toBe(true);
-    expect((within(picker).getByLabelText('every chat') as HTMLInputElement).checked).toBe(true);
-    // Unticking one makes a list of the others.
     fireEvent.click(lobby);
     await waitFor(() =>
       expect(core.checked.at(-1)?.nodes[0]?.config).toMatchObject({ chats: ['@QuestBot'] })
     );
     // A search finds one beyond the latest; ticked, it joins the list.
-    fireEvent.change(within(picker).getByLabelText('search chats'), {
+    fireEvent.change(within(picker).getByLabelText('search monitored chats'), {
       target: { value: 'attic' },
     });
-    const found = await within(picker).findByRole('list', { name: 'chats found' });
-    fireEvent.click(within(found).getByLabelText('The Attic'));
+    fireEvent.click(await within(picker).findByLabelText('The Attic'));
     await waitFor(() =>
       expect(core.checked.at(-1)?.nodes[0]?.config).toMatchObject({
         chats: ['@QuestBot', '#attic'],
@@ -61,42 +68,51 @@ describe('chats picked from lists', () => {
     await waitFor(() => expect(core.checked.at(-1)?.nodes[0]?.config?.['chats']).toBeUndefined());
   });
 
-  it('names a chat ticked from a search, and after a reload, not by its id', async () => {
+  it('names a chat picked from a search, and after a reload, not by its id', async () => {
+    const graph = structuredClone(VIEW.graph);
+    const chat = graph.nodes.find((n) => n.id === 'chat');
+    if (chat !== undefined) chat.config = { ...chat.config, chats: ['@QuestBot'] };
     fakeCore({
+      file: graph,
       routes: {
-        'GET /accounts/chat/surfaces': [...listed([LOBBY, QUEST])],
-        'GET /accounts/chat/surfaces?search=attic': [...listed([ATTIC])],
+        'GET /accounts/chat/surfaces?peers=1': [...listed([LOBBY, QUEST])],
+        'GET /accounts/chat/surfaces?search=attic&peers=1': [...listed([ATTIC])],
       },
     });
     render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
     fireEvent.click(await screen.findByLabelText('node chat · in', {}, slow));
     const details = await screen.findByLabelText('details of chat');
     const picker = within(details).getByRole('group', { name: 'chats it monitors' });
-    fireEvent.click(await within(picker).findByLabelText('The Lobby'));
-    fireEvent.change(within(picker).getByLabelText('search chats'), {
+    await within(picker).findByLabelText('The Lobby');
+    fireEvent.change(within(picker).getByLabelText('search monitored chats'), {
       target: { value: 'attic' },
     });
-    const found = await within(picker).findByRole('list', { name: 'chats found' });
-    fireEvent.click(within(found).getByLabelText('The Attic'));
-    // The search cleared: the ticked chat stays in the list, by its name.
-    fireEvent.change(within(picker).getByLabelText('search chats'), { target: { value: '' } });
+    fireEvent.click(await within(picker).findByLabelText('The Attic'));
+    // The search cleared: the picked chat stays, by its name, at the top.
+    fireEvent.change(within(picker).getByLabelText('search monitored chats'), {
+      target: { value: '' },
+    });
+    const list = await within(picker).findByRole('list', { name: 'monitored chats chats' });
     await waitFor(() =>
-      expect(within(picker).queryByRole('list', { name: 'chats found' })).toBeNull()
+      expect(
+        within(list)
+          .getAllByRole('checkbox')
+          .map((x) => [x.getAttribute('aria-label'), (x as HTMLInputElement).checked])
+      ).toEqual([
+        ['Quest Bot', true],
+        ['The Attic', true],
+        ['The Lobby', false],
+      ])
     );
-    const ticked = within(picker).getByRole('list', { name: 'latest chats' });
-    expect((within(ticked).getByLabelText('The Attic') as HTMLInputElement).checked).toBe(true);
-    expect(within(ticked).queryByLabelText('#attic')).toBeNull();
     cleanup();
 
     // Saved, then loaded again: the latest chats do not have it, so it is looked up by its id.
-    const graph = structuredClone(VIEW.graph);
-    const chat = graph.nodes.find((n) => n.id === 'chat');
     if (chat !== undefined)
       chat.config = { ...chat.config, chats: ['@QuestBot', '#attic', '#gone'] };
     fakeCore({
       file: graph,
       routes: {
-        'GET /accounts/chat/surfaces': [...listed([LOBBY, QUEST])],
+        'GET /accounts/chat/surfaces?peers=1': [...listed([LOBBY, QUEST])],
         'GET /accounts/chat/surfaces?search=%23attic&limit=500': [...listed([ATTIC])],
         'GET /accounts/chat/surfaces?search=%23gone&limit=500': [...listed([])],
       },
@@ -105,17 +121,22 @@ describe('chats picked from lists', () => {
     fireEvent.click(await screen.findByLabelText('node chat · in', {}, slow));
     const again = await screen.findByLabelText('details of chat');
     const picker2 = within(again).getByRole('group', { name: 'chats it monitors' });
-    const latest = await within(picker2).findByRole('list', { name: 'latest chats' });
-    expect(((await within(latest).findByLabelText('The Attic')) as HTMLInputElement).checked).toBe(
+    expect(((await within(picker2).findByLabelText('The Attic')) as HTMLInputElement).checked).toBe(
       true
     );
-    // One that no search finds is shown by its id.
-    expect((within(latest).getByLabelText('#gone') as HTMLInputElement).checked).toBe(true);
+    // One that no search finds is shown as it was saved, with why.
+    expect((within(picker2).getByLabelText('#gone') as HTMLInputElement).checked).toBe(true);
+    expect(
+      await within(picker2).findByText('chat does not know this chat: pick another')
+    ).toBeDefined();
   });
 
   it('picks an edge’s reads and senders from the connector’s monitored chats', async () => {
     const core = fakeCore({
-      routes: { 'GET /accounts/chat/surfaces': [...listed([LOBBY, QUEST])] },
+      routes: {
+        'GET /accounts/chat/surfaces': [...listed([LOBBY, QUEST])],
+        'GET /accounts/chat/surfaces?peers=1': [...listed([LOBBY, QUEST])],
+      },
     });
     render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
     await screen.findByLabelText('node chat · in', {}, slow);
@@ -166,16 +187,23 @@ describe('chats picked from lists', () => {
   });
 
   it('reminds the owner of the edges to update once the draft changes the chats', async () => {
-    fakeCore({ routes: { 'GET /accounts/chat/surfaces': [...listed([LOBBY, QUEST])] } });
+    const core = fakeCore({
+      routes: {
+        'GET /accounts/chat/surfaces': [...listed([LOBBY, QUEST])],
+        'GET /accounts/chat/surfaces?peers=1': [...listed([LOBBY, QUEST])],
+      },
+    });
     render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
     fireEvent.click(await screen.findByLabelText('node chat · in', {}, slow));
     const details = await screen.findByLabelText('details of chat');
     const picker = within(details).getByRole('group', { name: 'chats it monitors' });
-    const lobby = await within(picker).findByLabelText('The Lobby');
     // As saved: no reminder.
     expect(within(picker).queryByRole('note', { name: 'edges to update' })).toBeNull();
-    // The Lobby dropped: the edge that still reads it is named, and opens its panel.
-    fireEvent.click(lobby);
+    // From every chat to a list, the Lobby dropped: the edge that still reads it is named, and
+    // opens its panel.
+    await waitFor(() => expect(core.api.calls).toContain('GET /accounts/chat/surfaces'));
+    fireEvent.click(within(picker).getByLabelText('every chat'));
+    fireEvent.click(await within(picker).findByLabelText('The Lobby'));
     const note = await within(picker).findByRole('note', { name: 'edges to update' });
     expect(note.textContent).toContain('update the edges that should read them too');
     fireEvent.click(within(note).getByRole('button', { name: 'chat.chat → actor-a.chat' }));
@@ -224,9 +252,5 @@ describe('chats picked from lists', () => {
     expect(unlistedNote({ state: 'error', error: 'not connected' })).toBe(
       'Its chats cannot be listed now: not connected'
     );
-    expect(monitoredSurfaces([LOBBY], ['#A', '#b'])).toEqual([
-      LOBBY,
-      { id: '#b', title: '#b', kind: 'group' },
-    ]);
   });
 });

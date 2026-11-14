@@ -502,6 +502,8 @@ export function ownerNoticePlugin(): Plugin {
       config: ownerNoticeConfig,
       notices: true,
       summary: true,
+      // Its chat is picked among its connector's (D96).
+      configChats: [{ key: 'chat', output: 'chat' }],
       outputs: {
         chat: {
           type: 'chat-out',

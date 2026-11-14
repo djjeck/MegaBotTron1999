@@ -103,12 +103,15 @@ export interface Connection {
 
 /**
  * A connector's surfaces, as the owner picks from them (bot-os.md D63): `running` false while it
- * does not run (apply first), `listed` false for a connector that cannot list its chats.
+ * does not run (apply first), `listed` false for a connector that cannot list its chats. With
+ * `peers` asked (D96), the chats the other running connectors of its network list that it does not,
+ * by connector: a bot cannot list its chats, so the owner's account names those it may not reach.
  */
 export interface SurfacesView {
   running: boolean;
   listed: boolean;
   surfaces: Surface[];
+  peers?: { connector: string; surfaces: Surface[] }[];
 }
 
 /** One account, as the owner sees it: its connector instance and the connection's status. */
@@ -254,13 +257,42 @@ export class Controls {
    * query; undefined for a node that is not a connector. Rejects when the connector cannot tell
    * now (not connected).
    */
-  async surfaces(id: string, query: SurfaceQuery = {}): Promise<SurfacesView | undefined> {
+  async surfaces(
+    id: string,
+    query: SurfaceQuery = {},
+    peers = false
+  ): Promise<SurfacesView | undefined> {
     const node = this.host.nodes().find((n) => n.id === id);
     if (node === undefined || !node.manifest.kinds.includes('connector')) return undefined;
     const c = this.host.account(id).connection;
     if (c === undefined) return { running: false, listed: false, surfaces: [] };
     if (c.surfaces === undefined) return { running: true, listed: false, surfaces: [] };
-    return { running: true, listed: true, surfaces: await c.surfaces(query) };
+    const surfaces = await c.surfaces(query);
+    if (!peers) return { running: true, listed: true, surfaces };
+    // Every name the connector lists a chat by: a peer's chat it lists is not the peer's to add.
+    const names = new Set(
+      surfaces.flatMap((s) => [s.id, ...(s.aliases ?? [])]).map((n) => n.toLowerCase())
+    );
+    const others = this.host
+      .nodes()
+      .filter((n) => n.id !== id && n.manifest.kinds.includes('connector'))
+      .map((n) => ({ id: n.id, connection: this.host.account(n.id).connection }))
+      .filter((p) => p.connection?.network === c.network && p.connection.surfaces !== undefined);
+    const found = await Promise.all(
+      others.map(async (p) => ({
+        connector: p.id,
+        // A peer that cannot tell now (not connected) lists nothing.
+        surfaces: ((await p.connection?.surfaces?.(query).catch(() => [])) ?? []).filter(
+          (s) => ![s.id, ...(s.aliases ?? [])].some((n) => names.has(n.toLowerCase()))
+        ),
+      }))
+    );
+    return {
+      running: true,
+      listed: true,
+      surfaces,
+      peers: found.filter((p) => p.surfaces.length > 0),
+    };
   }
 
   /**

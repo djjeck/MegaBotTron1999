@@ -124,16 +124,6 @@ describe('the telegram-user plugin', () => {
     ]);
   });
 
-  it('refuses a chat that is neither a group id nor a username', () => {
-    const core = new Core({
-      clock: new VirtualClock(),
-      config: { 'telegram-user': { chats: ['lobby'] } },
-      secrets: secretsWith(USER),
-    });
-    core.register(telegramUserPlugin({ self: 'alice', client }));
-    expect(() => core.load()).toThrow('expected a group id (-100…) or a @username');
-  });
-
   it('monitors every chat without chats, each reader hearing its edge’s senders', async () => {
     const heard: string[] = [];
     let deliver: ((e: { message: RawMessage }) => Promise<void>) | undefined;
