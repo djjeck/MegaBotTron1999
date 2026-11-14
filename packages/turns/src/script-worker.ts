@@ -4,6 +4,7 @@
  * coverage (V8's coverage does not reach a worker thread): the runtime it runs is tested in the
  * main thread, and this file through the worker's tests.
  */
+import { getHeapStatistics } from 'node:v8';
 import { parentPort, workerData } from 'node:worker_threads';
 import { ScriptRuntime, type SendOutcome } from './script-runtime.ts';
 import { type FromHost, type FromWorker, type WorkerData } from './script-worker-messages.ts';
@@ -55,17 +56,53 @@ const runtime = new ScriptRuntime({
   },
 });
 
+// What its script costs (docs/bot-os.md D87): the CPU this thread spends from a message that may run
+// the script's code (an event, a call's answer, a send's outcome; its first run) until it is idle
+// again, the microtasks that message started drained (an immediate runs only then). A loop in
+// there never gets idle, and its host's watchdog kills it. Each time it gets idle it tells its host
+// how many such messages it has handled, its CPU so far and its heap: its host watches it only
+// while one is unhandled, and polls nothing, so that an idle script costs nothing and shows it.
+let handled = 0;
+let depth = 0;
+let busyFrom = 0;
+let cpuMs = 0;
+const threadCpuMs = (): number => {
+  const c = process.threadCpuUsage();
+  return (c.user + c.system) / 1000;
+};
+const busy = (): void => {
+  if (depth++ === 0) busyFrom = threadCpuMs();
+};
+const idle = (counted: boolean): void => {
+  setImmediate(() => {
+    if (counted) handled++;
+    if (--depth > 0) return;
+    cpuMs += threadCpuMs() - busyFrom;
+    post({ op: 'idle', handled, cpuMs, heapBytes: getHeapStatistics().used_heap_size });
+  });
+};
+
 // A promise the script left unhandled is its error, logged; never the thread's end.
 process.on('unhandledRejection', (e) =>
   post({ op: 'log', level: 'error', line: `unhandled: ${message(e)}` })
 );
 
 port.on('message', (m: FromHost) => {
+  if (m.op === 'ping') {
+    tick(m.now);
+    post({ op: 'pong' });
+    return;
+  }
+  busy();
+  try {
+    handle(m);
+  } finally {
+    idle(true);
+  }
+});
+
+function handle(m: Exclude<FromHost, { op: 'ping' }>): void {
   switch (m.op) {
-    case 'ping':
-      tick(m.now);
-      post({ op: 'pong' });
-      return;
     case 'event':
       tick(m.now);
       runtime.dispatch(
@@ -87,10 +124,15 @@ port.on('message', (m: FromHost) => {
       sends.delete(m.send);
       return;
   }
-});
+}
 
 post({ op: 'ready' });
-runtime.load(data.js, `${data.id}.ts`).then(
-  () => post({ op: 'loaded', patterns: runtime.patterns() }),
-  (e: unknown) => post({ op: 'refused', reason: message(e) })
-);
+// Its first run is its own: counted from here, the thread's start (Node's, its modules') left out.
+busy();
+runtime
+  .load(data.js, `${data.id}.ts`)
+  .then(
+    () => post({ op: 'loaded', patterns: runtime.patterns() }),
+    (e: unknown) => post({ op: 'refused', reason: message(e) })
+  )
+  .finally(() => idle(false));

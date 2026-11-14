@@ -247,7 +247,7 @@ export interface Instance {
   /**
    * What it costs of its own, beyond its handlers' time the core measures (bot-os.md D77): a
    * script's worker thread, its CPU, heap and calls. Read for `GET /status`; cheap, from what it
-   * last sampled.
+   * last learned.
    */
   cost?(): OwnCost;
 }

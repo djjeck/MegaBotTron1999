@@ -14,7 +14,8 @@ import {
   type Plugin,
   type PluginContext,
 } from '@megabottron1999/core';
-import { describe, expect, it } from 'vitest';
+import { Worker } from 'node:worker_threads';
+import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import {
   codeProblem,
@@ -432,6 +433,54 @@ describe('a script node in a worker', () => {
       'its script hung: it held its thread past its limit of 50 ms'
     );
     await kit.stop();
+  });
+
+  it('costs nothing while idle: no ping, no poll, and its CPU is its own runs’ (D87)', async () => {
+    // Every message its host posts to a worker, the watchdog's pings among them.
+    const posts: { worker: Worker; op: string }[] = [];
+    const real = Worker.prototype.postMessage;
+    const spy = vi.spyOn(Worker.prototype, 'postMessage').mockImplementation(function (
+      this: Worker,
+      ...a: Parameters<Worker['postMessage']>
+    ) {
+      posts.push({ worker: this, op: (a[0] as { op: string }).op });
+      real.apply(this, a);
+    });
+    try {
+      // A handler that spends a few ms of CPU, and a limit that pinged every 100 ms before D87.
+      const code = `on('quest.tick', () => { let x = 0; for (let i = 0; i < 3e6; i++) x += i; log.info('ticked ' + (x > 0)); });`;
+      const { kit, parser, lines } = await run('worker', {
+        ...examineConfig(code),
+        limits: { callMs: 50, memoryMb: 64 },
+      });
+      const own = () => kit.core.cost('examine')?.own;
+      await until(() => own()?.cpuMs !== undefined);
+      const loaded = own() as { cpuMs: number; heapBytes: number };
+      expect(loaded.cpuMs).toBeGreaterThan(0);
+      const worker = posts[0]?.worker;
+      // Idle for eight of the old rounds: nothing posted to it, its cost unchanged.
+      await new Promise((r) => setTimeout(r, 100));
+      const before = posts.length;
+      const thread0 = worker === undefined ? 0 : (await worker.cpuUsage()).user;
+      await new Promise((r) => setTimeout(r, 800));
+      expect(posts.slice(before).map((p) => p.op)).toEqual([]);
+      expect(own()).toMatchObject(loaded);
+      // Its thread, left alone, spends next to nothing (cpuUsage itself runs on it, once).
+      if (worker !== undefined) expect((await worker.cpuUsage()).user - thread0).toBeLessThan(5000);
+      // An event: watched while it runs, then idle again, its run's CPU added.
+      parser.publish?.('quest.tick', {});
+      await until(() => lines.some((l) => l.includes('ticked true')));
+      await until(() => (own()?.cpuMs ?? 0) > loaded.cpuMs);
+      expect(posts.slice(before).map((p) => p.op)[0]).toBe('event');
+      await new Promise((r) => setTimeout(r, 100));
+      const after = posts.length;
+      await new Promise((r) => setTimeout(r, 400));
+      expect(posts.length).toBe(after);
+      expect(kit.core.state('examine')?.state).toBe('running');
+      await kit.stop();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('is not killed while its thread is stalled, not running, past its limit', async () => {

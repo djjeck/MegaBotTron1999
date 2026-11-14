@@ -1161,10 +1161,13 @@ control API, the web UI and later the agents, whose grants will be subsets of it
   `dispatch`, its handlers' `calls`, their time (`ms`) and the longest (`maxMs`), timed where the
   core hands it a bus event, a message or a timer (the synchronous part, real time); and `own`, what
   its instance says (`Instance.cost`): a script's `runs` (`worker` or `in-process`), its handlers'
-  `calls`, `errors`, `ms` and `maxMs` from each call to its end, and its worker's `cpuMs` and
-  `heapBytes`, sampled every 5 seconds. The Admin page's **Resources** (`#/resources`) lists the
-  nodes by cost, a worker's CPU or else its handlers' time, most first, sortable by any column, the
-  top three marked with their share. The timing costs about 0.16 µs a handler call.
+  `calls`, `errors`, `ms` and `maxMs` from each call to its end, and its worker's `cpuMs`, the CPU
+  its script's own runs spent (its first run, and each event, call's answer or send's outcome until
+  the thread is idle again; the thread's start and idle time left out, bot-os.md D87), and
+  `heapBytes`, both as the worker last said when it got idle: nothing is polled. The Admin page's
+  **Resources** (`#/resources`) lists the nodes by cost, a worker's CPU or else its handlers' time,
+  most first, sortable by any column, the top three marked with their share. The timing costs about
+  0.16 µs a handler call.
 - **The owner's changes:** a declared read (`read`) and a declared action (`act`), whose input is
   checked against the action's schema (an error names the field) and which the plugin refuses by
   throwing, with why; a node's stop cleared (`clearStop`), for the next start. No control raises a
@@ -1717,8 +1720,10 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   (`limits.callMs`, 10–60000, 1000 by default): a ping from the main thread unanswered for twice the
   limit while the worker's thread spends the limit on the CPU, as a loop does in a handler's run or
   after an `await`, is a hang; a thread stalled with its host, not running, is waited for, even in
-  the middle of a run (bot-os.md D81, D85). Past either, or if it crashes, the worker is killed and
-  the node failed with why (`its script hung: a handler of quest.tick spent over 1000 ms of CPU`,
+  the middle of a run (bot-os.md D81, D85). It is pinged only while its script is busy, from a
+  message that may run its code until the worker says it is idle again, so an idle script costs
+  nothing (D87). Past either, or if it crashes, the worker is killed and the node failed with why
+  (`its script hung: a handler of quest.tick spent over 1000 ms of CPU`,
   `its script ran out of memory (its limit is 64 MB)`), the instance up. Its calls to the main
   thread are messages: an interface's member called there, a send queued there, its store's writes
   (read from a copy beside it), its events and its log lines; its clock is the main thread's time as

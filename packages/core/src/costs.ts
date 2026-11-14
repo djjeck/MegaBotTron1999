@@ -25,7 +25,10 @@ export interface OwnCost {
   errors?: number;
   ms?: number;
   maxMs?: number;
-  /** Its thread's CPU time (user and system), in milliseconds. */
+  /**
+   * The CPU time (user and system) its thread spent running its own code, in milliseconds: a
+   * script's first run and its runs from each message until idle (D87), not the thread's upkeep.
+   */
   cpuMs?: number;
   /** Its heap in use, in bytes. */
   heapBytes?: number;

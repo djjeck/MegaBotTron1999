@@ -131,13 +131,13 @@ the server that guards them.
   copy button), **Accounts** (each connector, its account and its connection's status) and
   **Plugins** (each plugin instance with its state, read-only (its reason and its stop), and,
   opened, its settings, its own status and the reads and actions it declares) and **Resources**
-  (`ResourcesPage.tsx`, docs/bot-os.md D77: the nodes by cost since the start, a script's worker's
-  CPU or else the time in its handlers, sortable by any column, the top three marked). Beside it,
-  **Drift** (each parser's counts and the latest reports) and **Events** (the event log's latest
-  records, filtered by type). Every page reads the control API only; the app imports the core's
-  types and nothing else of it, so its bundle holds none of the shell's code. All the pages are in
-  one menu, with no admin part apart: the whole app is the owner's console. A page is a line of
-  `PAGES` in `src/ui/App.tsx`.
+  (`ResourcesPage.tsx`, docs/bot-os.md D77: the nodes by cost since the start, the CPU a script's
+  worker spent running its code or else the time in its handlers, sortable by any column, the top
+  three marked). Beside it, **Drift** (each parser's counts and the latest reports) and **Events**
+  (the event log's latest records, filtered by type). Every page reads the control API only; the app
+  imports the core's types and nothing else of it, so its bundle holds none of the shell's code. All
+  the pages are in one menu, with no admin part apart: the whole app is the owner's console. A page
+  is a line of `PAGES` in `src/ui/App.tsx`.
 - `src/server/web-server.ts`: the UI's own listener. It serves the built app, and the core's control
   API (`controlHandler` of `@megabottron1999/core`) under `/api/`, only to a logged-in owner.
   `startWebUi` starts it only when the `web_ui_password` Docker secret is provided (12 characters at

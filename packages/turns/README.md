@@ -40,10 +40,10 @@ a game's player state, and the script node.
   worker thread of its own (`src/script-worker.ts`) with a CPU limit and a memory limit; a script
   that hangs (its thread spending its limit on the CPU without answering the main thread's ping, in
   a handler's run or after an await; one stalled with its host is waited for, even mid-run, D81,
-  D85), runs out of memory or crashes is killed and its node failed.
-  `scriptPlugin({ isolation: 'in-process' })` runs it in the main thread instead, for the dev kit's
-  deterministic runs on its virtual clock: there, with no worker to kill, each synchronous run is
-  cut by vm's limit in real time.
+  D85; pinged only while the script is busy, D87), runs out of memory or crashes is killed and its
+  node failed. `scriptPlugin({ isolation: 'in-process' })` runs it in the main thread instead, for
+  the dev kit's deterministic runs on its virtual clock: there, with no worker to kill, each
+  synchronous run is cut by vm's limit in real time.
 
 Their chats run left to right (docs/bot-os.md D60): a parser has a chat-in input only, the reactor a
 chat-out output (and a chat-in only with `match`), and the turn-actor both, for now. Whether a send

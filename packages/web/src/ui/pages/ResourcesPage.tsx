@@ -54,7 +54,7 @@ const COLUMNS: { key: Key; title: string; help: string }[] = [
   {
     key: 'costMs',
     title: 'Cost',
-    help: 'A worker’s CPU time; otherwise the time in its handlers, as the core hands it events, messages and timers',
+    help: 'A script’s CPU time running its own code, in its worker; otherwise the time in its handlers, as the core hands it events, messages and timers',
   },
   { key: 'calls', title: 'Calls', help: 'Its handlers’ calls' },
   { key: 'avgMs', title: 'Avg', help: 'A call’s time, on average' },
@@ -97,8 +97,9 @@ export function ResourcesPage({ loggedOut }: PageProps) {
   return (
     <div className="resources">
       <p className="muted small">
-        Since the start. A script’s cost is its worker’s CPU time; any other node’s, the time its
-        handlers take as the core hands it events, messages and timers. The top three are marked.
+        Since the start. A script’s cost is the CPU its worker spent running its code; any other
+        node’s, the time its handlers take as the core hands it events, messages and timers. The top
+        three are marked.
       </p>
       <div className="table-scroll">
         <table aria-label="nodes by cost">

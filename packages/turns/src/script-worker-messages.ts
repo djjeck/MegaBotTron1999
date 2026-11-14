@@ -32,7 +32,7 @@ export type FromHost =
 
 /**
  * From the worker: its load, the synchronous run that holds its thread, its calls' ends, its calls
- * to the main thread, a pong.
+ * to the main thread, a pong, and each time it gets idle what it has handled and spent.
  */
 export type FromWorker =
   | { op: 'ready' }
@@ -54,4 +54,12 @@ export type FromWorker =
   | { op: 'write'; name: string; value: unknown }
   | { op: 'remove'; name: string }
   | { op: 'log'; level: LogLevel; line: string }
-  | { op: 'pong' };
+  | { op: 'pong' }
+  | {
+      op: 'idle';
+      /** The messages that may run its code (events, answers, outcomes) handled so far. */
+      handled: number;
+      /** The CPU its thread spent running them and its first run, in ms. */
+      cpuMs: number;
+      heapBytes: number;
+    };

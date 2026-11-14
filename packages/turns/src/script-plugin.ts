@@ -255,16 +255,16 @@ export interface ScriptPluginOptions {
   isolation?: 'worker' | 'in-process';
 }
 
-/** How often a worker's CPU and heap are sampled. */
-const SAMPLE_MS = 5000;
-
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** A script, as its host runs it: in a worker, or in the main thread. */
 interface Runner {
   /** Loads the script: the patterns its handlers hear; refused with why. */
   load(): Promise<string[]>;
-  /** Its thread's CPU time and heap, as last sampled (a worker's; none in the main thread). */
+  /**
+   * The CPU its script's own runs spent and its heap, as the worker last said when it got idle (a
+   * worker's; none in the main thread).
+   */
   usage(): { cpuMs?: number; heapBytes?: number };
   dispatch(pattern: string, event: unknown): void;
   close(): Promise<void>;
@@ -457,24 +457,26 @@ function workerRunner(
   let answered = true;
   // The synchronous run holding its thread, as the worker last said: named when it is killed.
   let running: string | undefined;
+  // Its script's CPU and heap, as it last said when it got idle (D87): nothing is polled.
   let usage: { cpuMs?: number; heapBytes?: number } = {};
-  let sampler: ReturnType<typeof setInterval> | undefined;
-  // Its CPU and heap, sampled every few seconds (real time, as the watchdog's), for its cost.
-  const sample = async (): Promise<void> => {
-    try {
-      const w = worker as Worker;
-      const [cpu, heap] = await Promise.all([w.cpuUsage(), w.getHeapStatistics()]);
-      usage = { cpuMs: (cpu.user + cpu.system) / 1000, heapBytes: heap.used_heap_size };
-    } catch {
-      // A worker ending: its last sample stands.
-    }
-  };
+  // The messages posted that may run its code (events, answers, outcomes), and those it has said it
+  // handled; and whether its first run is still going. It is watched only while one of these is
+  // unfinished: an idle script runs no code of its own, as nothing but those messages wakes it.
+  let posted = 0;
+  let handled = 0;
+  let loading = true;
+  const busy = (): boolean => loading || handled < posted;
   const post = (m: FromHost): void => worker?.postMessage(m);
+  const send = (m: FromHost): void => {
+    if (worker === undefined || closing) return;
+    posted++;
+    post(m);
+    wake();
+  };
   const end = (why: string): void => {
     if (closing) return;
     closing = true;
     clearTimeout(ping);
-    clearInterval(sampler);
     void worker?.terminate();
     refused?.(new Error(`its script ${why}`));
     fail(`its script ${why}`);
@@ -487,22 +489,42 @@ function workerRunner(
   // stalls the whole process, its threads waiting on the disk or the scheduler, and a ping then
   // waits for seconds behind an idle script, or one in the middle of a short run (D81, D85). It is
   // hung once its thread has spent its limit on the CPU since the ping, which a loop does and a
-  // stall does not; until then it is waited for.
+  // stall does not; until then it is waited for. It pings only while the script is busy (D87):
+  // from its first run, or a message that may run its code, until the worker says it is idle.
   let cpuAtPing = 0;
   const cpuMs = async (): Promise<number> => {
     const c = await (worker as Worker).cpuUsage();
     return (c.user + c.system) / 1000;
   };
-  const rearm = (): void => {
+  // Its rounds: one at a time, each of a generation, so that one disarmed and armed again while it
+  // awaits the CPU's reading leaves the old one to end.
+  let watching = false;
+  let generation = 0;
+  /** Disarmed: an idle worker holds no code of its script, and is not pinged. */
+  const rest = (): void => {
+    clearTimeout(ping);
+    watching = false;
+    generation++;
+    answered = true;
+  };
+  /** Armed, unless it is already: its first ping now. */
+  const wake = (): void => {
+    if (watching || closing) return;
+    watching = true;
+    void watch(generation);
+  };
+  const rearm = (g: number): void => {
     // Twice the limit: a ping that lands as a run starts is answered once that run has ended.
-    ping = setTimeout(() => void watch(), 2 * c.limits.callMs);
+    ping = setTimeout(() => void watch(g), 2 * c.limits.callMs);
     ping.unref();
   };
-  const watch = async (): Promise<void> => {
-    if (closing) return;
+  const watch = async (g: number): Promise<void> => {
+    const stale = (): boolean => closing || g !== generation;
+    if (stale()) return;
+    if (!busy()) return rest();
     if (!answered) {
       const spent = (await cpuMs().catch(() => cpuAtPing)) - cpuAtPing;
-      if (closing) return;
+      if (stale()) return;
       if (!answered && spent >= c.limits.callMs) {
         end(
           running === undefined
@@ -512,13 +534,14 @@ function workerRunner(
         return;
       }
       // Its thread stalled, not running: the ping still stands.
-      if (!answered) return rearm();
+      if (!answered) return rearm(g);
     }
     cpuAtPing = await cpuMs().catch(() => cpuAtPing);
-    if (closing) return;
+    if (stale()) return;
+    if (!busy()) return rest();
     answered = false;
     post({ op: 'ping', now: ctx.clock.now() });
-    rearm();
+    rearm(g);
   };
   const onMessage = (m: FromWorker): void => {
     switch (m.op) {
@@ -526,17 +549,22 @@ function workerRunner(
         answered = true;
         return;
       case 'ready':
-        // Watched from its first word: its thread's start (Node's, its modules') is not its own.
-        void watch();
-        void sample();
-        sampler = setInterval(() => void sample(), SAMPLE_MS);
-        sampler.unref();
+        // Watched from its first word, its first run: its thread's start (Node's, its modules') is
+        // not its own.
+        wake();
         return;
       case 'loaded':
+        loading = false;
         loaded?.(m.patterns);
         return;
       case 'refused':
+        loading = false;
         refused?.(new Error(`its script failed: ${m.reason}`));
+        return;
+      case 'idle':
+        handled = m.handled;
+        usage = { cpuMs: m.cpuMs, heapBytes: m.heapBytes };
+        if (!busy()) rest();
         return;
       case 'running':
         running = m.what;
@@ -546,18 +574,18 @@ function workerRunner(
         return;
       case 'use':
         bridge.use(m.port, m.member, m.input).then(
-          (value) => post({ op: 'answer', id: m.id, ok: true, value }),
-          (e: unknown) => post({ op: 'answer', id: m.id, ok: false, error: message(e) })
+          (value) => send({ op: 'answer', id: m.id, ok: true, value }),
+          (e: unknown) => send({ op: 'answer', id: m.id, ok: false, error: message(e) })
         );
         return;
       case 'cancel':
         void bridge
           .cancel(m.send)
-          .then((value) => post({ op: 'answer', id: m.id, ok: true, value }));
+          .then((value) => send({ op: 'answer', id: m.id, ok: true, value }));
         return;
       case 'enqueue':
         bridge.enqueue(m.send, m.port, m.chat, m.text, m.cancel, (result) =>
-          post({ op: 'sent', send: m.send, result })
+          send({ op: 'sent', send: m.send, result })
         );
         return;
       case 'publish':
@@ -606,13 +634,12 @@ function workerRunner(
         });
       }),
     dispatch: (pattern, event) => {
-      if (!closing) post({ op: 'event', pattern, event, now: ctx.clock.now() });
+      send({ op: 'event', pattern, event, now: ctx.clock.now() });
     },
     usage: () => usage,
     close: async () => {
       closing = true;
       clearTimeout(ping);
-      clearInterval(sampler);
       await worker?.terminate();
     },
   };
