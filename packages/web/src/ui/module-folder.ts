@@ -5,7 +5,8 @@
  * paths and its `module.json` files go to `POST /modules/plan`, which finds the modules (vendored
  * copies and tests aside) and the files each installs; then only those files of the modules the
  * owner checks are read and sent, one module per `POST /modules`. What is under `.git` or
- * `node_modules` is never read nor listed.
+ * `node_modules` is never read nor listed; the folder's `.gitignore` files go with its listing, and
+ * what they ignore is left out, as the server decides.
  */
 import type { ModuleCandidate, TreeListing } from '@megabottron1999/core';
 
@@ -63,17 +64,24 @@ export function folderName(files: readonly FolderFile[]): string {
 }
 
 /**
- * What `POST /modules/plan` reads: every path, and the text of each `module.json` (but those
- * under a `vendor` directory, which are never the owner's modules).
+ * What `POST /modules/plan` reads: every path, the text of each `module.json` (but those under a
+ * `vendor` directory, which are never the owner's modules), and of each `.gitignore`, whose rules
+ * the server applies.
  */
 export async function listing(files: readonly FolderFile[]): Promise<TreeListing> {
   const manifests: Record<string, string> = {};
+  const ignores: Record<string, string> = {};
   for (const f of files) {
     const parts = f.path.split('/');
     if (parts.at(-1) === 'module.json' && !parts.slice(0, -1).includes('vendor'))
       manifests[f.path] = await f.file.text();
+    if (parts.at(-1) === '.gitignore') ignores[f.path] = await f.file.text();
   }
-  return { paths: files.map((f) => f.path), manifests };
+  return {
+    paths: files.map((f) => f.path),
+    manifests,
+    ...(Object.keys(ignores).length === 0 ? {} : { ignores }),
+  };
 }
 
 /** A module's files among the folder's, as the plan names them, and their size. */

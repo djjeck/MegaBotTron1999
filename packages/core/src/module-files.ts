@@ -11,7 +11,10 @@
  * - **A module's files:** those under its directory, but `.git`, `node_modules` and another module's
  *   directory nested in it; of those, the ones its `module.json`'s `files` globs match, or by
  *   default all but its tests (`*.test.ts`, `*.spec.ts`, `test/`, `tests/`, `__tests__/`,
- *   `__snapshots__/`) and its own `vendor/`. Its `module.json` is always kept.
+ *   `__snapshots__/`), its own `vendor/`, and what the tree's `.gitignore` files ignore, when the
+ *   listing has them (a folder's: the web UI sends them; a repository's archive holds only what is
+ *   tracked, so a file there is never ignored). Its `module.json` is always kept.
+ * - **`.gitignore`d paths** are not searched for modules either (a build's output, a local copy).
  */
 import { MODULE_FILE, moduleManifestSchema } from './modules.ts';
 import { compare, parseVersion } from './semver.ts';
@@ -49,6 +52,109 @@ export interface ModuleCandidate {
 export interface TreeListing {
   paths: string[];
   manifests: Record<string, string>;
+  /** Its `.gitignore` files' text, by their paths: what they ignore is left out. */
+  ignores?: Record<string, string>;
+}
+
+/** A `.gitignore` pattern as a regular expression of a path from its file's directory. */
+function ignoreRegExp(pattern: string, anchored: boolean): RegExp {
+  let re = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern.charAt(i);
+    if (c === '\\' && i + 1 < pattern.length) {
+      i++;
+      re += pattern.charAt(i).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+    } else if (c === '*' && pattern.charAt(i + 1) === '*') {
+      const start = i === 0 || pattern.charAt(i - 1) === '/';
+      while (pattern.charAt(i + 1) === '*') i++;
+      const end = i + 1 === pattern.length || pattern.charAt(i + 1) === '/';
+      if (start && end && pattern.charAt(i + 1) === '/') {
+        i++;
+        re += '(?:.*/)?'; // `**/`: any directories, or none
+      } else if (start && end)
+        re += '.*'; // a trailing `/**`: everything under it
+      else re += '[^/]*';
+    } else if (c === '*') re += '[^/]*';
+    else if (c === '?') re += '[^/]';
+    else if (c === '[') {
+      const close = pattern.indexOf(']', i + 2);
+      if (close === -1) re += '\\[';
+      else {
+        const body = pattern
+          .slice(i + 1, close)
+          .replace(/^!/u, '^')
+          .replace(/\\/gu, '\\\\');
+        re += `[${body}]`;
+        i = close;
+      }
+    } else re += c.replace(/[.+^${}()|\]\\]/gu, '\\$&');
+  }
+  try {
+    return new RegExp(anchored ? `^${re}$` : `^(?:.*/)?${re}$`, 'u');
+  } catch {
+    return /(?!)/u; // a pattern this does not read matches nothing
+  }
+}
+
+interface IgnoreRule {
+  test: RegExp;
+  negate: boolean;
+  dirOnly: boolean;
+}
+
+/** A `.gitignore` file's rules, as git reads them: comments and blank lines aside. */
+export function ignoreRules(text: string): IgnoreRule[] {
+  const rules: IgnoreRule[] = [];
+  for (const raw of text.split(/\r?\n/u)) {
+    // Trailing spaces go, unless escaped.
+    let line = raw.replace(/(?<!\\)\s+$/u, '');
+    if (line === '' || line.startsWith('#')) continue;
+    const negate = line.startsWith('!');
+    if (negate) line = line.slice(1);
+    const dirOnly = line.endsWith('/');
+    line = line.replace(/\/+$/u, '');
+    if (line === '') continue;
+    const anchored = line.includes('/');
+    rules.push({ test: ignoreRegExp(line.replace(/^\//u, ''), anchored), negate, dirOnly });
+  }
+  return rules;
+}
+
+/**
+ * Whether a tree's path is ignored by its `.gitignore` files, as git decides it for a file not
+ * tracked: each file's rules apply under its directory, a deeper file's after a shallower's, the
+ * last rule that matches deciding (`!` re-includes); what is under an ignored directory is ignored,
+ * and no rule re-includes it.
+ */
+export function gitignored(ignores: Record<string, string>): (path: string) => boolean {
+  const files = Object.entries(ignores)
+    .map(([p, text]) => ({ dir: dirOf(p), depth: p.split('/').length, rules: ignoreRules(text) }))
+    .filter((f) => f.rules.length > 0)
+    .sort((a, b) => a.depth - b.depth);
+  const dirs = new Map<string, boolean>();
+  const self = (p: string, isDir: boolean): boolean => {
+    let ignored = false;
+    for (const f of files) {
+      if (!under(f.dir, p) || p === f.dir) continue;
+      const rel = fromRoot(f.dir, p);
+      for (const r of f.rules) if ((!r.dirOnly || isDir) && r.test.test(rel)) ignored = !r.negate;
+    }
+    return ignored;
+  };
+  const dir = (d: string): boolean => {
+    let known = dirs.get(d);
+    if (known === undefined) {
+      const parent = dirOf(d);
+      known = (parent !== '' && dir(parent)) || self(d, true);
+      dirs.set(d, known);
+    }
+    return known;
+  };
+  return (p) => {
+    if (files.length === 0) return false;
+    const parent = dirOf(p);
+    return (parent !== '' && dir(parent)) || self(p, false);
+  };
 }
 
 /** A glob of `module.json`'s `files`, as a test of a path from the module's directory. */
@@ -81,12 +187,14 @@ export function leftOutByDefault(rel: string): boolean {
 
 /**
  * A module's files (paths from its directory) split into those it installs and those left out:
- * by its `files` globs when it has them, else by `leftOutByDefault`. Its `module.json` is kept, and
- * `.git` and `node_modules` are in neither.
+ * by its `files` globs when it has them (which may name a file `.gitignore`d, a build's output it
+ * ships), else by `leftOutByDefault` and `ignored`. Its `module.json` is kept, and `.git` and
+ * `node_modules` are in neither.
  */
 export function selectFiles(
   rels: readonly string[],
-  globs?: readonly string[]
+  globs?: readonly string[],
+  ignored: (rel: string) => boolean = () => false
 ): { kept: string[]; left: string[] } {
   const tests = globs?.map(globTest);
   const kept: string[] = [];
@@ -95,7 +203,7 @@ export function selectFiles(
     if (rel.split('/').some((p) => NEVER.has(p))) continue;
     const keep =
       rel === MODULE_FILE ||
-      (tests === undefined ? !leftOutByDefault(rel) : tests.some((t) => t(rel)));
+      (tests === undefined ? !leftOutByDefault(rel) && !ignored(rel) : tests.some((t) => t(rel)));
     (keep ? kept : left).push(rel);
   }
   return { kept, left };
@@ -142,8 +250,9 @@ export function findModules(
     ),
   ];
   const scope = insidePath(within) ?? '';
+  const ignored = gitignored(listing.ignores ?? {});
   const roots = paths
-    .filter(discoverable)
+    .filter((p) => discoverable(p) && !ignored(p))
     .map(dirOf)
     .filter((r) => under(scope, r) || r === scope)
     .sort();
@@ -172,11 +281,12 @@ export function findModules(
       };
     }
     const m = parsed.data;
+    const at = (rel: string): string => (root === '' ? rel : `${root}/${rel}`);
     const { kept, left } = selectFiles(
       mine.map((p) => fromRoot(root, p)),
-      m.files
+      m.files,
+      (rel) => ignored(at(rel))
     );
-    const at = (rel: string): string => (root === '' ? rel : `${root}/${rel}`);
     const missing = m.plugins.find((entry) => !kept.includes(insidePath(entry) ?? entry));
     const twice = seen.get(m.id);
     seen.set(m.id, root);

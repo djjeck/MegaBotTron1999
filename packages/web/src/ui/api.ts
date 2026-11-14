@@ -225,5 +225,64 @@ export async function api<T>(
   return value as T;
 }
 
+/** What `upload` uses of an `XMLHttpRequest`. */
+interface Xhr {
+  open(method: string, url: string): void;
+  withCredentials: boolean;
+  setRequestHeader(name: string, value: string): void;
+  upload: { onprogress: ((e: UploadProgress) => void) | null };
+  onerror: (() => void) | null;
+  onload: (() => void) | null;
+  status: number;
+  responseText: string;
+  send(body: string): void;
+}
+
+/** An upload's progress event, as `XMLHttpRequest`'s upload reports it. */
+export interface UploadProgress {
+  lengthComputable: boolean;
+  loaded: number;
+  total: number;
+}
+
+/**
+ * POSTs `body` as JSON, as `api` does, through `XMLHttpRequest`, whose upload reports its progress
+ * (`fetch` does not): `progress` is called with the bytes sent and the total as it goes. For a large
+ * upload (a module's files, a tarball), so that the page can show how far it is.
+ */
+export function upload<T>(
+  route: string,
+  body: unknown,
+  progress: (sent: number, total: number) => void
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    // Reached through `globalThis`: this file is type-checked without the DOM's types too (by the
+    // web package's test helpers, which the root's check covers).
+    const xhr = new (globalThis as unknown as { XMLHttpRequest: new () => Xhr }).XMLHttpRequest();
+    xhr.open('POST', `api${route}`);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader('content-type', 'application/json');
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) progress(e.loaded, e.total);
+    };
+    xhr.onerror = () =>
+      reject(new ApiError(0, 'the upload failed: the server could not be reached'));
+    xhr.onload = () => {
+      let value: unknown = null;
+      try {
+        value = JSON.parse(xhr.responseText) as unknown;
+      } catch {
+        // No JSON: the status says it.
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(value as T);
+      else {
+        const { error } = (value ?? {}) as { error?: unknown };
+        reject(new ApiError(xhr.status, typeof error === 'string' ? error : `HTTP ${xhr.status}`));
+      }
+    };
+    xhr.send(JSON.stringify(body));
+  });
+}
+
 /** A path segment, encoded. */
 export const seg = (s: string): string => encodeURIComponent(s);

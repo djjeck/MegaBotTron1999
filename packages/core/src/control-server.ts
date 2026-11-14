@@ -72,7 +72,7 @@
  *   `{"github": {…}}` is GitHub's. A folder's or a tarball's may name it (`"name"`), as
  *   its source.
  * - `POST /modules/plan` with a tree's listing (`{"paths": [...], "manifests": {"<path>": "<text>"}}`,
- *   as a folder picked gives it): the modules in it, each with its status against the one installed
+ *   and its `.gitignore` files' text, `"ignores"`, as a folder picked gives it): the modules in it, each with its status against the one installed
  *   and the files it would install and leave out.
  * - `POST /modules/link {"url": "https://github.com/<owner>/<repo>[/tree/<ref>[/<path>]]"}` (or a
  *   link on a Git server allowed; `POST /modules/github` is the same): the link resolved to a
@@ -201,15 +201,26 @@ async function moduleSource(req: http.IncomingMessage): Promise<ModuleRequest> {
 function treeListing(b: unknown): TreeListing {
   const paths = field(b, 'paths');
   const manifests = field(b, 'manifests');
+  const ignores = field(b, 'ignores');
+  const texts = (o: unknown): o is Record<string, string> =>
+    typeof o === 'object' &&
+    o !== null &&
+    !Array.isArray(o) &&
+    Object.values(o).every((t) => typeof t === 'string');
   if (
     !Array.isArray(paths) ||
     !paths.every((p) => typeof p === 'string') ||
-    typeof manifests !== 'object' ||
-    manifests === null ||
-    !Object.values(manifests).every((t) => typeof t === 'string')
+    !texts(manifests) ||
+    (ignores !== undefined && !texts(ignores))
   )
-    throw new ModuleError('give {"paths": ["…"], "manifests": {"<path>": "<text>"}}');
-  return { paths: paths as string[], manifests: manifests as Record<string, string> };
+    throw new ModuleError(
+      'give {"paths": ["…"], "manifests": {"<path>": "<text>"}, "ignores"?: {"<path>": "<text>"}}'
+    );
+  return {
+    paths: paths as string[],
+    manifests,
+    ...(ignores === undefined ? {} : { ignores }),
+  };
 }
 
 /** The owner's changes to the modules (module-store.ts), as the wiring offers them. */

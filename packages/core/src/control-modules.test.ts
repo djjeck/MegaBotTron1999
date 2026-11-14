@@ -375,11 +375,42 @@ describe('the control API’s modules from a tree and from GitHub', () => {
         },
       ],
     ]);
+    // A folder's .gitignore leaves out what it ignores.
+    expect(
+      await post('/modules/plan', {
+        paths: [
+          'games/.gitignore',
+          'games/dice/module.json',
+          'games/dice/src/a.ts',
+          'games/dice/dist/b.js',
+        ],
+        manifests: { 'games/dice/module.json': JSON.stringify(manifestOf('dice')) },
+        ignores: { 'games/.gitignore': 'dist/\n' },
+      })
+    ).toMatchObject([
+      200,
+      [
+        {
+          files: ['games/dice/module.json', 'games/dice/src/a.ts'],
+          left: ['games/dice/dist/b.js'],
+        },
+      ],
+    ]);
     expect(await post('/modules/plan', { paths: [1], manifests: {} })).toEqual([
       400,
-      { error: 'give {"paths": ["…"], "manifests": {"<path>": "<text>"}}' },
+      {
+        error:
+          'give {"paths": ["…"], "manifests": {"<path>": "<text>"}, "ignores"?: {"<path>": "<text>"}}',
+      },
     ]);
     expect(await post('/modules/plan', { paths: [] })).toMatchObject([400, {}]);
+    expect(await post('/modules/plan', { paths: [], manifests: {}, ignores: [] })).toMatchObject([
+      400,
+      {},
+    ]);
+    expect(
+      await post('/modules/plan', { paths: [], manifests: {}, ignores: { a: 1 } })
+    ).toMatchObject([400, {}]);
     const [status, found] = await post('/modules/github', {
       url: 'https://github.com/example/games',
     });

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   findModules,
+  gitignored,
   globTest,
+  ignoreRules,
   leftOutByDefault,
   selectFiles,
   statusOf,
@@ -192,5 +194,103 @@ describe('the modules in a tree', () => {
       ['g', 'twin', "twin is found twice, here and at f: choose one's folder"],
     ]);
     expect(found[1]).toMatchObject({ version: '1.0.0' });
+  });
+});
+
+describe('.gitignore files', () => {
+  const ignored = (text: string, more: Record<string, string> = {}) =>
+    gitignored({ '.gitignore': text, ...more });
+
+  it('ignore by a name at any depth, a path from their directory, or a directory', () => {
+    const i = ignored(
+      [
+        '# a comment',
+        '',
+        '*.log',
+        '/build',
+        'out/',
+        'docs/*.html',
+        'cache?',
+        '\\#notes',
+        'trailing   ',
+        'lit\\ ',
+        '[abc].tmp',
+        '[!x]y.bak',
+        'a\\*b',
+        '[unclosed',
+        '!keep.log',
+      ].join('\n')
+    );
+    expect(i('x.log')).toBe(true);
+    expect(i('deep/er/x.log')).toBe(true);
+    expect(i('keep.log')).toBe(false);
+    expect(i('build/a.js')).toBe(true);
+    expect(i('src/build/a.js')).toBe(false); // anchored to the root
+    expect(i('src/out/a.js')).toBe(true); // a directory at any depth
+    expect(i('src/out')).toBe(false); // `out/`: a directory only, not a file named so
+    expect(i('docs/a.html')).toBe(true);
+    expect(i('docs/x/a.html')).toBe(false);
+    expect(i('cache1/a')).toBe(true);
+    expect(i('#notes')).toBe(true);
+    expect(i('trailing')).toBe(true);
+    expect(i('lit ')).toBe(true);
+    expect(i('b.tmp')).toBe(true);
+    expect(i('d.tmp')).toBe(false);
+    expect(i('zy.bak')).toBe(true);
+    expect(i('xy.bak')).toBe(false);
+    expect(i('a*b')).toBe(true);
+    expect(i('axb')).toBe(false);
+    expect(i('[unclosed')).toBe(true);
+    expect(i('src/a.ts')).toBe(false);
+  });
+
+  it('read `**` as any directories, and apply a deeper file after a shallower one', () => {
+    const i = ignored('**/gen/**\nlogs/**\na/**/z\nsecret.txt\n**/*.map\nfoo**bar', {
+      'pkg/.gitignore': '!secret.txt\n/local\n',
+    });
+    expect(i('gen/x')).toBe(true);
+    expect(i('a/b/gen/c/d')).toBe(true);
+    expect(i('logs/x/y')).toBe(true);
+    expect(i('a/z')).toBe(true);
+    expect(i('a/b/c/z')).toBe(true);
+    expect(i('x/y.js.map')).toBe(true);
+    expect(i('fooxbar')).toBe(true);
+    expect(i('secret.txt')).toBe(true);
+    expect(i('pkg/secret.txt')).toBe(false); // re-included below
+    expect(i('pkg/local/a')).toBe(true);
+    expect(i('local/a')).toBe(false); // anchored to pkg/
+  });
+
+  it('never re-include what is under an ignored directory', () => {
+    const i = ignored('dist/\n!dist/keep.js\n');
+    expect(i('dist/keep.js')).toBe(true);
+    expect(gitignored({})('anything')).toBe(false);
+    expect(gitignored({ '.gitignore': '# only a comment\n!\n/\n' })('x')).toBe(false);
+    expect(ignoreRules('a\r\nb/\r\n')).toHaveLength(2);
+  });
+
+  it('leave out of a module what they ignore, unless its files name it, and hide modules ignored', () => {
+    const listing: TreeListing = {
+      ...tree({
+        '.gitignore': '',
+        'modules/dice/module.json': manifest('dice', { plugins: ['src/p.ts'] }),
+        'modules/dice/src/p.ts': '',
+        'modules/dice/.env': '',
+        'modules/dice/dist/p.js': '',
+        'modules/cards/module.json': manifest('cards', { files: ['dist/**'], plugins: [] }),
+        'modules/cards/dist/c.js': '',
+        'build/copy/module.json': manifest('copy'),
+      }),
+      ignores: { '.gitignore': 'dist/\n/build\n', 'modules/dice/.gitignore': '.env\n' },
+    };
+    const found = findModules(listing);
+    expect(found.map((m) => [m.path, m.files, m.left])).toEqual([
+      ['modules/cards', ['modules/cards/module.json', 'modules/cards/dist/c.js'], []],
+      [
+        'modules/dice',
+        ['modules/dice/module.json', 'modules/dice/src/p.ts'],
+        ['modules/dice/.env', 'modules/dice/dist/p.js'],
+      ],
+    ]);
   });
 });

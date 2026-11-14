@@ -2442,7 +2442,8 @@ restarts on its own (bot-os.md D67, D102). `ModuleStore` (`<data>/modules`):
   `node_modules` (never taken) and another module's directory nested in it. Of those, the ones its
   `module.json`'s `files` globs name (§7.1), or, without `files`, all but its tests: `*.test.ts`,
   `*.spec.ts` (and `.tsx`, `.js`, …), and the `test/`, `tests/`, `__tests__/` and `__snapshots__/`
-  directories at any depth, and its own top-level `vendor/`. Its `module.json` is always kept. A
+  directories at any depth, its own top-level `vendor/`, and, for a folder whose listing has its
+  `.gitignore` files, what they ignore (bot-os.md D104). Its `module.json` is always kept. A
   module's runtime code is under `src/` (§7.1), which no plugin may import its tests from.
 - **Its source** is recorded at each install in `<data>/modules/.sources.json`, never in the
   module's own files: `{"kind": "folder", "name"?}`, `{"kind": "tarball", "name"?}`,
@@ -2455,15 +2456,23 @@ restarts on its own (bot-os.md D67, D102). `ModuleStore` (`<data>/modules`):
   none.
 - **The modules in a tree** (`POST /modules/plan`): a folder may be a module's or a repository's
   root with several. Given its listing
-  (`{"paths": ["games/modules/dice/module.json", …], "manifests": {"<path>": "<its text>"}}`, the
-  `module.json` files' text only), it answers each module found: every `module.json` at any depth,
-  but under `.git`, `node_modules`, a `vendor/` directory (vendored copies, not the owner's) or a
-  test directory (fixtures). Each with its `path` in the tree, `id`, `version`, `description`, its
-  `status` against the version of its id installed (`new`; `update`, `same` or `older`, with the
-  version `installed`), the `files` it installs and those `left` out, by their paths in the tree; or
-  its `error`: its manifest refused (as `module.json: api: …`), a plugin entry missing or left out
-  by its `files`, its id found twice. Nothing is installed; the web UI then sends each module the
-  owner checks, with only its files.
+  (`{"paths": ["games/modules/dice/module.json", …], "manifests": {"<path>": "<its text>"}, "ignores"?: {"<path>": "<its text>"}}`,
+  the `module.json` files' text, and the `.gitignore` files' as `ignores`), it answers each module
+  found: every `module.json` at any depth, but under `.git`, `node_modules`, a `vendor/` directory
+  (vendored copies, not the owner's), a test directory (fixtures) or a path the `.gitignore` files
+  ignore. **`.gitignore` files** (D104) are read as git reads them for a file not tracked: each
+  file's rules apply under its directory, a deeper file's after a shallower's, the last rule that
+  matches deciding (`!` re-includes), `/` anchoring a pattern to the file's directory, a trailing
+  `/` matching directories only, `*`, `?`, `[…]` and `**`; what is under an ignored directory is
+  ignored, and no rule re-includes it. What they ignore is left out of a module's default files;
+  `files` globs that name it install it (a build's output a module ships). Only a folder's listing
+  has them: a repository's archive holds only what is tracked, and a file tracked despite a
+  `.gitignore` was added on purpose. Each with its `path` in the tree, `id`, `version`,
+  `description`, its `status` against the version of its id installed (`new`; `update`, `same` or
+  `older`, with the version `installed`), the `files` it installs and those `left` out, by their
+  paths in the tree; or its `error`: its manifest refused (as `module.json: api: …`), a plugin entry
+  missing or left out by its `files`, its id found twice. Nothing is installed; the web UI then
+  sends each module the owner checks, with only its files.
 - **From GitHub** (`module-github.ts`, #13): `POST /modules/link {"url": "…"}` (or
   `POST /modules/github`, the same) takes a public repository's link:
   `https://github.com/<owner>/<repo>` (its default branch), `…/tree/<ref>` or `…/tree/<ref>/<path>`

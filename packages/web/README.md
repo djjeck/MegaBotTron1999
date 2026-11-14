@@ -143,42 +143,45 @@ the server that guards them.
   `…/tree/<ref>/<path>`), or one on a Git server added under **Git servers** (`GitServers.tsx`: each
   server with its token's Docker secret, picked from `GET /modules/hosts`'s names, added with
   `POST /modules/hosts`, removed with `DELETE /modules/hosts/<host>`), a module's own folder or a
-  repository's that holds several. The folder's paths and its `module.json` files go to
-  `POST /modules/plan` (`src/ui/module-folder.ts`), a link to `POST /modules/link`; the modules
-  found, but those under `vendor/`, are a checklist (`ModuleChecklist.tsx`): each with its path,
-  version, status against the one installed (`new`, `update x → y`, `same version`, `older x → y`),
-  its files and those left out (its tests, unless its `module.json` lists `files`), all checked but
-  downgrades and those refused. **Install** sends each checked module on its own (a folder's files,
-  only that module's, as base64; a repository's module as its source at the commit looked up), with
-  its progress, and lists how each went; the restart is then offered once. A module from a
-  repository with a newer commit that changed its own directory (the shell checks every 6 hours, or
-  **Check for updates**; D103) says `update available` with the commit and its date, linked to its
-  host's comparison (and, when the host's comparison could not tell what changed, says so and why),
-  and **Update** or **Update all** installs it. It also installs a `.tar.gz` and rolls a module
-  back. **Remove** (D68) asks first, in a dialog that names the module, then moves it aside as its
-  previous version (`DELETE /modules/<id>`, sent JSON-typed as the server's same-origin rule asks of
-  every change); it is disabled, its reason shown beside it on hover, while a node of the saved
-  graph (disabled ones too) uses one of its plugins or another module imports it. A module removed
-  is listed as `removed` with **Restore** (its rollback) until an install of its id replaces it, and
-  the restart is offered. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59)
-  has one section per area, each reached by its route (`#/instance`, `#/graph-history`,
-  `#/graph-text`, `#/accounts`, `#/plugins`, `#/resources`), which opens the page scrolled to it:
-  **Instance** (on or off with its switch, the release and its commit, uptime, memory, the plugins
-  and accounts by state, the kill switch), **Graph history** (`GraphHistoryPage.tsx`, docs/bot-os.md
-  D61: each version of the saved graph, newest first, with its time, what changed and how the
-  instance started on it, the last that ran marked "last good"; one opened shows what rolling back
-  to it would change, as the review's diff (**Changes**) and as a line diff of the two printouts
-  (**As text**), and **Roll back to this** asks, repeating the diff, then restarts on it), **Graph
-  as text** (the saved graph printed, with a copy button), **Accounts** (each connector, its account
-  and its connection's status) and **Plugins** (each plugin instance with its state, read-only (its
-  reason and its stop), and, opened, its settings, its own status and the reads and actions it
-  declares) and **Resources** (`ResourcesPage.tsx`, docs/bot-os.md D77: the nodes by cost since the
-  start, the CPU a script's worker spent running its code or else the time in its handlers, sortable
-  by any column, the top three marked). Beside it, **Drift** (each parser's counts and the latest
-  reports) and **Events** (the event log's latest records, filtered by type). Every page reads the
-  control API only; the app imports the core's types and nothing else of it, so its bundle holds
-  none of the shell's code. All the pages are in one menu, with no admin part apart: the whole app
-  is the owner's console. A page is a line of `PAGES` in `src/ui/App.tsx`.
+  repository's that holds several. The folder's paths, its `module.json` files and its `.gitignore`
+  files go to `POST /modules/plan` (`src/ui/module-folder.ts`), a link to `POST /modules/link`; the
+  modules found, but those under `vendor/`, are a checklist (`ModuleChecklist.tsx`): each with its
+  path, version, status against the one installed (`new`, `update x → y`, `same version`,
+  `older x → y`), its files and those left out (its tests and a folder's `.gitignore`d paths, unless
+  its `module.json` lists `files`), all checked but downgrades and those refused. **Install** sends
+  each checked module on its own (a folder's files, only that module's, as base64; a repository's
+  module as its source at the commit looked up), with its progress (`Installing 2 of 5: dice…`, and
+  an upload's bytes sent, through `XMLHttpRequest`, whose upload reports them, D104), and lists how
+  each went; the restart is then offered once. A module from a repository with a newer commit that
+  changed its own directory (the shell checks every 6 hours, or **Check for updates**; D103) says
+  `update available` with the commit and its date, linked to its host's comparison (and, when the
+  host's comparison could not tell what changed, says so and why), and **Update** or **Update all**
+  installs it. It also installs a `.tar.gz`, picked or dropped on the page (one dropped named, with
+  its size, beside the input, which cannot show it), and rolls a module back. **Remove** (D68) asks
+  first, in a dialog that names the module, then moves it aside as its previous version
+  (`DELETE /modules/<id>`, sent JSON-typed as the server's same-origin rule asks of every change);
+  it is disabled, its reason shown beside it on hover, while a node of the saved graph (disabled
+  ones too) uses one of its plugins or another module imports it. A module removed is listed as
+  `removed` with **Restore** (its rollback) until an install of its id replaces it, and the restart
+  is offered. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59) has one
+  section per area, each reached by its route (`#/instance`, `#/graph-history`, `#/graph-text`,
+  `#/accounts`, `#/plugins`, `#/resources`), which opens the page scrolled to it: **Instance** (on
+  or off with its switch, the release and its commit, uptime, memory, the plugins and accounts by
+  state, the kill switch), **Graph history** (`GraphHistoryPage.tsx`, docs/bot-os.md D61: each
+  version of the saved graph, newest first, with its time, what changed and how the instance started
+  on it, the last that ran marked "last good"; one opened shows what rolling back to it would
+  change, as the review's diff (**Changes**) and as a line diff of the two printouts (**As text**),
+  and **Roll back to this** asks, repeating the diff, then restarts on it), **Graph as text** (the
+  saved graph printed, with a copy button), **Accounts** (each connector, its account and its
+  connection's status) and **Plugins** (each plugin instance with its state, read-only (its reason
+  and its stop), and, opened, its settings, its own status and the reads and actions it declares)
+  and **Resources** (`ResourcesPage.tsx`, docs/bot-os.md D77: the nodes by cost since the start, the
+  CPU a script's worker spent running its code or else the time in its handlers, sortable by any
+  column, the top three marked). Beside it, **Drift** (each parser's counts and the latest reports)
+  and **Events** (the event log's latest records, filtered by type). Every page reads the control
+  API only; the app imports the core's types and nothing else of it, so its bundle holds none of the
+  shell's code. All the pages are in one menu, with no admin part apart: the whole app is the
+  owner's console. A page is a line of `PAGES` in `src/ui/App.tsx`.
 - `src/server/web-server.ts`: the UI's own listener. It serves the built app, and the core's control
   API (`controlHandler` of `@megabottron1999/core`) under `/api/`, only to a logged-in owner.
   `startWebUi` starts it only when the `web_ui_password` Docker secret is provided (12 characters at

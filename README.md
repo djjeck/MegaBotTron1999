@@ -60,20 +60,20 @@ GitHub link (`https://github.com/<owner>/<repo>`, or a folder's `…/tree/<ref>/
 module's own folder, or a repository's root that holds several. The page lists every module found
 (but those under `vendor/`), each with its version and whether it is new, an update, the same
 version or older; check those to install, install them, then click **Apply (restart)** to load them.
-A module's tests are left out. A private repository on your own self-hosted Git server (one with a
-Gitea-compatible API) installs the same way, once the server is added under **Git servers** on the
-Modules page (below). One installed from a link shows its commit, and the page says when its branch
-has a newer one that changed the module's own folder (checked every 6 hours, or with **Check for
-updates**; a commit to a sibling module or the docs flags nothing); **Update** installs it. Nothing
-is installed or restarted but by you. The Modules page also installs a `.tar.gz` and rolls a module
-back to its previous version; the Admin page shows the instance (with its off and kill switches),
-the graph's history (each version applied in the last 7 days, what changed, whether the instance
-started on it, and a rollback to it) and the graph as text, its accounts and their connections, and
-its plugins with their states (D59, D61, D64). A **script** node runs TypeScript typed in its panel,
-on the ports its panel declares, each in a worker thread of its own
-([docs/bot-os.md](docs/bot-os.md) D76). In a real deployment, use Docker or Compose secrets, and put
-the UI behind a reverse proxy with HTTPS, and on the internet with its own authentication, rather
-than publishing the port.
+A folder's `.gitignore` files are honoured: what they ignore is left out. A module's tests are left
+out. A private repository on your own self-hosted Git server (one with a Gitea-compatible API)
+installs the same way, once the server is added under **Git servers** on the Modules page (below).
+One installed from a link shows its commit, and the page says when its branch has a newer one that
+changed the module's own folder (checked every 6 hours, or with **Check for updates**; a commit to a
+sibling module or the docs flags nothing); **Update** installs it. Nothing is installed or restarted
+but by you. The Modules page also installs a `.tar.gz` and rolls a module back to its previous
+version; the Admin page shows the instance (with its off and kill switches), the graph's history
+(each version applied in the last 7 days, what changed, whether the instance started on it, and a
+rollback to it) and the graph as text, its accounts and their connections, and its plugins with
+their states (D59, D61, D64). A **script** node runs TypeScript typed in its panel, on the ports its
+panel declares, each in a worker thread of its own ([docs/bot-os.md](docs/bot-os.md) D76). In a real
+deployment, use Docker or Compose secrets, and put the UI behind a reverse proxy with HTTPS, and on
+the internet with its own authentication, rather than publishing the port.
 
 - **`/data`** is the instance's state: the graph (`graph.json`, and its versions in
   `graph-history/`), each plugin instance's state (`instances/<id>/`), the core's own (`core/`), the

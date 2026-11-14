@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ModuleCandidate, ModulesReport } from '#src/ui/api.ts';
+import { upload } from '#src/ui/api.ts';
 import {
   droppedFiles,
   folderName,
@@ -12,7 +13,7 @@ import {
 } from '#src/ui/module-folder.ts';
 import { fakeApi } from '#test/fake-api.ts';
 import { size, statusText } from './ModuleChecklist.tsx';
-import { base64, ModulesPage, when } from './ModulesPage.tsx';
+import { base64, ModulesPage, sentText, when } from './ModulesPage.tsx';
 
 afterEach(() => {
   cleanup();
@@ -84,6 +85,17 @@ describe('ModulesPage', () => {
     expect(
       await screen.findByText('other.tar.gz: not installed: not a module', {}, slow)
     ).toBeDefined();
+    // An upload that does not reach the server says so.
+    api.offline = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }));
+    expect(
+      await screen.findByText(
+        'other.tar.gz: not installed: the upload failed: the server could not be reached',
+        {},
+        slow
+      )
+    ).toBeDefined();
+    api.offline = false;
     // Rolled back, once confirmed.
     fireEvent.click(within(dice).getByRole('button', { name: 'Roll back to 0.1.0' }));
     expect(api.calls).not.toContain('POST /modules/dice/rollback {}');
@@ -511,6 +523,10 @@ describe('ModulesPage: a folder of modules', () => {
     const box = await screen.findByLabelText('modules picked', {}, slow);
     expect(paths).toEqual(['games/modules/quest/module.json', 'games/modules/quest/src/a.ts']);
     fireEvent.click(within(box).getByRole('button', { name: 'Install 1 module' }));
+    // The upload's progress, in bytes.
+    expect(
+      await screen.findByText(/^Installing 1 of 1: quest… \d+ B of \d+ B sent \(\d+%\)$/u, {}, slow)
+    ).toBeDefined();
     expect(await screen.findByText('quest 0.1.0 installed', {}, slow)).toBeDefined();
     // Nothing usable dropped: nothing happens.
     fireEvent.drop(zone, items(null));
@@ -518,6 +534,14 @@ describe('ModulesPage: a folder of modules', () => {
     fireEvent.drop(zone, items(entry('/quest.tar.gz', 'x')));
     expect(await screen.findByText('quest.tar.gz: install it below, from a .tar.gz')).toBeDefined();
     expect(screen.getByRole('button', { name: 'Install' }).hasAttribute('disabled')).toBe(false);
+    // Named beside the input, which cannot show a file dropped; one picked, the input names.
+    expect(screen.getByLabelText('tarball dropped').textContent).toBe(
+      'dropped: quest.tar.gz (1 B)'
+    );
+    fireEvent.change(screen.getByLabelText('module tarball'), {
+      target: { files: [new File(['y'], 'picked.tar.gz')] },
+    });
+    expect(screen.queryByLabelText('tarball dropped')).toBeNull();
     // A folder that does not read says so.
     const broken = {
       name: 'quest',
@@ -532,6 +556,35 @@ describe('ModulesPage: a folder of modules', () => {
     expect(await screen.findByText('the folder does not read: not allowed')).toBeDefined();
   });
 
+  it('uploads with its progress, and says a refusal without JSON by its status', async () => {
+    fakeApi({ 'POST /modules': [500, undefined], 'POST /other': [400, { error: 7 }] });
+    const seen: number[] = [];
+    await expect(upload('/modules', { a: 1 }, (sent) => seen.push(sent))).rejects.toThrow(
+      'HTTP 500'
+    );
+    expect(seen).toEqual([3, 7]);
+    await expect(upload('/other', {}, () => undefined)).rejects.toThrow('HTTP 400');
+    // A length not known: no progress said.
+    vi.stubGlobal(
+      'XMLHttpRequest',
+      class {
+        upload: { onprogress?: (e: unknown) => void } = {};
+        status = 200;
+        responseText = '{"ok":true}';
+        onload?: () => void;
+        open(): void {}
+        setRequestHeader(): void {}
+        send(): void {
+          this.upload.onprogress?.({ lengthComputable: false, loaded: 1, total: 0 });
+          this.onload?.();
+        }
+      }
+    );
+    const none: number[] = [];
+    expect(await upload('/x', {}, (sent) => none.push(sent))).toEqual({ ok: true });
+    expect(none).toEqual([]);
+  });
+
   it('reads a folder’s listing and a module’s files in the browser', async () => {
     const f = (path: string, text = '') => ({ path, file: new File([text], 'x') });
     const all = [
@@ -543,6 +596,11 @@ describe('ModulesPage: a folder of modules', () => {
       paths: all.map((x) => x.path),
       manifests: { 'games/modules/dice/module.json': '{"id":"dice"}' },
     });
+    // Its .gitignore files go with it, for the server to apply.
+    const ignoring = [...all, f('games/.gitignore', 'dist/\n')];
+    expect(await listing(ignoring)).toMatchObject({ ignores: { 'games/.gitignore': 'dist/\n' } });
+    expect(sentText(512, 2048)).toBe('512 B of 2.0 KiB sent (25%)');
+    expect(sentText(2048, 2048)).toBe('2.0 KiB sent; installing');
     expect(folderName(all)).toBe('games');
     expect(folderName([f('a/x'), f('b/y')])).toBe('');
     expect(

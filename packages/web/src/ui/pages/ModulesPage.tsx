@@ -11,8 +11,10 @@
  * repository's root). The modules found (`POST /modules/plan` for a folder, `POST /modules/link`
  * for a link) are listed for the owner to check, each with how it compares with the one installed;
  * the checked ones are installed one by one (`POST /modules` each: a folder's files, as base64, or
- * the module's repository source at its commit), each on its own, and the page says how each went.
- * A module's `.tar.gz` is installed as before. The modules from links are checked for updates (by
+ * the module's repository source at its commit), each on its own, and the page says how each went,
+ * an upload with its bytes sent. A folder's `.gitignore` files go with its listing, and the server
+ * leaves out what they ignore. A module's `.tar.gz` is installed as before, picked or dropped (one
+ * dropped named beside the input, which cannot show it). The modules from links are checked for updates (by
  * the shell every 6 hours, or **Check for updates**): one whose newer commit changed its own path
  * says so (or, when the host's comparison could not tell, says that too), links the host's
  * comparison, and **Update** installs it, as any install. Nothing is installed or
@@ -33,7 +35,7 @@ import type {
   RepoLookup,
   RepoSource,
 } from '#src/ui/api.ts';
-import { api, seg } from '#src/ui/api.ts';
+import { api, seg, upload } from '#src/ui/api.ts';
 import type { PageProps } from '#src/ui/App.tsx';
 import { useLoad } from '#src/ui/hooks.ts';
 import type { FolderFile } from '#src/ui/module-folder.ts';
@@ -48,7 +50,7 @@ import {
 } from '#src/ui/module-folder.ts';
 import { Restart } from '#src/ui/Restart.tsx';
 import { GitServers } from './GitServers.tsx';
-import { firstChecked, ModuleChecklist } from './ModuleChecklist.tsx';
+import { firstChecked, ModuleChecklist, size } from './ModuleChecklist.tsx';
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -70,6 +72,12 @@ interface Installed {
 export const when = (iso: string): string => `${iso.slice(0, 16).replace('T', ' ')} UTC`;
 const day = (iso: string): string => iso.slice(0, 10);
 const short = (commit: string): string => commit.slice(0, 7);
+
+/** An upload's progress, for the owner: the bytes sent of all, then that the server installs it. */
+export const sentText = (sent: number, total: number): string =>
+  sent >= total
+    ? `${size(total)} sent; installing`
+    : `${size(sent)} of ${size(total)} sent (${Math.floor((sent / total) * 100)}%)`;
 
 /** What the owner is choosing from: a folder's modules, or a repository link's. */
 type Found =
@@ -184,6 +192,9 @@ function ConfirmRemove(props: {
 export function ModulesPage({ loggedOut, restarted }: PageProps) {
   const report = useLoad(() => api<ModulesReport>('/modules'), loggedOut, 30_000);
   const [file, setFile] = useState<File>();
+  /** Whether `file` was dropped on the page: the input cannot show it, so the page names it. */
+  const [dropped, setDropped] = useState(false);
+  const tarInput = useRef<HTMLInputElement>(null);
   const [found, setFound] = useState<Found>();
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [link, setLink] = useState('');
@@ -218,17 +229,24 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
    * how each went; the restart is then offered once.
    */
   const installEach = async (
-    items: { label: string; body: () => Promise<unknown>; left?: number }[]
+    items: { label: string; body: () => Promise<unknown>; left?: number; upload?: boolean }[]
   ): Promise<void> => {
     const done: Outcome[] = [];
     for (const [i, item] of items.entries()) {
-      setBusy(`Installing ${i + 1} of ${items.length}: ${item.label}…`);
+      const step = `Installing ${i + 1} of ${items.length}: ${item.label}…`;
+      setBusy(step);
       try {
-        const r = await api<Installed>('/modules', await item.body());
+        const body = await item.body();
+        const r =
+          item.upload === true
+            ? await upload<Installed>('/modules', body, (sent, total) =>
+                setBusy(`${step} ${sentText(sent, total)}`)
+              )
+            : await api<Installed>('/modules', body);
         done.push({
           label: item.label,
           ok: true,
-          text: `${r.id} ${r.version} installed${r.previous === undefined ? '' : ` (${r.previous} kept for a rollback)`}${item.left === undefined || item.left === 0 ? '' : `, ${item.left} files left out`}`,
+          text: `${r.id} ${r.version} installed${r.previous === undefined ? '' : ` (${r.previous} kept for a rollback)`}${item.left === undefined || item.left === 0 ? '' : `, ${item.left} ${item.left === 1 ? 'file' : 'files'} left out`}`,
         });
       } catch (err) {
         done.push({
@@ -250,6 +268,7 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
     void installEach([
       {
         label: file.name,
+        upload: true,
         body: async () => ({
           tarball: base64(new Uint8Array(await file.arrayBuffer())),
           name: file.name,
@@ -325,6 +344,7 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
         return {
           label,
           left: m.left.length,
+          upload: true,
           body: async () => ({
             files: await Promise.all(
               files.map(async ({ path, file: one }) => ({
@@ -400,7 +420,10 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
     if (tar) {
       setFound(undefined);
       (one as FileSystemFileEntry).file((f) => {
+        // The input still names what was picked before, if anything: cleared, for the drop's.
+        if (tarInput.current !== null) tarInput.current.value = '';
         setFile(f);
+        setDropped(true);
         setSaid(`${f.name}: install it below, from a .tar.gz`);
       });
       return;
@@ -489,8 +512,9 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
           Choose a module&apos;s folder, or a repository&apos;s that holds several (a clone or a
           downloaded ZIP), or drop it here; or paste a repository&apos;s link, on GitHub or on a Git
           server added below. Every <code>module.json</code> is found, but under{' '}
-          <code>vendor/</code>; each module&apos;s tests are left out, unless its{' '}
-          <code>module.json</code> lists its <code>files</code>.
+          <code>vendor/</code>; each module&apos;s tests, and what a folder&apos;s{' '}
+          <code>.gitignore</code> ignores, are left out, unless its <code>module.json</code> lists
+          its <code>files</code>.
         </p>
         <div className="install-ways">
           <input
@@ -589,9 +613,18 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
                 type="file"
                 aria-label="module tarball"
                 accept=".tar.gz,.tgz,.tar,application/gzip"
-                onChange={(e) => setFile(e.target.files?.[0])}
+                ref={tarInput}
+                onChange={(e) => {
+                  setFile(e.target.files?.[0]);
+                  setDropped(false);
+                }}
               />
             </label>
+            {file === undefined || !dropped ? null : (
+              <span className="small" aria-label="tarball dropped">
+                dropped: <code>{file.name}</code> ({size(file.size)})
+              </span>
+            )}
             <button type="submit" disabled={file === undefined || busy !== undefined}>
               Install
             </button>
