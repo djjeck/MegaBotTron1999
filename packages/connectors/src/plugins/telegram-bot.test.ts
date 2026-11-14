@@ -229,6 +229,36 @@ describe('the telegram-bot plugin', () => {
     await core.stop();
   });
 
+  it('ends the core’s cards with the way home its config names (D105)', async () => {
+    const stub = stubBot();
+    stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
+    stub.bot.start = () => new Promise<void>(() => {});
+    stub.bot.stop = () => Promise.resolve();
+    const core = new Core({
+      clock: new VirtualClock(),
+      secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
+      config: { 'telegram-bot': { owner: AUTHOR, home: '/menu' } },
+    });
+    core.register(telegramBotPlugin({ bot: () => stub.bot }));
+    await core.start();
+    await new Promise((r) => setTimeout(r, 20));
+    await stub.bot.handleUpdate(stub.command(AUTHOR, AUTHOR, '/plugins'));
+    await new Promise((r) => setTimeout(r, 20));
+    const card = stub.calls.find((c) => c.method === 'sendMessage');
+    const rows = (card?.payload['reply_markup'] as { inline_keyboard: { text: string }[][] })
+      .inline_keyboard;
+    expect(rows.at(-1)?.map((b) => b.text)).toEqual(['🏠 Home']);
+    await core.stop();
+    // Its form: a command as typed or short, within a button's 64 bytes; a label of its own.
+    const parse = (c: Record<string, unknown>) => telegramBotConfig.safeParse(c);
+    expect(parse({ home: 'menu' }).data?.homeLabel).toBe('🏠 Home');
+    expect(parse({ home: '/menu main', homeLabel: '⬅️ Back' }).success).toBe(true);
+    expect(parse({ home: 'menu:main' }).success).toBe(true);
+    for (const bad of ['', 'two words', '/', `/${'m'.repeat(64)}`, '/menu\nx'])
+      expect(parse({ home: bad }).success, bad).toBe(false);
+    expect(parse({ homeLabel: '' }).success).toBe(false);
+  });
+
   it('never denies its owner, and replies in one line (D100)', () => {
     expect(
       telegramBotConfig.safeParse({ owner: AUTHOR, deny: [String(AUTHOR)] }).error?.issues

@@ -10,7 +10,7 @@
  */
 
 import { z } from 'zod';
-import { type Buttons, type ChatCommand } from './commands.ts';
+import { type Buttons, type ChatCommand, type CommandButton } from './commands.ts';
 import { type Limits, type TextFormat } from './outbox.ts';
 
 /**
@@ -252,6 +252,12 @@ export interface ConnectorHandle {
 export interface ChatSurface {
   /** The commands to answer (`core.commands()`), once every plugin has started. */
   serve(commands: readonly ChatCommand[]): void;
+  /**
+   * The way back to the owner's main card on this surface, at the foot of the core's own cards
+   * (§4.11): its connector's config names it (a `telegram-bot`'s `home`); the core's `home` when
+   * none.
+   */
+  readonly home?: CommandButton;
 }
 
 /** What a send to a connector may carry beside its text. */

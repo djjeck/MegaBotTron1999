@@ -136,8 +136,9 @@ sends it in reply to the asker (`Asker`: the network's id and username, and whet
 owner), outside the plugin's outbox. What a plugin sends on its own goes through its outbox, within
 its chat-out edges, each sending for real or as a dry run (§4.6). The surface is a connector's
 (`ChatSurface`): the core serves every running connector that offers one the commands (`serve`),
-once every plugin has started. A surface is the owner's interactive control (commands, cards and
-their buttons), not a report channel: it tells the owner nothing on its own (bot-os.md D94).
+once every plugin has started, the core's own cards ending with that surface's way home (`home`,
+§4.11). A surface is the owner's interactive control (commands, cards and their buttons), not a
+report channel: it tells the owner nothing on its own (bot-os.md D94).
 
 **The owner's commands.** A command may be the owner's (`owner: true`): the core answers it to the
 owner only (`Asker.owner`), and the surface only in the owner's chat, never in a group. A command
@@ -1413,7 +1414,9 @@ buttons), `/plugins <id>` (a plugin's state and why, its stop, its settings, rea
 while it runs, the one action that changes a node's state there, **⛔ Stop**, `/plugins <id> stop`,
 a node's kill as above), `/kill`, `/settings` and `/set <key> <value>`; hidden, the cards' buttons
 and the off switch's `/off` and `/on`. Nothing there starts a node again: that is the editor's. Each
-card ends with the way back to the owner's main card that the wiring names (`CoreOptions.home`).
+card ends with the way back to the owner's main card: the one its chat surface's connector names in
+its config (`ChatSurface.home`, a `telegram-bot`'s `home`, bot-os.md D105), else the wiring's
+(`CoreOptions.home`; the image's names none), else none.
 
 **The HTTP control API** (`packages/core/src/control-server.ts`), one request handler
 (`controlHandler`) that the entry point serves twice: on the container's loopback (`CONTROL_PORT`,
@@ -1903,6 +1906,10 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   group, and their taps on buttons there, before any edge or its surface sees them; each drop is
   recorded (`telegram-bot.denied`, on the Events page) and counted in its node's view and on its
   card; silent unless `denyReply` sets one line to answer, at most once in 10 minutes per person.
+  Its `home` (D105) is the command of the owner's main card, as typed (`/menu`, `/menu main`) or
+  short (`menu`, `menu:main`), at most 64 bytes: the core's own cards on its surface (`/plugins`,
+  `/settings`) end with a button that runs it, labelled `homeLabel` (`🏠 Home` by default); unset,
+  they have none.
 - **`telegram-user`** (`packages/connectors/src/plugins/telegram-user.ts`, on GramJS in
   `packages/connectors/src/transport/telegram-user.ts`): the owner's own account, from three secrets
   (`telegram_user_api_id`, `telegram_user_api_hash`, `telegram_user_session`). It monitors the chats

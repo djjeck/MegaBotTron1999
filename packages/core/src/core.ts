@@ -175,7 +175,10 @@ export interface CoreOptions {
    * refused, no nodes, with why (`graphProblems`). Its nodes' instances are `referenced` by default.
    */
   graphFile?: GraphFile;
-  /** The way back to the owner's main card, at the foot of the core's own cards (§4.11). */
+  /**
+   * The way back to the owner's main card, at the foot of the core's own cards (§4.11), on a chat
+   * surface whose config names none (a surface's own `home` wins).
+   */
   home?: CommandButton;
   /**
    * The data volume: each instance's store is `<dataDir>/instances/<instance>/`, the core's own
@@ -654,9 +657,10 @@ export class Core {
   /**
    * The chat commands of the plugins up (running, or stopped since they started), in load order,
    * for the chat surface (§2 `interface.commands`, P11). A command whose plugin shuts down, or
-   * fails, since is answered by nobody: its handler does nothing.
+   * fails, since is answered by nobody: its handler does nothing. The core's own cards end with
+   * `home`, the surface's way back to the owner's main card (`CoreOptions.home` by default).
    */
-  commands(): ChatCommand[] {
+  commands(home: CommandButton | undefined = this.o.home): ChatCommand[] {
     const out: ChatCommand[] = [];
     const asOwner = (c: ChatCommand): ChatCommand =>
       c.owner
@@ -691,7 +695,7 @@ export class Core {
       ...coreCommands({
         controls: this.controls,
         settings: this.settings,
-        ...(this.o.home === undefined ? {} : { home: this.o.home }),
+        ...(home === undefined ? {} : { home }),
       })
     );
     return out.map(asOwner);
@@ -792,12 +796,12 @@ export class Core {
     for (const entry of this.entries.values()) await this.startOne(entry);
     // Every plugin has started: each hears it, in load order (§3).
     for (const entry of this.entries.values()) await this.readyOne(entry);
-    // The chat surfaces answer the commands from now on.
-    const commands = this.commands();
+    // The chat surfaces answer the commands from now on, each with its own way home.
     for (const entry of this.entries.values()) {
       if (entry.up !== true) continue;
+      const surface = entry.instance?.surface;
       try {
-        entry.instance?.surface?.serve(commands);
+        surface?.serve(this.commands(surface.home ?? this.o.home));
       } catch (e) {
         this.logger(entry.id).error(`serve failed: ${message(e)}`);
       }

@@ -15,6 +15,7 @@ import {
   type Buttons,
   type ChatCommand,
   type ChatSurface,
+  type CommandButton,
   type ConnectorStatus,
   type TextFormat,
 } from '@megabottron1999/core';
@@ -39,6 +40,8 @@ export interface TelegramSurfaceOptions {
   now: () => number;
   /** Hears the connector's status: the menus are set again each time it connects. */
   onStatus: (listener: (s: ConnectorStatus) => void) => void;
+  /** The way back to the owner's main card, at the foot of the core's cards (its config's). */
+  home?: CommandButton;
 }
 
 /** The switchboard's logger, on the connector's log. */
@@ -55,6 +58,7 @@ export function loggerOf(log: (line: string) => void): Logger {
 export class TelegramSurface implements ChatSurface {
   /** Resolved once served: polling waits for it. */
   readonly listening: Promise<void>;
+  readonly home?: CommandButton;
   private readonly o: TelegramSurfaceOptions;
   private listen: () => void = () => {};
   private switchboardIs: (s: Switchboard) => void = () => {};
@@ -64,6 +68,7 @@ export class TelegramSurface implements ChatSurface {
 
   constructor(o: TelegramSurfaceOptions) {
     this.o = o;
+    if (o.home !== undefined) this.home = o.home;
     this.listening = new Promise<void>((r) => (this.listen = r));
     this.switchboard = new Promise<Switchboard>((r) => (this.switchboardIs = r));
   }

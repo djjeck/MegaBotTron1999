@@ -12,6 +12,9 @@
  * through it, those with buttons to the owner's chat through its surface, whose taps run them. The token stays in the connector's secrets, and nothing hands it out:
  * no plugin, and not the wiring, gets the bot (P9).
  *
+ * Its `home` (bot-os.md D105) is the command of the owner's main card: the core's own cards
+ * (`/plugins`, `/settings`) end with a button back to it, labelled `homeLabel`.
+ *
  * Its `deny` list (bot-os.md D100) names the people and bots, picked among its chats, whose
  * commands in a group it drops before any plugin sees them; each drop is recorded
  * (`telegram-bot.denied`, on the Events page) and counted in its node's view and on its card.
@@ -76,6 +79,23 @@ export const telegramBotConfig = z
       .describe(
         'One line it answers a denied command with, at most once in 10 minutes per person; unset: it ignores them without a word'
       ),
+    home: z
+      .string()
+      .regex(
+        /^(?:\/\w+(?: +\S[^\n]*)?|\w+(?::[^\n]*)?)$/u,
+        'a command: /menu, /menu args, or menu:args'
+      )
+      .refine((s) => Buffer.byteLength(s) <= 64, 'at most 64 bytes, a Telegram button’s most')
+      .optional()
+      .describe(
+        'The owner’s main card: the command that the back button at the foot of the core’s cards (/plugins, /settings) runs, as typed (/menu) or short (menu); unset: no back button'
+      ),
+    homeLabel: z
+      .string()
+      .min(1)
+      .max(32)
+      .default('🏠 Home')
+      .describe('The back button’s label, when it has a home'),
     commandIntervalS,
     unansweredAt,
     unansweredAtBy,
@@ -157,6 +177,9 @@ export function telegramBotPlugin(
               log,
               now: () => ctx.clock.now(),
               onStatus: (l) => void ref.connector?.onStatus(l),
+              ...(config.home === undefined
+                ? {}
+                : { home: { label: config.homeLabel, action: config.home } }),
             });
       const listen = Promise.all([o.listen, surface?.listening]);
       const deny =

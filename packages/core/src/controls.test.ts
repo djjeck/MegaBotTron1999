@@ -412,6 +412,40 @@ describe('the core’s commands', () => {
     expect(await ask(named(core, 'tac'), 'evade:on')).toEqual([{ text: 'tac evade:on' }]);
   });
 
+  it('end each surface’s cards with its own way home, or the core’s', async () => {
+    const served: Record<string, readonly ChatCommand[]> = {};
+    const surfaced = (id: string, home?: { label: string; action: string }) =>
+      definePlugin({
+        manifest: {
+          id,
+          version: '0.1.0',
+          kinds: ['connector'],
+          description: 'a chat surface',
+          account: `${id}:me`,
+        },
+        create: () => ({
+          connector: new FakeConnector({ account: `${id}:me` }),
+          surface: {
+            serve: (commands: readonly ChatCommand[]) => (served[id] = commands),
+            ...(home === undefined ? {} : { home }),
+          },
+        }),
+      });
+    const { core } = instance();
+    core.register(surfaced('bot', { label: '🏠 Home', action: '/menu' }), surfaced('other'));
+    await core.start();
+    const foot = async (id: string, name: string): Promise<unknown> => {
+      const [card] = await ask(
+        served[id]?.find((c) => c.name === name),
+        ''
+      );
+      return card?.options?.buttons?.at(-1);
+    };
+    expect(await foot('bot', 'plugins')).toEqual([{ label: '🏠 Home', action: '/menu' }]);
+    expect(await foot('bot', 'settings')).toEqual([{ label: '🏠 Home', action: '/menu' }]);
+    expect(await foot('other', 'plugins')).toEqual([{ label: '← Status', action: 'status' }]);
+  });
+
   it('show the plugins and each one, stop one, and turn the instance off and on', async () => {
     const { core } = instance();
     await core.start();

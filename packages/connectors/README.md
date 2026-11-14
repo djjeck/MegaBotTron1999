@@ -10,7 +10,9 @@ other plugins a handle:
   so that a tap runs the owner's command; its `deny` list (docs/bot-os.md D100, `telegram-deny.ts`),
   people and bots picked among its chats but never its owner, has their commands in a group and
   their taps there dropped before any plugin sees them, each recorded (`telegram-bot.denied`) and
-  counted in its node's view, silent unless `denyReply` sets one line;
+  counted in its node's view, silent unless `denyReply` sets one line; its `home` (docs/bot-os.md
+  D105), the command of the owner's main card, puts a button back to it (`homeLabel`) at the foot of
+  the core's own cards;
 - `telegram-user`: a Telegram user account (GramJS), reading and sending in the chats it monitors
   (every chat, until its `chats` config ticks some);
 
