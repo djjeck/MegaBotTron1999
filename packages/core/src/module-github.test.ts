@@ -5,13 +5,13 @@ import { fakeGitHub, sha } from '#test/github.ts';
 import { manifestOf, tempDir, writeModule } from '#test/modules.ts';
 import {
   CHECK_EVERY,
-  GitHub,
-  GitHubError,
-  GitHubModules,
+  GitError,
+  GitModules,
   moduleControls,
   newerTag,
-  parseGitHubUrl,
-} from './module-github.ts';
+  onlyGitHub,
+} from './module-git.ts';
+import { GitHub, parseGitHubUrl } from './module-github.ts';
 import { ModuleStore } from './module-store.ts';
 
 const manifest = (id: string, version = '0.1.0', more: Record<string, unknown> = {}): string =>
@@ -75,14 +75,13 @@ describe('a GitHub link', () => {
       'https://github.com/example/games/blob/main/x',
       'https://github.com/example/games/tree',
     ])
-      expect(() => parseGitHubUrl(bad), bad).toThrow(GitHubError);
+      expect(() => parseGitHubUrl(bad), bad).toThrow(GitError);
   });
 
   it('resolves to the default branch, a branch with slashes, a tag or a commit', async () => {
     const gh = fakeGitHub(repos());
     const github = new GitHub({ fetch: gh.fetch });
-    expect(await github.resolve('https://github.com/example/games')).toEqual({
-      kind: 'github',
+    expect(await github.resolve(new URL('https://github.com/example/games'))).toEqual({
       repo: 'example/games',
       ref: 'main',
       refType: 'branch',
@@ -91,23 +90,29 @@ describe('a GitHub link', () => {
       commitDate: '2026-11-01T10:00:00Z',
     });
     expect(
-      await github.resolve('https://github.com/example/games/tree/feature/new/modules/dice')
+      await github.resolve(
+        new URL('https://github.com/example/games/tree/feature/new/modules/dice')
+      )
     ).toMatchObject({ ref: 'feature/new', refType: 'branch', path: 'modules/dice', commit: MAIN2 });
-    expect(await github.resolve('https://github.com/example/games/tree/v0.1.0')).toMatchObject({
+    expect(
+      await github.resolve(new URL('https://github.com/example/games/tree/v0.1.0'))
+    ).toMatchObject({
       ref: 'v0.1.0',
       refType: 'tag',
       path: '',
       commit: TAG1,
     });
     expect(
-      await github.resolve(`https://github.com/example/games/tree/${MAIN2.slice(0, 7)}/modules`)
+      await github.resolve(
+        new URL(`https://github.com/example/games/tree/${MAIN2.slice(0, 7)}/modules`)
+      )
     ).toMatchObject({ ref: MAIN2, refType: 'commit', path: 'modules' });
-    await expect(github.resolve('https://github.com/example/nothing')).rejects.toThrow(
+    await expect(github.resolve(new URL('https://github.com/example/nothing'))).rejects.toThrow(
       'github.com/example/nothing is not found (a private repository is not supported)'
     );
-    await expect(github.resolve('https://github.com/example/games/tree/gone/x')).rejects.toThrow(
-      'has no branch, tag or commit gone'
-    );
+    await expect(
+      github.resolve(new URL('https://github.com/example/games/tree/gone/x'))
+    ).rejects.toThrow('has no branch, tag or commit gone');
     // No token: no authorization header.
     expect(gh.calls.every((c) => !c.includes('Bearer'))).toBe(true);
   });
@@ -115,7 +120,7 @@ describe('a GitHub link', () => {
   it('says so when a repository has no commit on its default branch', async () => {
     const gh = fakeGitHub({ 'example/empty': { defaultBranch: 'main' } });
     await expect(
-      new GitHub({ fetch: gh.fetch }).resolve('https://github.com/example/empty')
+      new GitHub({ fetch: gh.fetch }).resolve(new URL('https://github.com/example/empty'))
     ).rejects.toThrow('example/empty has no commit on main');
   });
 
@@ -190,7 +195,7 @@ describe('a GitHub link', () => {
   it('says what went wrong with the network or GitHub', async () => {
     const down = new GitHub({ fetch: () => Promise.reject(new Error('getaddrinfo ENOTFOUND')) });
     await expect(down.commit('example/games', 'main')).rejects.toMatchObject({
-      message: 'GitHub could not be reached: getaddrinfo ENOTFOUND',
+      message: 'github.com could not be reached: getaddrinfo ENOTFOUND',
       status: 502,
     });
     const gh = fakeGitHub(repos());
@@ -234,9 +239,9 @@ describe('modules from GitHub', () => {
     const gh = fakeGitHub(repos());
     let now = Date.parse('2026-11-12T12:00:00Z');
     const store = new ModuleStore(path.join(tempDir(), 'modules'), () => now);
-    const modules = new GitHubModules(
+    const modules = new GitModules(
       store,
-      new GitHub({ fetch: gh.fetch, now: () => now, ...more }),
+      onlyGitHub(new GitHub({ fetch: gh.fetch, now: () => now, ...more })),
       () => now
     );
     return { gh, store, modules, tick: (ms: number) => (now += ms) };
@@ -306,9 +311,9 @@ describe('modules from GitHub', () => {
       'no module at vendor/Shell/modules/x'
     );
     await expect(modules.install({ ...base, repo: 'not a repo', path: '' })).rejects.toThrow(
-      'github: {"repo"'
+      'git: {"host"?, "repo"'
     );
-    await expect(modules.install({ ...base, commit: 'abc', path: '' })).rejects.toThrow('github:');
+    await expect(modules.install({ ...base, commit: 'abc', path: '' })).rejects.toThrow('git:');
     await expect(
       modules.install({ repo: 'example/games', ref: 'gone', path: 'modules/dice' })
     ).rejects.toThrow('example/games has no branch, tag or commit gone');
@@ -318,7 +323,10 @@ describe('modules from GitHub', () => {
     const gh = fakeGitHub({
       'example/bad': { trees: { [MAIN1]: { 'module.json': '{' } } },
     });
-    const modules = new GitHubModules(new ModuleStore(tempDir()), new GitHub({ fetch: gh.fetch }));
+    const modules = new GitModules(
+      new ModuleStore(tempDir()),
+      onlyGitHub(new GitHub({ fetch: gh.fetch }))
+    );
     await expect(
       modules.install({ repo: 'example/bad', ref: 'main', commit: MAIN1, path: '' })
     ).rejects.toThrow(/^module\.json: /u);
@@ -485,7 +493,7 @@ describe('modules from GitHub', () => {
       modules: [{ id: 'cards' }],
     });
     await controls.install({
-      github: { repo: 'example/games', ref: 'main', path: 'modules/cards' },
+      git: { repo: 'example/games', ref: 'main', path: 'modules/cards' },
     });
     expect(await controls.checkUpdates?.()).toMatchObject({
       installed: [{ id: 'cards' }],
@@ -493,9 +501,9 @@ describe('modules from GitHub', () => {
     });
     const plain = moduleControls(store, undefined);
     expect(plain.lookup).toBeUndefined();
-    expect(() =>
-      plain.install({ github: { repo: 'example/games', ref: 'main', path: '' } })
-    ).toThrow('installing from GitHub is not offered here');
+    expect(() => plain.install({ git: { repo: 'example/games', ref: 'main', path: '' } })).toThrow(
+      'installing from a repository link is not offered here'
+    );
     expect(plain.report()).not.toHaveProperty('updates');
   });
 });

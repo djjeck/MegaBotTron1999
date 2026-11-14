@@ -60,17 +60,19 @@ GitHub link (`https://github.com/<owner>/<repo>`, or a folder's `…/tree/<ref>/
 module's own folder, or a repository's root that holds several. The page lists every module found
 (but those under `vendor/`), each with its version and whether it is new, an update, the same
 version or older; check those to install, install them, then click **Apply (restart)** to load them.
-A module's tests are left out. One installed from GitHub shows its commit, and the page says when
-its branch has a newer one (checked every 6 hours, or with **Check for updates**); **Update**
-installs it. Nothing is installed or restarted but by you. The Modules page also installs a
-`.tar.gz` and rolls a module back to its previous version; the Admin page shows the instance (with
-its off and kill switches), the graph's history (each version applied in the last 7 days, what
-changed, whether the instance started on it, and a rollback to it) and the graph as text, its
-accounts and their connections, and its plugins with their states (D59, D61, D64). A **script** node
-runs TypeScript typed in its panel, on the ports its panel declares, each in a worker thread of its
-own ([docs/bot-os.md](docs/bot-os.md) D76). In a real deployment, use Docker or Compose secrets, and
-put the UI behind a reverse proxy with HTTPS, and on the internet with its own authentication,
-rather than publishing the port.
+A module's tests are left out. A private repository on your own self-hosted Git server (one with a
+Gitea-compatible API) installs the same way, once the server is added under **Git servers** on the
+Modules page (below). One installed from a link shows its commit, and the page says when its branch
+has a newer one (checked every 6 hours, or with **Check for updates**); **Update** installs it.
+Nothing is installed or restarted but by you. The Modules page also installs a `.tar.gz` and rolls a
+module back to its previous version; the Admin page shows the instance (with its off and kill
+switches), the graph's history (each version applied in the last 7 days, what changed, whether the
+instance started on it, and a rollback to it) and the graph as text, its accounts and their
+connections, and its plugins with their states (D59, D61, D64). A **script** node runs TypeScript
+typed in its panel, on the ports its panel declares, each in a worker thread of its own
+([docs/bot-os.md](docs/bot-os.md) D76). In a real deployment, use Docker or Compose secrets, and put
+the UI behind a reverse proxy with HTTPS, and on the internet with its own authentication, rather
+than publishing the port.
 
 - **`/data`** is the instance's state: the graph (`graph.json`, and its versions in
   `graph-history/`), each plugin instance's state (`instances/<id>/`), the core's own (`core/`), the
@@ -85,7 +87,33 @@ rather than publishing the port.
   `telegram_user_api_hash`, `telegram_user_session`, `anthropic_api_key`). Optional, `github_token`
   (a GitHub token, to raise the API's limit of 60 requests an hour for installing and updating
   modules from GitHub links; `GITHUB_TOKEN` in the environment is read too, though the secret is the
-  safer place).
+  safer place), and a token for each self-hosted Git server (below).
+- **Self-hosted Git servers** (private module repositories, [docs/bot-os.md](docs/bot-os.md) D102):
+  the shell fetches modules only from GitHub and the servers you add. Put the server's token (one
+  that can read its repositories) in a Docker secret of any name, say `git_example_token`, mounted
+  under `/run/secrets`; on the Modules page open **Git servers**, type the host (`git.example.lan`,
+  with its port if it has one), pick `git_example_token` under **token secret** (or **No token** for
+  public repositories only) and click **Add server**: the shell checks that the server answers as a
+  Gitea-compatible API, with the token, before adding it. Then paste a repository's link on it
+  (`https://git.example.lan/<owner>/<repo>`, or a folder's `…/src/branch/<branch>/<path>`). The
+  token is sent to that host only, and never shown or logged. A server is reached over HTTPS only;
+  if its certificate comes from a private CA, mount the CA's certificate (PEM) in the container and
+  point `NODE_EXTRA_CA_CERTS` at it, which Node honours (TLS verification is never turned off):
+
+  ```sh
+  docker run -d --name megabottron1999 \
+    -v megabottron1999-data:/data \
+    -v "$PWD/secrets:/run/secrets:ro" \
+    -v "$PWD/example-ca.pem:/etc/ssl/example-ca.pem:ro" \
+    -e NODE_EXTRA_CA_CERTS=/etc/ssl/example-ca.pem \
+    -p 127.0.0.1:8082:8082 \
+    --restart unless-stopped \
+    ghcr.io/djjeck/megabottron1999:latest
+  ```
+
+  Without it, adding the server or looking a link up says so:
+  `git.example.lan: the server's certificate isn't trusted (…): mount its CA and set NODE_EXTRA_CA_CERTS`.
+
 - **Ports:** 8082 is the web UI. 8080 is the health endpoint (`HEALTH_PORT`): `GET /health` answers
   200 while every enabled connector is connected, 503 otherwise, and the image's `HEALTHCHECK`
   probes it; set `HEALTH_PORT` empty to turn it off, and disable the healthcheck with it. The
@@ -193,10 +221,11 @@ export const greeter = definePlugin({
 
 Games and their automation come as _modules_ in the data volume (`/data/modules/<id>/`, a directory
 of `.ts` files and a `module.json`), installed by the owner through the control API (from a folder,
-a tarball or a GitHub link, the previous version kept for a rollback), removed the same way, and
-loaded at start ([docs/bot-os.md](docs/bot-os.md) D49, D53, D67, D68). A module repository develops
-and tests against this one vendored as a git submodule ([docs/bot-os-api.md](docs/bot-os-api.md)
-§7). The full API is [docs/bot-os-api.md](docs/bot-os-api.md).
+a tarball, a GitHub link or a link on a self-hosted Git server, the previous version kept for a
+rollback), removed the same way, and loaded at start ([docs/bot-os.md](docs/bot-os.md) D49, D53,
+D67, D68). A module repository develops and tests against this one vendored as a git submodule
+([docs/bot-os-api.md](docs/bot-os-api.md) §7). The full API is
+[docs/bot-os-api.md](docs/bot-os-api.md).
 
 ## Layout
 

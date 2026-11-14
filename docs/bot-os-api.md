@@ -1442,12 +1442,14 @@ nodes and `owner-notice`, §4.16; 404 for a node that keeps none, 409 for one no
 schema, 409 for the plugin's refusal); `GET /instances` (§2.2); `GET /graph/file`,
 `POST /graph/check`, `PUT /graph/file`, `GET /graph/history`, `GET /graph/history/<id>`,
 `POST /graph/history/<id>/rollback`, `POST /graph/rollback` and `POST /restart` (§2.3);
-`GET /available`, `GET /modules`, `POST /modules`, `POST /modules/plan`, `POST /modules/github`,
-`POST /modules/updates`, `POST /modules/<id>/rollback` and `DELETE /modules/<id>` (§7.4);
+`GET /available`, `GET /modules`, `POST /modules`, `POST /modules/plan`, `POST /modules/link` (or
+`POST /modules/github`), `POST /modules/updates`, `GET /modules/hosts`, `POST /modules/hosts`,
+`DELETE /modules/hosts/<host>`, `POST /modules/<id>/rollback` and `DELETE /modules/<id>` (§7.4);
 `GET /secrets`, the names of the Docker secrets provided, never their values, for a connector's
 config to name (§4.9; the wiring leaves out `web_ui_password`, `bot_os_key` and `github_token`, the
-shell's own). Ids and names in a path may be URL-encoded. The control API is the owner's alone: no
-agent is ever given it (P11), so no agent installs a module (P1).
+shell's own, and the secrets named for a self-hosted Git server's token, §7.4). Ids and names in a
+path may be URL-encoded. The control API is the owner's alone: no agent is ever given it (P11), so
+no agent installs a module (P1).
 
 **The health endpoint** (`packages/core/src/health.ts`), for a container's healthcheck, apart from
 the control API: on `HEALTH_PORT` (every interface; off unless set, and the image sets 8080; an irc
@@ -2283,8 +2285,9 @@ Games and automation come as modules (bot-os.md D49, D53): directories of plain 
 npm dependencies of their own, installed in the data volume and loaded at start. As built:
 `packages/core/src/modules.ts` (the manifest, the order), `module-resolve.ts` and `module-hooks.ts`
 (the resolve hook), `module-loader.ts` (the loading), `module-store.ts` (install and rollback),
-`module-files.ts` (the modules in a folder or a repository, and each one's files),
-`module-github.ts` (GitHub links and their updates) and `semver.ts`.
+`module-files.ts` (the modules in a folder or a repository, and each one's files), `module-git.ts`
+(repository links and their updates, on any host), `module-github.ts` (GitHub), `module-gitea.ts` (a
+Gitea-compatible server), `module-hosts.ts` (the hosts allowed) and `semver.ts`.
 
 ### 7.1 The format
 
@@ -2412,28 +2415,29 @@ editor will add as nodes. A plugin runs once a node of the saved graph (§2.3) n
 
 The owner installs a module through the control API (§4.11), never an agent (P1, P11); it is loaded
 at the next start (P8). The shell downloads a module only when the owner asks it to install one from
-a GitHub link, and never installs or restarts on its own (bot-os.md D67). `ModuleStore`
-(`<data>/modules`):
+a repository's link, on GitHub or on a self-hosted Git server the owner added, and never installs or
+restarts on its own (bot-os.md D67, D102). `ModuleStore` (`<data>/modules`):
 
 - **Install** (`POST /modules`), one module a request: from a directory of the container's
   (`{"dir": "/path"}`); from a tarball, `.tar.gz` or `.tar` (base64 in `{"tarball": "…"}`, which the
   web UI's same-origin rule allows; or the bytes as the body, with `content-type: application/gzip`,
   on the loopback); from a directory's files one by one, as a browser reads a folder picked or
-  dropped (`{"files": [{"path": "dice/module.json", "content": "<base64>"}, …]}`); or from GitHub
-  (`{"github": {"repo": "<owner>/<repo>", "ref": "main", "refType"?: "branch", "path": "modules/dice", "commit"?: "<sha>"}}`,
-  below). A tarball or files may name their source for the owner (`"name"`). Up to 64 MiB: the body,
-  and the files' bytes together. The tarball, or the files, hold the module at their root or in
-  their one directory (as `git archive --prefix=dice/`, GitHub's release tarballs and a folder
-  picked make it), which is stripped. A tarball holds files and directories only, nothing outside
-  it; a file's path is relative to that root, with `/` (or `\`) between its parts, and one that is
-  absolute, a drive's, or goes through `..` refuses the whole upload
-  (`<path> leaves the module's directory`). It is staged in `.staging/`, checked (its
-  `module.json`), pruned to the files it installs (below), checked again (each plugin entry must be
-  among them: `its plugin entry src/p.ts is not there`), and replaces `<id>/`, whose version before
-  is kept as `.previous/<id>/`. The answer is `{id, version, previous?, left?}`, `left` the files
-  left out. 400 with why for what is not a module. Reinstalling an id is how a module is upgraded,
-  or reinstalled at the same version (versions are not always bumped), the version before one
-  rollback away.
+  dropped (`{"files": [{"path": "dice/module.json", "content": "<base64>"}, …]}`); or from a
+  repository
+  (`{"git": {"host"?: "git.example.lan", "repo": "<owner>/<repo>", "ref": "main", "refType"?: "branch", "path": "modules/dice", "commit"?: "<sha>"}}`,
+  GitHub's without a `host`; `{"github": {…}}` is GitHub's too; below). A tarball or files may name
+  their source for the owner (`"name"`). Up to 64 MiB: the body, and the files' bytes together. The
+  tarball, or the files, hold the module at their root or in their one directory (as
+  `git archive --prefix=dice/`, GitHub's release tarballs and a folder picked make it), which is
+  stripped. A tarball holds files and directories only, nothing outside it; a file's path is
+  relative to that root, with `/` (or `\`) between its parts, and one that is absolute, a drive's,
+  or goes through `..` refuses the whole upload (`<path> leaves the module's directory`). It is
+  staged in `.staging/`, checked (its `module.json`), pruned to the files it installs (below),
+  checked again (each plugin entry must be among them: `its plugin entry src/p.ts is not there`),
+  and replaces `<id>/`, whose version before is kept as `.previous/<id>/`. The answer is
+  `{id, version, previous?, left?}`, `left` the files left out. 400 with why for what is not a
+  module. Reinstalling an id is how a module is upgraded, or reinstalled at the same version
+  (versions are not always bumped), the version before one rollback away.
 - **What a module installs** (`module-files.ts`): the files under its directory, but `.git` and
   `node_modules` (never taken) and another module's directory nested in it. Of those, the ones its
   `module.json`'s `files` globs name (§7.1), or, without `files`, all but its tests: `*.test.ts`,
@@ -2443,10 +2447,12 @@ a GitHub link, and never installs or restarts on its own (bot-os.md D67). `Modul
 - **Its source** is recorded at each install in `<data>/modules/.sources.json`, never in the
   module's own files: `{"kind": "folder", "name"?}`, `{"kind": "tarball", "name"?}`,
   `{"kind": "directory", "path"}` or
-  `{"kind": "github", "repo", "ref", "refType", "path", "commit", "commitDate"?}`, with when it was
-  installed (`installedAt`). The version kept for a rollback keeps its own, and a rollback swaps
-  them; an install that replaces nothing (the module removed) leaves the previous version, and its
-  record, as they are. A module installed before has none.
+  `{"kind": "github", "repo", "ref", "refType", "path", "commit", "commitDate"?}` or
+  `{"kind": "git", "host", "api": "gitea", "repo", "ref", "refType", "path", "commit", "commitDate"?}`
+  (a self-hosted Git server's), with when it was installed (`installedAt`). The version kept for a
+  rollback keeps its own, and a rollback swaps them; an install that replaces nothing (the module
+  removed) leaves the previous version, and its record, as they are. A module installed before has
+  none.
 - **The modules in a tree** (`POST /modules/plan`): a folder may be a module's or a repository's
   root with several. Given its listing
   (`{"paths": ["games/modules/dice/module.json", …], "manifests": {"<path>": "<its text>"}}`, the
@@ -2458,10 +2464,11 @@ a GitHub link, and never installs or restarts on its own (bot-os.md D67). `Modul
   its `error`: its manifest refused (as `module.json: api: …`), a plugin entry missing or left out
   by its `files`, its id found twice. Nothing is installed; the web UI then sends each module the
   owner checks, with only its files.
-- **From GitHub** (`module-github.ts`, #13): `POST /modules/github {"url": "…"}` takes a public
-  repository's link: `https://github.com/<owner>/<repo>` (its default branch), `…/tree/<ref>` or
-  `…/tree/<ref>/<path>` (a branch, which may hold slashes, a tag, or a commit). The shell resolves
-  the ref to a commit through GitHub's API (`GET /repos/<repo>`, for the default branch;
+- **From GitHub** (`module-github.ts`, #13): `POST /modules/link {"url": "…"}` (or
+  `POST /modules/github`, the same) takes a public repository's link:
+  `https://github.com/<owner>/<repo>` (its default branch), `…/tree/<ref>` or `…/tree/<ref>/<path>`
+  (a branch, which may hold slashes, a tag, or a commit). The shell resolves the ref to a commit
+  through GitHub's API (`GET /repos/<repo>`, for the default branch;
   `GET /repos/<repo>/commits?sha=<ref>&per_page=1`, the commit and its date; and
   `GET /repos/<repo>/git/ref/tags/<ref>`, whether it is a tag), downloads the repository's tarball
   at that commit from codeload (`https://codeload.github.com/<repo>/tar.gz/<commit>`, outside the
@@ -2470,16 +2477,57 @@ a GitHub link, and never installs or restarts on its own (bot-os.md D67). `Modul
   `{"source": {"repo", "ref", "refType", "path", "commit", "commitDate"}, "modules": [ … ]}`. Each
   module is then installed with `{"github": {…, "path": "<the module's>", "commit"}}`, from that
   commit; without a `commit`, from the ref's head now. 404 for a repository, branch, tag or commit
-  not found (a private repository reads as not found: private sources are not supported), 429 for
-  GitHub's rate limit, 502 for GitHub unreachable or failing.
-- **Updates:** for the modules installed from GitHub, the shell checks at its start, every 6 hours,
-  and when the owner asks (`POST /modules/updates`, which answers the list): each branch's head once
-  (`commits?sha=<branch>`), however many modules follow it, and each repository's tags once
-  (`GET /repos/<repo>/tags`) for the modules installed from a tag. A module whose branch now names
-  another commit, or whose tag has a newer semver tag (`v1.2.3` or `1.2.3`; pre-releases only after
-  a pre-release), has an `update`: `{ref, commit, commitDate?, compare}`, `compare` GitHub's
-  comparison of the two commits. It is installed as any install (`POST /modules` with its `github`
-  source at the new commit and ref), never on its own; a module installed from a commit is pinned.
+  not found (a private repository on GitHub reads as not found: private sources are on a self-hosted
+  Git server, below), 429 for GitHub's rate limit, 502 for GitHub unreachable or failing.
+- **From a self-hosted Git server** (`module-gitea.ts`, `module-hosts.ts`, bot-os.md D102, #48): a
+  server with a Gitea-compatible API, once the owner has added it. **The hosts allowed** are GitHub
+  and the servers added: `GET /modules/hosts` answers
+  `{"servers": [{"host": "git.example.lan", "api": "gitea", "secret"?: "git_example_token"}], "secrets": [ … ]}`,
+  `secrets` the names of the Docker secrets a token may be picked from (the shell's own left out);
+  `POST /modules/hosts {"host": "git.example.lan", "secret"?: "<a secret's name>"}` adds one, or
+  changes its secret, once it answers `GET https://<host>/api/v1/version` (with the token, if a
+  secret is named), and answers the list; `DELETE /modules/hosts/<host>` forgets one (404 for one
+  not added). The host is as the server's links name it (`git.example.lan`, or
+  `git.example.lan:3000`), over `https://` only, at the server's root (one under a path is not
+  supported); GitHub needs no adding. The list is kept in the core's store
+  (`<data>/core/git-servers.json`): hosts and secrets' names, never a token. A link on a host not
+  added is refused, 403:
+  `git.example.lan is not an allowed host: add it under Git servers on the Modules page (…)`, and
+  nothing is fetched from it. **The token** of a server is the Docker secret the owner picked (any
+  name; `git_example_token` in the examples), read from `/run/secrets` when a request needs it,
+  redacted from everything logged, and sent as `Authorization: token …` only to that server's own
+  origin: redirects are followed by hand, and one to another origin is followed without it. A secret
+  named for a server is no longer offered to a connector's config (`GET /secrets`). A server's
+  public repositories need no token. **Links:** `https://<host>/<owner>/<repo>` (its default
+  branch), or a folder's as the server's pages give it: `…/src/branch/<branch>/<path>`,
+  `…/src/tag/<tag>/<path>`, `…/src/commit/<sha>/<path>`. The shell resolves them through the
+  server's API (`GET /api/v1/repos/<repo>`, its default branch;
+  `…/commits?sha=<ref>&limit=1&stat=false&verification=false&files=false`, the commit and its date),
+  downloads `…/archive/<commit>.tar.gz`, and finds its modules as above (but under `vendor/`); the
+  source answered and recorded is `{"kind": "git", "host", "api": "gitea", …}`, and each module is
+  installed with `{"git": {"host", …}}`. **Errors** tell the cases apart: the host not allowed
+  (403); the server's certificate not trusted (502,
+  `git.example.lan: the server's certificate isn't trusted (SELF_SIGNED_CERT_IN_CHAIN): mount its CA and set NODE_EXTRA_CA_CERTS`);
+  the server unreachable (502, with why); the token refused (401,
+  `git.example.lan refused the token in the secret git_example_token (401): check it, or replace it`)
+  or not allowed to read the repository (403); a token asked for where none is given (401 or 403); a
+  repository not found, or private without a token (404,
+  `git.example.lan/<repo> is not found, or is private: a private repository needs a token (…)`; with
+  a token, `… or the token in the secret <name> cannot read it`); a branch, tag or commit missing
+  (404). **A private CA:** the image's Node trusts the public authorities only; mount the server's
+  CA certificate (PEM) and set `NODE_EXTRA_CA_CERTS` to its path. TLS verification is never turned
+  off, and no option does it.
+- **Updates:** for the modules installed from a repository, on GitHub or a Git server added, the
+  shell checks at its start, every 6 hours, and when the owner asks (`POST /modules/updates`, which
+  answers the list): each branch's head once (`commits?sha=<branch>`), however many modules follow
+  it, and each repository's tags once (`GET /repos/<repo>/tags`; a server's page by page) for the
+  modules installed from a tag. A host no longer allowed, or GitHub's rate limit, stops that host's
+  checks, said in the check's `error`; the others go on. A module whose branch now names another
+  commit, or whose tag has a newer semver tag (`v1.2.3` or `1.2.3`; pre-releases only after a
+  pre-release), has an `update`: `{ref, commit, commitDate?, compare}`, `compare` the host's
+  comparison of the two commits (GitHub's, or `https://<host>/<repo>/compare/<a>...<b>`). It is
+  installed as any install (`POST /modules` with its source at the new commit and ref), never on its
+  own; a module installed from a commit is pinned.
 - **GitHub's limits:** without a token, its API allows 60 requests an hour. When it refuses one (403
   or 429, with `x-ratelimit-remaining: 0` or a `retry-after`), the shell makes no request to it
   until the reset, and each call says until when; the check stops, and its `error` says so. A token
@@ -2516,13 +2564,15 @@ a GitHub link, and never installs or restarts on its own (bot-os.md D67). `Modul
 From the host, through the loopback: `docker cp dice/ megabottron1999:/tmp/dice`, then
 `docker exec megabottron1999 wget -qO- --header 'content-type: application/json' --post-data '{"dir":"/tmp/dice"}' http://127.0.0.1:8081/modules`,
 and restart it (`POST /restart`). The web UI's Modules page does the same: **Choose folder** (or a
-folder dropped on the page) or a GitHub link pasted lists the modules found as a checklist (each
-with its path, version and status, and its files left out; all checked but downgrades), installs
-those checked one by one, each on its own, and says how each went; it shows each module's source
-(linked to GitHub at its commit) and when it was installed, its update (**Update**, **Update all**,
-**Check for updates**), installs a `.tar.gz`, rolls one back, removes one (**Remove**, confirmed in
-a dialog that names it; disabled, its reason shown on hover, while the module is used) and restores
-one removed (**Restore**), and offers the restart.
+folder dropped on the page) or a repository's link pasted (GitHub's, or one on a Git server added
+under **Git servers**, where a server is added with its host and its token's secret picked from
+those mounted, and removed) lists the modules found as a checklist (each with its path, version and
+status, and its files left out; all checked but downgrades), installs those checked one by one, each
+on its own, and says how each went; it shows each module's source (linked to GitHub, or to its
+server, at its commit) and when it was installed, its update (**Update**, **Update all**, **Check
+for updates**), installs a `.tar.gz`, rolls one back, removes one (**Remove**, confirmed in a dialog
+that names it; disabled, its reason shown on hover, while the module is used) and restores one
+removed (**Restore**), and offers the restart.
 
 ### 7.5 Developing a module against MegaBotTron1999
 

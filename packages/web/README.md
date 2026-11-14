@@ -136,22 +136,25 @@ the server that guards them.
   on a lane's label everything outside the lane but its edges and the connectors they reach; the
   minimap tints each lane. Its colour comes from a fixed palette, by a hash of its name, the next
   free one when an earlier lane has it. **Modules** (`#/modules`, `ModulesPage.tsx`, docs/bot-os.md
-  D67) lists the modules installed, each with its version, its source (a folder upload, a tarball,
-  or a GitHub repository linked at its commit) and when it was installed. It installs modules from a
-  folder, chosen (**Choose folder**) or dropped on the page, or from a public GitHub link
-  (`https://github.com/<owner>/<repo>` or `…/tree/<ref>/<path>`): a module's own folder or a
+  D67, D102) lists the modules installed, each with its version, its source (a folder upload, a
+  tarball, or a repository on GitHub or a self-hosted Git server, linked at its commit) and when it
+  was installed. It installs modules from a folder, chosen (**Choose folder**) or dropped on the
+  page, or from a repository's link: a public GitHub one (`https://github.com/<owner>/<repo>` or
+  `…/tree/<ref>/<path>`), or one on a Git server added under **Git servers** (`GitServers.tsx`: each
+  server with its token's Docker secret, picked from `GET /modules/hosts`'s names, added with
+  `POST /modules/hosts`, removed with `DELETE /modules/hosts/<host>`), a module's own folder or a
   repository's that holds several. The folder's paths and its `module.json` files go to
-  `POST /modules/plan` (`src/ui/module-folder.ts`), a link to `POST /modules/github`; the modules
+  `POST /modules/plan` (`src/ui/module-folder.ts`), a link to `POST /modules/link`; the modules
   found, but those under `vendor/`, are a checklist (`ModuleChecklist.tsx`): each with its path,
   version, status against the one installed (`new`, `update x → y`, `same version`, `older x → y`),
   its files and those left out (its tests, unless its `module.json` lists `files`), all checked but
   downgrades and those refused. **Install** sends each checked module on its own (a folder's files,
-  only that module's, as base64; a GitHub module as its source at the commit looked up), with its
-  progress, and lists how each went; the restart is then offered once. A module from GitHub with a
-  newer commit (the shell checks every 6 hours, or **Check for updates**) says `update available`
-  with the commit and its date, linked to GitHub's comparison, and **Update** or **Update all**
-  installs it. It also installs a `.tar.gz` and rolls a module back. **Remove** (D68) asks first, in
-  a dialog that names the module, then moves it aside as its previous version
+  only that module's, as base64; a repository's module as its source at the commit looked up), with
+  its progress, and lists how each went; the restart is then offered once. A module from a
+  repository with a newer commit (the shell checks every 6 hours, or **Check for updates**) says
+  `update available` with the commit and its date, linked to its host's comparison, and **Update**
+  or **Update all** installs it. It also installs a `.tar.gz` and rolls a module back. **Remove**
+  (D68) asks first, in a dialog that names the module, then moves it aside as its previous version
   (`DELETE /modules/<id>`, sent JSON-typed as the server's same-origin rule asks of every change);
   it is disabled, its reason shown beside it on hover, while a node of the saved graph (disabled
   ones too) uses one of its plugins or another module imports it. A module removed is listed as

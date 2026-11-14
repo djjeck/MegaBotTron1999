@@ -67,15 +67,22 @@
  *   browser gives them), or from the tarball itself as the body (`content-type: application/gzip`,
  *   `application/x-tar` or `application/octet-stream`); it is loaded at the next start. 400 with
  *   why for what is not a module.
- *   `{"github": {"repo", "ref", "refType"?, "path", "commit"?}}` installs one module of a GitHub
- *   repository at a commit (bot-os.md D67). A folder's or a tarball's may name it (`"name"`), as
+ *   `{"git": {"host"?, "repo", "ref", "refType"?, "path", "commit"?}}` installs one module of a
+ *   repository at a commit, on GitHub (no host, bot-os.md D67) or a Git server allowed (D102);
+ *   `{"github": {…}}` is GitHub's. A folder's or a tarball's may name it (`"name"`), as
  *   its source.
  * - `POST /modules/plan` with a tree's listing (`{"paths": [...], "manifests": {"<path>": "<text>"}}`,
  *   as a folder picked gives it): the modules in it, each with its status against the one installed
  *   and the files it would install and leave out.
- * - `POST /modules/github {"url": "https://github.com/<owner>/<repo>[/tree/<ref>[/<path>]]"}`: the
- *   link resolved to a commit, and the modules found in the repository's tarball there, as above.
- * - `POST /modules/updates`: checks the GitHub sources for newer commits now, and answers the list.
+ * - `POST /modules/link {"url": "https://github.com/<owner>/<repo>[/tree/<ref>[/<path>]]"}` (or a
+ *   link on a Git server allowed; `POST /modules/github` is the same): the link resolved to a
+ *   commit, and the modules found in the repository's tarball there, as above.
+ * - `POST /modules/updates`: checks the repositories' sources for newer commits now, and answers
+ *   the list.
+ * - `GET /modules/hosts`: the self-hosted Git servers allowed (`{host, api, secret?}`), and the
+ *   Docker secrets' names a token may be picked from (D102). `POST /modules/hosts
+ *   {"host": "git.example.lan", "secret"?}` adds one, or changes its secret, once it answers as a
+ *   Gitea-compatible API; `DELETE /modules/hosts/<host>` forgets one.
  * - `POST /modules/<id>/rollback`: puts the previous version back (409 when there is none).
  * - `DELETE /modules/<id>`: removes a module, kept as its previous version for a rollback to
  *   restore (bot-os.md D68); 409 with why while the saved graph's nodes use its plugins or another
@@ -92,7 +99,7 @@ import { type GraphFileControls, GraphFileError } from './graph-file.ts';
 import { describeNodes } from './graph-view.ts';
 import { type InstanceInfo } from './instance-registry.ts';
 import { type TreeListing } from './module-files.ts';
-import { GitHubError, type GitHubPick } from './module-github.ts';
+import { GitError, type HostControls, type RepoPick } from './module-git.ts';
 import { type ModuleFile, ModuleInUse, type ModuleSource } from './module-store.ts';
 import { ModuleError } from './modules.ts';
 import { PORT_TYPE_INFO } from './ports.ts';
@@ -135,23 +142,32 @@ function moduleFiles(files: unknown[]): ModuleFile[] {
   });
 }
 
-/** What `POST /modules` installs from: a module's source, or a module of a GitHub repository. */
-export type ModuleRequest = ModuleSource | { github: GitHubPick };
+/** What `POST /modules` installs from: a module's source, or a module of a repository. */
+export type ModuleRequest = ModuleSource | { git: RepoPick };
 
-/** A GitHub source's module, as `{"github": {…}}` names it. */
-function githubPick(g: unknown): GitHubPick {
+/**
+ * A repository's module, as `{"git": {…}}` names it (its `host`, GitHub's when none), or as
+ * `{"github": {…}}` does (GitHub's).
+ */
+function repoPick(g: unknown, github: boolean): RepoPick {
   const text = (key: string): string | undefined => {
     const v = field(g, key);
     return typeof v === 'string' ? v : undefined;
   };
   const refType = text('refType');
+  const host = github ? undefined : text('host');
   const repo = text('repo');
   const ref = text('ref');
   const commit = text('commit');
   const commitDate = text('commitDate');
   if (repo === undefined || ref === undefined)
-    throw new ModuleError('github: {"repo": "<owner>/<repo>", "ref", "path", "commit"?}');
+    throw new ModuleError(
+      github
+        ? 'github: {"repo": "<owner>/<repo>", "ref", "path", "commit"?}'
+        : 'git: {"host"?, "repo": "<owner>/<repo>", "ref", "path", "commit"?}'
+    );
   return {
+    ...(host === undefined ? {} : { host }),
     repo,
     ref,
     path: text('path') ?? '',
@@ -168,14 +184,16 @@ async function moduleSource(req: http.IncomingMessage): Promise<ModuleRequest> {
   const tarball = field(b, 'tarball');
   const files = field(b, 'files');
   const github = field(b, 'github');
+  const git = field(b, 'git');
   const name = field(b, 'name');
   const named = typeof name === 'string' && name !== '' ? { name } : {};
   if (typeof dir === 'string') return { dir };
   if (typeof tarball === 'string') return { tarball: Buffer.from(tarball, 'base64'), ...named };
   if (Array.isArray(files)) return { files: moduleFiles(files), ...named };
-  if (typeof github === 'object' && github !== null) return { github: githubPick(github) };
+  if (typeof github === 'object' && github !== null) return { git: repoPick(github, true) };
+  if (typeof git === 'object' && git !== null) return { git: repoPick(git, false) };
   throw new ModuleError(
-    'give a dir, a tarball in base64, files, a github module, or the tarball as the body'
+    'give a dir, a tarball in base64, files, a git (or github) module, or the tarball as the body'
   );
 }
 
@@ -197,17 +215,19 @@ function treeListing(b: unknown): TreeListing {
 /** The owner's changes to the modules (module-store.ts), as the wiring offers them. */
 export interface ModuleControls {
   report(): unknown;
-  /** Installs one module; a GitHub one only when the wiring offers `lookup`. */
+  /** Installs one module; a repository's only when the wiring offers `lookup`. */
   install(source: ModuleRequest): unknown;
   rollback(id: string): unknown;
   /** Removes a module; refused (`ModuleInUse`) while it is used, with why. */
   remove?(id: string): unknown;
   /** The modules in a tree's listing (module-files.ts). */
   plan?(listing: TreeListing): unknown;
-  /** A GitHub link's modules (module-github.ts). */
+  /** A repository link's modules (module-git.ts). */
   lookup?(url: string): Promise<unknown>;
-  /** Checks the GitHub sources for updates now, and answers the list. */
+  /** Checks the repositories' sources for updates now, and answers the list. */
   checkUpdates?(): Promise<unknown>;
+  /** The self-hosted Git servers allowed (module-hosts.ts). */
+  hosts?: HostControls;
 }
 
 /**
@@ -393,20 +413,41 @@ export function controlHandler(
       if (!post && route === '/instances' && o.instances !== undefined)
         return reply(200, o.instances());
       const mods = o.modules;
+      const lookup =
+        mods?.lookup === undefined
+          ? undefined
+          : async () => {
+              const url = field(await body(req), 'url');
+              if (typeof url !== 'string')
+                throw new ModuleError('give {"url": "<a repository\'s link>"}');
+              return mods.lookup?.(url);
+            };
       const moduleRoutes: Record<string, (() => Promise<unknown>) | undefined> = {
         'POST /modules': async () => mods?.install(await moduleSource(req)),
         'POST /modules/plan':
           mods?.plan === undefined
             ? undefined
             : async () => mods.plan?.(treeListing(await body(req))),
-        'POST /modules/github':
-          mods?.lookup === undefined
+        'POST /modules/link': lookup,
+        'POST /modules/github': lookup,
+        'POST /modules/hosts':
+          mods?.hosts === undefined
             ? undefined
             : async () => {
-                const url = field(await body(req), 'url');
-                if (typeof url !== 'string')
-                  throw new ModuleError('give {"url": "<a GitHub link>"}');
-                return mods.lookup?.(url);
+                const b = await body(req);
+                const host = field(b, 'host');
+                const secret = field(b, 'secret');
+                if (
+                  typeof host !== 'string' ||
+                  (secret !== undefined && typeof secret !== 'string')
+                )
+                  throw new ModuleError(
+                    'give {"host": "git.example.lan", "secret"?: "<a secret\'s name>"}'
+                  );
+                return mods.hosts?.add({
+                  host,
+                  ...(typeof secret === 'string' ? { secret } : {}),
+                });
               },
         'POST /modules/updates':
           mods?.checkUpdates === undefined
@@ -415,11 +456,22 @@ export function controlHandler(
       };
       const moduleRoute = post ? moduleRoutes[`POST ${route}`] : undefined;
       if (mods !== undefined && route === '/modules' && !post) return reply(200, mods.report());
+      if (mods?.hosts !== undefined && route === '/modules/hosts' && req.method === 'GET')
+        return reply(200, mods.hosts.list());
+      const host = /^\/modules\/hosts\/([^/]+)$/u.exec(route);
+      if (req.method === 'DELETE' && mods?.hosts !== undefined && host !== null) {
+        try {
+          return reply(200, mods.hosts.remove(decodeURIComponent(host[1] ?? '')));
+        } catch (e) {
+          if (e instanceof GitError) return reply(e.status, { error: e.message });
+          throw e;
+        }
+      }
       if (mods !== undefined && moduleRoute !== undefined) {
         try {
           return reply(200, await moduleRoute());
         } catch (e) {
-          if (e instanceof GitHubError) return reply(e.status, { error: e.message });
+          if (e instanceof GitError) return reply(e.status, { error: e.message });
           if (e instanceof ModuleError) return reply(400, { error: e.message });
           throw e;
         }

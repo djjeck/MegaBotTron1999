@@ -54,7 +54,8 @@ export type ModuleSource =
 
 /**
  * Where a module installed came from: a directory of the container's, a tarball, a folder the
- * owner uploaded, or a GitHub repository at a commit (bot-os.md D67).
+ * owner uploaded, a GitHub repository at a commit (bot-os.md D67), or a repository at a commit on
+ * a self-hosted Git server the owner allowed (D102).
  */
 export type ModuleOrigin =
   | { kind: 'directory'; path: string }
@@ -72,6 +73,20 @@ export type ModuleOrigin =
       /** The commit installed, in full. */
       commit: string;
       /** Its committer's date, ISO 8601. */
+      commitDate?: string;
+    }
+  | {
+      kind: 'git';
+      /** The server's host, as its links name it (with a port, if any): `git.example.lan`. */
+      host: string;
+      /** Its API: a Gitea-compatible one (the only kind so far). */
+      api: 'gitea';
+      /** `<owner>/<repo>`. */
+      repo: string;
+      ref: string;
+      refType: 'branch' | 'tag' | 'commit';
+      path: string;
+      commit: string;
       commitDate?: string;
     };
 
@@ -97,7 +112,7 @@ export interface InstalledModule {
   loaded?: string;
   /** Where it came from, and when it was installed; none for a module installed before D67. */
   source?: ModuleSourceRecord;
-  /** For a module from GitHub, a newer commit or tag found by the last check (module-github.ts). */
+  /** For a module from a repository link, a newer commit or tag found by the last check (module-git.ts). */
   update?: ModuleUpdate;
   /** Why it cannot be removed now: the saved graph's nodes that use it, the modules importing it. */
   inUse?: string;
@@ -126,21 +141,21 @@ export interface GraphNodeRef {
   plugin: string;
 }
 
-/** A newer commit of a module's GitHub source: the one the module's ref now names. */
+/** A newer commit of a module's repository: the one the module's ref now names. */
 export interface ModuleUpdate {
   /** The ref to install: the branch, or a newer tag. */
   ref: string;
   commit: string;
   commitDate?: string;
-  /** GitHub's comparison of the commit installed and this one. */
+  /** The host's comparison of the commit installed and this one (GitHub's, or the server's). */
   compare: string;
 }
 
-/** The last check of the GitHub sources for updates. */
+/** The last check of the repositories' sources for updates. */
 export interface UpdateCheck {
   /** When it ran, ISO 8601; none before the first. */
   checkedAt?: string;
-  /** Why it failed, in part or whole (GitHub's rate limit, the network). */
+  /** Why it failed, in part or whole (GitHub's rate limit, the network, a host no longer allowed). */
   error?: string;
   /** Whether one runs now. */
   checking?: boolean;
@@ -154,7 +169,7 @@ export interface ModulesReport {
   failures: ModuleFailure[];
   /** Whether the installed modules differ from those loaded: a restart takes them up. */
   restart: boolean;
-  /** The last check for updates of the modules from GitHub, when the wiring makes them. */
+  /** The last check for updates of the modules from repository links, when the wiring makes them. */
   updates?: UpdateCheck;
 }
 

@@ -226,16 +226,31 @@ export {
 } from './module-files.ts';
 export {
   CHECK_EVERY,
-  GitHub,
-  GitHubError,
-  type GitHubLookup,
-  GitHubModules,
-  type GitHubPick,
-  type GitHubSource,
+  GitError,
+  type GitHost,
+  type GitHosts,
+  GITHUB_HOST,
+  GitModules,
+  type HostControls,
+  HostNotAllowed,
   moduleControls,
   newerTag,
-  parseGitHubUrl,
-} from './module-github.ts';
+  type RepoLookup,
+  type RepoPick,
+  type RepoRef,
+  type RepoSource,
+  type RepoTree,
+} from './module-git.ts';
+export { Gitea, parseGiteaUrl } from './module-gitea.ts';
+export { GitHub, type GitHubSource, parseGitHubUrl } from './module-github.ts';
+export {
+  GitHostList,
+  type GitHostListOptions,
+  type GitServer,
+  type GitServersReport,
+  hostName,
+  SERVERS_DOC,
+} from './module-hosts.ts';
 export {
   type LoadedModule,
   loadModules,

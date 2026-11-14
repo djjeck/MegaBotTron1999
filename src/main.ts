@@ -18,8 +18,9 @@ import {
   Core,
   CORE_STORE,
   CoreEventLog,
+  GitHostList,
   GitHub,
-  GitHubModules,
+  GitModules,
   GraphFile,
   graphFileControls,
   healthServer,
@@ -140,21 +141,27 @@ try {
 }
 await core.start();
 
-// Modules from GitHub links, checked for updates at the start and every 6 hours; only the owner
-// installs one (docs/bot-os.md D67). A token is optional: the `github_token` secret, or
-// `GITHUB_TOKEN`, raises the API's limit of 60 requests an hour.
+// Modules from repository links, checked for updates at the start and every 6 hours; only the
+// owner installs one (docs/bot-os.md D67, D102). GitHub is always allowed; a GitHub token is
+// optional: the `github_token` secret, or `GITHUB_TOKEN`, raises the API's limit of 60 requests an
+// hour. The self-hosted Git servers are those the owner adds on the Modules page, each with the
+// Docker secret of its token (kept in the core's store as names, never values).
 const GITHUB_TOKEN_SECRET = 'github_token';
 const githubToken = secrets.read(GITHUB_TOKEN_SECRET) ?? (env['GITHUB_TOKEN'] || undefined);
 if (githubToken !== undefined) secrets.remember(githubToken);
-const githubModules = new GitHubModules(
-  modules,
-  new GitHub({
+/** The Docker secrets that are the shell's own: never a connector's, nor a Git server's token. */
+const shellSecrets = new Set(['web_ui_password', KEY_SECRET, GITHUB_TOKEN_SECRET]);
+const gitHosts = new GitHostList({
+  store: new Stores(dataDir).open(CORE_STORE),
+  github: new GitHub({
     ...(githubToken === undefined ? {} : { token: githubToken }),
     now: () => clock.now(),
   }),
-  () => clock.now()
-);
-githubModules.start();
+  read: (name) => secrets.read(name),
+  names: () => secrets.names().filter((n) => !shellSecrets.has(n)),
+});
+const gitModules = new GitModules(modules, gitHosts.get, () => clock.now());
+gitModules.start();
 
 // The owner's control API (packages/core/src/control-server.ts): one handler, served on the
 // container's loopback, and under `/api/` by the web UI, only behind its login.
@@ -166,16 +173,17 @@ const controlApi = controlHandler({
   available: () => core.available(),
   // The names of the Docker secrets a connector's config may name, never their values; the UI's
   // password and the key of the stored secrets are the shell's own.
-  secrets: () =>
-    secrets
-      .names()
-      .filter((n) => n !== 'web_ui_password' && n !== KEY_SECRET && n !== GITHUB_TOKEN_SECRET),
+  // A Git server's token, named on the Modules page, is not a connector's either.
+  secrets: () => {
+    const servers = new Set(gitHosts.secrets());
+    return secrets.names().filter((n) => !shellSecrets.has(n) && !servers.has(n));
+  },
   instances: () => core.instances(),
   graphFile: graphFileControls(graphFile, core, (v) => secrets.redactDeep(v)),
   restart: () => void end('restart'),
   build,
   // A module is removed only while no node of the saved graph uses its plugins (D68).
-  modules: moduleControls(modules, loaded, githubModules, () => graphFile.nodes()),
+  modules: moduleControls(modules, loaded, gitModules, () => graphFile.nodes(), gitHosts),
 });
 const control = http.createServer(controlApi).listen(port('CONTROL_PORT', 8081), '127.0.0.1');
 // The shell's health endpoint, for a container's healthcheck (GET /health: 200 while every enabled
@@ -206,7 +214,7 @@ console.log(
 const end = shutdown({
   stop: () => core.stop(),
   close: () => {
-    githubModules.stop();
+    gitModules.stop();
     control.close();
     healthy?.close();
     web?.close();

@@ -1,18 +1,20 @@
 /**
- * The modules (bot-os.md D49, D53, D67; bot-os-api.md §7.4): each installed, with its version, its
- * source (a folder, a tarball, or a GitHub repository at a commit, linked) and when it was
+ * The modules (bot-os.md D49, D53, D67, D102; bot-os-api.md §7.4): each installed, with its version,
+ * its source (a folder, a tarball, or a repository at a commit on GitHub or on a self-hosted Git
+ * server, linked) and when it was
  * installed, the version the running instance loaded and the one kept for a rollback; those the
  * instance refused at its start, with why; and whether a restart is needed to load what is
  * installed.
  *
- * Installing: a folder picked or dropped, or a GitHub link pasted, may hold one module or several
- * (a repository's root). The modules found (`POST /modules/plan` for a folder, `POST /modules/github`
+ * Installing: a folder picked or dropped, or a repository's link pasted (GitHub's, or one on a Git
+ * server added under **Git servers**, GitServers.tsx), may hold one module or several (a
+ * repository's root). The modules found (`POST /modules/plan` for a folder, `POST /modules/link`
  * for a link) are listed for the owner to check, each with how it compares with the one installed;
  * the checked ones are installed one by one (`POST /modules` each: a folder's files, as base64, or
- * the module's GitHub source at its commit), each on its own, and the page says how each went. A
- * module's `.tar.gz` is installed as before. The modules from GitHub are checked for updates (by
- * the shell every 6 hours, or **Check for updates**): one with a newer commit says so, links
- * GitHub's comparison, and **Update** installs it, as any install. Nothing is installed or
+ * the module's repository source at its commit), each on its own, and the page says how each went.
+ * A module's `.tar.gz` is installed as before. The modules from links are checked for updates (by
+ * the shell every 6 hours, or **Check for updates**): one with a newer commit says so, links the
+ * host's comparison, and **Update** installs it, as any install. Nothing is installed or
  * restarted but by the owner; the restart is offered here.
  *
  * Removing (bot-os.md D68): **Remove**, once confirmed, moves the module aside as its previous
@@ -23,11 +25,12 @@
 import type { DragEvent, FormEvent } from 'react';
 import { useRef, useState } from 'react';
 import type {
-  GitHubLookup,
   InstalledModule,
   ModuleCandidate,
   ModulesReport,
   RemovedModule,
+  RepoLookup,
+  RepoSource,
 } from '#src/ui/api.ts';
 import { api, seg } from '#src/ui/api.ts';
 import type { PageProps } from '#src/ui/App.tsx';
@@ -43,6 +46,7 @@ import {
   shownPath,
 } from '#src/ui/module-folder.ts';
 import { Restart } from '#src/ui/Restart.tsx';
+import { GitServers } from './GitServers.tsx';
 import { firstChecked, ModuleChecklist } from './ModuleChecklist.tsx';
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -66,10 +70,10 @@ export const when = (iso: string): string => `${iso.slice(0, 16).replace('T', ' 
 const day = (iso: string): string => iso.slice(0, 10);
 const short = (commit: string): string => commit.slice(0, 7);
 
-/** What the owner is choosing from: a folder's modules, or a GitHub link's. */
+/** What the owner is choosing from: a folder's modules, or a repository link's. */
 type Found =
   | { kind: 'folder'; name: string; files: FolderFile[]; modules: ModuleCandidate[] }
-  | { kind: 'github'; lookup: GitHubLookup; modules: ModuleCandidate[] };
+  | { kind: 'link'; lookup: RepoLookup; modules: ModuleCandidate[] };
 
 /** How one install went. */
 interface Outcome {
@@ -79,21 +83,47 @@ interface Outcome {
 }
 
 type Source = NonNullable<InstalledModule['source']>;
-type GitHubOrigin = Extract<Source, { kind: 'github' }>;
+type RepoOrigin = RepoSource;
 
-/** A GitHub source's folder at its commit. */
-const githubTree = (s: { repo: string; commit: string; path: string }): string =>
-  `https://github.com/${s.repo}/tree/${s.commit}${s.path === '' ? '' : `/${s.path}`}`;
+const fromRepo = (s: Source | undefined): s is Source & RepoOrigin =>
+  s?.kind === 'github' || s?.kind === 'git';
+
+/** A repository source's folder at its commit, on GitHub or on its Git server. */
+const repoTree = (s: RepoOrigin): string => {
+  const sub = s.path === '' ? '' : `/${s.path}`;
+  return s.kind === 'github'
+    ? `https://github.com/${s.repo}/tree/${s.commit}${sub}`
+    : `https://${s.host}/${s.repo}/src/commit/${s.commit}${sub}`;
+};
+
+/** A repository's name for the owner: GitHub's bare, a server's with its host. */
+const repoName = (s: RepoOrigin): string => (s.kind === 'github' ? s.repo : `${s.host}/${s.repo}`);
+
+/** The install of one module of a repository source, at a ref and commit. */
+const repoPick = (
+  s: RepoOrigin,
+  at: { ref: string; path: string; commit: string; commitDate?: string | undefined }
+): unknown => {
+  const pick = {
+    repo: s.repo,
+    ref: at.ref,
+    refType: s.refType,
+    path: at.path,
+    commit: at.commit,
+    ...(at.commitDate === undefined ? {} : { commitDate: at.commitDate }),
+  };
+  return s.kind === 'github' ? { github: pick } : { git: { host: s.host, ...pick } };
+};
 
 /** Where a module came from, for the owner. */
 function SourceCell({ source }: { source: Source | undefined }) {
   if (source === undefined) return <span className="muted">unknown</span>;
   const at = <div className="muted small">installed {when(source.installedAt)}</div>;
-  if (source.kind === 'github')
+  if (fromRepo(source))
     return (
       <>
-        <a href={githubTree(source)} target="_blank" rel="noreferrer">
-          {source.repo}
+        <a href={repoTree(source)} target="_blank" rel="noreferrer">
+          {repoName(source)}
           {source.path === '' ? '' : `/${source.path}`}
         </a>{' '}
         <span className="muted small">
@@ -178,7 +208,7 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
       setSaid(
         f.kind === 'folder'
           ? `no module.json in ${f.name || 'the folder'}: choose a module's folder, or a repository's that holds modules`
-          : `no module.json under ${f.lookup.source.repo}${f.lookup.source.path === '' ? '' : `/${f.lookup.source.path}`} (vendor/ and tests aside)`
+          : `no module.json under ${repoName(f.lookup.source)}${f.lookup.source.path === '' ? '' : `/${f.lookup.source.path}`} (vendor/ and tests aside)`
       );
   };
 
@@ -246,8 +276,8 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
     if (link.trim() === '') return;
     setFound(undefined);
     start('Looking up…');
-    api<GitHubLookup>('/modules/github', { url: link.trim() })
-      .then((lookup) => show({ kind: 'github', lookup, modules: lookup.modules }))
+    api<RepoLookup>('/modules/link', { url: link.trim() })
+      .then((lookup) => show({ kind: 'link', lookup, modules: lookup.modules }))
       .catch((err: unknown) => setSaid(`the link: ${message(err)}`))
       .finally(() => setBusy(undefined));
   };
@@ -273,22 +303,20 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
     void installEach(
       picked.map((m) => {
         const label = m.id ?? m.path;
-        if (found.kind === 'github') {
+        if (found.kind === 'link') {
           const s = found.lookup.source;
           return {
             label,
             left: m.left.length,
             body: () =>
-              Promise.resolve({
-                github: {
-                  repo: s.repo,
+              Promise.resolve(
+                repoPick(s, {
                   ref: s.ref,
-                  refType: s.refType,
                   path: m.path,
                   commit: s.commit,
-                  ...(s.commitDate === undefined ? {} : { commitDate: s.commitDate }),
-                },
-              }),
+                  commitDate: s.commitDate,
+                })
+              ),
           };
         }
         const { files } = moduleFiles(m, found.files);
@@ -315,23 +343,21 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
     start('Updating…');
     void installEach(
       modules.flatMap((m) => {
-        const s = m.source as GitHubOrigin | undefined;
+        const s = m.source;
         const u = m.update;
-        if (s?.kind !== 'github' || u === undefined) return [];
+        if (!fromRepo(s) || u === undefined) return [];
         return [
           {
             label: m.id,
             body: () =>
-              Promise.resolve({
-                github: {
-                  repo: s.repo,
+              Promise.resolve(
+                repoPick(s, {
                   ref: u.ref,
-                  refType: s.refType,
                   path: s.path,
                   commit: u.commit,
-                  ...(u.commitDate === undefined ? {} : { commitDate: u.commitDate }),
-                },
-              }),
+                  commitDate: u.commitDate,
+                })
+              ),
           },
         ];
       })
@@ -347,7 +373,7 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
           setSaid(
             r.updates?.error === undefined
               ? n === 0
-                ? 'No update: every module from GitHub is at its newest commit.'
+                ? 'No update: every module from a repository is at its newest commit.'
                 : `${n} ${n === 1 ? 'update' : 'updates'} available.`
               : undefined
           );
@@ -424,7 +450,7 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
   const r = report.data;
   const removed = r?.removed ?? [];
   const updates = r?.installed.filter((m) => m.update !== undefined) ?? [];
-  const linked = r?.installed.some((m) => m.source?.kind === 'github') === true;
+  const linked = r?.installed.some((m) => fromRepo(m.source)) === true;
   const toInstall = found?.modules.filter(chosen).length ?? 0;
   return (
     <>
@@ -460,9 +486,10 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
         <h2>Install modules</h2>
         <p>
           Choose a module&apos;s folder, or a repository&apos;s that holds several (a clone or a
-          downloaded ZIP), or drop it here; or paste a GitHub link. Every <code>module.json</code>{' '}
-          is found, but under <code>vendor/</code>; each module&apos;s tests are left out, unless
-          its <code>module.json</code> lists its <code>files</code>.
+          downloaded ZIP), or drop it here; or paste a repository&apos;s link, on GitHub or on a Git
+          server added below. Every <code>module.json</code> is found, but under{' '}
+          <code>vendor/</code>; each module&apos;s tests are left out, unless its{' '}
+          <code>module.json</code> lists its <code>files</code>.
         </p>
         <div className="install-ways">
           <input
@@ -491,7 +518,7 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
           <form onSubmit={lookUp} className="inline link">
             <input
               type="url"
-              aria-label="GitHub link"
+              aria-label="repository link"
               placeholder="https://github.com/<owner>/<repo>[/tree/<ref>/<path>]"
               value={link}
               onChange={(e) => setLink(e.target.value)}
@@ -517,8 +544,8 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
               ) : (
                 <>
                   {found.modules.length} {found.modules.length === 1 ? 'module' : 'modules'} in{' '}
-                  <a href={githubTree(found.lookup.source)} target="_blank" rel="noreferrer">
-                    {found.lookup.source.repo}
+                  <a href={repoTree(found.lookup.source)} target="_blank" rel="noreferrer">
+                    {repoName(found.lookup.source)}
                   </a>{' '}
                   at {found.lookup.source.ref} <code>{short(found.lookup.source.commit)}</code>
                   {found.lookup.source.commitDate === undefined
@@ -551,6 +578,7 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
             </button>
           </div>
         )}
+        <GitServers loggedOut={loggedOut} />
         <details open={file !== undefined}>
           <summary>Or install a module&apos;s tarball</summary>
           <form onSubmit={install} className="inline">
@@ -635,7 +663,7 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
                             ? ''
                             : ` (${day(m.update.commitDate)})`}
                         </a>
-                        {m.source?.kind === 'github' && m.update.ref !== m.source.ref
+                        {fromRepo(m.source) && m.update.ref !== m.source.ref
                           ? ` ${m.update.ref}`
                           : ''}
                       </div>

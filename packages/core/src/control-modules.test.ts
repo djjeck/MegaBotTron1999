@@ -2,15 +2,19 @@ import type http from 'node:http';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
+import { fakeGitea } from '#test/gitea.ts';
 import { fakeGitHub, sha } from '#test/github.ts';
 import { manifestOf, tarOf, tempDir, writeModule } from '#test/modules.ts';
 import { VirtualClock } from './clock.ts';
 import { controlServer, type ModuleControls } from './control-server.ts';
 import { Core } from './core.ts';
-import { GitHub, GitHubModules, moduleControls } from './module-github.ts';
+import { GitModules, moduleControls, onlyGitHub } from './module-git.ts';
+import { GitHub } from './module-github.ts';
+import { GitHostList } from './module-hosts.ts';
 import { ModuleStore } from './module-store.ts';
 import { moduleManifestSchema } from './modules.ts';
 import { definePlugin, type Plugin } from './plugin.ts';
+import { Stores } from './store.ts';
 
 const plugin = (id: string, description = 'A test plugin'): Plugin =>
   definePlugin({
@@ -168,7 +172,7 @@ describe('the control API’s modules', () => {
       400,
       {
         error:
-          'give a dir, a tarball in base64, files, a github module, or the tarball as the body',
+          'give a dir, a tarball in base64, files, a git (or github) module, or the tarball as the body',
       },
     ]);
     expect(await call('/modules', JSON.stringify({ dir: path.join(store.dir, 'x') }))).toEqual([
@@ -320,9 +324,9 @@ describe('the control API’s modules from a tree and from GitHub', () => {
     server = controlServer({ controls: core.controls, settings: core.settings, modules });
     await new Promise<void>((r) => server?.listen(0, '127.0.0.1', r));
     const { port } = server.address() as { port: number };
-    return async (p: string, body?: unknown) => {
+    return async (p: string, body?: unknown, method = 'POST') => {
       const res = await fetch(`http://127.0.0.1:${port}${p}`, {
-        method: 'POST',
+        method,
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         headers: { 'content-type': 'application/json' },
       });
@@ -347,7 +351,11 @@ describe('the control API’s modules from a tree and from GitHub', () => {
     });
     const store = new ModuleStore(tempDir());
     const post = await serve(
-      moduleControls(store, undefined, new GitHubModules(store, new GitHub({ fetch: gh.fetch })))
+      moduleControls(
+        store,
+        undefined,
+        new GitModules(store, onlyGitHub(new GitHub({ fetch: gh.fetch })))
+      )
     );
     expect(
       await post('/modules/plan', {
@@ -382,7 +390,7 @@ describe('the control API’s modules from a tree and from GitHub', () => {
     });
     expect(await post('/modules/github', {})).toEqual([
       400,
-      { error: 'give {"url": "<a GitHub link>"}' },
+      { error: 'give {"url": "<a repository\'s link>"}' },
     ]);
     expect(await post('/modules/github', { url: 'https://github.com/example/none' })).toEqual([
       404,
@@ -421,6 +429,88 @@ describe('the control API’s modules from a tree and from GitHub', () => {
       { error: 'not found' },
     ]);
     expect(await post('/modules/github', { url: 'x' })).toEqual([404, { error: 'not found' }]);
+    expect(await post('/modules/link', { url: 'x' })).toEqual([404, { error: 'not found' }]);
     expect(await post('/modules/updates')).toEqual([404, { error: 'not found' }]);
+    expect(await post('/modules/hosts', { host: 'git.example.lan' })).toEqual([
+      404,
+      { error: 'not found' },
+    ]);
+    expect(await post('/modules/hosts', undefined, 'GET')).toEqual([404, { error: 'not found' }]);
+  });
+
+  it('adds a Git server, installs from a link on it, and forgets it', async () => {
+    const host = 'git.example.lan';
+    const commit = sha('srv');
+    const gitea = fakeGitea(
+      host,
+      {
+        'example/games': {
+          private: true,
+          defaultBranch: 'main',
+          branches: { main: commit },
+          trees: { [commit]: { 'dice/module.json': JSON.stringify(manifestOf('dice')) } },
+        },
+      },
+      { token: 'good-token-1' }
+    );
+    const store = new ModuleStore(tempDir());
+    const hosts = new GitHostList({
+      store: new Stores().open('core'),
+      github: new GitHub({ fetch: gitea.fetch }),
+      read: (name) => (name === 'git_example_token' ? 'good-token-1' : undefined),
+      names: () => ['git_example_token'],
+      fetch: gitea.fetch,
+    });
+    const send = await serve(
+      moduleControls(store, undefined, new GitModules(store, hosts.get), () => [], hosts)
+    );
+    expect(await send('/modules/link', { url: `https://${host}/example/games` })).toEqual([
+      403,
+      {
+        error: `${host} is not an allowed host: add it under Git servers on the Modules page (the shell fetches only from GitHub and the servers added there)`,
+      },
+    ]);
+    expect(await send('/modules/hosts', { host: 1 })).toEqual([
+      400,
+      { error: 'give {"host": "git.example.lan", "secret"?: "<a secret\'s name>"}' },
+    ]);
+    expect(await send('/modules/hosts', { host: 'http://x' })).toMatchObject([400, {}]);
+    expect(await send('/modules/hosts', { host, secret: 'git_example_token' })).toEqual([
+      200,
+      {
+        servers: [{ host, api: 'gitea', secret: 'git_example_token' }],
+        secrets: ['git_example_token'],
+      },
+    ]);
+    expect(await send('/modules/hosts', { host: 'other.example.lan' })).toMatchObject([
+      400,
+      { error: 'other.example.lan is not a Gitea-compatible server: it has no /api/v1/version' },
+    ]);
+    expect(await send('/modules/hosts', undefined, 'GET')).toMatchObject([
+      200,
+      { servers: [{ host }] },
+    ]);
+    const [status, found] = await send('/modules/link', { url: `https://${host}/example/games` });
+    expect([status, found]).toMatchObject([
+      200,
+      { source: { kind: 'git', host, commit }, modules: [{ id: 'dice' }] },
+    ]);
+    expect(
+      await send('/modules', {
+        git: { host, repo: 'example/games', ref: 'main', refType: 'branch', path: 'dice', commit },
+      })
+    ).toEqual([200, { id: 'dice', version: '0.1.0' }]);
+    expect(await send('/modules', { git: { host } })).toEqual([
+      400,
+      { error: 'git: {"host"?, "repo": "<owner>/<repo>", "ref", "path", "commit"?}' },
+    ]);
+    expect(await send(`/modules/hosts/${host}`, undefined, 'DELETE')).toEqual([
+      200,
+      { servers: [], secrets: ['git_example_token'] },
+    ]);
+    expect(await send(`/modules/hosts/${host}`, undefined, 'DELETE')).toEqual([
+      404,
+      { error: `${host} is not a Git server added` },
+    ]);
   });
 });

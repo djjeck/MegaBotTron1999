@@ -580,7 +580,7 @@ describe('ModulesPage: GitHub', () => {
     const sent: unknown[] = [];
     fakeApi({
       'GET /modules': [200, { installed: [], failures: [], restart: false }],
-      'POST /modules/github': (body) =>
+      'POST /modules/link': (body) =>
         (body as { url: string }).url === 'https://github.com/example/games'
           ? [
               200,
@@ -601,7 +601,7 @@ describe('ModulesPage: GitHub', () => {
       },
     });
     render(<ModulesPage loggedOut={vi.fn()} />);
-    const link = await screen.findByLabelText('GitHub link');
+    const link = await screen.findByLabelText('repository link');
     const lookUp = screen.getByRole('button', { name: 'Look up' });
     expect(lookUp.hasAttribute('disabled')).toBe(true);
     fireEvent.change(link, { target: { value: '  https://github.com/example/games ' } });
@@ -832,7 +832,7 @@ describe('ModulesPage: GitHub', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Check for updates' }));
     expect(
       await screen.findByText(
-        'No update: every module from GitHub is at its newest commit.',
+        'No update: every module from a repository is at its newest commit.',
         {},
         slow
       )
@@ -843,5 +843,179 @@ describe('ModulesPage: GitHub', () => {
     installed = [installed[0]!, { ...installed[0]!, id: 'two' }];
     fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
     expect(await screen.findByText('2 updates available.', {}, slow)).toBeDefined();
+  });
+});
+
+describe('ModulesPage: a self-hosted Git server', () => {
+  const HOST = 'git.example.lan';
+  const source = {
+    kind: 'git' as const,
+    host: HOST,
+    api: 'gitea' as const,
+    repo: 'example/games',
+    ref: 'main',
+    refType: 'branch' as const,
+    path: '',
+    commit: COMMIT,
+  };
+
+  it('adds a server with its token’s secret, picked, and removes it', async () => {
+    let servers: unknown[] = [];
+    const api = fakeApi({
+      'GET /modules': [200, { installed: [], failures: [], restart: false }],
+      'GET /modules/hosts': () => [200, { servers, secrets: ['git_example_token'] }],
+      'POST /modules/hosts': (body) => {
+        const b = body as { host: string; secret?: string };
+        if (b.host === 'bad.example.lan')
+          return [
+            502,
+            {
+              error:
+                "bad.example.lan: the server's certificate isn't trusted (SELF_SIGNED_CERT_IN_CHAIN): mount its CA and set NODE_EXTRA_CA_CERTS",
+            },
+          ];
+        servers = [
+          { host: b.host, api: 'gitea', ...(b.secret === undefined ? {} : { secret: b.secret }) },
+        ];
+        return [200, { servers, secrets: ['git_example_token'] }];
+      },
+      [`DELETE /modules/hosts/${HOST}`]: () => {
+        servers = [];
+        return [200, { servers, secrets: [] }];
+      },
+    });
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true)
+    );
+    render(<ModulesPage loggedOut={vi.fn()} />);
+    const host = await screen.findByLabelText('Git server');
+    const secret = screen.getByLabelText('token secret');
+    await screen.findByRole('option', { name: 'git_example_token' });
+    fireEvent.change(host, { target: { value: 'bad.example.lan' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add server' }));
+    expect(
+      await screen.findByText(
+        "bad.example.lan: not added: bad.example.lan: the server's certificate isn't trusted (SELF_SIGNED_CERT_IN_CHAIN): mount its CA and set NODE_EXTRA_CA_CERTS",
+        {},
+        slow
+      )
+    ).toBeDefined();
+    fireEvent.change(host, { target: { value: ` ${HOST} ` } });
+    fireEvent.change(secret, { target: { value: 'git_example_token' } });
+    fireEvent.submit(host);
+    expect(
+      await screen.findByText(`${HOST} added: paste a link on it above`, {}, slow)
+    ).toBeDefined();
+    expect(api.calls).toContain(
+      `POST /modules/hosts {"host":"${HOST}","secret":"git_example_token"}`
+    );
+    const list = await screen.findByLabelText('Git servers', {}, slow);
+    expect(within(list).getByText('git_example_token')).toBeDefined();
+    fireEvent.click(within(list).getByRole('button', { name: 'Remove' }));
+    expect(await screen.findByText(`${HOST} removed`, {}, slow)).toBeDefined();
+    // A public server: no token.
+    fireEvent.change(host, { target: { value: 'code.example.lan' } });
+    fireEvent.submit(host);
+    expect(await screen.findByText('no token: public repositories only', {}, slow)).toBeDefined();
+    fireEvent.change(host, { target: { value: ' ' } });
+    fireEvent.submit(host);
+  });
+
+  it('says a removal refused, and the list not read', async () => {
+    fakeApi({
+      'GET /modules': [200, { installed: [], failures: [], restart: false }],
+      'GET /modules/hosts': [200, { servers: [{ host: HOST, api: 'gitea' }], secrets: [] }],
+      [`DELETE /modules/hosts/${HOST}`]: [404, { error: `${HOST} is not a Git server added` }],
+    });
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    render(<ModulesPage loggedOut={vi.fn()} />);
+    const remove = await screen.findByRole('button', { name: 'Remove' }, slow);
+    fireEvent.click(remove);
+    expect(confirm).toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    fireEvent.click(remove);
+    expect(
+      await screen.findByText(`${HOST}: ${HOST} is not a Git server added`, {}, slow)
+    ).toBeDefined();
+    cleanup();
+    fakeApi({ 'GET /modules': [200, { installed: [], failures: [], restart: false }] });
+    render(<ModulesPage loggedOut={vi.fn()} />);
+    expect(await screen.findByText('not found', {}, slow)).toBeDefined();
+  });
+
+  it('installs from a link on it, shows the source on its server, and updates it', async () => {
+    const sent: unknown[] = [];
+    fakeApi({
+      'GET /modules': () => [
+        200,
+        {
+          installed: [
+            {
+              id: 'cards',
+              version: '0.1.0',
+              source: { ...source, path: 'modules/cards', installedAt: '2026-11-10T09:00:00.000Z' },
+              update: {
+                ref: 'main',
+                commit: NEWER,
+                compare: `https://${HOST}/example/games/compare/${COMMIT}...${NEWER}`,
+              },
+            },
+          ],
+          failures: [],
+          restart: false,
+        },
+      ],
+      'POST /modules/link': [
+        200,
+        {
+          source,
+          modules: [{ ...plan[1], path: 'modules/dice', files: ['modules/dice/module.json'] }],
+        },
+      ],
+      'POST /modules': (body) => {
+        sent.push(body);
+        return [200, { id: 'dice', version: '0.2.0' }];
+      },
+    });
+    render(<ModulesPage loggedOut={vi.fn()} />);
+    const cards = (await screen.findByText('cards')).closest('tr') as HTMLElement;
+    expect(
+      within(cards).getByText(`${HOST}/example/games/modules/cards`).getAttribute('href')
+    ).toBe(`https://${HOST}/example/games/src/commit/${COMMIT}/modules/cards`);
+    fireEvent.click(within(cards).getByRole('button', { name: 'Update' }));
+    await waitFor(() => expect(sent).toHaveLength(1), slow);
+    const link = screen.getByLabelText('repository link');
+    fireEvent.change(link, { target: { value: `https://${HOST}/example/games` } });
+    fireEvent.submit(link);
+    const box = await screen.findByLabelText('modules picked', {}, slow);
+    expect(within(box).getByText(`${HOST}/example/games`).getAttribute('href')).toBe(
+      `https://${HOST}/example/games/src/commit/${COMMIT}`
+    );
+    fireEvent.click(within(box).getByRole('button', { name: 'Install 1 module' }));
+    await waitFor(() => expect(sent).toHaveLength(2), slow);
+    expect(sent).toEqual([
+      {
+        git: {
+          host: HOST,
+          repo: 'example/games',
+          ref: 'main',
+          refType: 'branch',
+          path: 'modules/cards',
+          commit: NEWER,
+        },
+      },
+      {
+        git: {
+          host: HOST,
+          repo: 'example/games',
+          ref: 'main',
+          refType: 'branch',
+          path: 'modules/dice',
+          commit: COMMIT,
+        },
+      },
+    ]);
   });
 });
