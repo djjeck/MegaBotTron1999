@@ -101,6 +101,21 @@ const reader = definePlugin({
   create: () => ({}),
 });
 
+/** A bot whose network refuses the sends to some chats, as Telegram does one it cannot reach. */
+class Refusing extends FakeConnector {
+  private readonly chats: string[];
+  constructor(chats: string[]) {
+    super({ account: 'telegram-bot:ExampleBot', owner: OWNER });
+    this.chats = chats;
+  }
+  deliver(chat: string, text: string): Promise<{ id?: string }> {
+    this.send(chat, text);
+    return this.chats.includes(chat)
+      ? Promise.reject(new Error('400: Bad Request: chat not found'))
+      : Promise.resolve({});
+  }
+}
+
 interface RunOptions {
   config?: Record<string, unknown>;
   live?: boolean;
@@ -112,6 +127,8 @@ interface RunOptions {
   /** A node that fails as it starts. */
   crash?: boolean;
   build?: { version: string; commit?: string };
+  /** The bot refuses the sends to these chats, as Telegram does to a chat it cannot reach. */
+  refuses?: string[];
 }
 
 /** Its D91 tells alone: no start notice, no summary, unless a test asks. */
@@ -122,7 +139,10 @@ async function run(o: RunOptions = {}) {
   const counts = new Map<string, Tally>();
   const stores = new Map<string, Store>();
   const start = o.start ?? T0;
-  const bot = new FakeConnector({ account: 'telegram-bot:ExampleBot' });
+  const bot =
+    o.refuses === undefined
+      ? new FakeConnector({ account: 'telegram-bot:ExampleBot', owner: OWNER })
+      : new Refusing(o.refuses);
   const irc = new FakeConnector({ account: 'irc:alice' });
   const graph: GraphInput = {
     version: 2,
@@ -315,6 +335,48 @@ describe('owner-notice (D91)', () => {
 const H = 60 * MIN;
 const WARNING =
   'node reader: input port chat reads #elsewhere, which irc does not monitor (its chats: #lobby) (edge irc.chat → reader.chat)';
+
+describe('owner-notice: sends that cannot reach their chat (D95)', () => {
+  it('tells the unreachable sends of other nodes, paced as a kind of its own', async () => {
+    const r = await d91();
+    r.ctx('a').notice(
+      'unreachable',
+      'a could not send to Ada (5) through telegram-bot:ExampleBot: the person blocked the bot',
+      { account: 'telegram-bot:ExampleBot', chat: '5', reason: 'Forbidden: bot was blocked' }
+    );
+    r.at(30 * S);
+    expect(r.sent()).toEqual([
+      `${OWNER}: a could not send to Ada (5) through telegram-bot:ExampleBot: the person blocked the bot`,
+    ]);
+  });
+
+  it('never tells of its own failed sends, and shows the last on its panel and card', async () => {
+    const r = await d91({ refuses: [OWNER] });
+    const line = () => r.kit.core.controls.status().plugins.find((p) => p.id === 'notice')?.summary;
+    r.ctx('a').fail('crashed');
+    r.at(10 * S);
+    // The network's answer comes after the send.
+    await new Promise((done) => setImmediate(done));
+    expect(r.records('core.send-failed')).toMatchObject([
+      { plugins: ['notice'], chat: OWNER, reason: '400: Bad Request: chat not found' },
+    ]);
+    expect(r.records('core.notice').filter((n) => n['kind'] === 'unreachable')).toEqual([]);
+    expect(r.kit.core.controls.view('notice')).toMatchObject({
+      value: {
+        state: { notSent: { chat: OWNER, reason: 'failed: 400: Bad Request: chat not found' } },
+        pin: ['notSent', 'waiting'],
+      },
+    });
+    expect(line()).toBe('not sent: failed: 400: Bad Request: chat not found');
+  });
+
+  it("tells the connector's owner when it names no chat", async () => {
+    const r = await d91({ config: { chat: undefined } });
+    r.ctx('a').fail('crashed');
+    r.at(10 * S);
+    expect(r.sent()).toEqual([`${OWNER}: a failed: crashed`]);
+  });
+});
 
 describe('owner-notice: the plugins’ messages (D94)', () => {
   const GO = [[{ label: 'Go', action: '/go' }]];
@@ -598,7 +660,7 @@ describe('owner-notice: its view (D72, D91)', () => {
           summary: { everyMin: 60, dueAt: T0 + H },
           warnings: [WARNING],
         },
-        pin: ['waiting'],
+        pin: ['notSent', 'waiting'],
       },
     });
     expect(line()).toBeUndefined();

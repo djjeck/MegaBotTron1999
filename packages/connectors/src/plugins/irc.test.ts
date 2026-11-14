@@ -117,6 +117,16 @@ describe('IrcConnector', () => {
     expect(f.calls).toEqual(['say !profile', 'say !house']);
   });
 
+  it('delivers to its channel, and refuses any other chat with why (D95)', async () => {
+    const f = fake();
+    await expect(f.connector.deliver('#lobby', 'hi')).resolves.toEqual({});
+    await expect(f.connector.deliver('alice', 'hi')).rejects.toThrow(
+      'it sends only to its channel #lobby, not alice'
+    );
+    f.disconnect();
+    await expect(f.connector.deliver('#lobby', 'hi')).rejects.toThrow('not connected');
+  });
+
   it('makes a real IRC client by default, which does not connect until started', () => {
     expect(new IrcConnector(IRC_OPTIONS).status().state).toBe('closed');
   });

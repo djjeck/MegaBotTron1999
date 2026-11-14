@@ -391,10 +391,10 @@ interface ScriptCancel {
   /** Or: how long from now. */
   withinMs?: number;
 }
-/** What came of a queued send. */
+/** What came of a queued send (failed: the network refused it). */
 interface QueuedResult {
   text: string;
-  outcome: 'sent' | 'dry-run' | 'refused' | 'cancelled' | 'expired';
+  outcome: 'sent' | 'dry-run' | 'refused' | 'failed' | 'cancelled' | 'expired';
   reason?: string;
   event?: { type: string; t: number; [field: string]: unknown };
 }

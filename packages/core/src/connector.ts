@@ -288,6 +288,13 @@ export interface Connector extends ConnectorHandle {
    * says its chats have `aliases` offers it.
    */
   chatNames?(chat: string): readonly string[] | undefined;
+  /**
+   * The owner's own chat on the network, where the connector has one (a `telegram-bot`'s `owner`,
+   * their private chat with the bot): where `owner-notice` tells the owner by default.
+   */
+  owner?(): string | undefined;
+  /** A chat's title, as the network shows it, where it knows the chat: for the owner's words. */
+  chatTitle?(chat: string): string | undefined;
 }
 
 /**

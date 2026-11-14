@@ -13,6 +13,7 @@ import {
   Outbox,
   type SenderPolicy,
   type SendRecord,
+  unreachableHint,
 } from './outbox.ts';
 import { Stores } from './store.ts';
 
@@ -578,4 +579,93 @@ describe('the send-queue watchdog (D93)', () => {
     expect(paused.map(([node]) => node)).toEqual(['p']);
     expect(connector.sent).toHaveLength(2);
   });
+});
+
+describe('a send the network refuses (D95)', () => {
+  function refusing(o: { quiet?: boolean } = {}) {
+    const clock = new VirtualClock(0);
+    const connector = new LaterConnector();
+    const records: { type: string }[] = [];
+    const notices: Omit<Notice, 't'>[] = [];
+    const modes = new Modes();
+    const outbox = new Outbox({
+      account: 'test:me',
+      connector: () => connector,
+      clock,
+      modes,
+      record: (r) => records.push(r),
+      notice: (n) => notices.push(n),
+      quiet: (plugin) => o.quiet === true && plugin === 'p',
+      title: (chat) => (chat === '42' ? 'Alice' : undefined),
+    });
+    modes.set('p', 'live');
+    modes.set('q', 'live');
+    return { clock, connector, records, notices, outbox };
+  }
+  const fail = (reason: string) => () => Promise.reject(new Error(reason));
+
+  it('settles a queued send failed, records it and raises an unreachable notice', async () => {
+    const { connector, records, notices, outbox } = refusing();
+    connector.answers.push(fail('400: Bad Request: chat not found'));
+    const r = await outbox.as('q').enqueue('42', 'hello');
+    expect(r).toMatchObject({ outcome: 'failed', reason: '400: Bad Request: chat not found' });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        type: 'core.send-failed',
+        plugins: ['q'],
+        chat: '42',
+        title: 'Alice',
+        hint: expect.stringContaining('cannot find that chat') as unknown,
+      })
+    );
+    expect(records).toContainEqual(
+      expect.objectContaining({ type: 'core.queue', event: 'failed' })
+    );
+    expect(notices).toEqual([
+      expect.objectContaining({
+        kind: 'unreachable',
+        node: 'q',
+        text: expect.stringContaining('q could not send to Alice (42) through test:me') as unknown,
+      }),
+    ]);
+  });
+
+  it('tells nothing of a quiet node, and records it all the same', async () => {
+    const { connector, records, notices, outbox } = refusing({ quiet: true });
+    connector.answers.push(fail('Forbidden: bot was blocked by the user'));
+    await outbox.as('p').send('7', 'hi');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(notices).toEqual([]);
+    expect(records).toContainEqual(
+      expect.objectContaining({ type: 'core.send-failed', hint: 'the person blocked the bot' })
+    );
+  });
+
+  it("raises one for a deliver's failure, and holds the account on a flood wait", async () => {
+    const { clock, connector, notices, outbox } = refusing();
+    connector.answers.push(fail('CHAT_WRITE_FORBIDDEN'));
+    await expect(outbox.as('q').deliver('#c', 'x')).resolves.toMatchObject({ outcome: 'failed' });
+    expect(notices[0]?.text).toContain('give it the right to send');
+    connector.answers.push(() => Promise.reject(new FloodWait(5000)));
+    await expect(outbox.as('q').enqueue('#c', 'y')).resolves.toMatchObject({
+      outcome: 'failed',
+      reason: 'flood wait of 5 s',
+    });
+    expect(notices).toHaveLength(1);
+    expect(outbox.as('q').send('#c', 'z')).toMatchObject({ outcome: 'refused' });
+    clock.advance(6000);
+    connector.down();
+    expect(outbox.as('q').send('#c', 'z')).toMatchObject({ reason: 'not connected' });
+  });
+});
+
+describe('unreachableHint', () => {
+  it.each([
+    ['Forbidden: bot was kicked from the group chat', 'not a member'],
+    ['Forbidden: user is deactivated', 'deleted'],
+    ['PEER_ID_INVALID', 'cannot find'],
+    ['it sends only to its channel #lobby', 'only to its channel'],
+    ['something else', 'refused: something else'],
+  ])('%s', (reason, hint) => expect(unreachableHint(reason)).toContain(hint));
 });

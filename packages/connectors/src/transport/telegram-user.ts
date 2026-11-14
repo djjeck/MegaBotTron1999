@@ -395,6 +395,12 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     return dialogs;
   }
 
+  /** A chat's title, by any of its names, from the dialogs last fetched; undefined if not there. */
+  chatTitle(chat: string): string | undefined {
+    const names = new Set(this.namesOf(chat).map((n) => n.toLowerCase()));
+    return this.all?.dialogs.find((d) => names.has(d.id?.toString().toLowerCase() ?? ''))?.title;
+  }
+
   /** Whether it monitors `chat`, by any of its names: one of its chats, or any when given none. */
   private monitors(chat: string): boolean {
     return this.chats === undefined || this.listed(this.namesOf(chat)) !== undefined;

@@ -434,6 +434,8 @@ describe('every chat, and the surfaces', () => {
     expect((await c.surfaces({ search: ' lobby ', limit: 5 })).map((x) => x.id)).toEqual([GROUP]);
     expect((await c.surfaces({ search: 'quiz' })).map((x) => x.id)).toEqual(['@Quiz_bot']);
     expect(await c.surfaces({ limit: 1 })).toHaveLength(1);
+    expect(c.chatTitle('5000001')).toBe('Quiz Bot');
+    expect(c.chatTitle('@nobody_here')).toBeUndefined();
   });
 
   it('given chats, lists the chats it does not monitor too, named as they would be given', async () => {

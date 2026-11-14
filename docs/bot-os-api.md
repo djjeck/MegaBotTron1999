@@ -920,6 +920,11 @@ it): read that, not whether the name starts with `@`. Each offers `chatNames(cha
 knows the chat by, `chat` among them, or undefined for one it never saw, which the graph's check
 asks (§2.3).
 
+A connector may also offer `chatTitle(chat)`, a chat's title by any of its names (both Telegram
+connectors, from the chats they have seen), which a send the network refused names (§4.6, D95), and
+`owner()`, the owner's own chat on the network (`telegram-bot`: its `owner`'s private chat), where
+`owner-notice` tells by default (§5).
+
 The connector itself also implements `send(chat, text)`, and, for a network whose sends answer later
 (Telegram), `deliver(chat, text)`, which resolves with the message's id; only the outbox calls them:
 no plugin holds a way to send that skips it.
@@ -1045,6 +1050,21 @@ refused it; the rate counts the send when it leaves. A send may say its text is 
 (`format: 'markdown'`): a connector of a network that formats sends it formatted, any other as
 written. Every attempt's record (`core.send`) has the `mode` it went in (`dry-run` or `live`).
 
+**A send the network refuses** (bot-os.md D95): a live send, queued or not, goes through the
+connector's `deliver` where it has one (both Telegram connectors and `irc`; its `send` otherwise),
+so that the network's answer comes back to the outbox instead of the container's log alone. Its
+refusal (a flood wait holds the account, as before) is recorded as `core.send-failed`
+(`{ account, plugins, chat, title?, text, reason, hint }`: the nodes it went for, the chat's title
+where the connector knows it, `Connector.chatTitle`, the network's words and
+`unreachableHint(reason)`'s, what it means and what to do: a person who never started the bot, a
+group it is not in, no right to post, the bot blocked, a chat it cannot find) and raised as an
+`unreachable` notice per node (§4.16), **but for a node that tells the owner itself** (its manifest
+declares `notices: true`, `owner-notice`), which would send its own failure again: its failures are
+recorded and shown on its panel. A queued send then settles `failed`, with the reason (once the
+network answers: its pacing is counted as it leaves). The summary counts it as `failed`. `irc`
+refuses a chat other than its channel so (`it sends only to its channel #lobby, not alice`); the
+replies an IRC server may send later (`404`, cannot send to channel) are not tied to a send.
+
 **The queue** (bot-os.md D73): an acting node that needs a piece of state asks for it with a command
 (`/inventory`), but another node may ask too, or the state may come meanwhile, so it queues the
 send, with what makes it pointless:
@@ -1059,7 +1079,7 @@ const q = ctx.outbox('chat').enqueue('@QuestBot', '/inventory', {
     withinMs: 10 * 60_000, // or `deadline`, a time: then expired
   },
 });
-const r = await q; // { text, outcome: 'sent' | 'dry-run' | 'refused' | 'cancelled' | 'expired', reason?, event? }
+const r = await q; // { text, outcome: 'sent' | 'dry-run' | 'refused' | 'failed' | 'cancelled' | 'expired', reason?, event? }
 q.status(); // 'waiting', or its outcome
 q.cancel(); // true if it still waited
 ```
@@ -1088,8 +1108,9 @@ q.cancel(); // true if it still waited
   dropped, `cancelled` with why. The queue is not kept across a restart: its nodes queue again at
   their start, so a downtime never leaves stale commands to send.
 - **Logged:** each step as `core.queue` (`{ account, plugin, chat, text, event, reason?, by? }`,
-  `event` one of `queued`, `coalesced`, `sent`, `dry-run`, `refused`, `cancelled`, `expired`); the
-  queue as it stands is the connector's (`GET /plugins/<id>/queue`, §4.11), shown in its panel.
+  `event` one of `queued`, `coalesced`, `sent`, `dry-run`, `refused`, `failed`, `cancelled`,
+  `expired`); the queue as it stands is the connector's (`GET /plugins/<id>/queue`, §4.11), shown in
+  its panel.
 - **Merges seen:** a merge may say that two nodes duplicate a piece of logic, so while the queue is
   young they are easy to see without the log: the connector's panel marks a send several nodes share
   (`shared by 2 nodes`), and counts the sends coalesced since the start with the pairs of nodes that
@@ -1624,26 +1645,30 @@ inactive, D65; `detail.reason`, `needs actor (stopped)`), `drift` (a parser past
 once an hour, `detail.unread`, `detail.more`), `coalesced` (a queued send that joined another node's
 same text for the same chat, D73, about the node that joined; `detail`: `account`, `chat`, `text`,
 `with`, the other nodes), `stalled` (a node the send-queue watchdog stopped, §4.6, D93, about that
-node; `detail`: `account`, `chat`, `command`, `count`, `reason`), `warning` (each warning of the
-graph's check at the load, D89, D90, about its node if it names one) and `graph-refused` (the saved
-graph refused at the load, so that no node runs, D94; `detail.problems`; no node hears it, the
-events panel shows it). **A plugin raises** its own through `ctx.notice(kind, text, detail?)`, about
-its node: a state node raises `refused` for each event it refuses (D72; `detail`: `event`, `at`,
-`reason`); and `told` through `ctx.notify(text, buttons?)` (§4.8, D94; `detail.buttons`, which
-`buttonsOf(notice)` reads). A kind is lower-case words and dashes; raising one sends nothing. **A
-plugin whose manifest declares `notices: true`** gets `ctx.notices`: `subscribe(handler)` hears the
-notices raised since the instance started first (the newest `NOTICES_KEPT`, 200), so that the load's
-warnings and a node failed at its start reach a node started after them, then each as it is raised,
-while its node is up; the time its handler takes is its node's (D77). The notices live in memory
-(`core.notices()` lists them), and **each is recorded** as it is raised (`core.notice`: `kind`,
-`node?`, `text`, `detail?`), so that the editor's events panel shows every notice whether a node
-tells it or not (D94), beside the records it was raised with (`core.plugin`, `core.drift`,
-`core.queue`, `<id>.refused`).
+node; `detail`: `account`, `chat`, `command`, `count`, `reason`), `unreachable` (a send the network
+refused, §4.6, D95, about each node it went for but one that tells the owner itself; its text names
+the chat by its title and says what to do; `detail`: `account`, `chat`, `reason`), `warning` (each
+warning of the graph's check at the load, D89, D90, about its node if it names one) and
+`graph-refused` (the saved graph refused at the load, so that no node runs, D94; `detail.problems`;
+no node hears it, the events panel shows it). **A plugin raises** its own through
+`ctx.notice(kind, text, detail?)`, about its node: a state node raises `refused` for each event it
+refuses (D72; `detail`: `event`, `at`, `reason`); and `told` through `ctx.notify(text, buttons?)`
+(§4.8, D94; `detail.buttons`, which `buttonsOf(notice)` reads). A kind is lower-case words and
+dashes; raising one sends nothing. **A plugin whose manifest declares `notices: true`** gets
+`ctx.notices`: `subscribe(handler)` hears the notices raised since the instance started first (the
+newest `NOTICES_KEPT`, 200), so that the load's warnings and a node failed at its start reach a node
+started after them, then each as it is raised, while its node is up; the time its handler takes is
+its node's (D77). The notices live in memory (`core.notices()` lists them), and **each is recorded**
+as it is raised (`core.notice`: `kind`, `node?`, `text`, `detail?`), so that the editor's events
+panel shows every notice whether a node tells it or not (D94), beside the records it was raised with
+(`core.plugin`, `core.drift`, `core.queue`, `<id>.refused`).
 
 `owner-notice` (§5) tells a kind it does not name as `other`. Its view (`GET /plugins/<id>/view`,
 D72) shows the notices waiting by kind with when each is due, when each kind was last told, whether
 the start notice is waiting, sent or off, the summary's cadence and times (next due, last sent, last
-looked) and the graph's warnings at this start; its card's line counts the notices waiting.
+looked), the graph's warnings at this start, and its last message the network refused (`notSent`:
+when, the chat, why; D95), pinned first; its card's line says that one (`not sent: …`) and counts
+the notices waiting.
 
 ### 4.17 The owner's summary
 
@@ -1829,13 +1854,15 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   with the bot (the owner's user id), or an `irc` node, to a nick or a channel. Its sends are queued
   as any node's (`enqueue`, D73), so a dry-run edge (as a new one is drawn, D64) logs each as
   `core.send` with outcome `dry-run` and sends nothing. Its configuration (`ownerNoticeConfig`):
-  `chat`, where it tells (one of its edge's `sends`); `report`, each kind on or off (`refused`,
-  `coalesced`, `drift`, `cascade`, `failed`, `stalled`, `warning`, `other` for every kind it does
-  not name, and `told`, the plugins' messages), all on by default; `pace`, per kind but `told`,
-  `gatherS`, how long the kind's first notice waits for others of its kind, and `everyMin`, the
-  least minutes between two of its messages, what comes meanwhile going in the next (`DEFAULT_PACE`:
-  `failed`, `drift`, `cascade` and `stalled` 10 s and 5 min; `refused` 60 s and 10 min; `coalesced`
-  60 s and 30 min; `warning` 30 s and 60 min; `other` 60 s and 10 min; a field left out keeps its
+  `chat`, where it tells (one of its edge's `sends`), unset: its connector's owner's private chat
+  (`Connector.owner()`, the handle's `owner()`: a `telegram-bot`'s `owner`), where it has one;
+  `report`, each kind on or off (`refused`, `coalesced`, `drift`, `cascade`, `failed`, `stalled`,
+  `unreachable`, `warning`, `other` for every kind it does not name, and `told`, the plugins'
+  messages), all on by default; `pace`, per kind but `told`, `gatherS`, how long the kind's first
+  notice waits for others of its kind, and `everyMin`, the least minutes between two of its
+  messages, what comes meanwhile going in the next (`DEFAULT_PACE`: `failed`, `drift`, `cascade` and
+  `stalled` 10 s and 5 min; `unreachable` 30 s and 10 min; `refused` 60 s and 10 min; `coalesced` 60
+  s and 30 min; `warning` 30 s and 60 min; `other` 60 s and 10 min; a field left out keeps its
   default); `maxLines`, the most items a message lists (5), the rest counted; `summaryEveryMin` and
   `startNotice`, below. A kind's message is plain text: one notice is its own line
   (`script-1 failed: its script hung: …`); several, a title with their count and, past a minute, how

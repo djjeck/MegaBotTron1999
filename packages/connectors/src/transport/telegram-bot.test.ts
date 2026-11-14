@@ -396,6 +396,10 @@ describe('TelegramBotConnector', () => {
     ]);
     stub.bot.api.getChat = (() => Promise.reject(new Error('chat not found'))) as never;
     expect(await c.surfaces({ search: '@nowhere_chat' })).toEqual([]);
+    // Titled by any name it saw, for the owner's words (D95); no owner without one.
+    expect(c.chatTitle('-100123')).toBe('The Lobby');
+    expect(c.chatTitle('-1')).toBeUndefined();
+    expect(c.owner()).toBeUndefined();
   });
 
   it('names a chat by its username when it has no title', () => {

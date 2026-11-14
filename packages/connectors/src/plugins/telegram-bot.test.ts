@@ -118,6 +118,8 @@ describe('the telegram-bot plugin', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(polling).toBe(true);
     expect(core.connector('telegram-bot')?.limits?.unansweredAtBy).toEqual({ '/turn': 2 });
+    // Its owner's chat, where owner-notice tells by default (D95).
+    expect(core.connector('telegram-bot')?.owner?.()).toBe(String(AUTHOR));
     expect(core.notices().map((n) => `${n.kind} ${n.text}`)).toEqual(['told starting']);
     const sent = () =>
       stub.calls

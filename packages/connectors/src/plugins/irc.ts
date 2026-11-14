@@ -115,6 +115,16 @@ export class IrcConnector extends ConnectorBase implements Connector {
     if (chat.toLowerCase() !== this.channel.toLowerCase()) return false;
     return this.client.say(text);
   }
+
+  /**
+   * Sends to its channel, the one chat it can reach; any other refused with why (bot-os.md D95), so
+   * that the outbox records it and the owner is told, rather than a silent `false`.
+   */
+  deliver(chat: string, text: string): Promise<{ id?: string }> {
+    if (chat.toLowerCase() !== this.channel.toLowerCase())
+      return Promise.reject(new Error(`it sends only to its channel ${this.channel}, not ${chat}`));
+    return this.client.say(text) ? Promise.resolve({}) : Promise.reject(new Error('not connected'));
+  }
 }
 
 /** The connection's health, as `/health` answers it. */

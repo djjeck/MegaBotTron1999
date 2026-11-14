@@ -283,12 +283,14 @@ export {
   type QueueRecord,
   type Reach,
   type SenderPolicy,
+  type SendFailedRecord,
   type SendOptions,
   type SendRecord,
   type SendResult,
   type TextFormat,
   unansweredAt,
   unansweredAtBy,
+  unreachableHint,
 } from './outbox.ts';
 export { CORE_COMMANDS, coreCommands, lamp, showValue } from './owner-commands.ts';
 export {

@@ -43,6 +43,8 @@ export interface FakeConnectorOptions {
   admins?: readonly string[];
   /** The chats it can see (`surfaces`), in order; none: it cannot list them. */
   surfaces?: readonly Surface[];
+  /** The owner's own chat (`owner()`), as a `telegram-bot`'s; none: it has no owner. */
+  owner?: string;
 }
 
 /** A message the connector hears: its account and network are the connector's. */
@@ -56,6 +58,7 @@ export class FakeConnector extends ConnectorBase implements Connector {
   private readonly admins: readonly string[];
   /** Its surfaces, as a test sets them; undefined: none (it cannot list them). */
   readonly surfaces?: (query?: SurfaceQuery) => Promise<Surface[]>;
+  private readonly ownerChat: string | undefined;
 
   constructor(o: FakeConnectorOptions) {
     const colon = o.account.indexOf(':');
@@ -65,6 +68,7 @@ export class FakeConnector extends ConnectorBase implements Connector {
     if (o.limits !== undefined) this.limits = o.limits;
     this.onSend = o.onSend;
     this.admins = o.admins ?? [];
+    this.ownerChat = o.owner;
     const listed = o.surfaces;
     if (listed !== undefined)
       this.surfaces = (q = {}) => {
@@ -76,6 +80,11 @@ export class FakeConnector extends ConnectorBase implements Connector {
             .slice(0, q.limit ?? listed.length)
         );
       };
+  }
+
+  /** The owner's own chat, as the test gave it. */
+  owner(): string | undefined {
+    return this.ownerChat;
   }
 
   /** Whether the account administers `chat`: one of `admins`. */

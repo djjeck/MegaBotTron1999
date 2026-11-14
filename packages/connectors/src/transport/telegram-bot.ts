@@ -334,6 +334,17 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
     return found();
   }
 
+  /** Its owner's private chat with it, by id, where its config names an owner. */
+  owner(): string | undefined {
+    return this.o.ownerChat?.chat;
+  }
+
+  /** A chat's title, by any of its names, as the bot saw it; undefined for one it never saw. */
+  chatTitle(chat: string): string | undefined {
+    const id = this.names.get(chat.toLowerCase())?.[0] ?? chat;
+    return this.seen[id]?.title;
+  }
+
   /** Whether it monitors `chat`: one of its chats (by id or `@username`), or any without. */
   private monitors(chat: Chat): boolean {
     const chats = this.chats;

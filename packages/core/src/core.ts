@@ -62,6 +62,7 @@ import {
   type QueuedSend,
   type QueueRecord,
   type SenderPolicy,
+  type SendFailedRecord,
   type SendRecord,
 } from './outbox.ts';
 import { CORE_COMMANDS, coreCommands } from './owner-commands.ts';
@@ -127,7 +128,9 @@ export interface CoreOptions {
    * is where the log put the record (`LogPosition`, bot-os.md D72), the bus hands its subscribers
    * with the event, for those that keep a cursor into the log.
    */
-  record?: (r: CoreRecord | BusEvent | SendRecord | QueueRecord | DriftRecord) => unknown;
+  record?: (
+    r: CoreRecord | BusEvent | SendRecord | QueueRecord | SendFailedRecord | DriftRecord
+  ) => unknown;
   /**
    * Each plugin instance's configuration, by its id, as the deployment sets it: checked against
    * its plugin's `config` schema at load, a bad value naming the instance and the key. A node of
@@ -510,6 +513,9 @@ export class Core {
         // The send-queue watchdog (D93): an actor's sends to a chat a parser reads, paused as drift
         // pauses (P5).
         watch: (plugin, chat) => this.awaitsAnswers(plugin, account, chat),
+        // A node that tells the owner (owner-notice) is not told of its own failed sends (D95).
+        quiet: (plugin) => this.entries.get(plugin)?.manifest.notices === true,
+        title: (chat) => connector()?.chatTitle?.(chat),
         pause: (plugin, reason) => {
           this.stopNode(plugin, reason, 'stalled');
         },
@@ -544,8 +550,10 @@ export class Core {
    * A send counted for the owner's summary (D92), by node and outcome: each node it went for, and a
    * queued send dropped before it went.
    */
-  private counted(r: SendRecord | QueueRecord): void {
-    if (r.type === 'core.send')
+  private counted(r: SendRecord | QueueRecord | SendFailedRecord): void {
+    if (r.type === 'core.send-failed')
+      for (const node of r.plugins) this.summaries.sent(node, 'failed');
+    else if (r.type === 'core.send')
       for (const node of [r.plugin, ...(r.with ?? [])]) this.summaries.sent(node, r.outcome);
     else if (r.event === 'cancelled' || r.event === 'expired')
       this.summaries.sent(r.plugin, r.event);

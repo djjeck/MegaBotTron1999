@@ -72,6 +72,7 @@ export const PACED = [
   'cascade',
   'failed',
   'stalled',
+  'unreachable',
   'warning',
   'other',
 ] as const;
@@ -99,6 +100,7 @@ export const DEFAULT_PACE: Readonly<Record<Paced, Pace>> = {
   cascade: { gatherS: 10, everyMin: 5 },
   failed: { gatherS: 10, everyMin: 5 },
   stalled: { gatherS: 10, everyMin: 5 },
+  unreachable: { gatherS: 30, everyMin: 10 },
   warning: { gatherS: 30, everyMin: 60 },
   other: { gatherS: 60, everyMin: 10 },
 };
@@ -110,6 +112,8 @@ const reportHelp: Record<Reported, string> = {
   cascade: 'Nodes a runtime stop made inactive (D65)',
   failed: 'Nodes that failed: a crash, a script killed as hung',
   stalled: 'Nodes stopped for sending a command again and again with no answer (D93)',
+  unreachable:
+    'Sends the network refused: a chat the connector cannot reach, such as a person who never started the bot (D95)',
   warning: "The graph's warnings at the load (D89)",
   other: 'Notices of any other kind, raised by plugins',
   told: 'The plugins’ messages for the owner (`ctx.notify`), each at once, with its buttons where the chat can run them',
@@ -124,8 +128,9 @@ export const ownerNoticeConfig = z.object({
   chat: z
     .string()
     .min(1)
+    .optional()
     .describe(
-      "The chat it tells the owner in, as its chat edge sends to it: the owner's private chat with the bot (their user id), an IRC nick or #channel"
+      "The chat it tells the owner in, picked among its connector's (its chat edge must send there too); unset: the connector's owner's private chat, where it has one (a telegram-bot's `owner`)"
     ),
   report: z
     .object(
@@ -225,6 +230,11 @@ export const KINDS: Readonly<Record<Paced, KindSpec>> = {
         ? `${String(x.node)}: ${x.text}`
         : `${String(x.node)}: ${field(x, 'command')} to ${field(x, 'chat')}, ${plural(count, 'time')}`;
     },
+  },
+  unreachable: {
+    byNode: false,
+    title: (n) => `${plural(n, 'send')} could not reach their chat`,
+    item: (x) => x.text,
   },
   warning: {
     byNode: false,
@@ -469,6 +479,14 @@ const viewState = z.object({
     })
     .describe('Summary'),
   warnings: z.array(z.string()).describe("The graph's warnings at this start"),
+  notSent: z
+    .object({
+      t: z.number().describe('When'),
+      chat: z.string().describe('Chat'),
+      reason: z.string().describe('Why'),
+    })
+    .optional()
+    .describe('Its last message not sent (D95): its own failures are never told, only shown here'),
 });
 const VIEW_SCHEMA = z.toJSONSchema(viewState, { io: 'output', unrepresentable: 'any' });
 
@@ -512,18 +530,29 @@ export function ownerNoticePlugin(): Plugin {
         if (ctx.summary === undefined) throw new Error('no summary: its manifest declares it');
         return ctx.summary;
       };
+      /** Its last message that did not go, for its panel and card (D95): never told, no loop. */
+      let notSent: { t: number; chat: string; reason: string } | undefined;
       /** One message, through its single send path: queued, so that a dry-run edge sends nothing. */
       const send = (kind: string, text: string, count: number, buttons?: Buttons): void => {
-        ctx.record(`${OWNER_NOTICE}.told`, { kind, count, chat: c.chat, text });
+        const out = ctx.outbox('chat');
+        // Its chat, or its connector's owner's (a telegram-bot's), when it names none.
+        const chat = c.chat ?? out.owner();
+        if (chat === undefined) {
+          notSent = { t: ctx.clock.now(), chat: '', reason: 'no chat: pick one in its config' };
+          ctx.log.warn(`not told (no chat, and its connector has no owner): ${text}`);
+          return;
+        }
+        ctx.record(`${OWNER_NOTICE}.told`, { kind, count, chat, text });
         toldAt = ctx.clock.now();
-        const queued = ctx
-          .outbox('chat')
-          .enqueue(c.chat, text, buttons === undefined ? undefined : { buttons });
+        const queued = out.enqueue(chat, text, buttons === undefined ? undefined : { buttons });
         void queued.then((r) => {
-          if (r.outcome === 'refused' || r.outcome === 'expired' || r.outcome === 'cancelled')
-            ctx.log.warn(
-              `not told (${r.outcome}${r.reason === undefined ? '' : `: ${r.reason}`}): ${text}`
-            );
+          if (r.outcome === 'sent' || r.outcome === 'dry-run') {
+            notSent = undefined;
+            return;
+          }
+          const reason = r.reason === undefined ? r.outcome : `${r.outcome}: ${r.reason}`;
+          if (r.outcome !== 'cancelled') notSent = { t: ctx.clock.now(), chat, reason };
+          ctx.log.warn(`not told (${reason}): ${text}`);
         });
       };
       const desk = new NoticeDesk({
@@ -621,14 +650,17 @@ export function ownerNoticePlugin(): Plugin {
             ...kept,
           },
           warnings: warned,
+          ...(notSent === undefined ? {} : { notSent }),
         },
         ...(toldAt === undefined ? {} : { updatedAt: toldAt }),
-        pin: ['waiting'],
+        pin: ['notSent', 'waiting'],
       });
       /** Its card's line: the notices waiting to be told, if any. */
       const waitingLine = (): string | undefined => {
         const n = Object.values(desk.view().waiting).reduce((sum, w) => sum + w.count, 0);
-        return n === 0 ? undefined : `${n} ${n === 1 ? 'notice' : 'notices'} waiting`;
+        const waiting = n === 0 ? undefined : `${n} ${n === 1 ? 'notice' : 'notices'} waiting`;
+        const failed = notSent === undefined ? undefined : `not sent: ${notSent.reason}`;
+        return [failed, waiting].filter((x) => x !== undefined).join('; ') || undefined;
       };
       return {
         start() {

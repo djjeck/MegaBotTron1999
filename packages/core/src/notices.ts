@@ -28,6 +28,7 @@ export const NOTICE_KINDS = [
   'failed',
   'warning',
   'stalled',
+  'unreachable',
   'told',
   'graph-refused',
 ] as const;
@@ -47,7 +48,8 @@ export interface Notice {
    * cascade made inactive (`cascade`), a node failed (`failed`), a warning of the graph's check
    * (`warning`), a node the send-queue watchdog paused (`stalled`, bot-os.md D93), a plugin's
    * message for the owner (`told`, `ctx.notify`, D94), the saved graph refused at the load, no node
-   * running (`graph-refused`, D94), or a plugin's own kind.
+   * running (`graph-refused`, D94), a send the network refused (`unreachable`, D95), or a plugin's
+   * own kind.
    */
   kind: string;
   /** When, in ms. */
@@ -60,7 +62,8 @@ export interface Notice {
    * What it is, by fields a listener may group by: a refused event's `event` type and `reason`; a
    * coalesced send's `chat`, `text` and the other nodes (`with`); a drift's `paused` nodes; the
    * reason of a cascade or a failure; a stall's `account`, `chat`, `command`, `count` and `reason`;
-   * a drift's `unread` message; a told message's `buttons`; a refused graph's `problems`.
+   * a drift's `unread` message; a told message's `buttons`; a refused graph's `problems`; a send
+   * refused's `account`, `chat` and `reason`.
    */
   detail?: Readonly<Record<string, unknown>>;
 }

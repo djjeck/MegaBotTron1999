@@ -173,12 +173,16 @@ export const greeter = definePlugin({
   `owner-notice`, the Events page alone shows a failure, a drift, a refused saved graph or a
   plugin's message**; wire one first (the setup wizard, #45, is to do it). The owner's commands,
   cards and their buttons in the owner's chat are the control surface, not reporting, and work
-  without it. Wire it from the editor: add the node, set its `chat` to where the owner reads (their
-  private chat with the bot, by their Telegram user id), draw its `chat` edge to the `telegram-bot`
-  node with that chat among the edge's sends, and make the edge live once the dry run's log
-  (`core.send`, `dry-run`) reads right. The same node sends a summary of what happened every hour
-  (`summaryEveryMin`; none when nothing did, from lines the core and the plugins add, D92) and a
-  notice at each start: the release, the nodes running and not, the graph's warnings.
+  without it. Wire it from the editor: add the node, draw its `chat` edge to the `telegram-bot` node
+  with the owner's private chat among the edge's sends, leave its `chat` unset (the bot's owner's
+  chat) or pick another, and make the edge live once the dry run's log (`core.send`, `dry-run`)
+  reads right. The same node sends a summary of what happened every hour (`summaryEveryMin`; none
+  when nothing did, from lines the core and the plugins add, D92) and a notice at each start: the
+  release, the nodes running and not, the graph's warnings.
+- **A send the network refuses** (D95), such as a chat the bot cannot reach, is recorded
+  (`core.send-failed`, on the Events page) and raised as an `unreachable` notice that names the
+  node, the chat and what to do; `owner-notice`'s own failures are only recorded and shown on its
+  panel and card, never sent again.
 - **The dev kit** (`DevKit`, `FakeConnector`, `VirtualClock`) runs plugins on a virtual clock with
   fake connectors, for tests and simulators.
 

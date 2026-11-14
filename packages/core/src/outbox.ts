@@ -28,6 +28,14 @@
  * that time their sends to the second; `enqueue` waits its turn within the limits; `deliver` sends
  * now or refuses, as `send` does, and waits for the network's answer (Telegram's), with the sent
  * message's id, or `failed` with why if the network refused it.
+ *
+ * **A send the network refuses** (bot-os.md D95), whichever way it went: a queued or immediate send
+ * goes through the connector's `deliver` where it has one, so its answer comes back to the outbox
+ * rather than to the container's log alone. A refusal (not a flood wait, which holds the account)
+ * is recorded (`core.send-failed`: the account, the nodes, the chat, the reason) and raised as an
+ * `unreachable` notice per node, its reason in the owner's words (`unreachableHint`), but for a
+ * node that tells the owner itself (`quiet`: `owner-notice`, no loop); a queued send settles
+ * `failed`, with why.
  */
 import { z } from 'zod';
 import { type Clock, type TimerHandle } from './clock.ts';
@@ -245,7 +253,7 @@ export interface OutboxOptions {
   /** What the outbox knows of a sender, at each send: through its output `port`, if one is named. */
   policy?: (plugin: string, port?: string) => SenderPolicy;
   /** Where every attempt, and every step of the queue, goes: the event log. */
-  record?: (r: SendRecord | QueueRecord) => void;
+  record?: (r: SendRecord | QueueRecord | SendFailedRecord) => void;
   /**
    * What the owner should hear of (bot-os.md D91): a send coalesced across nodes (`coalesced`),
    * raised as a notice; and a node its watchdog paused (`stalled`, D93).
@@ -256,6 +264,13 @@ export interface OutboxOptions {
    * publishes events reads that chat. None: no send is watched.
    */
   watch?: (plugin: string, chat: string) => boolean;
+  /**
+   * Whether a node tells the owner itself (`owner-notice`, D95): a send of its that the network
+   * refuses is recorded, never raised as a notice, which it would send again.
+   */
+  quiet?: (plugin: string) => boolean;
+  /** A chat's title, as the connector knows it, for the owner's words (D95). */
+  title?: (chat: string) => string | undefined;
   /** Pauses a node whose sends went unanswered (D93), with why: the core's stop. */
   pause?: (plugin: string, reason: string) => void;
 }
@@ -305,6 +320,11 @@ export interface OutboxHandle {
   enqueue(chat: string, text: string, options?: QueueOptions): QueuedSend;
   /** Sends now or refuses, and waits for the network's answer: the message's id. */
   deliver(chat: string, text: string, options?: SendOptions): Promise<DeliverResult>;
+  /**
+   * The account's owner's own chat, where its connector has one (a telegram-bot's `owner`): where
+   * a node tells the owner when it names no chat. Undefined while the connector does not run.
+   */
+  owner(): string | undefined;
 }
 
 /** An event as a cancel tests it: the bus's, `{ type, t, ...payload }`. */
@@ -332,8 +352,11 @@ export interface QueueOptions extends SendOptions {
   cancel?: CancelWhen;
 }
 
-/** What came of a queued send: the send's outcome, or dropped before it went. */
-export type QueueOutcome = SendResult['outcome'] | 'cancelled' | 'expired';
+/**
+ * What came of a queued send: the send's outcome (`failed`: the network refused it, D95), or
+ * dropped before it went.
+ */
+export type QueueOutcome = SendResult['outcome'] | 'failed' | 'cancelled' | 'expired';
 
 export interface QueuedResult {
   text: string;
@@ -367,6 +390,41 @@ export type QueueRecord = {
   /** The event that cancelled it, by type. */
   by?: string;
 };
+
+/** A send the network refused (bot-os.md D95), as the log keeps it (`core.send-failed`). */
+export type SendFailedRecord = {
+  type: 'core.send-failed';
+  t: number;
+  account: string;
+  /** The nodes it went for (several, coalesced). */
+  plugins: string[];
+  chat: string;
+  /** The chat's title, where the connector knows it. */
+  title?: string;
+  text: string;
+  /** The network's words. */
+  reason: string;
+  /** What it means, in the owner's words, and what to do. */
+  hint: string;
+};
+
+/**
+ * A network's refusal of a send, in the owner's words (bot-os.md D95): what it means, and what to
+ * do; the network's own words when they say nothing known.
+ */
+export function unreachableHint(reason: string): string {
+  const r = reason.toLowerCase();
+  if (/bot was blocked/u.test(r)) return 'the person blocked the bot';
+  if (/user is deactivated|input_user_deactivated/u.test(r)) return 'that account was deleted';
+  if (/kicked|not a member|user_not_participant|channel_private/u.test(r))
+    return 'it is not a member of that chat: add it again, or pick another chat';
+  if (/not enough rights|have no rights|chat_write_forbidden|chat_admin_required/u.test(r))
+    return 'it may not post in that chat: give it the right to send there';
+  if (/chat not found|peer_id_invalid|username_not_occupied|username_invalid|input entity/u.test(r))
+    return 'it cannot find that chat: a person must message it first (a bot: /start), a group or channel must add it; pick the chat again in its picker';
+  if (/only to its channel/u.test(r)) return reason;
+  return `refused: ${reason}`;
+}
 
 /** A queued send, as the owner sees it (the connector's panel, `GET /plugins/<id>/queue`). */
 export interface QueueEntryView {
@@ -468,6 +526,7 @@ export class Outbox {
       send: (chat, text, options = {}) => this.send(plugin, chat, text, via(options)),
       enqueue: (chat, text, options = {}) => this.enqueue(plugin, chat, text, via(options)),
       deliver: (chat, text, options = {}) => this.deliver(plugin, chat, text, via(options)),
+      owner: () => this.o.connector()?.owner?.(),
     };
   }
 
@@ -484,7 +543,7 @@ export class Outbox {
         ? v.refused
         : stalled !== undefined
           ? stalled
-          : this.attempt(chat, text, v.dryRun, options.buttons);
+          : this.attempt(chat, text, v.dryRun, options.buttons, [plugin]).result;
     this.sent(chat, text, result);
     if (result.outcome === 'sent') this.went(plugin, chat, text);
     this.log(plugin, chat, options, result, v.mode);
@@ -535,7 +594,7 @@ export class Outbox {
       const connector = this.o.connector();
       const now = this.o.clock.now();
       if (connector?.deliver === undefined)
-        result = this.attempt(chat, text, false, options.buttons);
+        result = this.attempt(chat, text, false, options.buttons, [plugin]).result;
       else if (connector.status().state !== 'connected')
         result = { text, outcome: 'refused', reason: 'not connected' };
       else {
@@ -555,12 +614,14 @@ export class Outbox {
           if (e instanceof FloodWait) {
             this.heldUntil = this.o.clock.now() + e.ms;
             result = { text, outcome: 'refused', reason: e.message };
-          } else
+          } else {
             result = {
               text,
               outcome: 'failed',
               reason: e instanceof Error ? e.message : String(e),
             };
+            this.unreachable([plugin], chat, text, result.reason ?? '');
+          }
         }
       }
     }
@@ -878,7 +939,10 @@ export class Outbox {
     }
     const lead = going.find((g) => !g.dryRun) ?? going[0];
     if (lead === undefined) return;
-    const result = this.attempt(w.chat, w.text, lead.dryRun, lead.m.options.buttons);
+    const live = going.filter((g) => !g.dryRun).map((g) => g.m.plugin);
+    const { result, answer } = this.attempt(w.chat, w.text, lead.dryRun, lead.m.options.buttons, [
+      ...new Set(live),
+    ]);
     this.sent(w.chat, w.text, result);
     const others = [
       ...new Set(going.filter((g) => g.m.plugin !== lead.m.plugin).map((g) => g.m.plugin)),
@@ -886,14 +950,20 @@ export class Outbox {
     this.log(lead.m.plugin, w.chat, lead.m.options, result, lead.mode, others);
     for (const g of going) {
       const outcome = result.outcome === 'sent' && g.dryRun ? 'dry-run' : result.outcome;
-      const r: QueuedResult = {
-        text: w.text,
-        outcome,
-        ...(result.reason === undefined ? {} : { reason: result.reason }),
-      };
-      g.m.settle(r);
       if (outcome === 'sent') this.went(g.m.plugin, w.chat, w.text);
-      this.queueLog(g.m.plugin, w.chat, w.text, outcome, result.reason);
+      const settle = (failed: string | undefined): void => {
+        const reason = failed ?? result.reason;
+        const r: QueuedResult = {
+          text: w.text,
+          outcome: failed === undefined ? outcome : 'failed',
+          ...(reason === undefined ? {} : { reason }),
+        };
+        g.m.settle(r);
+        this.queueLog(g.m.plugin, w.chat, w.text, r.outcome, reason);
+      };
+      // A live share settles once the network answers (D95); a dry run, at once.
+      if (answer === undefined || outcome !== 'sent') settle(undefined);
+      else void answer.then(settle);
     }
   }
 
@@ -1006,13 +1076,42 @@ export class Outbox {
     return undefined;
   }
 
-  /** A send the checks allow, against the clock and the network. */
-  private attempt(chat: string, text: string, dryRun: boolean, buttons?: Buttons): SendResult {
+  /**
+   * A send the checks allow, against the clock and the network: through the connector's `deliver`
+   * where it has one, whose refusal comes back (`answer`, its reason; D95) and is told for
+   * `plugins`, the nodes it goes for live; its `send` otherwise.
+   */
+  private attempt(
+    chat: string,
+    text: string,
+    dryRun: boolean,
+    buttons: Buttons | undefined,
+    plugins: readonly string[]
+  ): { result: SendResult; answer?: Promise<string | undefined> } {
     const refuse = (reason: string): SendResult => ({ text, outcome: 'refused', reason });
     const admitted = this.admit(text, dryRun);
-    if (admitted !== undefined) return admitted;
+    if (admitted !== undefined) return { result: admitted };
     const now = this.o.clock.now();
     const connector = this.o.connector();
+    if (connector?.deliver !== undefined) {
+      if (connector.status().state !== 'connected') return { result: refuse('not connected') };
+      this.recent.push(now);
+      const answer = connector
+        .deliver(chat, text, buttons === undefined ? undefined : { buttons })
+        .then(
+          () => undefined,
+          (e: unknown) => {
+            if (e instanceof FloodWait) {
+              this.heldUntil = this.o.clock.now() + e.ms;
+              return e.message;
+            }
+            const reason = e instanceof Error ? e.message : String(e);
+            this.unreachable(plugins, chat, text, reason);
+            return reason;
+          }
+        );
+      return { result: { text, outcome: 'sent' }, answer };
+    }
     let sent: boolean;
     try {
       sent =
@@ -1022,11 +1121,45 @@ export class Outbox {
     } catch (e) {
       if (!(e instanceof FloodWait)) throw e;
       this.heldUntil = now + e.ms;
-      return refuse(e.message);
+      return { result: refuse(e.message) };
     }
-    if (!sent) return refuse('not connected');
+    if (!sent) return { result: refuse('not connected') };
     this.recent.push(now);
-    return { text, outcome: 'sent' };
+    return { result: { text, outcome: 'sent' } };
+  }
+
+  /**
+   * A send the network refused (D95): recorded (`core.send-failed`), and an `unreachable` notice
+   * for each node it went for, but those that tell the owner themselves (`quiet`).
+   */
+  private unreachable(
+    plugins: readonly string[],
+    chat: string,
+    text: string,
+    reason: string
+  ): void {
+    const title = this.o.title?.(chat);
+    const hint = unreachableHint(reason);
+    this.o.record?.({
+      type: 'core.send-failed',
+      t: this.o.clock.now(),
+      account: this.account,
+      plugins: [...plugins],
+      chat,
+      ...(title === undefined ? {} : { title }),
+      text,
+      reason,
+      hint,
+    });
+    const named = title === undefined || title === chat ? chat : `${title} (${chat})`;
+    for (const plugin of plugins)
+      if (this.o.quiet?.(plugin) !== true)
+        this.o.notice?.({
+          kind: 'unreachable',
+          node: plugin,
+          text: `${plugin} could not send to ${named} through ${this.account}: ${hint}`,
+          detail: { account: this.account, chat, reason },
+        });
   }
 
   private log(
