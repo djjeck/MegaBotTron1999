@@ -314,7 +314,6 @@ export {
   matches,
   type MessageTrigger,
   react,
-  REACT_MAX_AGE_MS,
   type Reaction,
   type ReactionPayload,
   type ReactionText,

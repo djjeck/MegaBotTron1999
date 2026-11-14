@@ -71,8 +71,10 @@ export const reactorConfig = z
       .number()
       .int()
       .positive()
-      .default(120)
-      .describe('How old an event may be, in seconds, and still be reacted to'),
+      .optional()
+      .describe(
+        'How old an event may be, in seconds, and still be reacted to; unset: any age (an event played back is skipped by its mark)'
+      ),
   })
   .superRefine((c, ctx) => {
     if ((c.on === undefined) === (c.match === undefined))
@@ -133,7 +135,7 @@ export function reactorPlugin(): Plugin {
             send: c.send,
             record: `${REACTOR}.reaction`,
             name: ctx.id,
-            maxAgeMs: c.maxAgeS * 1000,
+            ...(c.maxAgeS === undefined ? {} : { maxAgeMs: c.maxAgeS * 1000 }),
           });
         },
         stop() {

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { DevKit, FakeConnector, fakeConnectorPlugin } from './devkit.ts';
 import { definePlugin, type PluginContext } from './plugin.ts';
-import { fill, matches, react, REACT_MAX_AGE_MS, type Reaction, valueAt } from './react.ts';
+import { fill, matches, react, type Reaction, valueAt } from './react.ts';
+
+const MAX_AGE_MS = 2 * 60_000;
 
 const T0 = Date.UTC(2026, 10, 8, 12);
 const BOT = '@QuestBot';
@@ -157,24 +159,34 @@ describe('react on an event', () => {
     ]);
   });
 
-  it('skips an event older than its limit: a replay of history', async () => {
+  it('reacts to an event of any age by default: only its mark makes it history', async () => {
+    const { quest, on, records, account } = await run();
+    on({ on: 'quest.turn', chat: BOT, send: '/look {outcome.item}' });
+    quest.bus.publish('quest.turn', gain('lantern'), T0 - 24 * 3_600_000);
+    await flush();
+    expect(account.sent).toEqual([{ chat: BOT, text: '/look lantern' }]);
+    expect(records()).toHaveLength(1);
+  });
+
+  it('skips an event older than a limit it sets: a backstop for unmarked replays', async () => {
     const { quest, on, records, account } = await run();
     on({
       on: 'quest.turn',
       when: { 'outcome.sure': true },
       chat: BOT,
       send: '/look {outcome.item}',
+      maxAgeMs: MAX_AGE_MS,
     });
-    quest.bus.publish('quest.turn', gain('lantern'), T0 - REACT_MAX_AGE_MS - 1);
-    quest.bus.publish('quest.turn', gain('rope', false), T0 - REACT_MAX_AGE_MS - 1);
-    quest.bus.publish('quest.turn', gain('torch'), T0 - REACT_MAX_AGE_MS);
+    quest.bus.publish('quest.turn', gain('lantern'), T0 - MAX_AGE_MS - 1);
+    quest.bus.publish('quest.turn', gain('rope', false), T0 - MAX_AGE_MS - 1);
+    quest.bus.publish('quest.turn', gain('torch'), T0 - MAX_AGE_MS);
     await flush();
     expect(account.sent).toEqual([{ chat: BOT, text: '/look torch' }]);
     expect(records()[0]).toEqual({
       reaction: 'react',
       on: 'quest.turn',
       outcome: 'skipped',
-      reason: `an event of ${new Date(T0 - REACT_MAX_AGE_MS - 1).toISOString()}, too old`,
+      reason: `an event of ${new Date(T0 - MAX_AGE_MS - 1).toISOString()}, too old`,
     });
     expect(records()).toHaveLength(2);
   });

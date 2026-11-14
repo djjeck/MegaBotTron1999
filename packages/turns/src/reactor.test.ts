@@ -112,6 +112,22 @@ describe('the reactor', () => {
     expect(reactions()).toEqual(['sent']);
   });
 
+  it('skips an event played back, at any age, and an old one only with maxAgeS', async () => {
+    const { quest, account, reactions } = await run(ON_GAIN, { live: true });
+    quest.bus.publish('quest.turn', { ...gain('rope'), playback: true });
+    quest.bus.publish('quest.turn', gain('lantern'), T0 - 3_600_000);
+    await flush();
+    expect(account.sent).toEqual([{ chat: BOT, text: '/look lantern' }]);
+    expect(reactions()).toEqual(['skipped (played back: history, not news)', 'sent']);
+    const limited = await run({ ...ON_GAIN, maxAgeS: 60 }, { live: true });
+    limited.quest.bus.publish('quest.turn', gain('lantern'), T0 - 3_600_000);
+    await flush();
+    expect(limited.account.sent).toEqual([]);
+    expect(limited.reactions()).toEqual([
+      `skipped (an event of ${new Date(T0 - 3_600_000).toISOString()}, too old)`,
+    ]);
+  });
+
   it('through a dry-run edge, as a new one is drawn, logs what it sends and sends nothing', async () => {
     const { quest, account, reactions } = await run(ON_GAIN);
     quest.bus.publish('quest.turn', gain('lantern'));
@@ -206,7 +222,8 @@ describe('the reactor', () => {
     const problems = (c: Record<string, unknown>) =>
       reactorConfig.safeParse(c).error?.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
     expect(problems(ON_GAIN)).toBeUndefined();
-    expect(reactorConfig.parse(ON_GAIN)).toMatchObject({ ignoreCase: false, maxAgeS: 120 });
+    expect(reactorConfig.parse(ON_GAIN)).toMatchObject({ ignoreCase: false });
+    expect(reactorConfig.parse(ON_GAIN)).not.toHaveProperty('maxAgeS');
     expect(problems({ chat: BOT, send: '/look' })).toEqual([
       'on: set either on (an event) or match (a message), not both',
     ]);

@@ -17,8 +17,10 @@
  *   is not a string, number or boolean) sends nothing: the reaction is skipped and recorded, never
  *   sent half made.
  * - **How:** through the outbox of its chat-out output `via` (`enqueue`), so its mode, the edge's reach,
- *   the account's pacing and the `core.send` log all apply. An event older than `maxAgeMs` (a
- *   parser's replay of its history at start) is skipped, so that history is never acted on twice.
+ *   the account's pacing and the `core.send` log all apply. An event played back (`playback: true`,
+ *   bot-os.md D83, D88) is skipped, so that history is never acted on twice: news is told by its
+ *   mark, not its age. A reaction may still set `maxAgeMs`, a backstop for a plugin whose replays
+ *   are not marked.
  * - **Its trace:** each reaction, sent, refused, dry run or skipped, is written with `ctx.record` as
  *   `record` (a type of its plugin's namespace, `reactor.reaction`).
  *
@@ -58,12 +60,12 @@ export interface Reaction {
   record: string;
   /** Its name in its records and the `core.send` log (the outbox's `origin`); `react` by default. */
   name?: string;
-  /** How old an event may be and still be reacted to; two minutes by default. */
+  /**
+   * How old an event may be and still be reacted to; no limit by default (D88): a played-back
+   * event is skipped by its mark, whatever its age.
+   */
   maxAgeMs?: number;
 }
-
-/** How old an event may be, by default, and still be reacted to: no replay is news. */
-export const REACT_MAX_AGE_MS = 2 * 60_000;
 
 /** A `{path}` placeholder: a name, then dotted names or indices. */
 const PLACEHOLDER = /\{([A-Za-z_$][\w$]*(?:\.[\w$]+)*)\}/gu;
@@ -150,7 +152,7 @@ function messagePayload(m: Inbound, match: string | RegExp): ReactionPayload | u
 export function react(ctx: PluginContext, reaction: Reaction): () => void {
   const name = reaction.name ?? 'react';
   const via = reaction.via ?? 'chat';
-  const maxAgeMs = reaction.maxAgeMs ?? REACT_MAX_AGE_MS;
+  const maxAgeMs = reaction.maxAgeMs ?? Number.POSITIVE_INFINITY;
   const trigger = typeof reaction.on === 'string' ? reaction.on : 'message';
   let live = true;
   const trace = (fields: Record<string, unknown>): void =>

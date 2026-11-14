@@ -1492,15 +1492,16 @@ interface Reaction {
   via?: string; // the chat-out output whose outbox it sends through: `chat` by default
   record: string; // ctx.record's type for each reaction
   name?: string; // in its records, and the send's origin in `core.send`: `react` by default
-  maxAgeMs?: number; // how old an event may be and still be reacted to: 2 minutes by default
+  maxAgeMs?: number; // how old an event may be and still be reacted to: no limit by default (D88)
 }
 ```
 
 - **On an event:** `on` is an event type (`quest.turn`) or a namespace on the bus, one its events
   inputs consume or its own (§4.4), heard from the nodes its edges bind. Its payload is the event as
   published, `{ type, t, instance, ...payload }`. An event played back (`playback: true`, D83) is
-  skipped, and recorded; so is an event older than `maxAgeMs` (a parser's replay of its history at
-  `ready`) is skipped, and recorded, so that history is not acted on again.
+  skipped, and recorded, whatever its age, so that history is not acted on again (D88: news is told
+  by its mark, not its age). With `maxAgeMs`, an event older than that is skipped and recorded too:
+  a backstop for a plugin whose replays (at `ready`, say) are not marked.
 - **On a message:** `on` is `{ port, chats, match }`: the messages read on the chat-in input `port`
   (`chat` by default), in `chats` (compared without case; every chat its edge reads without), whose
   text contains `match` (a string) or matches it (a `RegExp`). Messages played back and the
@@ -1648,15 +1649,16 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   with `in` (the one chat whose messages it reads; every chat its edge reads without) and
   `ignoreCase`; exactly one of `on` and `match`. Then `when` (dotted paths of the payload, each
   equal to its value), `chat` and `send` (`{path}` templates of the payload), and `maxAgeS` (how old
-  an event may be, 120 seconds by default). Its ports: `chat`, a chat-out output, the account it
-  sends through (on any network), whose edge carries the chat it sends to and its commands; `chat`,
-  a chat-in input there only with `match` (`when: { config: 'match' }`, §2.1), the chats it reads;
-  and `events`, whose namespace is the one of its `on` (§2.1): there only with `on`
-  (`when: { config: 'on' }`) and then required, bound to the nodes whose events it hears (the check
-  refuses a reactor on events that no edge binds), and not a port at all of a reactor on messages.
-  So a reactor on events only sends. Each reaction is recorded as `reactor.reaction`, and each send
-  logged as `core.send` with the node's id as its origin. The image offers it (`src/main.ts`); a
-  node that examines what a game's parser reads, in the graph file:
+  an event may be, unset by default: any age, an event played back skipped by its mark, D88). Its
+  ports: `chat`, a chat-out output, the account it sends through (on any network), whose edge
+  carries the chat it sends to and its commands; `chat`, a chat-in input there only with `match`
+  (`when: { config: 'match' }`, §2.1), the chats it reads; and `events`, whose namespace is the one
+  of its `on` (§2.1): there only with `on` (`when: { config: 'on' }`) and then required, bound to
+  the nodes whose events it hears (the check refuses a reactor on events that no edge binds), and
+  not a port at all of a reactor on messages. So a reactor on events only sends. Each reaction is
+  recorded as `reactor.reaction`, and each send logged as `core.send` with the node's id as its
+  origin. The image offers it (`src/main.ts`); a node that examines what a game's parser reads, in
+  the graph file:
 
   ```json
   {
