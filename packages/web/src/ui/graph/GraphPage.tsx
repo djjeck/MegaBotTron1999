@@ -771,6 +771,7 @@ export function GraphPage({
         configErrors={placed.config.get(shownNode.id) ?? {}}
         settingErrors={placed.settings.get(shownNode.id) ?? {}}
         secretNames={secrets.data?.names ?? []}
+        provided={secrets.data?.names}
         groups={groupsOf(draft.nodes)}
         change={(c, moved) =>
           change((g) => {

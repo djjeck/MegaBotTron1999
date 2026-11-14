@@ -645,6 +645,36 @@ describe('the graph editor', () => {
     expect(core.checked.length).toBe(before);
   });
 
+  it('says where a connector’s secrets come from, and whether each is provided (#10)', async () => {
+    const core = fakeCore();
+    core.file = {
+      ...(core.file as Graph),
+      nodes: (core.file as Graph).nodes.map((n) =>
+        n.id === 'chat' ? { ...n, config: { ...n.config, token: 'token_c' } } : n
+      ),
+    };
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    fireEvent.click(await screen.findByLabelText('node chat · in', {}, slow));
+    const details = await screen.findByLabelText('details of chat');
+    const secrets = await within(details).findByRole('region', { name: 'its secrets' });
+    await waitFor(() => expect(within(secrets).getByText('set')).toBeDefined());
+    const rows = within(secrets)
+      .getAllByRole('listitem')
+      .map((l) => l.textContent);
+    expect(rows[0]).toMatch(/^chat_password set — read by its plugin; a Docker secret$/u);
+    expect(rows[1]).toMatch(
+      /^token_c not provided — named by its config's token; a Docker secret$/u
+    );
+  });
+
+  it('says a secret’s state is not known while the names provided are not read', async () => {
+    fakeCore({ routes: { 'GET /secrets': [500, { error: 'broke' }] } });
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    fireEvent.click(await screen.findByLabelText('node chat · in', {}, slow));
+    const details = await screen.findByLabelText('details of chat');
+    expect(within(details).getByText('(not known yet)')).toBeDefined();
+  });
+
   it('draws a node’s inputs as the check resolves them (#6)', async () => {
     const core = fakeCore();
     const check = core.api.routes['POST /graph/check'] as (b: unknown) => [number, unknown];

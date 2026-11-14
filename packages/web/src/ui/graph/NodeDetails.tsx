@@ -3,7 +3,8 @@
  * editable for the draft, whether it is enabled (D64), its account (a connector's), its config
  * and the settings its instance starts with, in forms made from their schemas, each field with the
  * check's errors; a config key that names a secret (`configSecrets`) is a choice of the secrets'
- * names; a key that names a chat (`configChats`) is picked in the chat picker (D96); a connector's
+ * names, and its secrets say whether each is provided and where from, never their values; a key
+ * that names a chat (`configChats`) is picked in the chat picker (D96); a connector's
  * `chats` (what it monitors) is picked from its surfaces (D63), and once the
  * draft changes them, a reminder names its chat-in edges to update, each opening its panel. Then
  * the interface it declares (P11) and its removal, which keeps its instance. A stopped node (D64)
@@ -291,6 +292,59 @@ function Members(props: { title: string; members: MemberView[] }) {
   );
 }
 
+/**
+ * Where a connector's secrets come from (#10): each secret it reads, by name (those its manifest
+ * declares, and those its config's `configSecrets` keys name), whether it is provided, and its
+ * source, a Docker secret today (§4.9). Never a value: the UI is given only the names provided
+ * (`GET /secrets`); unknown until they are read.
+ */
+function SecretSources(props: {
+  declared: readonly string[];
+  keys: readonly string[];
+  config: Readonly<Record<string, unknown>> | undefined;
+  provided: readonly string[] | undefined;
+}) {
+  const rows: { name: string; why: string }[] = [
+    ...props.declared.map((name) => ({ name, why: 'read by its plugin' })),
+    ...props.keys.flatMap((key) => {
+      const name = props.config?.[key];
+      return typeof name === 'string' && name !== ''
+        ? [{ name, why: `named by its config's ${key}` }]
+        : [];
+    }),
+  ];
+  if (rows.length === 0) return null;
+  return (
+    <section aria-label="its secrets">
+      <h4>Secrets</h4>
+      <ul className="secrets">
+        {rows.map((r) => {
+          const set = props.provided?.includes(r.name);
+          return (
+            <li key={`${r.name} ${r.why}`}>
+              <code>{r.name}</code>{' '}
+              {set === undefined ? (
+                <span className="muted">(not known yet)</span>
+              ) : set ? (
+                <span className="ok">set</span>
+              ) : (
+                <strong className="error">not provided</strong>
+              )}
+              <span className="muted"> — {r.why}; a Docker secret</span>
+            </li>
+          );
+        })}
+      </ul>
+      <small className="muted">
+        Each is a Docker secret: a file of its name in the instance’s secrets directory (
+        <code>/run/secrets</code> in the image). Its value is never shown here. A secret not
+        provided fails the check and the start; it is added with the deployment’s Docker secrets,
+        then a restart.
+      </small>
+    </section>
+  );
+}
+
 /** The script plugin's id (D76): its nodes' config is edited as ports and code. */
 const SCRIPT = 'script';
 
@@ -473,6 +527,8 @@ export function NodeDetails(props: {
   configErrors: Record<string, string[]>;
   settingErrors: Record<string, string[]>;
   secretNames: readonly string[];
+  /** The names of the secrets provided (`GET /secrets`), once read: what its secrets say of them. */
+  provided?: readonly string[] | undefined;
   /** The draft's groups, in their lanes' order (D69). */
   groups: readonly string[];
   /**
@@ -691,9 +747,12 @@ export function NodeDetails(props: {
             }}
           />
         )}
-        {view.secrets.length === 0 ? null : (
-          <p className="muted small">Secrets it reads: {view.secrets.join(', ')}</p>
-        )}
+        <SecretSources
+          declared={view.secrets}
+          keys={view.configSecrets}
+          config={node.config}
+          provided={props.provided}
+        />
       </section>
       <section>
         <h3>Settings</h3>

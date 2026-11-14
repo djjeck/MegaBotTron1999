@@ -243,7 +243,9 @@ describe('GraphPage', () => {
       'chat:me'
     );
     expect(within(chat).getByText('no settings')).toBeDefined();
-    expect(within(chat).getByText('Secrets it reads: chat_password')).toBeDefined();
+    expect(within(chat).getByRole('region', { name: 'its secrets' }).textContent).toContain(
+      'chat_password'
+    );
     expect((within(chat).getByLabelText('host') as HTMLInputElement).value).toBe('example.test');
     // Removing it, from either card, removes both: the confirmation names them.
     const confirm = vi.fn(() => false);

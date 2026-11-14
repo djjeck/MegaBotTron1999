@@ -1310,12 +1310,14 @@ and tells, and a failed plugin's reason, through them, and the entry point its `
 event log. A connector's `ctx.secrets.get(name)` gives only the secrets its manifest declares, and
 those its node's config names in a key of its manifest's `configSecrets` (a connector run as several
 nodes, each with its own credential: `{ "token": "bot_token_b" }`; `secrets.names()` lists the names
-provided, never their values, for the editor's choice); no other kind of plugin has `ctx.secrets`; a
-secret declared or named and not provided, or a value that is no secret's name, fails the load (and
-the graph's check), naming it and its file. `core.secretStore` keeps the core's own secrets (a login
-done later through the UI), each in `/data/core/secrets/<name>.json` of mode 600: AES-256-GCM with a
-random IV and the secret's name as additional data, under a key derived (HKDF-SHA256) from the
-`bot_os_key` Docker secret; without that secret it stores nothing.
+provided, never their values, for the editor's choice); the editor's node panel lists a connector's
+secrets (those it declares and those its config names), each by name, whether it is provided (from
+those names), and where it comes from, a Docker secret, never its value; no other kind of plugin has
+`ctx.secrets`; a secret declared or named and not provided, or a value that is no secret's name,
+fails the load (and the graph's check), naming it and its file. `core.secretStore` keeps the core's
+own secrets (a login done later through the UI), each in `/data/core/secrets/<name>.json` of mode
+600: AES-256-GCM with a random IV and the secret's name as additional data, under a key derived
+(HKDF-SHA256) from the `bot_os_key` Docker secret; without that secret it stores nothing.
 
 **Backups and secrets.** The Docker secrets are not in the data volume: back them up where the
 deployment keeps them. The secrets the core stores itself are in the volume, encrypted: a backup of

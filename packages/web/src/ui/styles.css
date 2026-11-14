@@ -1897,3 +1897,8 @@ ul.warnings {
   outline: 2px solid var(--bad);
   outline-offset: 2px;
 }
+
+/* A connector's secrets (NodeDetails.tsx, #10): provided, or not. */
+.secrets .ok {
+  color: var(--ok);
+}
