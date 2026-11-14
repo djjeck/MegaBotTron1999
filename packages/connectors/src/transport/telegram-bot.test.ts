@@ -214,8 +214,11 @@ describe('TelegramBotConnector', () => {
       time: 0,
       id: expect.any(String) as string,
       playback: false,
+      private: false,
     });
     expect(heard[1]?.sender).toBe('');
+    // User 5's own chat with the bot: private, by its id (D90).
+    expect(heard[1]).toMatchObject({ chat: '5', private: true });
   });
 
   describe('a file (D82)', () => {

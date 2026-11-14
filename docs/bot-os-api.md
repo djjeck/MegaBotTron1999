@@ -848,6 +848,7 @@ interface Inbound {
   network: string; // 'irc', 'telegram', …
   chat: string; // '#lobby', a Telegram chat id or @username
   aliases?: readonly string[]; // the chat's other names (its @username, its id), bot-os.md D90
+  private?: boolean; // a private chat (one user or bot), not a group, where the network says
   sender: string; // a nick, a username
   text: string;
   time: number;
@@ -905,9 +906,11 @@ private chat's `@username`) and gives the others as `aliases`; a chat-in edge's 
 reaction's `chats` and a turn actor's chat match the name or any alias, without case (the core's
 `hears` and `inChat(m, chat)`). `telegram-user` learns each chat's names from its dialogs (and a
 private chat's from its first message), so it monitors, catches up on and sends to a chat its config
-names either way; `telegram-bot` from the chats it has seen since it started. Each offers
-`chatNames(chat)`: every name it knows the chat by, `chat` among them, or undefined for one it never
-saw, which the graph's check asks (§2.3).
+names either way; `telegram-bot` from the chats it has seen since it started. Since a private chat
+may so be delivered under its id, both say whether a chat is private (`private`, as Telegram tells
+it): read that, not whether the name starts with `@`. Each offers `chatNames(chat)`: every name it
+knows the chat by, `chat` among them, or undefined for one it never saw, which the graph's check
+asks (§2.3).
 
 The connector itself also implements `send(chat, text)`, and, for a network whose sends answer later
 (Telegram), `deliver(chat, text)`, which resolves with the message's id; only the outbox calls them:
@@ -1638,20 +1641,22 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   bare or addressed to its bot, sent by hand from any device; and those its actor sends, told
   through its action `sent`, since the account never sees its own sends come back), and which of its
   bot's messages answer one: a reply to it or, in the private chat, the first message within two
-  minutes of it. What it reads it publishes as `<id>.turn` (`{ chat, outcome, playback? }`,
-  `playback: true` for a message played back, D83); a message it claims and cannot read goes to
-  drift (§4.7) and is published as an `unknown` outcome. Its read `rest` says until when the bot
-  rests, from its last answer. It resumes from what it parsed (D62): the owner's recent turns and
-  its bot's rest are kept in its store (`parsed`) as they change and read back at its start; it
-  never re-reads the chat, and reads missed messages as any other. Its game gives it a spec
-  (`TurnParserSpec`): its `id`, its `bot`, its `description`, its grammar (`read`, given each of its
-  bot's messages as a `BotMessage`: `text`, `private`, `answers`, `replies`, `self`, and `document`,
-  the file it carries with its text when it has one, such as the bot's export of the player's state,
-  beside the caption in `text`, D82) and its `turnCommands`, the bot's turn commands by first word
-  (`["/play"]`, at least one): which commands are turns is a fact of the game, so it has no config
-  (bot-os.md D70). A node saved while it had one (`"config": { "commands": [...] }`) still loads and
-  runs: a plugin with no config schema ignores its node's config, which the file keeps as written
-  until the owner takes it out. The tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
+  minutes of it (a chat is private as its connector says, `Inbound.private`, so that one configured
+  by id counts; from a connector that does not say, a chat named by `@username`). What it reads it
+  publishes as `<id>.turn` (`{ chat, outcome, playback? }`, `playback: true` for a message played
+  back, D83); a message it claims and cannot read goes to drift (§4.7) and is published as an
+  `unknown` outcome. Its read `rest` says until when the bot rests, from its last answer. It resumes
+  from what it parsed (D62): the owner's recent turns and its bot's rest are kept in its store
+  (`parsed`) as they change and read back at its start; it never re-reads the chat, and reads missed
+  messages as any other. Its game gives it a spec (`TurnParserSpec`): its `id`, its `bot`, its
+  `description`, its grammar (`read`, given each of its bot's messages as a `BotMessage`: `text`,
+  `private`, `answers`, `replies`, `self`, and `document`, the file it carries with its text when it
+  has one, such as the bot's export of the player's state, beside the caption in `text`, D82) and
+  its `turnCommands`, the bot's turn commands by first word (`["/play"]`, at least one): which
+  commands are turns is a fact of the game, so it has no config (bot-os.md D70). A node saved while
+  it had one (`"config": { "commands": [...] }`) still loads and runs: a plugin with no config
+  schema ignores its node's config, which the file keeps as written until the owner takes it out.
+  The tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
 - **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
   (P3, P17), each with its own id, configuration, store, timer and state. Its ports: `chat`, a
   chat-in input on `telegram`, which reads the private chat with its bot (for the turns the owner

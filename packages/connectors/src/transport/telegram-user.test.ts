@@ -223,7 +223,8 @@ describe('TelegramUserConnector', () => {
         playback: false,
         own: true,
       },
-      expect.objectContaining({ chat: '@Quiz_bot', id: '5', sender: 'quiz_bot' }),
+      // A private chat, as the network says (D90): its name may be an id.
+      expect.objectContaining({ chat: '@Quiz_bot', id: '5', sender: 'quiz_bot', private: true }),
     ]);
   });
 
@@ -390,6 +391,7 @@ describe('every chat, and the surfaces', () => {
     );
     await f.deliver(raw({ id: 3, chatId: { toString: () => '778' }, isPrivate: true }));
     expect(messages.map((m) => m.chat)).toEqual(['-100999', '@x_bot', '778']);
+    expect(messages.map((m) => m.private)).toEqual([undefined, true, true]);
     await expect(c.deliver('778', 'hi')).resolves.toEqual({ id: '99' });
     await expect(c.deliver('778', 'again')).resolves.toEqual({ id: '99' });
     expect(f.calls.filter((x) => x.startsWith('entity'))).toEqual(['entity 778']);

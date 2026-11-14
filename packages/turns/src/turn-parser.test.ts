@@ -13,11 +13,18 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runParser as run, T0 } from '#test/parser-run.ts';
 import { QUEST, QUESTBOT, questPlugin } from '#test/quest.ts';
-import { type BotMessage, isTurnCommand, PARSED_DOC, turnParserPlugin } from './turn-parser.ts';
+import {
+  type BotMessage,
+  isPrivate,
+  isTurnCommand,
+  PARSED_DOC,
+  turnParserPlugin,
+} from './turn-parser.ts';
 
 const GROUP = '-1001000000001';
 const MIN = 60_000;
 const PRIVATE = `@${QUESTBOT}`;
+const PRIVATE_ID = '1000000001';
 const bot = { sender: QUESTBOT };
 const own = { sender: 'alice', own: true };
 
@@ -28,6 +35,15 @@ describe('isTurnCommand', () => {
     expect(isTurnCommand('/quest@OtherBot', ['/quest'], 'QuestBot')).toBe(false);
     expect(isTurnCommand('/lore', ['/quest'], 'QuestBot')).toBe(false);
     expect(isTurnCommand('/quest now', ['/quest'], 'QuestBot')).toBe(false);
+  });
+});
+
+describe('isPrivate', () => {
+  it("takes the connector's word, else a `@username`'s shape", () => {
+    expect(isPrivate({ chat: PRIVATE_ID, private: true })).toBe(true);
+    expect(isPrivate({ chat: '@PublicGroup', private: false })).toBe(false);
+    expect(isPrivate({ chat: PRIVATE })).toBe(true);
+    expect(isPrivate({ chat: GROUP })).toBe(false);
   });
 });
 
@@ -155,6 +171,31 @@ describe('a turn parser', () => {
       outcome: { kind: 'unknown', bot: QUESTBOT, text: 'Level 5!' },
     });
     expect(p.drift()).toMatchObject({ read: 0, unread: 1 });
+  });
+
+  it('knows a private chat named by id by what its connector says, not by its name (D90)', async () => {
+    const seen: boolean[] = [];
+    // The picker keeps the bot's private chat by its id: the edge reads it so.
+    const p = await run(questPlugin(), {}, PRIVATE_ID);
+    const inPrivate = { chat: PRIVATE_ID, aliases: [PRIVATE], private: true };
+    p.hear({ ...own, ...inPrivate, text: '/play' });
+    // No reply-to: only a private chat's window matches it to the turn.
+    p.hear({ ...bot, ...inPrivate, text: 'Found an apple.' });
+    expect(p.outcomes()).toEqual(['gain']);
+    // A public group named by `@username` is a group all the same.
+    const spy = turnParserPlugin({
+      id: QUEST,
+      bot: QUESTBOT,
+      description: 'x',
+      turnCommands: ['/play'],
+      read: (m) => (seen.push(m.private), undefined),
+    });
+    const q = await run(spy, {}, '@PublicGroup');
+    q.hear({ ...bot, chat: '@PublicGroup', private: false, text: 'Hi' });
+    q.hear({ ...bot, ...inPrivate, chat: PRIVATE, aliases: [PRIVATE_ID], text: 'Hi' });
+    // A connector that does not say: a `@username` is a private chat.
+    q.hear({ ...bot, chat: PRIVATE, text: 'Hi' });
+    expect(seen).toEqual([false, true, true]);
   });
 
   it('in private, reads a reply to a turn it does not know, and keeps the longest rest', async () => {

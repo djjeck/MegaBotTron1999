@@ -202,7 +202,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
           keep();
           return true;
         }
-        if (!m.chat.startsWith('@')) return false;
+        if (!isPrivate(m)) return false;
         const turn = turns.findLast((x) => x.chat === m.chat);
         if (turn === undefined || turn.answered || m.time - turn.t > ANSWER_WINDOW_MS) return false;
         turn.answered = true;
@@ -218,7 +218,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
         if (m.sender.toLowerCase() !== spec.bot.toLowerCase()) return;
         const reading = spec.read({
           text: m.text,
-          private: m.chat.startsWith('@'),
+          private: isPrivate(m),
           answers: answered(m),
           replies: m.replyTo !== undefined,
           self: handle.self(),
@@ -263,6 +263,15 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       return { interface: iface };
     },
   });
+}
+
+/**
+ * Whether `m` is in a private chat: as its connector says (`Inbound.private`), since a private
+ * chat configured by id (as the chat picker keeps it) is delivered under its id (bot-os.md D90);
+ * else, from a connector that does not say, by its name, a private chat's being a `@username`.
+ */
+export function isPrivate(m: Pick<Inbound, 'chat' | 'private'>): boolean {
+  return m.private ?? m.chat.startsWith('@');
 }
 
 /** Why the bot rests, in the owner's words. */

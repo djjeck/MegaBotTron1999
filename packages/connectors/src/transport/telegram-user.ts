@@ -717,6 +717,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     return {
       chat,
       ...(aliases.length === 0 ? {} : { aliases }),
+      ...(m.isPrivate === undefined ? {} : { private: m.isPrivate }),
       sender: sender ?? '',
       text: m.message,
       time: m.date * 1000,

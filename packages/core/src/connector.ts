@@ -120,6 +120,12 @@ export interface Inbound {
    * D90): a chat-in edge that reads any of them hears it (`hears`).
    */
   aliases?: readonly string[];
+  /**
+   * Whether the chat is private (with one user or one bot), not a group or a channel, where the
+   * network says (both Telegram connectors): read this, not the shape of `chat`'s name, which may
+   * be an id either way (D90). Undefined where the connector does not tell.
+   */
+  private?: boolean;
   /** Who: a nick, a username. */
   sender: string;
   text: string;
