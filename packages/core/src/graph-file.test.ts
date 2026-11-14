@@ -56,7 +56,7 @@ const good: GraphInput = {
 };
 
 /** The good graph as version 1 wrote it: one chat edge for the reads and the sends. */
-const legacy = {
+const versionOne = {
   ...good,
   version: 1,
   edges: [
@@ -536,8 +536,8 @@ describe('a graph file of version 1', () => {
   afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r())));
 
   it('runs converted, is shown and saved as version 2, and rolls back as version 2', async () => {
-    write('graph.json', legacy);
-    write('graph.previous.json', legacy);
+    write('graph.json', versionOne);
+    write('graph.previous.json', versionOne);
     // Written a day before, each version is kept at its file's time.
     const before = new Date(clock.now() - 86_400_000);
     fs.utimesSync(path.join(dir, 'graph.previous.json'), before, before);
@@ -579,12 +579,12 @@ describe('a graph file of version 1', () => {
     });
     expect(JSON.parse(fs.readFileSync(file.file, 'utf8'))).toMatchObject({ version: 1 });
     // Checked against the saved file, both converted: nothing changes.
-    expect(await call('/graph/check', 'POST', legacy)).toMatchObject({
+    expect(await call('/graph/check', 'POST', versionOne)).toMatchObject({
       ok: true,
       diff: { edges: { added: [], removed: [], changed: [] } },
     });
     // Saved, as version 2: the same graph, so it is no new version.
-    expect(await call('/graph/file', 'PUT', legacy)).toEqual({ saved: true, restart: false });
+    expect(await call('/graph/file', 'PUT', versionOne)).toEqual({ saved: true, restart: false });
     expect(JSON.parse(fs.readFileSync(file.file, 'utf8'))).toMatchObject({
       version: 2,
       edges: converted,

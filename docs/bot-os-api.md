@@ -1,6 +1,6 @@
 # MegaBotTron1999: the plugin API
 
-Documented as of 12 Nov 2026. The plugin model of MegaBotTron1999 ([bot-os.md](bot-os.md)): what a
+Documented as of 13 Nov 2026. The plugin model of MegaBotTron1999 ([bot-os.md](bot-os.md)): what a
 plugin declares, how the core runs it, what it is given, and the shell's own plugins. The API stays
 open until launch (P13): this document changes with it, in the same commit as the code.
 
@@ -784,9 +784,9 @@ wake.
   it reads nothing. **By instance:** it reads its own instance's records of its own namespaces, and,
   of a namespace an events input consumes, those of the instances its edges bind, as the bus would
   have delivered them; so two instances of one plugin (a turn-actor per bot) never read each
-  other's. `all: true` reads every instance's. A record with no `instance` (imported from an older
-  log, §8, or written before records carried one) belongs to no instance, and every reader of its
-  namespace reads it.
+  other's. `all: true` reads every instance's. A record with no `instance` (the core's own, or one
+  written before records carried one) belongs to no instance, and every reader of its namespace
+  reads it.
 
 **A cursor into the log** (bot-os.md D72), for a reader that resumes where it left the log (the
 state plugins, §5). A record goes to the file of its own time's UTC day, so one of an old time (a
@@ -1218,11 +1218,10 @@ keeps none, 409 for one not running); `POST /plugins/<id>/actions/<name>`, the b
 input (400 for an input refused by its schema, 409 for the plugin's refusal); `GET /instances`
 (§2.2); `GET /graph/file`, `POST /graph/check`, `PUT /graph/file`, `GET /graph/history`,
 `GET /graph/history/<id>`, `POST /graph/history/<id>/rollback`, `POST /graph/rollback` and
-`POST /restart` (§2.3); `GET /legacy`, `GET /legacy/events`, `POST /instances/import` and
-`POST /legacy/events/import` (§8); `GET /available`, `GET /modules`, `POST /modules`,
-`POST /modules/plan`, `POST /modules/github`, `POST /modules/updates`, `POST /modules/<id>/rollback`
-and `DELETE /modules/<id>` (§7.4); `GET /secrets`, the names of the Docker secrets provided, never
-their values, for a connector's config to name (§4.9; the wiring leaves out `web_ui_password`,
+`POST /restart` (§2.3); `GET /available`, `GET /modules`, `POST /modules`, `POST /modules/plan`,
+`POST /modules/github`, `POST /modules/updates`, `POST /modules/<id>/rollback` and
+`DELETE /modules/<id>` (§7.4); `GET /secrets`, the names of the Docker secrets provided, never their
+values, for a connector's config to name (§4.9; the wiring leaves out `web_ui_password`,
 `bot_os_key` and `github_token`, the shell's own). Ids and names in a path may be URL-encoded. The
 control API is the owner's alone: no agent is ever given it (P11), so no agent installs a module
 (P1).
@@ -2140,50 +2139,3 @@ D60, `v0.1.0-alpha.7`) changes no module's plugins (§7.2), but a module's own c
 write a graph typed as `GraphInput` change it to `version: 2`, each `chat` edge as a `chat-in` edge
 (its `reads`) and a `chat-out` edge from the plugin to the connector's `chat` (its `sends`,
 `commands`); untyped, a version 1 graph still loads, converted.
-
-## 8. Importing from an older MegaBotTron1999 data directory
-
-An instance from before the graph lived in the volume kept its state by plugin, not by instance. Its
-data directory, mounted read-only into the new container (`LEGACY_DIR`, `/legacy` by default), can
-be imported from, one store at a time and its event log (bot-os.md D54). Nothing writes to it. As
-built: `packages/core/src/legacy.ts` (`LegacyImport`).
-
-**The older layout:**
-
-| Path                    | What it holds                                                                                                                                 |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plugins/<id>/`         | A plugin's store, by its plugin's id: documents `<name>.json`, and the core's `_meta.json`, `_timers.json`, `_settings.json`, `_restore.json` |
-| `plugins/core/`         | The core's own: `modes.json` (every plugin's mode), `power.json` (the off switch), `secrets/`                                                 |
-| `events-<day>.jsonl`    | The event log, a file per UTC day, one JSON record per line; records of before types were namespaced have plain types (`message`)             |
-| other files at the root | What an older entry point kept itself; not imported                                                                                           |
-
-**The control API** (§4.11), the owner's alone; each says so (404) when no directory is mounted:
-
-- `GET /legacy`: what it offers: each store (`plugins/<id>/` but the core's) with its documents, its
-  schema `version`, its `timers`, whether it keeps `settings`, and the `mode` it had; and its event
-  log's days (`days`, `first`, `last`).
-- `POST /instances/import {"from": "<store>", "instance"?: "<id>", "plugin"?: "<id>"}`: copies the
-  store's JSON documents, the core's beside them, into a fresh instance (`instances/<instance>/`,
-  `from` by default), of a plugin the instance offers (`from` by default), which a node then names
-  (§2.2). Its version comes with it, so its plugin's migrations run from there; its timers and
-  settings come too; its mode does not: whether its node sends for real is its chat-out edges'
-  (bot-os.md D64), and the mode it had is only reported. 409 for an instance kept already, 400 for
-  an unknown plugin. An instance no node uses is deleted after 7 days, as any.
-- `GET /legacy/events`: the types of its event log that are not namespaced (those an import would
-  skip), each with how many records have it and the event types registered here whose name after the
-  namespace is it (`suggest`: `message` → `dice.message`, where a plugin registers `dice.message`),
-  for the owner's table of renames: one suggestion is the rename to give, several a choice, none a
-  name to type. Nothing is guessed beyond that.
-- `POST /legacy/events/import {"types"?: {"<old>": "<ns>.<name>"}, "since"?: <ms>}`: merges its
-  event log into this instance's, day by day, from the day of `since`: each record once (a record
-  there already is not added again, so the import may be run again), its type renamed by `types`,
-  each day's file rewritten in time order. A record whose type is still not namespaced is left out
-  and counted by its old type (`skipped`), for the owner to give its name and import again. It
-  answers the `days` read, the records `imported`, those `present` already, and those `skipped`. The
-  records imported carry no `instance` (§4.4): every reader of their namespace reads them.
-
-From the host: mount the older volume read-only (`-v old-data:/legacy:ro`), `GET /legacy`, import
-each store a node will use and the event log, save the graph that names those instances
-(`PUT /graph/file`), and restart (`POST /restart`). In the web UI: a store is imported as the
-instance of a node as the node is added in the graph editor, and the event log from the Import page,
-its table of renames started from `GET /legacy/events`.

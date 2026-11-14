@@ -37,14 +37,6 @@
  * - `POST /graph/history/<id>/rollback`: that version written as the current graph, kept as a new
  *   version that names it (404 for none, 409 when it is the current graph already).
  * - `POST /graph/rollback`: the version before the current one back, as above (409 when none).
- * - `GET /legacy`: what an older data directory mounted read-only offers to import (§8): its
- *   stores, and its event log's days; 404 when none is mounted.
- * - `GET /legacy/events`: its event log's types that are not namespaced, counted, each with the
- *   types registered here it may be renamed to.
- * - `POST /instances/import {"from": "<store>", "instance"?: "<id>", "plugin"?: "<id>"}`: a store
- *   of it copied into a fresh instance; 409 for an instance kept already.
- * - `POST /legacy/events/import {"types"?: {"old": "ns.new"}, "since"?: <ms>}`: its event log
- *   merged into this instance's.
  * - `POST /restart`: the instance stops, its state kept, and exits to be started again: how a
  *   saved graph, or a module installed, takes effect.
  * - `POST /plugins/<id>/kill`: that node's kill (D44): its own safety stop, then stopped (D64),
@@ -96,7 +88,6 @@ import { type Graph } from './graph.ts';
 import { type GraphFileControls, GraphFileError } from './graph-file.ts';
 import { describeNodes } from './graph-view.ts';
 import { type InstanceInfo } from './instance-registry.ts';
-import { LegacyError } from './legacy.ts';
 import { type TreeListing } from './module-files.ts';
 import { GitHubError, type GitHubPick } from './module-github.ts';
 import { type ModuleFile, ModuleInUse, type ModuleSource } from './module-store.ts';
@@ -200,14 +191,6 @@ function treeListing(b: unknown): TreeListing {
   return { paths: paths as string[], manifests: manifests as Record<string, string> };
 }
 
-/** The import from an older data directory (legacy.ts), as the wiring offers it. */
-export interface LegacyControls {
-  report(): unknown;
-  eventTypes(): unknown;
-  importStore(request: unknown): unknown;
-  importEvents(request: unknown): unknown;
-}
-
 /** The owner's changes to the modules (module-store.ts), as the wiring offers them. */
 export interface ModuleControls {
   report(): unknown;
@@ -257,8 +240,6 @@ export interface ControlOptions {
   instances?: () => InstanceInfo[];
   /** The saved graph's file: read, checked, saved, rolled back (§2.3). */
   graphFile?: GraphFileControls;
-  /** An older data directory's stores and event log, imported (§8). */
-  legacy?: LegacyControls;
   /**
    * Applies the saved graph: the instance stops, its state kept, and exits for its supervisor
    * (Docker's `restart: unless-stopped`) to start it again. Called once the answer has gone.
@@ -328,23 +309,6 @@ export function controlHandler(
             return reply(200, gf.rollbackTo(id, actorOf(req)));
         } catch (e) {
           if (e instanceof GraphFileError) return reply(e.status ?? 409, { error: e.message });
-          throw e;
-        }
-      }
-      const legacy = o.legacy;
-      const imports: Record<string, ((b: unknown) => unknown) | undefined> = {
-        'GET /legacy': legacy === undefined ? undefined : () => legacy.report(),
-        'GET /legacy/events': legacy === undefined ? undefined : () => legacy.eventTypes(),
-        'POST /instances/import': legacy === undefined ? undefined : (b) => legacy.importStore(b),
-        'POST /legacy/events/import':
-          legacy === undefined ? undefined : (b) => legacy.importEvents(b),
-      };
-      const run = imports[`${post ? 'POST' : (req.method ?? 'GET')} ${route}`];
-      if (run !== undefined) {
-        try {
-          return reply(200, run(post ? await body(req) : undefined));
-        } catch (e) {
-          if (e instanceof LegacyError) return reply(e.status, { error: e.message });
           throw e;
         }
       }

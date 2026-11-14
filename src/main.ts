@@ -23,8 +23,6 @@ import {
   GraphFile,
   graphFileControls,
   KEY_SECRET,
-  LEGACY_DIR,
-  LegacyImport,
   loadModules,
   moduleControls,
   ModuleStore,
@@ -157,14 +155,6 @@ const controlApi = controlHandler({
   instances: () => core.instances(),
   graphFile: graphFileControls(graphFile, core, (v) => secrets.redactDeep(v)),
   restart: () => void end('restart'),
-  // An older MegaBotTron1999 data directory, mounted read-only, to import from (§8).
-  legacy: new LegacyImport({
-    dir: env['LEGACY_DIR'] || LEGACY_DIR,
-    dataDir,
-    now: () => clock.now(),
-    plugins: () => core.available().map((p) => p.id),
-    eventTypes: () => core.available().flatMap((p) => p.events),
-  }),
   // A module is removed only while no node of the saved graph uses its plugins (D68).
   modules: moduleControls(modules, loaded, githubModules, () => graphFile.nodes()),
 });

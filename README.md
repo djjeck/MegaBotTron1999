@@ -63,9 +63,8 @@ version or older; check those to install, install them, then click **Apply (rest
 A module's tests are left out. One installed from GitHub shows its commit, and the page says when
 its branch has a newer one (checked every 6 hours, or with **Check for updates**); **Update**
 installs it. Nothing is installed or restarted but by you. The Modules page also installs a
-`.tar.gz` and rolls a module back to its previous version; the Import page brings in an older data
-directory's event log ([docs/bot-os.md](docs/bot-os.md) D55); the Admin page shows the instance
-(with its off and kill switches), the graph's history (each version applied in the last 7 days, what
+`.tar.gz` and rolls a module back to its previous version; the Admin page shows the instance (with
+its off and kill switches), the graph's history (each version applied in the last 7 days, what
 changed, whether the instance started on it, and a rollback to it) and the graph as text, its
 accounts and their connections, and its plugins with their states (D59, D61, D64). A **script** node
 runs TypeScript typed in its panel, on the ports its panel declares, each in a worker thread of its
@@ -87,9 +86,6 @@ rather than publishing the port.
   (a GitHub token, to raise the API's limit of 60 requests an hour for installing and updating
   modules from GitHub links; `GITHUB_TOKEN` in the environment is read too, though the secret is the
   safer place).
-- **An older data directory** (a deployment of before v1) can be mounted read-only at `/legacy`
-  (`LEGACY_DIR`) to import its plugins' stores and its event log through the control API
-  ([docs/bot-os-api.md](docs/bot-os-api.md) §8).
 - **Ports:** 8082 is the web UI. The control API listens on the container's loopback (8081) only.
 - The container runs as the `node` user, from `/app`, with `node src/main.ts`.
 

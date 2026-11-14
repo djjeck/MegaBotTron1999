@@ -6,8 +6,8 @@
  * each node its state (D64) and drift (`GET /status`, `GET /drift`).
  *
  * - **Add a node** from the plugins the instance offers (`GET /available`), choosing its id and its
- *   instance: fresh, kept already, or imported from an older data directory. It starts disabled,
- *   for the owner to set it up first (D64), and selected, its panel open on it.
+ *   instance: fresh, or kept already. It starts disabled, for the owner to set it up first (D64),
+ *   and selected, its panel open on it.
  * - **Wire it**: an edge dragged from an output to an input; a chat-in edge's chats, or a chat-out
  *   edge's chats and commands, set in its panel; a new chat-out edge is a dry run until the owner
  *   sends for real (D64). Every change is checked by the core as the load would

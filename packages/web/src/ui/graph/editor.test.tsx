@@ -127,7 +127,7 @@ describe('the graph editor', () => {
     expect(core.checked.at(-1)?.nodes[0]?.config?.['host']).toBe('example.test.example');
   }, 20_000);
 
-  it('adds a node on an instance kept, or imported from an older directory, and says what it cannot', async () => {
+  it('adds a node on an instance kept, or a fresh one, and says what it cannot', async () => {
     const core = fakeCore({
       instances: [
         { id: 'actor-a', plugin: 'actor', created: 1, referenced: 2, node: 'actor-a', used: true },
@@ -140,21 +140,6 @@ describe('the graph editor', () => {
         },
         { id: 'tally', plugin: 'other', created: 1, used: false },
       ],
-      legacy: {
-        dir: '/legacy',
-        stores: [
-          {
-            id: 'actor',
-            documents: ['state'],
-            version: 2,
-            timers: ['turn'],
-            settings: true,
-            mode: 'live',
-          },
-          { id: 'misc', documents: [], version: 0, timers: [], settings: false },
-        ],
-        events: { days: 0 },
-      },
     });
     render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
     await screen.findByLabelText('node actor-a', {}, slow);
@@ -200,52 +185,35 @@ describe('the graph editor', () => {
         disabled: true,
       })
     );
-    // Imported: the stores of its plugin's id, or all of them.
+    // A fresh one, named as the node by default.
     fireEvent.click(screen.getByRole('button', { name: 'Add a node' }));
     fireEvent.click(
       within(await screen.findByLabelText('plugins')).getByRole('button', { name: /^actor/u })
     );
     const again = await screen.findByLabelText('add actor');
-    fireEvent.click(within(again).getByRole('radio', { name: /Imported/u }));
-    const store = (await within(again).findByLabelText('store')) as HTMLSelectElement;
-    expect([...store.options].map((o) => o.value)).toEqual(['actor']);
-    expect(store.options[0]?.textContent).toBe(
-      'actor: 1 documents, version 2, timers turn, was live'
+    expect((within(again).getByLabelText('fresh instance') as HTMLInputElement).value).toBe(
+      'actor'
     );
-    fireEvent.click(within(again).getByRole('checkbox'));
-    fireEvent.change(within(again).getByLabelText('store'), { target: { value: 'misc' } });
-    expect((within(again).getByLabelText('imported instance') as HTMLInputElement).value).toBe(
-      'misc'
-    );
-    fireEvent.change(within(again).getByLabelText('imported instance'), {
-      target: { value: 'actor-old' },
-    });
     fireEvent.click(within(again).getByRole('button', { name: 'Add actor' }));
     await screen.findByLabelText('node actor', {}, slow);
     // The new node takes the selection from the one before, and its panel.
     expect(await screen.findByLabelText('details of actor')).toBeDefined();
     expect(screen.getByLabelText('node actor').className).toContain('selected');
     expect(screen.getByLabelText('node actor-b').className).not.toContain('selected');
-    expect(core.api.calls).toContain(
-      'POST /instances/import {"from":"misc","instance":"actor-old","plugin":"actor"}'
+    await waitFor(() =>
+      // Its instance named as it, so left out.
+      expect(core.checked.at(-1)?.nodes.at(-1)).toEqual({
+        id: 'actor',
+        plugin: 'actor',
+        disabled: true,
+      })
     );
-    // An import the core refuses says why; cancelled, back to the plugins.
-    core.api.routes['POST /instances/import'] = [
-      409,
-      { error: 'the instance actor-old exists already' },
-    ];
+    // Cancelled, back to the plugins.
     fireEvent.click(screen.getByRole('button', { name: 'Add a node' }));
     fireEvent.click(
       within(await screen.findByLabelText('plugins')).getByRole('button', { name: /^actor/u })
     );
     const third = await screen.findByLabelText('add actor');
-    fireEvent.click(within(third).getByRole('radio', { name: /Imported/u }));
-    await within(third).findByLabelText('store');
-    fireEvent.click(within(third).getByRole('button', { name: 'Add actor-2' }));
-    expect(await within(third).findByRole('alert')).toHaveProperty(
-      'textContent',
-      'the instance actor-old exists already'
-    );
     fireEvent.click(within(third).getByRole('button', { name: 'Cancel' }));
     expect(await screen.findByLabelText('plugins')).toBeDefined();
     fireEvent.click(
@@ -254,8 +222,8 @@ describe('the graph editor', () => {
     expect(screen.queryByLabelText('plugins')).toBeNull();
   }, 20_000);
 
-  it('says when no older directory is mounted, or a plugin has no instance kept', async () => {
-    fakeCore({ routes: { 'GET /legacy': [500, { error: 'the disk is gone' }] } });
+  it('says when a plugin has no instance kept', async () => {
+    fakeCore();
     render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
     await screen.findByLabelText('node actor-a', {}, slow);
     fireEvent.click(screen.getByRole('button', { name: 'Add a node' }));
@@ -266,22 +234,6 @@ describe('the graph editor', () => {
     expect(
       (within(add).getByRole('radio', { name: /One kept of parser/u }) as HTMLInputElement).disabled
     ).toBe(true);
-    fireEvent.click(within(add).getByRole('radio', { name: /Imported/u }));
-    expect(await within(add).findByText('the disk is gone')).toBeDefined();
-    expect(within(add).getByText('no store to import')).toBeDefined();
-    cleanup();
-    fakeCore();
-    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
-    await screen.findByLabelText('node actor-a', {}, slow);
-    fireEvent.click(screen.getByRole('button', { name: 'Add a node' }));
-    fireEvent.click(
-      within(await screen.findByLabelText('plugins')).getByRole('button', { name: /^parser/u })
-    );
-    const other = await screen.findByLabelText('add parser');
-    fireEvent.click(within(other).getByRole('radio', { name: /Imported/u }));
-    expect(
-      await within(other).findByText('No older data directory is mounted (LEGACY_DIR).')
-    ).toBeDefined();
   });
 
   it('marks what the check refuses where it is, and edits a node and an edge', async () => {

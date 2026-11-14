@@ -1563,7 +1563,7 @@ export class Core {
     }
     // Whose records of each namespace it reads: its own instance's, and those of the nodes its
     // events inputs bind (their instances), as the bus delivers them; with `all`, every instance's.
-    // A record with no instance (imported from an older log, D54) is everyone's.
+    // A record with no instance (written before records carried one) is everyone's.
     const sources = sourcesOf(node);
     const writers = (ns: string): Set<string> =>
       new Set([

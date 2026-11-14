@@ -1,8 +1,8 @@
 /**
  * The web UI (docs/bot-os.md P16, D43, D55): the owner's login, then the graph editor, the home
- * page and the main UI, beside the modules, the import from an older data directory, the admin
- * page (D59: the instance, its accounts and its plugins), drift and events; the other pages'
- * features move into the editor over time. The whole app is the owner's console, in one menu.
+ * page and the main UI, beside the modules, the admin page (D59: the instance, its accounts and its
+ * plugins), drift and events; the other pages' features move into the editor over time. The whole
+ * app is the owner's console, in one menu.
  *
  * Its shell: a top bar whose tabs are the pages (the tab selected is the page's title), the page
  * between, which alone scrolls, and a bottom bar for small print, such as diagnostics. The bars
@@ -20,7 +20,6 @@ import { Login } from './Login.tsx';
 import { ADMIN_SECTIONS, AdminPage } from './pages/AdminPage.tsx';
 import { DriftPage } from './pages/DriftPage.tsx';
 import { EventsPage } from './pages/EventsPage.tsx';
-import { ImportPage } from './pages/ImportPage.tsx';
 import { ModulesPage } from './pages/ModulesPage.tsx';
 
 /**
@@ -53,7 +52,6 @@ export const NOTICE_MS = 30_000;
 export const PAGES: Page[] = [
   { route: 'graph', title: 'Graph', wide: true, fill: true, page: (p) => <GraphPage {...p} /> },
   { route: 'modules', title: 'Modules', wide: true, page: (p) => <ModulesPage {...p} /> },
-  { route: 'import', title: 'Import', wide: true, page: (p) => <ImportPage {...p} /> },
   { route: 'admin', title: 'Admin', wide: false, page: (p) => <AdminPage {...p} /> },
   { route: 'drift', title: 'Drift', wide: false, page: (p) => <DriftPage {...p} /> },
   { route: 'events', title: 'Events', wide: false, page: (p) => <EventsPage {...p} /> },

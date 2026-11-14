@@ -63,7 +63,6 @@ describe('App', () => {
       ...GRAPH(),
       'GET /session': [200, { authenticated: true }],
       'GET /modules': [200, { installed: [], failures: [], restart: false }],
-      'GET /legacy/events': [200, { types: {} }],
       'GET /instance': [200, HEALTH],
       'GET /accounts': [200, []],
       'GET /drift': [200, []],
@@ -79,7 +78,7 @@ describe('App', () => {
       within(screen.getByRole('navigation', { name: 'main' }))
         .getAllByRole('link')
         .map((l) => l.textContent)
-    ).toEqual(['Graph', 'Modules', 'Import', 'Admin', 'Drift', 'Events']);
+    ).toEqual(['Graph', 'Modules', 'Admin', 'Drift', 'Events']);
     // The bottom bar, for small print, stays on every page.
     expect(screen.getByRole('contentinfo')).toBeDefined();
     for (const page of PAGES) {

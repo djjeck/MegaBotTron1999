@@ -157,8 +157,8 @@ export interface EventQuery {
   until?: number;
   /**
    * Every instance's records: without it, only its own instance's records of its own namespaces,
-   * and those of the nodes its events inputs bind (records with no instance, imported from an
-   * older log, always).
+   * and those of the nodes its events inputs bind (records with no instance, written before records
+   * carried one, always).
    */
   all?: boolean;
 }

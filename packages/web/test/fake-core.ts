@@ -1,7 +1,7 @@
 /**
  * A fake of the core's control API for the graph editor's tests (`test/fake-api.ts` underneath):
  * the saved graph file, a check that refuses what `refuse` says (and prints the draft: its node ids,
- * a line each), a save, the instances kept, the secrets' names, an older data directory, and a restart, after
+ * a line each), a save, the instances kept, the secrets' names, and a restart, after
  * which a new process answers, the session kept. Synthetic: made-up plugins (`test/graph-view.ts`).
  */
 import {
@@ -9,7 +9,6 @@ import {
   type Graph,
   type GraphProblem,
   type InstanceInfo,
-  type LegacyReport,
   type Status,
 } from '#src/ui/api.ts';
 import { type Answer, type FakeApi, fakeApi } from './fake-api.ts';
@@ -39,7 +38,6 @@ export function fakeCore(
     refuse?: (g: Graph) => GraphProblem[];
     available?: AvailablePlugin[];
     instances?: InstanceInfo[];
-    legacy?: LegacyReport;
     status?: Status;
     routes?: Record<string, Answer>;
   } = {}
@@ -106,17 +104,6 @@ export function fakeCore(
       core.file = g;
       return [200, { saved: true, restart: !same(g, core.running) }];
     },
-    'POST /instances/import': (body) => {
-      const b = body as { from: string; instance: string; plugin: string };
-      if (instances.some((i) => i.id === b.instance))
-        return [409, { error: `the instance ${b.instance} exists already` }];
-      instances.push({ id: b.instance, plugin: b.plugin, created: 1, referenced: 1, used: false });
-      return [200, { instance: b.instance, plugin: b.plugin, documents: ['state'] }];
-    },
-    'GET /legacy':
-      o.legacy === undefined
-        ? [404, { error: 'no older data directory is mounted at /legacy' }]
-        : [200, o.legacy],
     'POST /restart': () => {
       core.restarted = true;
       return [200, { restarting: true }];

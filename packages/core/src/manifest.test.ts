@@ -121,11 +121,11 @@ describe('parseManifest', () => {
       said: { type: 'chat-out', optional: false, bind: { node: 'irc', sends: ['#a'] } },
       old: { type: 'chat-out', network: 'irc', optional: true },
     });
-    const legacy = parseManifest({
+    const oldChat = parseManifest({
       ...base,
       inputs: { old: { type: 'chat', bind: { node: 'irc', reads: [], sends: ['#b'] } } },
     });
-    expect(legacy.outputs['old']).toEqual({
+    expect(oldChat.outputs['old']).toEqual({
       type: 'chat-out',
       optional: false,
       bind: { node: 'irc', sends: ['#b'] },

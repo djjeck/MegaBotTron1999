@@ -23,59 +23,58 @@ the server that guards them.
   senders' edges; one node in the graph file all the same. Each card is placed on its own, either
   selects the node and opens its panel, and removing it removes both, after a confirmation that
   names them. An empty graph offers its first node, a connector. **Add a node** lists the plugins
-  offered, by the image and each module (`Palette.tsx`), and asks its id and its instance: fresh,
-  kept, or imported from an older data directory (`AddNode.tsx`); the node added is selected, its
-  panel open on it. An edge is dragged from an output to an input; dropped on the card of a node
-  whose inputs its config declares (a script node, docs/bot-os.md D80), not on a port, it is bound
-  to an input of the node that takes it, or to one added to its config for it (`draft.ts`'s
-  `dropOn`: an events input of the output's namespace, or an interface input of its plugin with no
-  member, to pick in its panel); when several of its inputs take it, to the one bound to that output
-  already or the only one free, else to none, the status naming them, to drop it on the port of one
-  (D84); a rhombus at its midpoint, in its port type's colour (`PortEdge.tsx`), is a button that
-  selects it and opens its panel (`EdgeDetails.tsx`), where a chat-in edge's `reads` (or all the
-  chats its connector monitors) and its `senders` (anyone, or a list with _me_), or a chat-out
-  edge's `sends` and `commands`, are set, the chats ticked among its connector's monitored chats and
-  the words as rows (`Surfaces.tsx`, D62, D63), and where **Remove edge** removes it alone; a
-  connector's own `chats`, what it monitors, are ticked from its surfaces, with a search; each chat
-  ticked is shown by its name wherever it came from: one the latest surfaces do not hold (ticked
-  from a search, or listed in the config beyond them) is named from the search that found it, or
-  looked up by a search of its id (`useNamed`), so after a reload too, and shown by its id only when
-  no search finds it; once the draft changes them, a reminder beside them says that the edges which
-  should read a chat need it ticked too (P6: the edges filter again), naming the chat-in edges with
-  a `reads` list that miss a chat added or still read one removed, each a link that opens its panel.
-  A connector not running yet says to apply first. A new node starts **disabled** and a new chat-out
-  edge a **dry run**: its rhombus hollow and its part from the rhombus to the connector greyed and
-  dashed; its panel's **Dry-run / Send for real** switch, and a node's **Enabled** switch, are
-  changes of the draft, applied with Apply. A node's config, settings and account are forms made
-  from its schemas, each field's description as its help; a new node's config starts filled with its
-  schema's defaults, and an opened node shows its unset ones filled in, written with its first
-  change (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a secret a
-  choice of the secrets' names. Its outputs say what they carry (docs/bot-os.md D71): an events
-  output its event types, each with its description; an interface output its members, folded, each
-  with its signature (`signature.ts`) and help when opened. A node up that keeps a state
-  (docs/bot-os.md D72) has a **State** section, drawn from its schema alone (`StateViewer.tsx`): its
-  pinned paths first, then each section with its freshness; a list of objects as a sortable,
-  searchable table, a map as a table of keys and values, an object folded, a value as a labelled
-  line; its card shows a line of it. A running connector's panel lists its **Queue** (`Queue.tsx`,
-  D73): each send waiting, until when, and the nodes that asked for it with what cancels them, a
-  send several share marked so, and the sends coalesced since the start with the pairs of nodes that
-  shared them; a chat-out edge's panel sets each command's spacing (`minIntervalS`, empty for the
-  connector's default). Every change is checked by the core, and each refusal shown on its edge,
-  port, node or field (`draft.ts`, the draft's pure changes); typing in a panel keeps its field
-  focused, and the cards and edges that draw as before are kept as drawn (`stable.ts`), so the map
-  does not redraw at each keystroke. **Review changes** opens a dialog with the diff and two actions
-  (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`) and restarts the instance on it,
-  waiting for it and coming back to the page, still logged in (`src/ui/Restart.tsx`), with a note
-  that says so and goes by itself after 30 seconds (or at its **dismiss**), or says why the core
-  refused it and restarts nothing; **Revert** drops the draft, back to the graph saved, once
-  confirmed. Its × (or Escape) only closes it, the draft kept. When the saved graph is not what runs
-  (changed through the API, rolled back, or a restart that did not happen), a banner offers **Apply
-  (restart)**; a saved graph refused at the last start is shown first. A **script** node
-  (docs/bot-os.md D76, D78, `src/ui/graph/script/`) has its ports in a form in its panel
-  (`ScriptPorts.tsx`), a port renamed once its name is typed (left, or Enter; a name empty or taken
-  refused), its edges moved with it in the same change, and removed with its row's **Remove**, its
-  edges with it in the same change, after a confirmation naming them (docs/bot-os.md D84: several
-  ports of a kind, each its own name), and **Edit script** opens its code in Monaco
+  offered, by the image and each module (`Palette.tsx`), and asks its id and its instance: fresh, or
+  kept (`AddNode.tsx`); the node added is selected, its panel open on it. An edge is dragged from an
+  output to an input; dropped on the card of a node whose inputs its config declares (a script node,
+  docs/bot-os.md D80), not on a port, it is bound to an input of the node that takes it, or to one
+  added to its config for it (`draft.ts`'s `dropOn`: an events input of the output's namespace, or
+  an interface input of its plugin with no member, to pick in its panel); when several of its inputs
+  take it, to the one bound to that output already or the only one free, else to none, the status
+  naming them, to drop it on the port of one (D84); a rhombus at its midpoint, in its port type's
+  colour (`PortEdge.tsx`), is a button that selects it and opens its panel (`EdgeDetails.tsx`),
+  where a chat-in edge's `reads` (or all the chats its connector monitors) and its `senders`
+  (anyone, or a list with _me_), or a chat-out edge's `sends` and `commands`, are set, the chats
+  ticked among its connector's monitored chats and the words as rows (`Surfaces.tsx`, D62, D63), and
+  where **Remove edge** removes it alone; a connector's own `chats`, what it monitors, are ticked
+  from its surfaces, with a search; each chat ticked is shown by its name wherever it came from: one
+  the latest surfaces do not hold (ticked from a search, or listed in the config beyond them) is
+  named from the search that found it, or looked up by a search of its id (`useNamed`), so after a
+  reload too, and shown by its id only when no search finds it; once the draft changes them, a
+  reminder beside them says that the edges which should read a chat need it ticked too (P6: the
+  edges filter again), naming the chat-in edges with a `reads` list that miss a chat added or still
+  read one removed, each a link that opens its panel. A connector not running yet says to apply
+  first. A new node starts **disabled** and a new chat-out edge a **dry run**: its rhombus hollow
+  and its part from the rhombus to the connector greyed and dashed; its panel's **Dry-run / Send for
+  real** switch, and a node's **Enabled** switch, are changes of the draft, applied with Apply. A
+  node's config, settings and account are forms made from its schemas, each field's description as
+  its help; a new node's config starts filled with its schema's defaults, and an opened node shows
+  its unset ones filled in, written with its first change (`defaults.ts`) (`SchemaForm.tsx`,
+  `NodeDetails.tsx`), a config key that names a secret a choice of the secrets' names. Its outputs
+  say what they carry (docs/bot-os.md D71): an events output its event types, each with its
+  description; an interface output its members, folded, each with its signature (`signature.ts`) and
+  help when opened. A node up that keeps a state (docs/bot-os.md D72) has a **State** section, drawn
+  from its schema alone (`StateViewer.tsx`): its pinned paths first, then each section with its
+  freshness; a list of objects as a sortable, searchable table, a map as a table of keys and values,
+  an object folded, a value as a labelled line; its card shows a line of it. A running connector's
+  panel lists its **Queue** (`Queue.tsx`, D73): each send waiting, until when, and the nodes that
+  asked for it with what cancels them, a send several share marked so, and the sends coalesced since
+  the start with the pairs of nodes that shared them; a chat-out edge's panel sets each command's
+  spacing (`minIntervalS`, empty for the connector's default). Every change is checked by the core,
+  and each refusal shown on its edge, port, node or field (`draft.ts`, the draft's pure changes);
+  typing in a panel keeps its field focused, and the cards and edges that draw as before are kept as
+  drawn (`stable.ts`), so the map does not redraw at each keystroke. **Review changes** opens a
+  dialog with the diff and two actions (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`)
+  and restarts the instance on it, waiting for it and coming back to the page, still logged in
+  (`src/ui/Restart.tsx`), with a note that says so and goes by itself after 30 seconds (or at its
+  **dismiss**), or says why the core refused it and restarts nothing; **Revert** drops the draft,
+  back to the graph saved, once confirmed. Its × (or Escape) only closes it, the draft kept. When
+  the saved graph is not what runs (changed through the API, rolled back, or a restart that did not
+  happen), a banner offers **Apply (restart)**; a saved graph refused at the last start is shown
+  first. A **script** node (docs/bot-os.md D76, D78, `src/ui/graph/script/`) has its ports in a form
+  in its panel (`ScriptPorts.tsx`), a port renamed once its name is typed (left, or Enter; a name
+  empty or taken refused), its edges moved with it in the same change, and removed with its row's
+  **Remove**, its edges with it in the same change, after a confirmation naming them (docs/bot-os.md
+  D84: several ports of a kind, each its own name), and **Edit script** opens its code in Monaco
   (`ScriptEditor.tsx`, `ScriptCode.tsx`: `monaco-editor`, bundled, its chunk loaded only then),
   typed by a `.d.ts` made from its ports (`types.ts`), beside a panel of its API; every key typed
   there is the editor's (the dialog is out of the reach of the map's keys, Space to pan among them),
@@ -120,9 +119,8 @@ the server that guards them.
   it is disabled, its reason shown beside it on hover, while a node of the saved graph (disabled
   ones too) uses one of its plugins or another module imports it. A module removed is listed as
   `removed` with **Restore** (its rollback) until an install of its id replaces it, and the restart
-  is offered. **Import** (`#/import`) shows an older data directory and imports its event log with a
-  table of type renames. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59) has
-  one section per area, each reached by its route (`#/instance`, `#/graph-history`, `#/graph-text`,
+  is offered. **Admin** (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59) has one
+  section per area, each reached by its route (`#/instance`, `#/graph-history`, `#/graph-text`,
   `#/accounts`, `#/plugins`, `#/resources`), which opens the page scrolled to it: **Instance** (on
   or off with its switch, uptime, memory, the plugins and accounts by state, the kill switch),
   **Graph history** (`GraphHistoryPage.tsx`, docs/bot-os.md D61: each version of the saved graph,
