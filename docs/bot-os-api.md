@@ -184,9 +184,11 @@ written before has no `senders`, so it reads from anyone as it did: nothing conv
 is `senders`, not `from`, since an edge's `from` is its output end. _Any chat from anyone_ is
 allowed, and the editor flags it as broad. Sending stays explicit: a chat-out edge lists its chats.
 
-A chat-in input may say `when: { config: key }`, a key of its plugin's `config` schema: the node has
-the port only while its config sets that key (the reactor reads a chat only with a `match`),
-resolved as an events input's namespace is (below).
+A chat-in or an events input may say `when: { config: key }`, a key of its plugin's `config` schema:
+the node has the port only while its config sets that key (the reactor reads a chat only with a
+`match`, and hears events only with an `on`), resolved as an events input's namespace is (below).
+Once there, the port is required unless it says `optional`: so the check refuses, naming the node, a
+reactor on events whose events input no edge binds, which would never fire.
 
 **Module API 1** keeps loading: a manifest's `{ type: 'chat' }` input, and the `requires`/`reach`
 shorthand's chat, are read as a chat-in input and a chat-out output of the same name, the `bind`
@@ -1649,11 +1651,12 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
   an event may be, 120 seconds by default). Its ports: `chat`, a chat-out output, the account it
   sends through (on any network), whose edge carries the chat it sends to and its commands; `chat`,
   a chat-in input there only with `match` (`when: { config: 'match' }`, §2.1), the chats it reads;
-  and `events`, optional, whose namespace is the one of its `on` (§2.1): bound to the nodes whose
-  events it hears, and not a port at all of a reactor on messages. So a reactor on events only
-  sends. Each reaction is recorded as `reactor.reaction`, and each send logged as `core.send` with
-  the node's id as its origin. The image offers it (`src/main.ts`); a node that examines what a
-  game's parser reads, in the graph file:
+  and `events`, whose namespace is the one of its `on` (§2.1): there only with `on`
+  (`when: { config: 'on' }`) and then required, bound to the nodes whose events it hears (the check
+  refuses a reactor on events that no edge binds), and not a port at all of a reactor on messages.
+  So a reactor on events only sends. Each reaction is recorded as `reactor.reaction`, and each send
+  logged as `core.send` with the node's id as its origin. The image offers it (`src/main.ts`); a
+  node that examines what a game's parser reads, in the graph file:
 
   ```json
   {

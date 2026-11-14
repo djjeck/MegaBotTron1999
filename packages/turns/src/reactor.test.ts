@@ -147,6 +147,27 @@ describe('the reactor', () => {
     );
   });
 
+  it('is refused on events that no edge binds, which it would never hear', () => {
+    const kit = new DevKit({
+      graph: graph(ON_GAIN, false),
+      plugins: [
+        fakeConnectorPlugin('tg', new FakeConnector({ account: 'telegram:alice' })),
+        questParser({}),
+        reactorPlugin(),
+      ],
+    });
+    let refused: unknown;
+    try {
+      kit.core.load();
+    } catch (e) {
+      refused = e;
+    }
+    expect(refused).toBeInstanceOf(StartError);
+    expect((refused as Error).message).toContain(
+      'node look: input port events (events of quest) is not bound'
+    );
+  });
+
   it('reacts to a message that matches, with no events port', async () => {
     const config = {
       match: 'the (?<prize>\\w+) draw opens',
@@ -221,7 +242,12 @@ describe('the reactor', () => {
     expect(schema.properties['ignoreCase']?.type).toBe('boolean');
     expect(schema.properties['when']?.type).toBe('object');
     expect(schema.properties['send']?.description).toContain('{path}');
-    expect(view.inputs['events']).toMatchObject({ type: 'events', config: 'on', optional: true });
+    expect(view.inputs['events']).toMatchObject({
+      type: 'events',
+      config: 'on',
+      when: 'on',
+      optional: false,
+    });
     expect(view.kinds).toEqual(['actor']);
   });
 });

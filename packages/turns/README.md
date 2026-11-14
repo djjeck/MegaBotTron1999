@@ -16,10 +16,11 @@ a game's player state, and the script node.
   for the account to be connected. Its safety stop (the kill switch) stops its node (`ctx.stop`,
   docs/bot-os.md D64), until the owner clears the stop in the editor.
 - `reactorPlugin` (`src/reactor.ts`): the `reactor`, one reaction (`react()` of the core) from its
-  node's config: when an event of its `on` type is heard, or a message on its chat-in input (there
-  only with `match`) matches its `match`, and the payload's fields equal its `when`, it sends its
-  `send` template to its `chat`, through its chat-out output's outbox. One plugin, run as one
-  instance per reaction.
+  node's config: when an event of its `on` type is heard (on its events input, there only with `on`
+  and then required: the check refuses a reactor on events that no edge binds), or a message on its
+  chat-in input (there only with `match`) matches its `match`, and the payload's fields equal its
+  `when`, it sends its `send` template to its `chat`, through its chat-out output's outbox. One
+  plugin, run as one instance per reaction.
 - `statePlugin` (`src/state-plugin.ts`): a game's player state (an inventory, a profile), from a
   spec the game gives: the state's zod schema, its initial value, the event types it applies (a
   required events input per namespace, so that its parser stopped takes it down), a pure reducer,

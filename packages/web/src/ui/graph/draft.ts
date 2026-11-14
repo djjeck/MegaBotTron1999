@@ -311,8 +311,8 @@ const NAMESPACE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
  * A node's input ports, each events input whose namespace its config names (`config`) resolved
  * from the node's config as written, as the core resolves it (bot-os-api.md §2.1): the value's
  * namespace, or its event type's. Unresolved, an optional one is not there, and a required one is
- * left for the check to refuse. A chat-in input there only with a config key (`when`, the
- * reactor's `match`) is not there while the key is unset.
+ * left for the check to refuse. A chat-in or events input there only with a config key (`when`,
+ * the reactor's `match` and `on`) is not there while the key is unset.
  */
 export function inputsOf(
   inputs: Readonly<Record<string, PortView>>,
@@ -320,10 +320,12 @@ export function inputsOf(
 ): Record<string, PortView> {
   const out: Record<string, PortView> = {};
   for (const [name, p] of Object.entries(inputs)) {
-    if (p.type === 'chat-in' && p.when !== undefined) {
-      if (config?.[p.when] !== undefined && config[p.when] !== null) out[name] = p;
+    if (
+      (p.type === 'chat-in' || p.type === 'events') &&
+      p.when !== undefined &&
+      (config?.[p.when] === undefined || config[p.when] === null)
+    )
       continue;
-    }
     if (p.type !== 'events' || p.config === undefined) {
       out[name] = p;
       continue;

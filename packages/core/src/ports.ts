@@ -161,6 +161,11 @@ export const inputSchema = z.discriminatedUnion('type', [
      * namespace, or an event type of it), resolved per node (`resolveInputs`).
      */
     namespace: z.union([z.string().regex(ID), configKey]),
+    /**
+     * The key of its node's config that, set, gives the node this port, as a chat-in's: unset, the
+     * node has none; set, it is required unless `optional` (a reactor on events must hear some).
+     */
+    when: configKey.optional(),
     ...common,
     /** By default, every other node whose plugin registers the namespace. */
     bind: z.strictObject({ nodes: z.array(z.string().regex(ID)) }).optional(),
@@ -299,10 +304,10 @@ export function namespaceOf(value: unknown): string | undefined {
 /**
  * A node's input ports, each resolved from its node's `config` when the manifest says so: an
  * events input's namespace (`{ config: key }`), the namespace the key's value names, or the event
- * type's; a chat-in input's presence (`when: { config: key }`), there only while the key is set.
- * An events input whose key is not set is left out if it is optional (the node has no such port),
- * and is a problem if it is required; one whose value names no namespace is a problem. Each problem
- * names the port; the caller names the node.
+ * type's; a chat-in or events input's presence (`when: { config: key }`), there only while the key
+ * is set. An events input whose namespace key is not set is left out if it is optional or has such
+ * a `when` (the node has no such port), and is a problem if it is required; one whose value names
+ * no namespace is a problem. Each problem names the port; the caller names the node.
  */
 export function resolveInputs(
   inputs: Readonly<Record<string, ManifestInputPort>>,
@@ -312,10 +317,12 @@ export function resolveInputs(
   const problems: string[] = [];
   const set = (key: string): boolean => config?.[key] !== undefined && config[key] !== null;
   for (const [name, p] of Object.entries(inputs)) {
-    if (p.type === 'chat-in' && p.when !== undefined) {
-      if (set(p.when.config)) ports[name] = p;
+    if (
+      (p.type === 'chat-in' || p.type === 'events') &&
+      p.when !== undefined &&
+      !set(p.when.config)
+    )
       continue;
-    }
     if (p.type !== 'events' || typeof p.namespace === 'string') {
       ports[name] = p as InputPort;
       continue;

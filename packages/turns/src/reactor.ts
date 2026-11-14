@@ -8,8 +8,9 @@
  * `core.send` and each reaction recorded as `reactor.reaction`.
  *
  * Its `events` input takes its namespace from `on` (§2.1): the namespace of the event type it
- * reacts to. A reactor on messages has no such port; one on events has no chat-in input (its
- * `chat` input is there only with `match`), and only sends.
+ * reacts to, there only with `on` and then required (the check refuses a reactor on events that no
+ * edge binds, which would never fire). A reactor on messages has no such port; one on events has no
+ * chat-in input (its `chat` input is there only with `match`), and only sends.
  */
 import { definePlugin, type Plugin, react } from '@megabottron1999/core';
 import { z } from 'zod';
@@ -102,8 +103,10 @@ export function reactorPlugin(): Plugin {
         events: {
           type: 'events',
           namespace: { config: 'on' },
-          optional: true,
-          help: 'The nodes whose events of its on type it hears (none for a reactor on messages)',
+          // There only with `on`, and then required: a reactor on events no edge binds would
+          // never fire, so the check refuses it.
+          when: { config: 'on' },
+          help: 'With on: the nodes whose events of its on type it hears',
         },
       },
       outputs: {

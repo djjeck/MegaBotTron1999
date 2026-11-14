@@ -221,6 +221,8 @@ export type PortView = (
       namespace?: string;
       /** The key of its node's config that names its namespace, when the manifest says so. */
       config?: string;
+      /** The key of its node's config that, set, gives the node this port (the reactor's `on`). */
+      when?: string;
       /**
        * An output's: the event types its plugin registers in its namespace, each with its schema's
        * description (`.describe()`) if it has one (bot-os.md D71).
@@ -316,6 +318,7 @@ function inputView(
       type: 'events',
       ...(typeof p.namespace === 'string' ? { namespace: p.namespace } : {}),
       ...(from !== undefined && typeof from !== 'string' ? { config: from.config } : {}),
+      ...(p.when === undefined ? {} : { when: p.when.config }),
       ...base,
     };
   }

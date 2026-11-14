@@ -249,7 +249,7 @@ export const manifestSchema = z
           message: `its config has no key ${p.namespace.config}`,
         });
       if (
-        p.type === 'chat-in' &&
+        (p.type === 'chat-in' || p.type === 'events') &&
         p.when !== undefined &&
         !Object.hasOwn(m.config?.shape ?? {}, p.when.config)
       )

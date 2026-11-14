@@ -122,6 +122,27 @@ describe('an events input whose namespace its node’s config names', () => {
     ]);
   });
 
+  it('with when: there only while its key is set, and then required, so unbound refused', () => {
+    const when: ManifestInput = {
+      ...listener(),
+      inputs: { heard: { type: 'events', namespace: { config: 'on' }, when: { config: 'on' } } },
+    };
+    const plugins = new Map([...image()].map(([id, x]) => [id, x]));
+    plugins.set('listener', parseManifest(when));
+    expect(resolveInputs(parseManifest(when).inputs, {})).toEqual({ ports: {}, problems: [] });
+    expect(problems({ ...graph({}), edges: [] }, plugins)).toEqual([]);
+    expect(problems({ ...graph({ on: 'dice.roll' }), edges: [] }, plugins)).toEqual([
+      'node ears: input port heard (events of dice) is not bound',
+    ]);
+    expect(problems(graph({ on: 'dice.roll' }), plugins)).toEqual([]);
+    expect(() =>
+      parseManifest({
+        ...when,
+        inputs: { heard: { type: 'events', namespace: 'dice', when: { config: 'nope' } } },
+      })
+    ).toThrow('inputs.heard.when: its config has no key nope');
+  });
+
   it('is resolved from the config as its schema makes it, defaults included', () => {
     const defaulted = parseManifest({
       ...listener(),

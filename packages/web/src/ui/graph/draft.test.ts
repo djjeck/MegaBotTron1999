@@ -299,6 +299,20 @@ describe('the draft', () => {
       chat: ports.chat,
       matched: ports.matched,
     });
+    // An events input there only with its config key (the reactor's on), required once there.
+    const reactor = {
+      events: {
+        type: 'events',
+        config: 'on',
+        when: 'on',
+        label: 'events of config on',
+        optional: false,
+      },
+    } as const;
+    expect(inputsOf(reactor, { match: 'x' })).toEqual({});
+    expect(inputsOf(reactor, { on: 'dice.roll' })).toEqual({
+      events: { ...reactor.events, namespace: 'dice', label: 'events of dice' },
+    });
   });
 });
 
