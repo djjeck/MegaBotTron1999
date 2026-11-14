@@ -149,6 +149,12 @@ export interface ModuleUpdate {
   commitDate?: string;
   /** The host's comparison of the commit installed and this one (GitHub's, or the server's). */
   compare: string;
+  /**
+   * Why the module is flagged without knowing that its own files changed: the host's comparison
+   * could not tell (too many files, a history rewritten, an older server, or it failed). None when
+   * its files did change.
+   */
+  unsure?: string;
 }
 
 /** The last check of the repositories' sources for updates. */

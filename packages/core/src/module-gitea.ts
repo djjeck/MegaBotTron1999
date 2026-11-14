@@ -8,12 +8,14 @@
  *
  * The API: `GET /api/v1/version` (whether it is one), `GET /api/v1/repos/<repo>` (its default
  * branch), `…/commits?sha=<ref>&limit=1` (a ref's commit and its date), `…/tags/<tag>` (whether a
- * ref is a tag), `…/tags` (the semver tags, for updates) and `…/archive/<sha>.tar.gz` (the tarball).
+ * ref is a tag), `…/tags` (the semver tags, for updates), `…/compare/<a>...<b>` (what a branch's
+ * new commits changed, for updates) and `…/archive/<sha>.tar.gz` (the tarball).
  *
  * The token goes to this host only: as `Authorization: token …`, on requests to its own `https://`
  * origin; a redirect to another origin is followed without it. It is never put in a message.
  */
 import {
+  type Changes,
   GitError,
   type GitHost,
   REPO,
@@ -241,5 +243,47 @@ export class Gitea implements GitHost {
 
   compare(repo: string, from: string, to: string): string {
     return `${this.origin}/${repo}/compare/${from}...${to}`;
+  }
+
+  /**
+   * What `from..to` changed, from the server's comparison (`GET /api/v1/repos/<repo>/compare/
+   * <from>...<to>`): its commits, each with its parents and the files it changed against its first
+   * parent. Their union holds every file `to` changed since `from` when `from` is on `to`'s
+   * first-parent line within them; otherwise (a history rewritten, `from` reached only through a
+   * merge's other parent) it is not told, nor when a commit lists no files (a server older than the
+   * comparison's `files`) or the commits are not all listed.
+   */
+  async changes(repo: string, from: string, to: string): Promise<Changes> {
+    const body = (await this.api(
+      `/repos/${repo}/compare/${from}...${to}?verification=false&files=true`,
+      repo
+    )) as { total_commits?: unknown; commits?: unknown } | undefined;
+    const short = `${from.slice(0, 7)}...${to.slice(0, 7)}`;
+    if (body === undefined || !Array.isArray(body.commits))
+      return { unknown: `${this.host} could not compare ${short}` };
+    const list = body.commits as {
+      sha?: unknown;
+      parents?: { sha?: unknown }[];
+      files?: { filename?: unknown }[];
+    }[];
+    if (typeof body.total_commits === 'number' && body.total_commits !== list.length)
+      return { unknown: `${this.host}'s comparison ${short} lists only some of its commits` };
+    const firstParent = new Map<string, unknown>();
+    const files = new Set<string>();
+    for (const c of list) {
+      if (typeof c.sha !== 'string') return { unknown: `${this.host}'s comparison did not read` };
+      firstParent.set(c.sha, Array.isArray(c.parents) ? c.parents[0]?.sha : undefined);
+      if (!Array.isArray(c.files))
+        return { unknown: `${this.host}'s comparison lists no files (an older server)` };
+      for (const f of c.files) if (typeof f.filename === 'string') files.add(f.filename);
+    }
+    let at: unknown = to;
+    for (let n = 0; n <= list.length && at !== from && typeof at === 'string'; n++)
+      at = firstParent.get(at);
+    if (at !== from)
+      return {
+        unknown: `the commit installed is not on the branch's first-parent line (its history rewritten, or merged in)`,
+      };
+    return { files: [...files] };
   }
 }

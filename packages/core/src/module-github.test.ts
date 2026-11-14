@@ -361,7 +361,11 @@ describe('modules from GitHub', () => {
     gh.calls.length = 0;
     tick(60_000);
     expect(await modules.check()).toEqual({ checkedAt: '2026-11-12T12:01:00.000Z' });
-    expect(gh.calls).toEqual(['api.github.com/repos/example/games/commits?sha=main&per_page=1']);
+    expect(gh.calls).toEqual([
+      'api.github.com/repos/example/games/commits?sha=main&per_page=1',
+      // One comparison for both modules: they were installed from the same commit.
+      `api.github.com/repos/example/games/compare/${MAIN1}...${MAIN2}?per_page=1`,
+    ]);
     const report = modules.decorate(store.report());
     expect(report.installed.map((m) => m.update)).toEqual([
       {
@@ -407,6 +411,91 @@ describe('modules from GitHub', () => {
     });
     await modules.check();
     expect(modules.decorate(store.report()).installed[0]?.update).toBeUndefined();
+  });
+
+  it('flags a module only when the commits changed its own path', async () => {
+    const { gh, store, modules } = setup();
+    const repo = gh.repos['example/games']!;
+    const MAIN3 = sha('main3');
+    const MAIN4 = sha('main4');
+    // MAIN3 changes the README and cards; dice is the same.
+    repo.trees![MAIN3] = {
+      ...repo.trees![MAIN1]!,
+      'README.md': '# Changed',
+      'modules/cards/src/p.ts': 'export const plugins = [1];',
+    };
+    const base = { repo: 'example/games', ref: 'main', refType: 'branch' as const };
+    await modules.install({ ...base, commit: MAIN1, path: 'modules/dice' });
+    await modules.install({ ...base, commit: MAIN1, path: 'modules/cards' });
+    repo.branches!.main = MAIN3;
+    await modules.check();
+    const updates = () =>
+      modules
+        .decorate(store.report())
+        .installed.map((m) => [m.id, m.update?.commit, m.update?.unsure]);
+    expect(updates()).toEqual([
+      ['cards', MAIN3, undefined],
+      ['dice', undefined, undefined],
+    ]);
+    // A range compared once, however many checks.
+    gh.calls.length = 0;
+    await modules.check();
+    expect(gh.calls.filter((c) => c.includes('/compare/'))).toEqual([]);
+
+    // A rename out of dice's path counts, as its old name.
+    repo.trees![MAIN4] = repo.trees![MAIN1]!;
+    repo.compare = {
+      [`${MAIN1}...${MAIN4}`]: {
+        status: 'ahead',
+        files: [{ filename: 'attic/p.ts', previous_filename: 'modules/dice/src/p.ts' }],
+      },
+    };
+    repo.branches!.main = MAIN4;
+    await modules.check();
+    expect(updates()).toEqual([
+      ['cards', undefined, undefined],
+      ['dice', MAIN4, undefined],
+    ]);
+
+    // Not told: flagged, saying why.
+    const unsure = async (answer: unknown): Promise<unknown> => {
+      repo.compare = { [`${MAIN1}...${MAIN4}`]: answer };
+      const fresh = new GitModules(store, onlyGitHub(new GitHub({ fetch: gh.fetch })));
+      await fresh.check();
+      return fresh.decorate(store.report()).installed[1]?.update?.unsure;
+    };
+    expect(await unsure({ status: 'diverged', files: [] })).toBe(
+      "the branch's history was rewritten (diverged of the commit installed)"
+    );
+    expect(await unsure({ files: [] })).toBe(
+      "the branch's history was rewritten (not ahead of the commit installed)"
+    );
+    expect(await unsure({ status: 'ahead' })).toBe("GitHub's comparison listed no files");
+    expect(
+      await unsure({
+        status: 'ahead',
+        files: Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}` })),
+      })
+    ).toBe("the commits changed 300 files or more, more than GitHub's comparison lists");
+    expect(await unsure({ status: 'ahead', files: [{}] })).toBe("GitHub's comparison did not read");
+    repo.compare = {};
+    delete repo.trees![MAIN4];
+    const fresh = new GitModules(store, onlyGitHub(new GitHub({ fetch: gh.fetch })));
+    await fresh.check();
+    expect(fresh.decorate(store.report()).installed[1]?.update?.unsure).toBe(
+      `GitHub could not compare ${MAIN1.slice(0, 7)} with ${MAIN4.slice(0, 7)}`
+    );
+    // The comparison failing: flagged, and the check says so.
+    const failingFetch: typeof fetch = (input, init) =>
+      String(input).includes('/compare/')
+        ? Promise.resolve(new Response('{}', { status: 500 }))
+        : gh.fetch(input, init);
+    const failing = new GitModules(store, onlyGitHub(new GitHub({ fetch: failingFetch })));
+    const check = await failing.check();
+    expect(check.error).toContain('example/games main compared: GitHub answered 500');
+    expect(failing.decorate(store.report()).installed[1]?.update?.unsure).toBe(
+      'the commits could not be compared'
+    );
   });
 
   it('checks one at a time, says a rate limit, and makes no request until its reset', async () => {

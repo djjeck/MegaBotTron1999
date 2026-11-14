@@ -2524,10 +2524,21 @@ restarts on its own (bot-os.md D67, D102). `ModuleStore` (`<data>/modules`):
   modules installed from a tag. A host no longer allowed, or GitHub's rate limit, stops that host's
   checks, said in the check's `error`; the others go on. A module whose branch now names another
   commit, or whose tag has a newer semver tag (`v1.2.3` or `1.2.3`; pre-releases only after a
-  pre-release), has an `update`: `{ref, commit, commitDate?, compare}`, `compare` the host's
-  comparison of the two commits (GitHub's, or `https://<host>/<repo>/compare/<a>...<b>`). It is
-  installed as any install (`POST /modules` with its source at the new commit and ref), never on its
-  own; a module installed from a commit is pinned.
+  pre-release), has an `update`: `{ref, commit, commitDate?, compare, unsure?}`, `compare` the
+  host's comparison of the two commits (GitHub's, or `https://<host>/<repo>/compare/<a>...<b>`). A
+  branch that moved is first compared with the commit each module was installed from (bot-os.md
+  D103, #37), through the host's API, once for each pair of commits: GitHub's
+  `GET /repos/<repo>/compare/<a>...<b>?per_page=1`, or the server's
+  `GET /api/v1/repos/<repo>/compare/<a>...<b>?verification=false&files=true`; a module has an update
+  only when a path changed (either side of a rename) lies under its own directory, any change for a
+  module at the root. When the comparison cannot tell, the module has its update, with `unsure`
+  saying why: on GitHub, the new head not `ahead` of the commit installed (a history rewritten) or
+  300 files listed, its most; on a server, the commit installed not on the new head's first-parent
+  line within the commits listed, a commit listed without its `files` (an older server), or the
+  commits not all listed; on either, the comparison failing (said in the check's `error` too). A
+  newer tag is an update whatever it changed. An update is installed as any install (`POST /modules`
+  with its source at the new commit and ref), never on its own; a module installed from a commit is
+  pinned.
 - **GitHub's limits:** without a token, its API allows 60 requests an hour. When it refuses one (403
   or 429, with `x-ratelimit-remaining: 0` or a `retry-after`), the shell makes no request to it
   until the reset, and each call says until when; the check stops, and its `error` says so. A token

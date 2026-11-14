@@ -9,8 +9,11 @@
  *
  * Updates: a check resolves each ref once (a branch's head, or a repository's tags), at the start,
  * every 6 hours and when the owner asks; a module whose branch has moved, or whose tag has a newer
- * semver tag, has an update, which the owner installs or not. Nothing is installed or restarted
- * here on its own (P1).
+ * semver tag, has an update, which the owner installs or not. A branch that moved is compared with
+ * the commit installed through the host's API, once for each pair of commits, and a module whose
+ * own path the commits did not change is not flagged (#37); when the host's comparison cannot tell
+ * (too many files, a history rewritten, an older server), the module is flagged, and says why.
+ * Nothing is installed or restarted here on its own (P1).
  *
  * A host is an implementation of `GitHost`: GitHub's API, or a Gitea-compatible one. Another kind
  * (GitLab's) would be one more, and one more `api` of the `git` source.
@@ -89,6 +92,16 @@ export interface RepoTree {
   files: Map<string, Uint8Array>;
 }
 
+/**
+ * What a range of commits changed: every path changed (both sides of a rename), or why the host's
+ * comparison cannot tell, in which case every module that follows the ref is flagged.
+ */
+export type Changes = { files: readonly string[] } | { unknown: string };
+
+/** Whether a module at `path` ('' for the root) has a file among `files`. */
+export const touches = (files: readonly string[], path: string): boolean =>
+  path === '' ? files.length > 0 : files.some((f) => f.startsWith(`${path}/`));
+
 /** What the modules need of a repository's host. */
 export interface GitHost {
   /** The host, as its links name it: `github.com`, `git.example.lan`. */
@@ -105,6 +118,11 @@ export interface GitHost {
   source(ref: RepoRef): RepoSource;
   /** The host's page comparing two commits. */
   compare(repo: string, from: string, to: string): string;
+  /**
+   * The paths changed from `from` to `to`, through the host's comparison API, or why they cannot be
+   * told; it throws only for the host's own failures (unreachable, a rate limit, a token refused).
+   */
+  changes(repo: string, from: string, to: string): Promise<Changes>;
 }
 
 /** The host a link or a source names: one allowed, or `HostNotAllowed`. */
@@ -221,6 +239,11 @@ export class GitModules {
   private readonly now: () => number;
   /** Each branch's head, by `<host> <repo> <branch>`, as the last check found it. */
   private readonly heads = new Map<string, { commit: string; commitDate?: string }>();
+  /**
+   * What each range of commits changed, by `<host> <repo> <from> <to>`: kept while a branch's
+   * modules still need it, since a range's changes never change.
+   */
+  private readonly changed = new Map<string, Changes>();
   /** Each tag's newer tag, by `<host> <repo> <tag>`, as the last check found it. */
   private readonly newer = new Map<string, { ref: string; commit: string; commitDate?: string }>();
   private state: UpdateCheck = {};
@@ -325,6 +348,20 @@ export class GitModules {
         if (head === undefined) throw new GitError(`${s.ref} is not found`, 404);
         this.heads.set(key, head);
       });
+    // Each module whose branch moved: what the commits changed, once for each range.
+    const ranges = new Map<string, RepoSource & { to: string }>();
+    for (const s of linked.filter((t) => t.refType === 'branch')) {
+      const to = this.heads.get(keyOf(s))?.commit;
+      if (to !== undefined && to !== s.commit)
+        ranges.set(`${hostOf(s)} ${s.repo} ${s.commit} ${to}`, { ...s, to });
+    }
+    for (const key of this.changed.keys()) if (!ranges.has(key)) this.changed.delete(key);
+    for (const [key, s] of ranges) {
+      if (this.changed.has(key)) continue;
+      await run(hostOf(s), `${s.repo} ${s.ref} compared`, async () => {
+        this.changed.set(key, await this.hosts(hostOf(s)).changes(s.repo, s.commit, s.to));
+      });
+    }
     const tagged = linked.filter((s) => s.refType === 'tag');
     const repos = new Map(tagged.map((s) => [`${hostOf(s)} ${s.repo}`, s]));
     for (const [repoKey, first] of repos)
@@ -365,6 +402,15 @@ export class GitModules {
           ? this.newer.get(key)
           : undefined;
     if (found === undefined || found.commit === source.commit) return undefined;
+    let unsure: string | undefined;
+    if (source.refType === 'branch') {
+      const changes = this.changed.get(
+        `${hostOf(source)} ${source.repo} ${source.commit} ${found.commit}`
+      );
+      if (changes === undefined) unsure = 'the commits could not be compared';
+      else if ('unknown' in changes) unsure = changes.unknown;
+      else if (!touches(changes.files, source.path)) return undefined;
+    }
     let host: GitHost;
     try {
       host = this.hosts(hostOf(source));
@@ -376,6 +422,7 @@ export class GitModules {
       commit: found.commit,
       ...(found.commitDate === undefined ? {} : { commitDate: found.commitDate }),
       compare: host.compare(source.repo, source.commit, found.commit),
+      ...(unsure === undefined ? {} : { unsure }),
     };
   }
 

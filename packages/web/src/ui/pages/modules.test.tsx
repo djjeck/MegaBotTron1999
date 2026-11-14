@@ -670,6 +670,7 @@ describe('ModulesPage: GitHub', () => {
                   ref: 'v1.1.0',
                   commit: NEWER,
                   compare: 'https://github.com/example/games/compare/x...y',
+                  unsure: "the branch's history was rewritten",
                 },
               }
             : {}),
@@ -770,6 +771,14 @@ describe('ModulesPage: GitHub', () => {
     );
     expect(within(updated).getByText('(2026-11-11)', { exact: false })).toBeDefined();
     expect(within(await row('cards')).getByText('v1.1.0', { exact: false })).toBeDefined();
+    expect(
+      within(await row('cards')).getByText(
+        "its own files may be unchanged: the branch's history was rewritten"
+      )
+    ).toBeDefined();
+    expect(
+      within(updated).queryByText('its own files may be unchanged', { exact: false })
+    ).toBeNull();
     fireEvent.click(within(updated).getByRole('button', { name: 'Update' }));
     expect(
       await screen.findByText('dice 0.2.0 installed (0.1.0 kept for a rollback)', {}, slow)

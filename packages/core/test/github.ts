@@ -16,6 +16,18 @@ export interface FakeRepo {
   dates?: Record<string, string>;
   /** Each commit's files, by path from the repository's root. */
   trees?: Record<string, Record<string, string>>;
+  /**
+   * The comparison's answer for `<from>...<to>`, as the host's API sends it; by default, the paths
+   * whose content differs between the two trees, `to` ahead of `from` by one commit.
+   */
+  compare?: Record<string, unknown>;
+}
+
+/** The paths whose content differs between two of a repository's trees. */
+export function treeDiff(r: FakeRepo, from: string, to: string): string[] {
+  const a = r.trees?.[from] ?? {};
+  const b = r.trees?.[to] ?? {};
+  return [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((p) => a[p] !== b[p]).sort();
 }
 
 export interface FakeGitHub {
@@ -93,6 +105,20 @@ export function fakeGitHub(repos: Record<string, FakeRepo>): FakeGitHub {
       return Promise.resolve(
         json(Object.entries(r.tags ?? {}).map(([n, c]) => ({ name: n, commit: { sha: c } })))
       );
+    if (what === 'compare') {
+      const range = rest.join('/');
+      const [from = '', to = ''] = range.split('...');
+      if (r.compare?.[range] !== undefined) return Promise.resolve(json(r.compare[range]));
+      return Promise.resolve(
+        r.trees?.[from] === undefined || r.trees[to] === undefined
+          ? json({ message: 'Not Found' }, 404)
+          : json({
+              status: 'ahead',
+              total_commits: 1,
+              files: treeDiff(r, from, to).map((filename) => ({ filename, status: 'modified' })),
+            })
+      );
+    }
     return Promise.resolve(json({ message: 'Not Found' }, 404));
   };
   return gh;

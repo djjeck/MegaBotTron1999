@@ -13,8 +13,9 @@
  * the checked ones are installed one by one (`POST /modules` each: a folder's files, as base64, or
  * the module's repository source at its commit), each on its own, and the page says how each went.
  * A module's `.tar.gz` is installed as before. The modules from links are checked for updates (by
- * the shell every 6 hours, or **Check for updates**): one with a newer commit says so, links the
- * host's comparison, and **Update** installs it, as any install. Nothing is installed or
+ * the shell every 6 hours, or **Check for updates**): one whose newer commit changed its own path
+ * says so (or, when the host's comparison could not tell, says that too), links the host's
+ * comparison, and **Update** installs it, as any install. Nothing is installed or
  * restarted but by the owner; the restart is offered here.
  *
  * Removing (bot-os.md D68): **Remove**, once confirmed, moves the module aside as its previous
@@ -666,6 +667,11 @@ export function ModulesPage({ loggedOut, restarted }: PageProps) {
                         {fromRepo(m.source) && m.update.ref !== m.source.ref
                           ? ` ${m.update.ref}`
                           : ''}
+                        {m.update.unsure === undefined ? null : (
+                          <div className="muted">
+                            its own files may be unchanged: {m.update.unsure}
+                          </div>
+                        )}
                       </div>
                     )}
                   </td>

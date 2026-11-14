@@ -201,6 +201,23 @@ describe('modules from a self-hosted Git server', () => {
       commitDate: '2026-11-02T10:00:00Z',
       compare: `https://${HOST}/example/games/compare/${MAIN1}...${MAIN2}`,
     });
+    // A commit that changes only what is beside the module: no update for it.
+    const MAIN3 = sha('h-main3');
+    const repo = gitea.repos['example/games']!;
+    repo.trees![MAIN3] = { ...tree('0.1.0'), 'docs/notes.md': 'notes' };
+    repo.dates![MAIN3] = '2026-11-03T10:00:00Z';
+    repo.branches = { main: MAIN3 };
+    await git.check();
+    expect(git.decorate(modules.report(undefined)).installed[0]?.update).toBeUndefined();
+    // A server whose comparison cannot tell: flagged, saying why.
+    repo.compare = { [`${MAIN1}...${MAIN3}`]: { total_commits: 1, commits: [{ sha: MAIN3 }] } };
+    const again = new GitModules(modules, (h) => list.get(h));
+    await again.check();
+    expect(again.decorate(modules.report(undefined)).installed[0]?.update).toMatchObject({
+      commit: MAIN3,
+      unsure: `${HOST}'s comparison lists no files (an older server)`,
+    });
+    repo.compare = {};
     // A module installed from a tag: a newer semver tag is its update.
     gitea.repos['example/games']!.tags = { 'v0.1.0': TAG1, 'v0.2.0': TAG2 };
     await git.install({

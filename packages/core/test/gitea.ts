@@ -3,7 +3,7 @@
  * synthetic repositories, public or private, each call kept with the token it carried. Nothing
  * reaches the network. Hosts are made up (`git.example.lan`).
  */
-import { type FakeRepo, githubTarball } from './github.ts';
+import { type FakeRepo, githubTarball, treeDiff } from './github.ts';
 
 export interface FakeGiteaRepo extends FakeRepo {
   /** Readable only with the token. */
@@ -101,6 +101,28 @@ export function fakeGitea(
       const limit = Number(url.searchParams.get('limit') ?? '50');
       const all = Object.entries(r.tags ?? {}).map(([n, c]) => ({ name: n, commit: { sha: c } }));
       return Promise.resolve(json(all.slice((page - 1) * limit, page * limit)));
+    }
+    if (what === 'compare') {
+      const range = rest.join('/');
+      const [from = '', to = ''] = range.split('...');
+      if (r.compare?.[range] !== undefined) return Promise.resolve(json(r.compare[range]));
+      return Promise.resolve(
+        r.trees?.[from] === undefined || r.trees[to] === undefined
+          ? json({ message: 'Not Found' }, 404)
+          : json({
+              total_commits: 1,
+              commits: [
+                {
+                  sha: to,
+                  parents: [{ sha: from }],
+                  files: treeDiff(r, from, to).map((filename) => ({
+                    filename,
+                    status: 'modified',
+                  })),
+                },
+              ],
+            })
+      );
     }
     if (what === 'archive') {
       const commit = (rest[0] ?? '').replace(/\.tar\.gz$/u, '');

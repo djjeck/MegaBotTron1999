@@ -12,7 +12,7 @@ const TAG = sha('g-tag');
 
 const manifest = (id: string): string => JSON.stringify(manifestOf(id, { plugins: ['src/p.ts'] }));
 
-const files = {
+const files: Record<string, string> = {
   'modules/dice/module.json': manifest('dice'),
   'modules/dice/src/p.ts': 'export const plugins = [];',
   'vendor/Other/module.json': manifest('other'),
@@ -186,6 +186,66 @@ describe('a link on a Gitea-compatible server', () => {
     await expect(new Gitea({ host: HOST, fetch: loop }).commit('a/b', 'main')).rejects.toThrow(
       `${HOST}: too many redirects`
     );
+  });
+
+  it('tells what a range of commits changed, or why it cannot', async () => {
+    const r = repos();
+    r['example/games'].trees[NEXT] = { ...files, 'README.md': '# Changed' };
+    const fake = fakeGitea(HOST, r);
+    const g = new Gitea({ host: HOST, fetch: fake.fetch });
+    expect(await g.changes('example/games', MAIN, NEXT)).toEqual({ files: ['README.md'] });
+    expect(fake.calls).toEqual([
+      `${HOST}/api/v1/repos/example/games/compare/${MAIN}...${NEXT}?verification=false&files=true`,
+    ]);
+    // Two commits, the first a merge whose other parent brings a file in: their union.
+    const MID = sha('g-mid');
+    const SIDE = sha('g-side');
+    const answer = (commits: unknown[], total = commits.length): unknown => ({
+      total_commits: total,
+      commits,
+    });
+    const range = `${MAIN}...${NEXT}`;
+    const set = (a: unknown): void => {
+      fake.repos['example/games']!.compare = { [range]: a };
+    };
+    const linear = [
+      { sha: NEXT, parents: [{ sha: MID }, { sha: SIDE }], files: [{ filename: 'b/x.ts' }] },
+      { sha: SIDE, parents: [{ sha: MAIN }], files: [{ filename: 'c/y.ts' }] },
+      { sha: MID, parents: [{ sha: MAIN }], files: [{ filename: 'a/z.ts' }, {}] },
+    ];
+    set(answer(linear));
+    expect(await g.changes('example/games', MAIN, NEXT)).toEqual({
+      files: ['b/x.ts', 'c/y.ts', 'a/z.ts'],
+    });
+    // The commit installed reached only through a merge's other parent, or not at all.
+    set(answer([linear[0], linear[1], { ...linear[2], parents: [{ sha: TAG }] }]));
+    expect(await g.changes('example/games', MAIN, NEXT)).toEqual({
+      unknown:
+        "the commit installed is not on the branch's first-parent line (its history rewritten, or merged in)",
+    });
+    set(answer([{ sha: NEXT, files: [] }]));
+    expect(await g.changes('example/games', MAIN, NEXT)).toMatchObject({
+      unknown: expect.stringContaining('first-parent') as unknown,
+    });
+    set(answer([{ sha: NEXT, parents: [{ sha: MAIN }] }]));
+    expect(await g.changes('example/games', MAIN, NEXT)).toEqual({
+      unknown: `${HOST}'s comparison lists no files (an older server)`,
+    });
+    set(answer(linear, 50));
+    expect(await g.changes('example/games', MAIN, NEXT)).toEqual({
+      unknown: `${HOST}'s comparison ${MAIN.slice(0, 7)}...${NEXT.slice(0, 7)} lists only some of its commits`,
+    });
+    set(answer([{ parents: [] }]));
+    expect(await g.changes('example/games', MAIN, NEXT)).toEqual({
+      unknown: `${HOST}'s comparison did not read`,
+    });
+    set({ message: 'odd' });
+    expect(await g.changes('example/games', MAIN, NEXT)).toEqual({
+      unknown: `${HOST} could not compare ${MAIN.slice(0, 7)}...${NEXT.slice(0, 7)}`,
+    });
+    // A cycle a server should never send ends.
+    set(answer([{ sha: NEXT, parents: [{ sha: NEXT }], files: [] }]));
+    expect(await g.changes('example/games', MAIN, NEXT)).toHaveProperty('unknown');
   });
 
   it('lists its semver tags, page by page', async () => {

@@ -10,6 +10,7 @@
  * server (module-gitea.ts, D102).
  */
 import {
+  type Changes,
   GitError,
   type GitHost,
   GITHUB_HOST,
@@ -25,6 +26,8 @@ import {
 const API = 'https://api.github.com';
 const CODELOAD = 'https://codeload.github.com';
 const WEB = 'https://github.com';
+/** The most files GitHub's comparison lists: one that lists as many may have left some out. */
+export const COMPARE_FILES = 300;
 
 /** A GitHub source resolved: the repository, the ref, the path in it, and the commit. */
 export type GitHubSource = Extract<RepoSource, { kind: 'github' }>;
@@ -207,5 +210,35 @@ export class GitHub implements GitHost {
 
   compare(repo: string, from: string, to: string): string {
     return `${WEB}/${repo}/compare/${from}...${to}`;
+  }
+
+  /**
+   * What `from..to` changed, from GitHub's comparison (`GET /repos/<repo>/compare/<from>...<to>`,
+   * paged so that its commits are not all sent: its first page lists the files of the whole
+   * range). Not told when `to` is not ahead of `from` (a history rewritten: the comparison is from
+   * their merge base, which misses what `from` had alone), or when it lists 300 files, GitHub's
+   * most, which may be some of them only.
+   */
+  async changes(repo: string, from: string, to: string): Promise<Changes> {
+    const body = (await this.api(`/repos/${repo}/compare/${from}...${to}?per_page=1`)) as
+      { status?: unknown; files?: unknown } | undefined;
+    if (body === undefined)
+      return { unknown: `GitHub could not compare ${from.slice(0, 7)} with ${to.slice(0, 7)}` };
+    if (body.status !== 'ahead' && body.status !== 'identical')
+      return {
+        unknown: `the branch's history was rewritten (${typeof body.status === 'string' ? body.status : 'not ahead'} of the commit installed)`,
+      };
+    if (!Array.isArray(body.files)) return { unknown: "GitHub's comparison listed no files" };
+    if (body.files.length >= COMPARE_FILES)
+      return {
+        unknown: `the commits changed ${COMPARE_FILES} files or more, more than GitHub's comparison lists`,
+      };
+    const files: string[] = [];
+    for (const f of body.files as { filename?: unknown; previous_filename?: unknown }[]) {
+      if (typeof f.filename !== 'string') return { unknown: "GitHub's comparison did not read" };
+      files.push(f.filename);
+      if (typeof f.previous_filename === 'string') files.push(f.previous_filename);
+    }
+    return { files };
   }
 }
