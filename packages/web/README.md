@@ -65,11 +65,12 @@ the server that guards them.
   focused, and the cards and edges that draw as before are kept as drawn (`stable.ts`), so the map
   does not redraw at each keystroke. **Review changes** opens a dialog with the diff and two actions
   (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`) and restarts the instance on it,
-  waiting for it and coming back to the page, still logged in (`src/ui/Restart.tsx`), or says why
-  the core refused it and restarts nothing; **Revert** drops the draft, back to the graph saved,
-  once confirmed. Its × (or Escape) only closes it, the draft kept. When the saved graph is not what
-  runs (changed through the API, rolled back, or a restart that did not happen), a banner offers
-  **Apply (restart)**; a saved graph refused at the last start is shown first. A **script** node
+  waiting for it and coming back to the page, still logged in (`src/ui/Restart.tsx`), with a note
+  that says so and goes by itself after 30 seconds (or at its **dismiss**), or says why the core
+  refused it and restarts nothing; **Revert** drops the draft, back to the graph saved, once
+  confirmed. Its × (or Escape) only closes it, the draft kept. When the saved graph is not what runs
+  (changed through the API, rolled back, or a restart that did not happen), a banner offers **Apply
+  (restart)**; a saved graph refused at the last start is shown first. A **script** node
   (docs/bot-os.md D76, D78, `src/ui/graph/script/`) has its ports in a form in its panel
   (`ScriptPorts.tsx`), a port renamed once its name is typed (left, or Enter; a name empty or taken
   refused), its edges moved with it in the same change, and removed with its row's **Remove**, its

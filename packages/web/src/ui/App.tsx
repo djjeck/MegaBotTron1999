@@ -46,6 +46,9 @@ export interface Page {
   page: (p: PageProps) => ReactNode;
 }
 
+/** How long a restart's note stays before it goes by itself; dismiss takes it away sooner. */
+export const NOTICE_MS = 30_000;
+
 /** The pages, in the menus' order; the first is the home page. */
 export const PAGES: Page[] = [
   { route: 'graph', title: 'Graph', wide: true, fill: true, page: (p) => <GraphPage {...p} /> },
@@ -76,6 +79,13 @@ export function App() {
     setNotice(why);
     setGeneration((g) => g + 1);
   }, []);
+  // The note goes after NOTICE_MS, counted again from each restart (the generation), even one that
+  // says the same.
+  useEffect(() => {
+    if (notice === undefined) return undefined;
+    const timer = setTimeout(() => setNotice(undefined), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice, generation]);
   const loggedOut = useCallback((why?: string) => {
     setNote(why);
     setSession('out');

@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Answer } from '#test/fake-api.ts';
 import { fakeApi } from '#test/fake-api.ts';
 import { fakeCore } from '#test/fake-core.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
-import { App, PAGES } from './App.tsx';
+import { App, NOTICE_MS, PAGES } from './App.tsx';
 
 const HEALTH = {
   off: false,
@@ -125,6 +125,26 @@ describe('App', () => {
     fireEvent.click(within(said).getByRole('button', { name: 'dismiss' }));
     expect(screen.queryByText(/^The instance restarted/u)).toBeNull();
   });
+
+  it('takes a restart’s note away by itself after 30 seconds', async () => {
+    // Fake timers that still advance with the clock, so that the restart's waits run as they do.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const core = fakeCore();
+      core.running = { version: 2, nodes: [], edges: [] };
+      render(<App />);
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Apply (restart)' }, { timeout: 5000 })
+      );
+      await screen.findByText(/^The instance restarted: it runs/u, {}, { timeout: 5000 });
+      act(() => vi.advanceTimersByTime(NOTICE_MS - 1000));
+      expect(screen.queryByText(/^The instance restarted/u)).not.toBeNull();
+      act(() => vi.advanceTimersByTime(1000));
+      expect(screen.queryByText(/^The instance restarted/u)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 15_000);
 
   it('shows the login with why, when the session did not survive the restart', async () => {
     const api = fakeApi({ ...GRAPH(), 'GET /session': [200, { authenticated: true }] });
