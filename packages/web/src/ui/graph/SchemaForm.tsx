@@ -1,8 +1,9 @@
 /**
  * A form made from a JSON Schema (P11): the schemas a plugin declares in zod, as the core writes
  * them (`GET /available`, `GET /graph/view`). One field per property, by its type: a check box, a
- * number, a text, a choice of the enum's values, a nested group for an object; anything else as
- * JSON. Each field shows its value, or the schema's default, unmarked (the editor fills a node's
+ * number, a text, a choice of the enum's values, a nested group for an object, a list of strings or
+ * numbers as rows with add and remove buttons, a record of plain values as rows of a key and a value
+ * (`ListFields.tsx`, #9); anything else as JSON. Each field shows its value, or the schema's default, unmarked (the editor fills a node's
  * config with its defaults, `defaults.ts`); its description, the schema's, is its help.
  *
  * Editable when given `onChange` (the editor's draft, D55): a field emptied (once left) is taken
@@ -16,6 +17,8 @@ import type { ReactNode } from 'react';
 import { useState } from 'react';
 import type { JsonSchema } from '#src/ui/api.ts';
 import { plain } from './defaults.ts';
+import type { Scalar } from './ListFields.tsx';
+import { ListField, listItems, RecordField, recordValues } from './ListFields.tsx';
 
 const show = (v: unknown): string => JSON.stringify(v, null, 2) ?? '';
 
@@ -187,10 +190,32 @@ function Field(props: {
         set={set}
       />
     );
+  else if (listItems(schema) !== undefined)
+    control = (
+      <ListField
+        name={name}
+        items={listItems(schema) as JsonSchema}
+        value={value}
+        fallback={fallback}
+        set={set}
+      />
+    );
+  else if (recordValues(schema) !== undefined)
+    control = (
+      <RecordField
+        name={name}
+        types={recordValues(schema) as Scalar[]}
+        value={value}
+        fallback={fallback}
+        set={set}
+      />
+    );
   else control = <JsonField name={name} value={value} set={set} />;
+  // A list's or a record's rows hold their own inputs, each labelled: no label around them all.
+  const rows = listItems(schema) !== undefined || recordValues(schema) !== undefined;
   return (
     <div className={`field${errors.length > 0 ? ' refused' : ''}`}>
-      {custom !== undefined && set !== undefined ? (
+      {(custom !== undefined && set !== undefined) || rows ? (
         // Its own control holds its inputs, each labelled: no label around them all.
         <div className="custom-field">
           <code>{name}</code>

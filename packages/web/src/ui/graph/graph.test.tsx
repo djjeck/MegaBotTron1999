@@ -419,7 +419,10 @@ describe('SchemaForm', () => {
     expect((screen.getByLabelText('port') as HTMLInputElement).value).toBe('6667');
     expect((screen.getByLabelText('tls') as HTMLInputElement).checked).toBe(true);
     expect((screen.getByLabelText('flavour') as HTMLSelectElement).value).toBe('');
-    expect((screen.getByLabelText('channels') as HTMLTextAreaElement).value).toBe('[\n  "#a"\n]');
+    // A list as rows, read-only: no quotes, no buttons.
+    const channel = screen.getByLabelText('channels 1') as HTMLInputElement;
+    expect([channel.value, channel.readOnly]).toEqual(['#a', true]);
+    expect(screen.queryByLabelText('add to channels')).toBeNull();
     expect((screen.getByLabelText('note') as HTMLInputElement).type).toBe('text');
     expect((screen.getByLabelText('burst') as HTMLInputElement).value).toBe('3');
     expect(screen.getByRole('group', { name: 'limits' })).toBeDefined();
@@ -480,19 +483,19 @@ describe('SchemaForm', () => {
     fireEvent.change(screen.getByLabelText('token'), { target: { value: '' } });
     expect(value).not.toHaveProperty('token');
     rerender(form());
-    // JSON: kept as typed until it reads.
-    const channels = screen.getByLabelText('channels') as HTMLTextAreaElement;
-    fireEvent.change(channels, { target: { value: '["#b"' } });
-    fireEvent.blur(channels);
-    expect(screen.getByText('not JSON: unchanged')).toBeDefined();
-    fireEvent.change(channels, { target: { value: '["#b"]' } });
-    fireEvent.blur(channels);
+    // A list as rows: one added, typed, removed; emptied, its default back.
+    fireEvent.click(screen.getByLabelText('add to channels'));
+    expect(value).not.toHaveProperty('channels');
+    fireEvent.change(screen.getByLabelText('channels 2'), { target: { value: '#b' } });
+    expect(value).toMatchObject({ channels: ['#a', '#b'] });
+    rerender(form());
+    fireEvent.click(screen.getByLabelText('remove channels 1'));
     expect(value).toMatchObject({ channels: ['#b'] });
     rerender(form());
-    fireEvent.blur(screen.getByLabelText('channels'));
-    fireEvent.change(screen.getByLabelText('channels'), { target: { value: ' ' } });
-    fireEvent.blur(screen.getByLabelText('channels'));
-    expect(value).not.toHaveProperty('channels');
+    expect((screen.getByLabelText('channels 1') as HTMLInputElement).value).toBe('#b');
+    fireEvent.click(screen.getByLabelText('remove channels 1'));
+    // Its default is not empty: kept empty, rather than taken away for the default to come back.
+    expect(value).toMatchObject({ channels: [] });
     rerender(form());
     // A nested object.
     fireEvent.change(screen.getByLabelText('burst'), { target: { value: '5' } });
@@ -500,6 +503,30 @@ describe('SchemaForm', () => {
     rerender(form());
     fireEvent.change(screen.getByLabelText('host'), { target: { value: 'b.test' } });
     expect(value).toMatchObject({ host: 'b.test' });
+  });
+
+  it('edits a value it cannot draw as JSON, kept as typed until it reads', () => {
+    let value: Record<string, unknown> = {};
+    const schema = {
+      type: 'object',
+      properties: { rules: { type: 'array', items: { type: 'object' } } },
+    };
+    const form = () => (
+      <SchemaForm legend="config" schema={schema} value={value} onChange={(v) => (value = v)} />
+    );
+    const { rerender } = render(form());
+    const rules = screen.getByLabelText('rules') as HTMLTextAreaElement;
+    fireEvent.change(rules, { target: { value: '[{}' } });
+    fireEvent.blur(rules);
+    expect(screen.getByText('not JSON: unchanged')).toBeDefined();
+    fireEvent.change(rules, { target: { value: '[{"a":1}]' } });
+    fireEvent.blur(rules);
+    expect(value).toEqual({ rules: [{ a: 1 }] });
+    rerender(form());
+    fireEvent.blur(screen.getByLabelText('rules'));
+    fireEvent.change(screen.getByLabelText('rules'), { target: { value: ' ' } });
+    fireEvent.blur(screen.getByLabelText('rules'));
+    expect(value).toEqual({});
   });
 
   it('says when there is nothing to set', () => {

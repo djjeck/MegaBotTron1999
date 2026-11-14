@@ -1447,11 +1447,14 @@ filled with its schema's defaults (nested objects within), written to the draft 
 opened shows the defaults of the fields its config leaves unset filled in, unmarked, and writes them
 with its first change, so that merely opening a node changes nothing. A field's description is its
 help. A node selected shows its forms, editable, a key of `configSecrets` as a choice of
-`GET /secrets`, and what each of its outputs carries, not its type, which the graph draws (bot-os.md
-D71): an events output, the event types its plugin registers in that namespace (`types` of its port
-in `GET /available`), each with its schema's description (§4.4) and its payload's JSON Schema
-(`schema`); a chat-out output that declares its commands, each with its spacing (bot-os.md D74); an
-interface output, its members' names, folded, opening on each one's signature (from its schemas:
+`GET /secrets`, a list of strings or numbers as rows of plain fields (add, remove; an empty row
+written nowhere), a record of plain values as rows of a key and a value (its type picked where the
+schema allows several), JSON only for what these do not draw, and what each of its outputs carries,
+not its type, which the graph draws (bot-os.md D71): an events output, the event types its plugin
+registers in that namespace (`types` of its port in `GET /available`), each with its schema's
+description (§4.4) and its payload's JSON Schema (`schema`); a chat-out output that declares its
+commands, each with its spacing (bot-os.md D74); an interface output, its members' names, folded,
+opening on each one's signature (from its schemas:
 `actions.sent({ chat: string, id?: string, t: number })`,
 `state.rest() → { until: number, why: string }`) and help; another output, its port in words. An
 edge selected, what it carries: a chat-in edge its `reads` alone, a chat-out edge its `sends` and

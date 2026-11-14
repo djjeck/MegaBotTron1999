@@ -1861,3 +1861,33 @@ ul.warnings {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* A list's or a record's rows (ListFields.tsx, #9): a plain field each, with its remove button. */
+.list-field ul,
+.record-field ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.2rem 0;
+}
+.list-field li,
+.record-field li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0.15rem 0;
+}
+.details .list-field li input:not([type='checkbox']),
+.details .record-field li input:not([type='checkbox']) {
+  flex: 1 1 6rem;
+  width: auto;
+  min-width: 0;
+}
+.details .record-field li select,
+.details .list-field li select {
+  flex: 0 1 auto;
+  width: auto;
+}
+.record-field li small {
+  flex-basis: 100%;
+}
