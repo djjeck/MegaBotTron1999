@@ -1294,18 +1294,18 @@ query's fields, §2); `GET /plugins/<id>/queue` (what waits in a connector's que
 each node with its `origin` and its `cancel`, `{ on?, when?, test?, deadline? }`, and `coalesced`
 the sends merged since the start, `{ count, pairs: [{ nodes: [a, b], count }] }`; 404 for a node
 that is not a connector); `GET /plugins/<id>/view` (the state a node keeps, read only, D72:
-`{ schema, state, updatedAt?, freshness?, pin? }`, its schema a JSON Schema; 404 for a node that
-keeps none, 409 for one not running); `POST /plugins/<id>/actions/<name>`, the body the action's
-input (400 for an input refused by its schema, 409 for the plugin's refusal); `GET /instances`
-(§2.2); `GET /graph/file`, `POST /graph/check`, `PUT /graph/file`, `GET /graph/history`,
-`GET /graph/history/<id>`, `POST /graph/history/<id>/rollback`, `POST /graph/rollback` and
-`POST /restart` (§2.3); `GET /available`, `GET /modules`, `POST /modules`, `POST /modules/plan`,
-`POST /modules/github`, `POST /modules/updates`, `POST /modules/<id>/rollback` and
-`DELETE /modules/<id>` (§7.4); `GET /secrets`, the names of the Docker secrets provided, never their
-values, for a connector's config to name (§4.9; the wiring leaves out `web_ui_password`,
-`bot_os_key` and `github_token`, the shell's own). Ids and names in a path may be URL-encoded. The
-control API is the owner's alone: no agent is ever given it (P11), so no agent installs a module
-(P1).
+`{ schema, state, updatedAt?, freshness?, pin? }`, its schema a JSON Schema, offered by the state
+nodes and `owner-notice`, §4.16; 404 for a node that keeps none, 409 for one not running);
+`POST /plugins/<id>/actions/<name>`, the body the action's input (400 for an input refused by its
+schema, 409 for the plugin's refusal); `GET /instances` (§2.2); `GET /graph/file`,
+`POST /graph/check`, `PUT /graph/file`, `GET /graph/history`, `GET /graph/history/<id>`,
+`POST /graph/history/<id>/rollback`, `POST /graph/rollback` and `POST /restart` (§2.3);
+`GET /available`, `GET /modules`, `POST /modules`, `POST /modules/plan`, `POST /modules/github`,
+`POST /modules/updates`, `POST /modules/<id>/rollback` and `DELETE /modules/<id>` (§7.4);
+`GET /secrets`, the names of the Docker secrets provided, never their values, for a connector's
+config to name (§4.9; the wiring leaves out `web_ui_password`, `bot_os_key` and `github_token`, the
+shell's own). Ids and names in a path may be URL-encoded. The control API is the owner's alone: no
+agent is ever given it (P11), so no agent installs a module (P1).
 
 **The health endpoint** (`packages/core/src/health.ts`), for a container's healthcheck, apart from
 the control API: on `HEALTH_PORT` (every interface; off unless set, and the image sets 8080; an irc
@@ -1627,7 +1627,10 @@ node started after them, then each as it is raised, while its node is up; the ti
 is its node's (D77). The notices live in memory (`core.notices()` lists them); the log has the
 records each was raised beside (`core.plugin`, `core.drift`, `core.queue`, `<id>.refused`).
 
-`owner-notice` (§5) tells a kind it does not name as `other`.
+`owner-notice` (§5) tells a kind it does not name as `other`. Its view (`GET /plugins/<id>/view`,
+D72) shows the notices waiting by kind with when each is due, when each kind was last told, whether
+the start notice is waiting, sent or off, the summary's cadence and times (next due, last sent, last
+looked) and the graph's warnings at this start; its card's line counts the notices waiting.
 
 ### 4.17 The owner's summary
 

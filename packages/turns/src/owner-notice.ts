@@ -33,6 +33,7 @@ import {
   type Notice,
   type Plugin,
   type PluginContext,
+  type StateView,
   type SummarySection,
   type TimerHandle,
 } from '@megabottron1999/core';
@@ -278,7 +279,15 @@ export function wordNotices(
 interface Pending {
   notices: Notice[];
   timer?: TimerHandle | undefined;
+  /** When its timer tells what it holds. */
+  dueAt?: number | undefined;
   lastAt?: number;
+}
+
+/** What the desk holds, for the node's view: the notices waiting by kind, and its last tells. */
+export interface DeskView {
+  waiting: Partial<Record<Reported, { count: number; dueAt: number }>>;
+  lastTold: Partial<Record<Reported, number>>;
 }
 
 interface DeskOptions {
@@ -309,14 +318,26 @@ export class NoticeDesk {
     const { gatherS, everyMin } = this.o.pace(kind);
     const now = this.o.clock.now();
     const due = Math.max(now + gatherS * 1000, (p.lastAt ?? -Infinity) + everyMin * 60_000);
+    p.dueAt = due;
     p.timer = this.o.clock.setTimeout(() => this.flush(kind), due - now);
+  }
+
+  /** What waits, by kind, and when each kind last told. */
+  view(): DeskView {
+    const v: DeskView = { waiting: {}, lastTold: {} };
+    for (const [kind, p] of this.pending) {
+      if (p.notices.length > 0 && p.dueAt !== undefined)
+        v.waiting[kind] = { count: p.notices.length, dueAt: p.dueAt };
+      if (p.lastAt !== undefined) v.lastTold[kind] = p.lastAt;
+    }
+    return v;
   }
 
   /** Tells what a kind holds now, in one message. */
   flush(kind: Reported): void {
     const p = this.pending.get(kind);
     if (p === undefined) return;
-    p.timer = undefined;
+    p.timer = p.dueAt = undefined;
     const notices = p.notices.splice(0);
     if (notices.length === 0) return;
     const now = this.o.clock.now();
@@ -328,7 +349,7 @@ export class NoticeDesk {
   stop(): void {
     for (const p of this.pending.values()) {
       this.o.clock.clearTimeout(p.timer);
-      p.timer = undefined;
+      p.timer = p.dueAt = undefined;
     }
   }
 }
@@ -409,6 +430,40 @@ function ownNotice(n: Notice, id: string): boolean {
   return n.node === id || (Array.isArray(others) && others.includes(id));
 }
 
+const kindTimes = (what: string) =>
+  z.object(Object.fromEntries(REPORTED.map((k) => [k, z.number().optional()]))).describe(what);
+
+/** What its view shows (bot-os.md D72): the state its schema describes, for the viewer's labels. */
+const viewState = z.object({
+  waiting: z
+    .object(
+      Object.fromEntries(
+        REPORTED.map((k) => [
+          k,
+          z
+            .object({
+              count: z.number().describe('Notices'),
+              dueAt: z.number().describe('Told at'),
+            })
+            .optional(),
+        ])
+      )
+    )
+    .describe('Waiting to be told'),
+  lastTold: kindTimes('Last told, by kind'),
+  startNotice: z.enum(['waiting', 'sent', 'off']).describe('Start notice'),
+  summary: z
+    .object({
+      everyMin: z.number().describe('Every (min)'),
+      dueAt: z.number().optional().describe('Next due'),
+      sentAt: z.number().optional().describe('Last sent'),
+      checkedAt: z.number().optional().describe('Last looked'),
+    })
+    .describe('Summary'),
+  warnings: z.array(z.string()).describe("The graph's warnings at this start"),
+});
+const VIEW_SCHEMA = z.toJSONSchema(viewState, { io: 'output', unrepresentable: 'any' });
+
 /** The owner-notice plugin: one node, or one per place the owner is told. */
 export function ownerNoticePlugin(): Plugin {
   return definePlugin({
@@ -437,6 +492,9 @@ export function ownerNoticePlugin(): Plugin {
       let atStart: Notice[] | undefined = c.startNotice ? [] : undefined;
       let startTimer: TimerHandle | undefined;
       let summaryTimer: TimerHandle | undefined;
+      let summaryDueAt: number | undefined;
+      /** When it last told the owner anything. */
+      let toldAt: number | undefined;
       let kept: SummaryKept = ctx.store.read<SummaryKept>(SUMMARY_DOC) ?? {};
       const summary = (): NonNullable<PluginContext['summary']> => {
         if (ctx.summary === undefined) throw new Error('no summary: its manifest declares it');
@@ -445,6 +503,7 @@ export function ownerNoticePlugin(): Plugin {
       /** One message, through its single send path: queued, so that a dry-run edge sends nothing. */
       const send = (kind: string, text: string, count: number): void => {
         ctx.record(`${OWNER_NOTICE}.told`, { kind, count, chat: c.chat, text });
+        toldAt = ctx.clock.now();
         const queued = ctx.outbox('chat').enqueue(c.chat, text);
         void queued.then((r) => {
           if (r.outcome === 'refused' || r.outcome === 'expired' || r.outcome === 'cancelled')
@@ -518,7 +577,29 @@ export function ownerNoticePlugin(): Plugin {
           kept = { sentAt: now, checkedAt: now };
         } else kept = { ...kept, checkedAt: now };
         ctx.store.write(SUMMARY_DOC, kept);
+        summaryDueAt = now + every;
         summaryTimer = ctx.clock.setTimeout(tellSummary, every);
+      };
+      /** What it holds now, for the node panel's viewer and its card (D72). */
+      const view = (): StateView => ({
+        schema: VIEW_SCHEMA,
+        state: {
+          ...desk.view(),
+          startNotice: atStart !== undefined ? 'waiting' : c.startNotice ? 'sent' : 'off',
+          summary: {
+            everyMin: c.summaryEveryMin,
+            ...(summaryDueAt === undefined ? {} : { dueAt: summaryDueAt }),
+            ...kept,
+          },
+          warnings: warned,
+        },
+        ...(toldAt === undefined ? {} : { updatedAt: toldAt }),
+        pin: ['waiting'],
+      });
+      /** Its card's line: the notices waiting to be told, if any. */
+      const waitingLine = (): string | undefined => {
+        const n = Object.values(desk.view().waiting).reduce((sum, w) => sum + w.count, 0);
+        return n === 0 ? undefined : `${n} ${n === 1 ? 'notice' : 'notices'} waiting`;
       };
       return {
         start() {
@@ -531,7 +612,8 @@ export function ownerNoticePlugin(): Plugin {
             // A cadence after the last look, kept across a restart; one overdue, a cadence on.
             const now = ctx.clock.now();
             const due = (kept.checkedAt ?? now) + every;
-            summaryTimer = ctx.clock.setTimeout(tellSummary, due > now ? due - now : every);
+            summaryDueAt = due > now ? due : now + every;
+            summaryTimer = ctx.clock.setTimeout(tellSummary, summaryDueAt - now);
           }
         },
         ready() {
@@ -544,8 +626,9 @@ export function ownerNoticePlugin(): Plugin {
           desk.stop();
           ctx.clock.clearTimeout(startTimer);
           ctx.clock.clearTimeout(summaryTimer);
-          startTimer = summaryTimer = undefined;
+          startTimer = summaryTimer = summaryDueAt = undefined;
         },
+        view: { read: view, summary: waitingLine },
       };
     },
   });

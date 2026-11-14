@@ -530,6 +530,55 @@ describe('owner-notice: the summary (D92)', () => {
   });
 });
 
+describe('owner-notice: its view (D72, D91)', () => {
+  it('shows the node panel what waits, what it told last, and when the summary is due', async () => {
+    const r = await run({ config: { summaryEveryMin: 60 }, warn: true });
+    const view = () => r.kit.core.controls.view('notice');
+    const line = () => r.kit.core.controls.status().plugins.find((p) => p.id === 'notice')?.summary;
+    expect(view()).toMatchObject({
+      value: {
+        state: {
+          waiting: {},
+          lastTold: {},
+          startNotice: 'waiting',
+          summary: { everyMin: 60, dueAt: T0 + H },
+          warnings: [WARNING],
+        },
+        pin: ['waiting'],
+      },
+    });
+    expect(line()).toBeUndefined();
+    refused(r.ctx('a'), 'quest.gain', 'no room');
+    refused(r.ctx('b'), 'quest.loss', 'below zero');
+    r.at(30 * S);
+    expect(view()).toMatchObject({
+      value: { state: { waiting: { refused: { count: 2, dueAt: T0 + 60 * S } } } },
+    });
+    expect(line()).toBe('2 notices waiting');
+    r.at(60 * S);
+    expect(view()).toMatchObject({
+      value: {
+        state: { waiting: {}, lastTold: { refused: T0 + 60 * S }, startNotice: 'sent' },
+        updatedAt: T0 + 60 * S,
+      },
+    });
+    expect(line()).toBeUndefined();
+    const schema = (
+      view() as unknown as { value: { schema: { properties: Record<string, unknown> } } }
+    ).value.schema;
+    expect(schema.properties['waiting']).toMatchObject({ description: 'Waiting to be told' });
+    r.count('a').add('quest.tick');
+    r.at(H);
+    expect(view()).toMatchObject({
+      value: { state: { summary: { sentAt: T0 + H, checkedAt: T0 + H, dueAt: T0 + 2 * H } } },
+    });
+    const off = await run({ config: { startNotice: false, summaryEveryMin: 0 } });
+    expect(off.kit.core.controls.view('notice')).toMatchObject({
+      value: { state: { startNotice: 'off', summary: { everyMin: 0 } } },
+    });
+  });
+});
+
 describe('its wording', () => {
   const n = (
     kind: string,

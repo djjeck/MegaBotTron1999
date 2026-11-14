@@ -41,7 +41,8 @@ a game's player state, the script node, and the node that tells the owner what n
   sends a summary every `summaryEveryMin` (60) minutes, none when nothing happened, from the lines
   the core and the plugins contribute (docs/bot-os.md D92, #46), and a notice at each start
   (`startNotice`). The state plugins, the turn parsers and `turn-actor` contribute their lines
-  (events applied and refused, answers read, turns).
+  (events applied and refused, answers read, turns). Its view, in its node's panel, shows what waits
+  to be told and when, its last tells, the start notice's and the summary's times.
 - `scriptPlugin` (`src/script-plugin.ts`): the `script` node, TypeScript the owner types in the web
   UI (docs/bot-os.md D76), on the ports its config declares (events and interface inputs, chat-out
   outputs with their commands, events of its own; several of a kind, each its own name, D84), its
