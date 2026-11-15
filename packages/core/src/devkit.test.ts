@@ -84,6 +84,8 @@ describe('FakeConnector', () => {
     expect(said).toEqual(['#test a', '#other b']);
     expect(c.sent).toHaveLength(2);
     expect(c.limits).toEqual({ minIntervalMs: 1000, maxPerHour: 60 });
+    c.connecting('retrying');
+    expect(c.status()).toEqual({ state: 'connecting', phase: 'retrying' });
     c.close('bye');
     expect(c.status()).toEqual({ state: 'closed', phase: 'closed', detail: 'bye' });
     const plain = new FakeConnector({ account: 'telegram:me', self: 'Me' });

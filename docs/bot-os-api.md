@@ -1092,11 +1092,18 @@ reason: the caller's own refusal (`refuse`, for a game's grammar), the reach
 (`… does not send to …`, `… is not among …'s commands`, by first word), whether it is a dry run, a
 stop (`stopped: …`, or `not running (…)`), a flood wait (a connector throws `FloodWait`, which holds
 the account), the rate (`too soon`, `hourly limit`, dry runs counted), and the connector
-(`not connected`). `deliver(chat, text)` runs the same checks, then awaits the connector's
-`deliver`: `sent` with the network's id of the message, `refused`, or `failed` with why the network
-refused it; the rate counts the send when it leaves. A send may say its text is Markdown
-(`format: 'markdown'`): a connector of a network that formats sends it formatted, any other as
-written. Every attempt's record (`core.send`) has the `mode` it went in (`dry-run` or `live`).
+(`not connected`). **A queued send waits for the connection** (bot-os.md D108): while the account's
+connector is about to start, starting, or running and (re)connecting (`connecting`, as at the start
+of the instance or after a drop), a live send in the queue stays `waiting` and goes, through every
+check above, once it connects; it expires at its deadline (`cancel`), and one with none is refused
+after `CONNECT_WAIT_MS` (5 minutes) of waiting, `not connected: waited 5 min for the connection`. A
+dry run does not wait. With no connector running (stopped, disabled, failed) it is refused
+`not connected` when its turn comes, as before; `send` and `deliver`, which send now, are refused at
+once. `deliver(chat, text)` runs the same checks, then awaits the connector's `deliver`: `sent` with
+the network's id of the message, `refused`, or `failed` with why the network refused it; the rate
+counts the send when it leaves. A send may say its text is Markdown (`format: 'markdown'`): a
+connector of a network that formats sends it formatted, any other as written. Every attempt's record
+(`core.send`) has the `mode` it went in (`dry-run` or `live`).
 
 **A send the network refuses** (bot-os.md D95): a live send, queued or not, goes through the
 connector's `deliver` where it has one (both Telegram connectors and `irc`; its `send` otherwise),
@@ -1345,10 +1352,10 @@ public API (`packages/core/src/devkit.ts`):
 
 - **`FakeConnector`**, and `fakeConnectorPlugin(id, connector)`, the connector plugin on it: a
   connector of any network (the account's prefix), whose messages the test or the simulator says
-  (`hear`, live unless `playback`) and whose status it sets (`open`, `close`), and whose sends go to
-  its `onSend` (and are kept, `sent`), with the account's `limits` and the chats it administers
-  (`admins`). The plugins read it through their handles and send through their outboxes, as they do
-  live.
+  (`hear`, live unless `playback`) and whose status it sets (`open`, `connecting`, `close`), and
+  whose sends go to its `onSend` (and are kept, `sent`), with the account's `limits` and the chats
+  it administers (`admins`). The plugins read it through their handles and send through their
+  outboxes, as they do live.
 - **`DevKit`**: a core on a `VirtualClock` (§4.1) whose stores are in memory, with the plugins of
   the run, the run's graph (`graph`; by default one instance of each, bound as the manifests say)
   and, set before it starts, keyed by plugin instance: their configuration (`config`), the owner's

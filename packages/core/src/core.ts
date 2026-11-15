@@ -534,10 +534,30 @@ export class Core {
         },
         // A send waits for the game's answer where a parser reading its chat declares one (D98).
         expects: (chat, command) => this.answerWindow(account, chat, command),
+        // A queued send waits while the account connects, at the start too (D108).
+        connection: () => this.connection(account),
       });
       this.outboxes.set(account, outbox);
     }
     return outbox;
+  }
+
+  /**
+   * Where an account's connection is (D108): `connected` when a connector of it is; `connecting`
+   * while one is about to start, starts, or runs and connects (again); `down` otherwise: none, or
+   * every one stopped, disabled, inactive or failed.
+   */
+  private connection(account: string): 'connected' | 'connecting' | 'down' {
+    let connecting = false;
+    for (const e of this.entries.values()) {
+      if (e.node.account !== account || !e.manifest.kinds.includes('connector')) continue;
+      const state = this.connector(e.id)?.status().state;
+      if (state === 'connected') return 'connected';
+      const s = e.status.state;
+      if (s === 'registered' || s === 'starting' || (s === 'running' && state === 'connecting'))
+        connecting = true;
+    }
+    return connecting ? 'connecting' : 'down';
   }
 
   /**

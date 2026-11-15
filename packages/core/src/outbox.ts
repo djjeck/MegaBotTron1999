@@ -12,7 +12,8 @@
  * 4. a flood wait the network asked for (Telegram's `FLOOD_WAIT`), which holds the account;
  * 5. the account's rate: at least `minIntervalMs` between two sends and at most `maxPerHour` in
  *    any hour, dry runs counted;
- * 6. the connector, which may not be connected.
+ * 6. the connector, which may not be connected: a queued live send waits while its account
+ *    connects (bot-os.md D108), up to its deadline or `CONNECT_WAIT_MS`.
  *
  * A **watchdog** (bot-os.md D93) stands before a live send of a node that waits for answers (an
  * actor, to a chat a parser reads): the sends of one command (its first word), by one node, to one
@@ -297,6 +298,13 @@ export interface OutboxOptions {
    * D98): a parser that reads the chat declares one; undefined: no answer is waited for.
    */
   expects?: (chat: string, command: string) => number | undefined;
+  /**
+   * Where the account's connection is (bot-os.md D108): `connected`; `connecting`, its connector
+   * about to start, starting, or running and (re)connecting, so that a queued live send waits for
+   * it; `down`, no connector running (stopped, disabled, failed), so that it is refused at once.
+   * None: never waited for.
+   */
+  connection?: () => 'connected' | 'connecting' | 'down';
 }
 
 export interface SendOptions {
@@ -518,6 +526,8 @@ interface Waiting {
   command: string;
   queuedAt: number;
   members: Member[];
+  /** Since when it waits for the account to connect (D108), while it does. */
+  connectingSince?: number;
 }
 
 /** The sends of one command, by one node, to one chat, gone unanswered in a row (D93). */
@@ -532,6 +542,14 @@ interface Unanswered {
 }
 
 const HOUR = 3_600_000;
+
+/**
+ * How long a queued live send with no deadline waits for its account to connect (bot-os.md D108),
+ * before it is refused `not connected`; one with a deadline waits until it.
+ */
+export const CONNECT_WAIT_MS = 5 * 60_000;
+/** How often a queue that waits for its account to connect looks again. */
+export const CONNECT_POLL_MS = 1000;
 
 export class Outbox {
   readonly account: string;
@@ -1031,9 +1049,20 @@ export class Outbox {
       if (this.waitingList.length === 0) return;
       const now = this.o.clock.now();
       const pace = this.wait();
-      const next = this.waitingList.find((w) => this.readyAt(w) <= now);
+      // While the account connects, a live send waits for it, a dry run does not (D108).
+      const connecting = this.o.connection?.() === 'connecting';
+      const blocked = (w: Waiting): boolean => connecting && this.goesLive(w);
+      for (const w of this.waitingList)
+        if (!blocked(w)) delete w.connectingSince;
+        else w.connectingSince ??= now;
+      if (this.connectWaitOver(now)) continue;
+      const next = this.waitingList.find((w) => !blocked(w) && this.readyAt(w) <= now);
       if (pace > 0 || next === undefined) {
-        const soonest = Math.min(...this.waitingList.map((w) => this.readyAt(w)));
+        const soonest = Math.min(
+          ...this.waitingList.map((w) =>
+            blocked(w) ? Math.max(this.readyAt(w), now + CONNECT_POLL_MS) : this.readyAt(w)
+          )
+        );
         const ms = Math.max(pace, soonest - now, 0);
         this.timer = this.o.clock.setTimeout(() => {
           this.timer = undefined;
@@ -1043,6 +1072,42 @@ export class Outbox {
       }
       this.issue(next);
     }
+  }
+
+  /** Whether a waiting send would go live for any of its nodes now (not only as a dry run). */
+  private goesLive(w: Waiting): boolean {
+    return w.members.some((m) => {
+      const v = this.check(m.plugin, w.chat, w.text, m.options);
+      return !('refused' in v) && !v.dryRun;
+    });
+  }
+
+  /**
+   * The shares of a send that waited `CONNECT_WAIT_MS` for the account to connect with no deadline
+   * of their own (D108): refused `not connected`, logged as a refused send. Whether any was.
+   */
+  private connectWaitOver(now: number): boolean {
+    let any = false;
+    for (const w of [...this.waitingList]) {
+      if (w.connectingSince === undefined || now < w.connectingSince + CONNECT_WAIT_MS) continue;
+      for (const m of w.members.filter((x) => x.deadline === undefined)) {
+        const refused: SendResult = {
+          text: w.text,
+          outcome: 'refused',
+          reason: `not connected: waited ${CONNECT_WAIT_MS / 60_000} min for the connection`,
+        };
+        this.log(
+          m.plugin,
+          w.chat,
+          m.options,
+          refused,
+          this.check(m.plugin, w.chat, w.text, m.options).mode
+        );
+        this.drop(m.id, refused);
+        any = true;
+      }
+    }
+    return any;
   }
 
   /**

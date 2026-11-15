@@ -4,6 +4,7 @@ import { type Connector, ConnectorBase } from './connector.ts';
 import { Core } from './core.ts';
 import { type Notice } from './notices.ts';
 import {
+  CONNECT_WAIT_MS,
   DEFAULT_UNANSWERED_AT,
   FloodWait,
   isMode,
@@ -11,6 +12,8 @@ import {
   Modes,
   modesIn,
   Outbox,
+  type OutboxHandle,
+  type QueuedSend,
   type SenderPolicy,
   type SendRecord,
   unreachableHint,
@@ -41,6 +44,9 @@ class LaterConnector extends ConnectorBase implements Connector {
   down(): void {
     this.changed({ state: 'connecting', phase: 'retry' });
   }
+  up(): void {
+    this.changed({ state: 'connected', phase: 'up' });
+  }
 }
 
 class FakeConnector extends ConnectorBase implements Connector {
@@ -58,6 +64,11 @@ class FakeConnector extends ConnectorBase implements Connector {
     if (!this.up) return false;
     this.sent.push(`${chat} ${text}`);
     return true;
+  }
+  /** Its connection's state, as a connector tells it. */
+  connecting(state: 'connecting' | 'connected' | 'closed'): void {
+    this.up = state === 'connected';
+    this.changed({ state, phase: state });
   }
 }
 
@@ -423,6 +434,46 @@ describe('the outboxes of the core', () => {
     );
     expect(records.filter((r) => r.type === 'core.send')).toHaveLength(7);
     expect(connector.sent).toEqual([]);
+  });
+  it("hold a queued send from the start until the account's connector connects (D108)", async () => {
+    const connector = new FakeConnector('test:me', 'test');
+    const { conn } = plugins(connector, {});
+    const clock = new VirtualClock(0);
+    const core = new Core({ clock });
+    let q: QueuedSend | undefined;
+    // A sender that queues a send once the instance is up, its connector still connecting.
+    core.register(
+      {
+        manifest: {
+          id: 'early',
+          version: '0.1.0',
+          kinds: ['actor' as const],
+          description: 'early',
+          reach: [{ connector: 'conn', sends: ['#c'], commands: ['!a'] }],
+        },
+        create: (ctx: { outbox(a: string): OutboxHandle }) => ({
+          ready: () => {
+            q = ctx.outbox('test:me').enqueue('#c', '!a');
+          },
+        }),
+      },
+      conn
+    );
+    connector.connecting('connecting');
+    await core.start();
+    clock.advance(5000);
+    expect(q?.status()).toBe('waiting');
+    connector.connecting('connected');
+    clock.advance(1000);
+    await expect(q).resolves.toMatchObject({ outcome: 'sent' });
+    expect(connector.sent).toEqual(['#c !a']);
+    // Its connector stopped: refused at once, as before.
+    core.stopNode('conn', 'by hand', 'drift');
+    connector.connecting('closed');
+    await expect(core.outbox('test:me').as('early').enqueue('#c', '!a')).resolves.toMatchObject({
+      outcome: 'refused',
+    });
+    await core.stop();
   });
 });
 
@@ -810,6 +861,86 @@ describe('command answers (D98)', () => {
     );
     expect(paused).toEqual(['p']);
     expect(outbox.backoffs('p')).toEqual([]);
+  });
+});
+
+describe('a queued send while the account connects (D108)', () => {
+  function connecting() {
+    const clock = new VirtualClock(0);
+    const connector = new LaterConnector();
+    let down = false;
+    const modes = new Modes();
+    const records: SendRecord[] = [];
+    const outbox = new Outbox({
+      account: 'test:me',
+      connector: () => connector,
+      limits: () => ({ minIntervalMs: 3000 }),
+      clock,
+      modes,
+      record: (r) => (r.type === 'core.send' ? records.push(r) : undefined),
+      connection: () =>
+        down ? 'down' : connector.status().state === 'connected' ? 'connected' : 'connecting',
+    });
+    modes.set('p', 'live');
+    connector.down();
+    const flush = () => new Promise((r) => setImmediate(r));
+    return {
+      clock,
+      connector,
+      modes,
+      records,
+      p: outbox.as('p'),
+      flush,
+      stop: () => {
+        down = true;
+      },
+    };
+  }
+
+  it('waits for the connection, then goes within the rate', async () => {
+    const { clock, connector, records, p, flush } = connecting();
+    const one = p.enqueue('#c', '/a');
+    const two = p.enqueue('#c', '/b');
+    clock.advance(60_000);
+    expect([one.status(), two.status()]).toEqual(['waiting', 'waiting']);
+    expect(records).toEqual([]);
+    connector.up();
+    clock.advance(1000);
+    await flush();
+    expect([one.status(), two.status()]).toEqual(['sent', 'waiting']);
+    clock.advance(3000);
+    await flush();
+    await expect(two).resolves.toMatchObject({ outcome: 'sent' });
+    expect(records.map((r) => [r.text, r.t])).toEqual([
+      ['/a', 61_000],
+      ['/b', 64_000],
+    ]);
+  });
+
+  it('expires at its deadline, else is refused after the wait; a dry run does not wait', async () => {
+    const { clock, modes, p, flush } = connecting();
+    const timed = p.enqueue('#c', '/a', { cancel: { withinMs: 10_000 } });
+    const untimed = p.enqueue('#c', '/b');
+    clock.advance(10_000);
+    await expect(timed).resolves.toMatchObject({ outcome: 'expired' });
+    clock.advance(CONNECT_WAIT_MS);
+    await flush();
+    await expect(untimed).resolves.toEqual({
+      text: '/b',
+      outcome: 'refused',
+      reason: 'not connected: waited 5 min for the connection',
+    });
+    modes.set('p', 'dry-run');
+    await expect(p.enqueue('#c', '/c')).resolves.toMatchObject({ outcome: 'dry-run' });
+  });
+
+  it('is refused at once when no connector runs', async () => {
+    const { p, stop } = connecting();
+    stop();
+    await expect(p.enqueue('#c', '/a')).resolves.toMatchObject({
+      outcome: 'refused',
+      reason: 'not connected',
+    });
   });
 });
 

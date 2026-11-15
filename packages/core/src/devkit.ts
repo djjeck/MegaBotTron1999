@@ -97,6 +97,11 @@ export class FakeConnector extends ConnectorBase implements Connector {
     this.changed({ state: 'connected', phase });
   }
 
+  /** On its way to connect (again), at the network's step `phase`: a queued send waits (D108). */
+  connecting(phase = 'connecting'): void {
+    this.changed({ state: 'connecting', phase });
+  }
+
   /** Closed, with why. */
   close(detail?: string): void {
     this.changed({ state: 'closed', phase: 'closed', ...(detail === undefined ? {} : { detail }) });

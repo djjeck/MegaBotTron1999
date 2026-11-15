@@ -27,10 +27,10 @@ never their values.
   through the outbox (docs/bot-os-api.md §4.15).
 - `src/outbox.ts`: an account's outbox: the reach, dry runs and the pace of every send, and its
   queue (docs/bot-os.md D73): one per (connector, chat), the same text of different nodes coalesced,
-  each command spaced by its interval, each send dropped when its cancel holds, its node stops or
-  the instance does, and the merges counted since the start, by pair of nodes; and its watchdog
-  (docs/bot-os.md D93), which stops an actor whose sends of a command go unanswered too many times
-  in a row.
+  each command spaced by its interval, each live send waiting while its account connects (D108),
+  each send dropped when its cancel holds, its node stops or the instance does, and the merges
+  counted since the start, by pair of nodes; and its watchdog (docs/bot-os.md D93), which stops an
+  actor whose sends of a command go unanswered too many times in a row.
 - `src/answers.ts`: command answers (docs/bot-os.md D98): the parsers' declared answers (a
   manifest's `answers`), the sends waiting for theirs (`await enqueue(…)` settles with `answer`),
   the cooldowns their `retryAt` sets per chat and command, and the retry-loop guard, which backs off
