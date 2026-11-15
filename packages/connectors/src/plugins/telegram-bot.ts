@@ -6,8 +6,12 @@
  * send through the account's outbox.
  *
  * Configured with the owner's Telegram user id (`owner`) and, optionally, a group (`group`), it is a
- * chat surface (packages/connectors/src/transport/telegram-surface.ts): it answers the
- * plugins' commands and the owner's, polling only once the core has served it the commands. It
+ * chat surface (packages/connectors/src/transport/telegram-surface.ts): it answers the owner's
+ * controls in the owner's chat, and the plugins' commands that a commands edge from its `commands`
+ * output serves (bot-os.md D109), in the chats that edge names, polling only once the core has
+ * served it the commands. Without an `owner` it is no surface, and its commands edges answer
+ * nothing. A graph saved before D109 gets an edge to each plugin with commands, answering where it
+ * answered then (its owner's chat, its group, every private chat: `servedBefore`). It
  * reports nothing on its own (bot-os.md D94): an `owner-notice` node sends the owner's notices
  * through it, those with buttons to the owner's chat through its surface, whose taps run them. The token stays in the connector's secrets, and nothing hands it out:
  * no plugin, and not the wiring, gets the bot (P9).
@@ -160,6 +164,14 @@ export function telegramBotPlugin(
         // Whom it denies: people and bots it recognises, not chats it sends to (D100).
         { key: 'deny', kinds: ['private', 'bot'], sender: true },
       ],
+      // The plugins' commands it answers, each where and to whom its edge says (D109).
+      outputs: {
+        commands: {
+          type: 'commands',
+          help: 'The plugins’ chat commands it answers (with an owner set): each edge says which, in which chats, to whom',
+          servedBefore: { when: 'owner', chats: ['owner', 'group'], privateChats: true },
+        },
+      },
     },
     create: (ctx) => {
       const log = (line: string): void => ctx.log.info(line);

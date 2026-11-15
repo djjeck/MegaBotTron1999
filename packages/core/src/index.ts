@@ -27,6 +27,8 @@ export {
   type CommandButton,
   type CommandHandler,
   type CommandPhoto,
+  type CommandScope,
+  inScope,
   type Request,
   tapOf,
 } from './commands.ts';
@@ -122,6 +124,8 @@ export {
 } from './event-log.ts';
 export {
   type Binding,
+  commandEdges,
+  type CommandsBinding,
   defaultGraph,
   downText,
   dropInputs,
@@ -340,6 +344,8 @@ export {
   ANY_CHAT,
   type ChatBinding,
   type ChatOutInput,
+  COMMANDS_PORT,
+  type CommandsInput,
   type DeclaredInput,
   type DeclaredOutput,
   describePort,
@@ -352,6 +358,7 @@ export {
   type NamespaceSource,
   type OutputPort,
   type OutputPortInput,
+  OWNER,
   PORT_TYPE_INFO,
   PORT_TYPES,
   type PortType,

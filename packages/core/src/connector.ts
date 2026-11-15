@@ -244,13 +244,18 @@ export interface ConnectorHandle {
 }
 
 /**
- * A chat surface: a connector that answers the plugins' chat commands where they are asked, the
- * owner's among them, with their cards and buttons. The core serves it the commands once every
- * plugin has started. It reports nothing on its own (bot-os.md D94): what the owner is told goes
- * through a node of the graph (`owner-notice`).
+ * A chat surface: a connector that answers the plugins' chat commands its commands edges serve
+ * (bot-os.md D109), each in the chats its edge names (`ChatCommand.where`), and the owner's
+ * controls in the owner's chat, with their cards and buttons. The core serves it the commands once
+ * every plugin has started. It reports nothing on its own (bot-os.md D94): what the owner is told
+ * goes through a node of the graph (`owner-notice`).
  */
 export interface ChatSurface {
-  /** The commands to answer (`core.commands()`), once every plugin has started. */
+  /**
+   * The commands to answer (`core.served(node)`: those its edges serve, then the core's own), once
+   * every plugin has started; each asked in a chat its `where` does not name is neither listed nor
+   * answered there, and is run with the chat's id (`Request.chat`).
+   */
   serve(commands: readonly ChatCommand[]): void;
   /**
    * The way back to the owner's main card on this surface, at the foot of the core's own cards

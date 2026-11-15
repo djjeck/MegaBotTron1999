@@ -19,13 +19,19 @@
  * - `interface`: a plugin's declared interface (§2): its reads and actions; an input names the
  *   members it uses, none for a plugin it only needs started first. An input that names no plugin
  *   is a contract: any interface that declares its members binds it.
+ * - `commands`: a plugin's chat commands (§2 `interface.commands`, bot-os.md D109), served by a
+ *   connector that answers them in its chats (a `telegram-bot`, its chat surface). The connector's
+ *   output, declared (`{ type: 'commands' }`); the plugin's input, derived from its manifest's
+ *   commands, on its left. Bound, it carries which of them it serves (`serves`), the chats it answers
+ *   in (`chats`, `privateChats`), who may ask (`senders`) and whether it is a dry run (`dryRun`). No
+ *   edge, no chat command.
  *
  * Nothing in here knows of any game or any network.
  */
 import { z } from 'zod';
 
 /** The port types, by their stable id. */
-export const PORT_TYPES = ['chat-in', 'chat-out', 'events', 'interface'] as const;
+export const PORT_TYPES = ['chat-in', 'chat-out', 'events', 'interface', 'commands'] as const;
 export type PortType = (typeof PORT_TYPES)[number];
 
 /** What the UI shows of a port type: stable, so that a drawing keeps its look. */
@@ -66,6 +72,13 @@ export const PORT_TYPE_INFO: Readonly<Record<PortType, PortTypeInfo>> = {
     shape: 'square',
     colour: '#3a9a5b',
   },
+  commands: {
+    id: 'commands',
+    description:
+      'A plugin’s chat commands, served by a connector in the chats its edge names, to whom it names: from the connector to the plugin',
+    shape: 'diamond',
+    colour: '#c2407a',
+  },
 };
 
 /** A port's name in a manifest: lower-case words and dashes, as an id. */
@@ -80,6 +93,8 @@ const chats = z.array(z.string().min(1));
 export const ANY_CHAT = '*';
 /** In a chat-in edge's `senders`, the account's own messages (bot-os.md D62). */
 export const ME = 'me';
+/** In a commands edge's `senders`, the connector's owner (bot-os.md D109: its `owner()`). */
+export const OWNER = 'owner';
 
 /**
  * What a bound chat carries: the chats read (a chat-in edge's: a list, or `'*'`, any chat its
@@ -248,6 +263,29 @@ export const outputSchema = z.discriminatedUnion('type', [
       })
       .optional(),
   }),
+  /**
+   * A connector's: it serves the plugins' chat commands (bot-os.md D109), answering each where the
+   * edge to the plugin says. Of its account's network.
+   */
+  z.strictObject({
+    type: z.literal('commands'),
+    help: z.string().min(1).optional(),
+    /**
+     * What it served before commands needed an edge (D109), for the migration of a graph saved by an
+     * older release (`Core`, once): from a node whose config sets `when`, an edge to each node with
+     * commands, answering in the chats its config keys `chats` name and, with `privateChats`, in
+     * every private chat.
+     */
+    servedBefore: z
+      .strictObject({
+        when: z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key'),
+        chats: z
+          .array(z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key'))
+          .default([]),
+        privateChats: z.boolean().default(false),
+      })
+      .optional(),
+  }),
 ]);
 export type DeclaredOutput = z.output<typeof outputSchema>;
 export type OutputPortInput = z.input<typeof outputSchema>;
@@ -266,7 +304,22 @@ export interface ChatOutInput {
  * An input port of a manifest as the core holds it: the old `chat` read as a chat-in (and a
  * chat-out output), a connector's chat-out added.
  */
-export type ManifestInputPort = Exclude<DeclaredInput, { type: 'chat' }> | ChatOutInput;
+export type ManifestInputPort =
+  Exclude<DeclaredInput, { type: 'chat' }> | ChatOutInput | CommandsInput;
+/**
+ * A plugin's commands input, derived from its manifest's `interface.commands` (bot-os.md D109):
+ * the connectors that serve them, each edge saying which, where and to whom. Optional: a plugin
+ * with no edge there runs, and no chat asks it anything.
+ */
+export interface CommandsInput {
+  type: 'commands';
+  /** Its commands, by name, in the manifest's order. */
+  commands: string[];
+  optional: true;
+  help?: string;
+}
+/** The name of the derived commands input (and of a connector's commands output). */
+export const COMMANDS_PORT = 'commands';
 /** An events input's namespace as declared: a namespace, or the config key that names one. */
 export type NamespaceSource = Extract<DeclaredInput, { type: 'events' }>['namespace'];
 /** An input port of a node: its namespace resolved (`resolveInputs`), as the graph compares it. */
@@ -277,7 +330,8 @@ export type InputPort =
 /** An output port: a connector's chat-in, a declared chat-out, and the derived events and interface. */
 export type OutputPort =
   | { type: 'chat-in'; network: string }
-  | DeclaredOutput
+  | Exclude<DeclaredOutput, { type: 'commands' }>
+  | (Extract<DeclaredOutput, { type: 'commands' }> & { network?: string })
   | { type: 'events'; namespace: string }
   | { type: 'interface'; plugin: string; members: string[] };
 
@@ -288,6 +342,8 @@ export type OutputPort =
 export function describePort(p: ManifestInputPort | InputPort | OutputPort): string {
   if (p.type === 'chat-in' || p.type === 'chat-out')
     return `${p.type} of ${p.network ?? 'any network'}`;
+  if (p.type === 'commands')
+    return 'commands' in p ? 'commands' : `commands of ${p.network ?? 'any network'}`;
   if (p.type === 'events')
     return `events of ${typeof p.namespace === 'string' ? p.namespace : `config ${p.namespace.config}`}`;
   return p.plugin === undefined
@@ -311,6 +367,8 @@ export function mismatch(input: InputPort, output: OutputPort): string | undefin
       : no;
   if (input.type === 'events')
     return output.type === 'events' && input.namespace === output.namespace ? undefined : no;
+  if (input.type === 'commands') return output.type === 'commands' ? undefined : no;
+  if (output.type === 'commands') return no;
   if (output.type !== 'interface' || (input.plugin ?? output.plugin) !== output.plugin) return no;
   const missing = input.members.filter((m) => !output.members.includes(m));
   return missing.length === 0

@@ -6,6 +6,7 @@
 import { z } from 'zod';
 import { answerSchema } from './answers.ts';
 import {
+  COMMANDS_PORT,
   type DeclaredInput,
   type DeclaredOutput,
   inputSchema,
@@ -454,6 +455,22 @@ export const manifestSchema = z
           message: `its config has no key ${p.when.config}`,
         });
     }
+    for (const [port, p] of Object.entries(m.outputs))
+      if (p.type === 'commands' && !connector)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['outputs', port],
+          message: 'only a connector serves commands (D109)',
+        });
+    if (
+      Object.keys(m.interface.commands ?? {}).length > 0 &&
+      Object.hasOwn(m.inputs, COMMANDS_PORT)
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['inputs', COMMANDS_PORT],
+        message: `the input ${COMMANDS_PORT} is derived from its commands (D109): name it otherwise`,
+      });
     const derived = new Set([
       'interface',
       ...(m.account === undefined ? [] : ['chat']),
@@ -515,6 +532,7 @@ function normalise<
     interface: {
       state?: Record<string, unknown> | undefined;
       actions?: Record<string, unknown> | undefined;
+      commands?: Record<string, unknown> | undefined;
     };
   },
 >(m: M) {
@@ -584,9 +602,21 @@ function normalise<
           }),
     };
   }
+  // Its chat commands, served through the edges to this input (D109).
+  const commands = Object.keys(m.interface.commands ?? {});
+  if (commands.length > 0)
+    all[COMMANDS_PORT] = {
+      type: 'commands',
+      commands,
+      optional: true,
+      help: 'Its chat commands: the connectors that answer them, where, and to whom',
+    };
   const outputs: Record<string, OutputPort> = {};
   if (m.account !== undefined) {
     const network = m.account.slice(0, m.account.indexOf(':'));
+    // A connector's commands output is of its account's network (D109).
+    for (const [name, p] of Object.entries(declaredOut))
+      if (p.type === 'commands') outputs[name] = { ...p, network };
     outputs['chat'] = { type: 'chat-in', network };
     if (!Object.hasOwn(all, 'chat'))
       all['chat'] = {
@@ -596,7 +626,8 @@ function normalise<
         help: 'What the plugins send through its account',
       };
   }
-  Object.assign(outputs, chatOuts, declaredOut);
+  for (const [name, p] of Object.entries({ ...chatOuts, ...declaredOut }))
+    if (!Object.hasOwn(outputs, name)) outputs[name] = p;
   for (const ns of games.registers)
     outputs[games.registers.length === 1 ? 'events' : `${ns}-events`] = {
       type: 'events',

@@ -1,4 +1,10 @@
-import { Core, definePlugin, VirtualClock } from '@megabottron1999/core';
+import {
+  Core,
+  definePlugin,
+  type Graph,
+  type GraphEdge,
+  VirtualClock,
+} from '@megabottron1999/core';
 import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
 import { describe, expect, it } from 'vitest';
 import { readWarnings } from '#test/monitors.ts';
@@ -7,6 +13,37 @@ import { telegramBotConfig, telegramBotPlugin } from './telegram-bot.ts';
 
 const AUTHOR = 4242;
 const GROUP = -100123;
+
+/** The default graph with a commands edge from the bot to the pinger (D109), as `edge` says. */
+const served =
+  (edge: Partial<GraphEdge> = {}) =>
+  (d: Graph): Graph => ({
+    ...d,
+    edges: [
+      ...d.edges,
+      {
+        from: 'telegram-bot.commands',
+        to: 'pinger.commands',
+        type: 'commands',
+        chats: [String(AUTHOR), String(GROUP)],
+        privateChats: true,
+        ...edge,
+      },
+    ],
+  });
+
+/** A plugin of one command, `/ping`, that answers `pong`. */
+const pinger = () =>
+  definePlugin({
+    manifest: {
+      id: 'pinger',
+      version: '0.1.0',
+      kinds: ['stats'],
+      description: 'answers',
+      interface: { commands: { ping: { help: 'ping', menu: 'il ping' } } },
+    },
+    create: () => ({ commands: { ping: { run: (a) => a.text('pong') } } }),
+  });
 
 describe('the telegram-bot plugin', () => {
   it('makes the bot from its own secret, polls once the app listens, and stops it', async () => {
@@ -96,6 +133,7 @@ describe('the telegram-bot plugin', () => {
       clock: new VirtualClock(),
       secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
       config: { 'telegram-bot': { owner: AUTHOR, group: GROUP, unansweredAtBy: { '/turn': 2 } } },
+      graph: served(),
     });
     core.register(
       telegramBotPlugin({ bot: () => stub.bot }),
@@ -184,20 +222,9 @@ describe('the telegram-bot plugin', () => {
       secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
       record: (r) => void records.push(r as { type: string }),
       config: { 'telegram-bot': { owner: AUTHOR, group: GROUP, deny: ['66'] } },
+      graph: served(),
     });
-    core.register(
-      telegramBotPlugin({ bot: () => stub.bot }),
-      definePlugin({
-        manifest: {
-          id: 'pinger',
-          version: '0.1.0',
-          kinds: ['stats'],
-          description: 'answers',
-          interface: { commands: { ping: { help: 'ping', menu: 'il ping' } } },
-        },
-        create: () => ({ commands: { ping: { run: (a) => a.text('pong') } } }),
-      })
-    );
+    core.register(telegramBotPlugin({ bot: () => stub.bot }), pinger());
     await core.start();
     await new Promise((r) => setTimeout(r, 20));
     expect(core.controls.view('telegram-bot')).toMatchObject({ value: { state: { count: 0 } } });
@@ -227,6 +254,64 @@ describe('the telegram-bot plugin', () => {
       '1 command denied'
     );
     await core.stop();
+  });
+
+  it('answers a plugin’s command only where and to whom an edge serves it (D109)', async () => {
+    const run = async (graph?: (d: Graph) => Graph) => {
+      const stub = stubBot();
+      stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
+      stub.bot.start = () => new Promise<void>(() => {});
+      stub.bot.stop = () => Promise.resolve();
+      const records: { type: string; origin?: string; outcome?: string; chat?: string }[] = [];
+      const core = new Core({
+        clock: new VirtualClock(),
+        secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
+        record: (r) => void records.push(r as (typeof records)[number]),
+        config: { 'telegram-bot': { owner: AUTHOR, group: GROUP } },
+        ...(graph === undefined ? {} : { graph }),
+      });
+      core.register(telegramBotPlugin({ bot: () => stub.bot }), pinger());
+      await core.start();
+      await new Promise((r) => setTimeout(r, 20));
+      await stub.bot.handleUpdate(stub.command(GROUP, 7, '/ping', 'bob'));
+      await stub.bot.handleUpdate(stub.command(55, 55, '/ping', 'carol'));
+      await stub.bot.handleUpdate(stub.command(AUTHOR, AUTHOR, '/ping'));
+      await new Promise((r) => setTimeout(r, 20));
+      await core.stop();
+      const menus = stub.calls
+        .filter((c) => c.method === 'setMyCommands')
+        .map(
+          (c) =>
+            `${JSON.stringify(c.payload['scope'])} ${(c.payload['commands'] as { command: string }[]).map((x) => x.command).join(',')}`
+        );
+      const sent = stub.calls
+        .filter((c) => c.method === 'sendMessage')
+        .map((c) => `${String(c.payload['chat_id'])} ${String(c.payload['text'])}`);
+      return { menus, sent, answers: records.filter((r) => r.origin === 'command /ping') };
+    };
+    // No edge, no chat command: listed nowhere, answered nowhere; the owner's controls stay.
+    const none = await run();
+    expect(none.sent).toEqual([]);
+    expect(none.menus.some((m) => m.includes('ping'))).toBe(false);
+    expect(none.menus).toContain(`{"type":"chat","chat_id":${AUTHOR}} plugins,kill,settings,set`);
+    // The group alone: answered there, and listed in its menu alone.
+    const group = await run(served({ chats: [String(GROUP)], privateChats: undefined }));
+    expect(group.sent).toEqual([`${GROUP} pong`]);
+    expect(group.menus).toContain(`{"type":"all_private_chats"} `);
+    expect(group.answers).toEqual([
+      expect.objectContaining({ outcome: 'sent', chat: String(GROUP) }),
+    ]);
+    // Every private chat, to the owner and to carol only: the group's ask is ignored.
+    const asked = await run(served({ chats: [], senders: ['owner', '@Carol'] }));
+    expect(asked.sent).toEqual(['55 pong', `${AUTHOR} pong`]);
+    // A dry run answers nothing, and logs what it would have.
+    const dry = await run(served({ dryRun: true }));
+    expect(dry.sent).toEqual([]);
+    expect(dry.answers.map((r) => `${r.outcome} ${r.chat}`)).toEqual([
+      `dry-run ${GROUP}`,
+      'dry-run 55',
+      `dry-run ${AUTHOR}`,
+    ]);
   });
 
   it('ends the core’s cards with the way home its config names (D105)', async () => {

@@ -165,7 +165,12 @@ export const greeter = definePlugin({
   ports and the chats it sends through (its `chat-out` outputs), the event types it registers (each
   schema's `.describe()` saying what it is), its configuration, settings and secrets as zod schemas,
   and its interface of reads, actions and chat commands. The web UI, the chat commands and the
-  owner's control API are all made from these declarations.
+  owner's control API are all made from these declarations. A chat answers a plugin's command only
+  where a **commands edge** from a connector serves it (D109): drawn from the `telegram-bot`'s
+  `commands` output to the plugin's `commands` input, it says which commands, in which chats (the
+  group, the owner's chat, every private chat) and to whom, and starts a dry run that logs each
+  answer; no edge, no chat command. An instance saved before got these edges at its first start, so
+  each command is answered where it was.
 - **The context** gives it a clock, its own store, durable timers, the bus, the event log read back
   (its own namespaces and those it consumes), handles on the connectors its edges bind, an outbox,
   drift reporting, its settings, a way to raise a notice for the owner (`ctx.notice`), and its own
@@ -188,9 +193,10 @@ export const greeter = definePlugin({
   watchdog, the owner's kill or Telegram's stop; kept in its instance across restarts until the
   owner clears it), or **inactive** while a node its required ports bind is down, at once when that
   node is stopped at runtime (D65). A chat-out edge that is a **dry run** logs what it would send,
-  as sent, and sends nothing. New nodes start disabled and new chat-out edges dry runs; every state
-  is raised only in the editor, applied with a restart. The modes of before (`read-only`, `dry-run`,
-  `live`) were migrated into them at the first start.
+  as sent, and sends nothing; so does a commands edge for a command's answers (D109). New nodes
+  start disabled and new chat-out edges dry runs; every state is raised only in the editor, applied
+  with a restart. The modes of before (`read-only`, `dry-run`, `live`) were migrated into them at
+  the first start.
 - **Drift:** a parser reports every message it claims but cannot read; past a threshold, the core
   stops the actors that depend on it, and what requires them goes inactive, until the owner looks.
 - **The send-queue watchdog** (D93): an actor that keeps sending one command to a bot's chat with no

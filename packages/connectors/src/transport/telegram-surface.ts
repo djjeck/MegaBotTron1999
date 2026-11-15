@@ -1,12 +1,13 @@
 /**
  * A Telegram bot as a chat surface of the core (docs/bot-os-api.md §2, §4.11): the
- * `telegram-bot` connector answers the plugins' commands, the owner's with their cards and buttons,
- * on the bot it holds. Once the core serves it the commands (`serve`), it makes the switchboard
+ * `telegram-bot` connector answers the plugins' commands its commands edges serve (bot-os.md
+ * D109), and the owner's with their cards and buttons, on the bot it holds. Once the core serves
+ * it the commands (`serve`), it makes the switchboard
  * (packages/connectors/src/transport/telegram-switchboard.ts), with the owner's private chat
- * as its `author` topic and the group, if any, as `group`; it answers the commands there and
- * in every other private chat (packages/connectors/src/transport/telegram-commands.ts),
- * keeps the menus registered (`CommandMenus`, again once connected), and only then lets the bot
- * poll, so that no update arrives before its handlers. It reports nothing on its own (bot-os.md
+ * as its `author` topic and the group, if any, as `group`; it answers each command in the chats its
+ * edge names (packages/connectors/src/transport/telegram-commands.ts), keeps each chat's menu
+ * to the commands served there (`CommandMenus`, the private chats' and the other chats', again once
+ * connected), and only then lets the bot poll, so that no update arrives before its handlers. It reports nothing on its own (bot-os.md
  * D94): a message with buttons a node sends to the owner's chat through the connector (an
  * `owner-notice` telling a plugin's `ctx.notify`) goes through its switchboard (`send`), so that a
  * tap runs the owner's command as a card's does.
@@ -21,7 +22,12 @@ import {
 } from '@megabottron1999/core';
 import { type Bot } from 'grammy';
 import { type Logger, type Switchboard } from 'grammy-switchboard';
-import { installPublicCommands, registerPrivateMenu, surfaceOf } from './telegram-commands.ts';
+import {
+  installPublicCommands,
+  registerChatMenus,
+  registerPrivateMenu,
+  surfaceOf,
+} from './telegram-commands.ts';
 import {
   AUTHOR_TOPIC,
   CommandMenus,
@@ -77,7 +83,10 @@ export class TelegramSurface implements ChatSurface {
     if (this.served) return;
     this.served = true;
     const { bot, owner, group, log } = this.o;
-    const surface = surfaceOf(commands);
+    const surface = surfaceOf(commands, {
+      author: owner,
+      ...(group === undefined ? {} : { group }),
+    });
     const switchboard = createSwitchboard({
       api: bot.api,
       authorId: owner,
@@ -93,6 +102,7 @@ export class TelegramSurface implements ChatSurface {
     bot.use(switchboard);
     installPublicCommands(switchboard, bot, {
       handlers: surface.handlers,
+      served: surface.served,
       allow: surface.allow,
       aliases: surface.aliases,
       owner: surface.owner,
@@ -104,7 +114,8 @@ export class TelegramSurface implements ChatSurface {
     this.o.onStatus((s) => {
       if (s.state !== 'connected') return;
       menus.registerAll();
-      void registerPrivateMenu(bot.api, surface.publicMenu, log);
+      void registerPrivateMenu(bot.api, surface.privateMenu, log);
+      void registerChatMenus(bot.api, surface.chatMenus, log);
     });
     this.switchboardIs(switchboard);
     this.listen();

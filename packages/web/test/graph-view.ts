@@ -16,6 +16,7 @@ const PORT_TYPES: GraphViewData['portTypes'] = {
   'chat-out': { id: 'chat-out', description: 'chats sent', shape: 'circle', colour: '#8a4fd1' },
   events: { id: 'events', description: 'events', shape: 'diamond', colour: '#d97b29' },
   interface: { id: 'interface', description: 'an interface', shape: 'square', colour: '#3a9a5b' },
+  commands: { id: 'commands', description: 'commands served', shape: 'diamond', colour: '#c2407a' },
 };
 
 const none = { reads: [], actions: [], commands: [] };

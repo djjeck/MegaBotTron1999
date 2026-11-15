@@ -238,6 +238,13 @@ export type PortView = (
       types?: EventTypeView[];
     }
   | { type: 'interface'; plugin?: string; members: string[] }
+  | {
+      type: 'commands';
+      /** A connector's output: its network. */
+      network?: string;
+      /** A plugin's input: its commands, by name, in its manifest's order (D109). */
+      commands?: string[];
+    }
 ) & {
   /** The port in words (`describePort`). */
   label: string;
@@ -337,6 +344,7 @@ function inputView(
       ...(p.type === 'chat-in' && p.sameAs !== undefined ? { sameAs: p.sameAs } : {}),
       ...base,
     };
+  if (p.type === 'commands') return { type: 'commands', commands: [...p.commands], ...base };
   if (p.type === 'events') {
     const from = declared.type === 'events' ? declared.namespace : undefined;
     return {
@@ -378,6 +386,14 @@ function outputView(p: OutputPort, events: Manifest['events']): PortView {
       types: typesOf(events, p.namespace),
       label: describePort(p),
       optional: false,
+    };
+  if (p.type === 'commands')
+    return {
+      type: 'commands',
+      ...(p.network === undefined ? {} : { network: p.network }),
+      label: describePort(p),
+      optional: false,
+      ...(p.help === undefined ? {} : { help: p.help }),
     };
   if (p.type !== 'chat-out')
     return { ...structuredClone(p), label: describePort(p), optional: false };

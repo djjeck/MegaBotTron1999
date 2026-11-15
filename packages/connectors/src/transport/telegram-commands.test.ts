@@ -8,6 +8,7 @@ import {
   PER_CHAT_MS,
   PER_USER_MS,
   type PublicCommandsOptions,
+  registerChatMenus,
   registerPrivateMenu,
   surfaceOf,
   Throttle,
@@ -298,11 +299,15 @@ describe('installPublicCommands', () => {
       ...more,
     });
     const owner = (who: Asker) => who.owner === true;
-    const surface = surfaceOf([
-      command('map', { menu: 'la mappa' }),
-      command('countdown', { menu: 'conto', aliases: ['timer', 'clock'] }),
-      command('report', { aliases: ['stats'], allow: owner }),
-    ]);
+    const everywhere = { chats: [String(AUTHOR), String(GROUP)], privateChats: true };
+    const surface = surfaceOf(
+      [
+        command('map', { menu: 'la mappa', where: everywhere }),
+        command('countdown', { menu: 'conto', aliases: ['timer', 'clock'], where: everywhere }),
+        command('report', { aliases: ['stats'], allow: owner, where: everywhere }),
+      ],
+      { author: AUTHOR, group: GROUP }
+    );
     expect(surface.aliases).toEqual({
       timer: 'countdown',
       clock: 'countdown',
@@ -626,14 +631,117 @@ describe('the owner’s commands', () => {
       run: () => Promise.resolve(),
       ...more,
     });
-    const s = surfaceOf([
-      command('status', { menu: 'not for the players' }),
-      command('opt', { hidden: true }),
-      command('map', { owner: false, menu: 'la mappa' }),
-    ]);
+    const s = surfaceOf(
+      [
+        command('status', { menu: 'not for the players' }),
+        command('opt', { hidden: true }),
+        command('map', {
+          owner: false,
+          menu: 'la mappa',
+          where: { chats: [String(AUTHOR), String(GROUP)], privateChats: false },
+        }),
+      ],
+      { author: AUTHOR, group: GROUP }
+    );
     expect(s.authorMenu.map((c) => c.command)).toEqual(['status', 'map']);
     expect(s.publicMenu.map((c) => c.command)).toEqual(['map']);
+    expect(s.privateMenu).toEqual([]);
     expect([...s.owner]).toEqual(['status', 'opt']);
+  });
+});
+
+describe('the commands served by edges (D109)', () => {
+  const command = (name: string, where?: ChatCommand['where']): ChatCommand => ({
+    plugin: 'p',
+    name,
+    help: `${name} help`,
+    menu: `${name} menu`,
+    aliases: [],
+    owner: false,
+    hidden: false,
+    run: () => Promise.resolve(),
+    ...(where === undefined ? {} : { where }),
+  });
+
+  it('lists each in the menus of the chats its edge names, and answers it there alone', () => {
+    const s = surfaceOf(
+      [
+        command('map', { chats: [String(GROUP)], privateChats: false }),
+        command('dm', { chats: [], privateChats: true }),
+        command('lobby', { chats: ['@other_lobby', '-100999'], privateChats: false }),
+        command('plugins'),
+      ],
+      { author: AUTHOR, group: GROUP }
+    );
+    expect(s.authorMenu.map((c) => c.command)).toEqual(['dm', 'plugins']);
+    expect(s.publicMenu.map((c) => c.command)).toEqual(['map']);
+    expect(s.privateMenu.map((c) => c.command)).toEqual(['dm']);
+    expect(
+      [...s.chatMenus].map(([chat, m]) => `${chat} ${m.map((c) => c.command).join()}`)
+    ).toEqual(['@other_lobby lobby', '-100999 lobby']);
+    const at = (name: string, chat: { id: number; type: string; username?: string }) =>
+      s.served[name]?.(chat) === true;
+    expect(at('map', { id: GROUP, type: 'supergroup' })).toBe(true);
+    expect(at('map', { id: PLAYER, type: 'private' })).toBe(false);
+    expect(at('dm', { id: PLAYER, type: 'private' })).toBe(true);
+    expect(at('lobby', { id: -100555, type: 'supergroup', username: 'Other_Lobby' })).toBe(true);
+    // The core's own: the author's chat alone.
+    expect(at('plugins', { id: AUTHOR, type: 'private' })).toBe(true);
+    expect(at('plugins', { id: PLAYER, type: 'private' })).toBe(false);
+    expect(surfaceOf([command('plugins')]).authorMenu).toEqual([]);
+  });
+
+  it('answers in a chat served, with its id, and ignores the others', async () => {
+    const stub = stubBot();
+    const asked: string[] = [];
+    const switchboard = new Switchboard({
+      api: stub.bot.api,
+      topics: telegramTopics(AUTHOR, GROUP),
+      commands: { [AUTHOR_TOPIC]: [], [GROUP_TOPIC]: [] },
+    });
+    stub.bot.use(switchboard);
+    installPublicCommands(switchboard, stub.bot, {
+      handlers: { ping: (_a, r) => (asked.push(r.chat ?? '?'), Promise.resolve()) },
+      served: { ping: (chat) => chat.id === -100999 || chat.id === AUTHOR },
+      groupId: GROUP,
+      authorId: AUTHOR,
+      now: () => T0,
+    });
+    for (const chat of [GROUP, -100999, PLAYER, AUTHOR])
+      await stub.bot.handleUpdate(stub.command(chat, PLAYER, '/ping'));
+    await stub.bot.handleUpdate(stub.tap(GROUP, PLAYER, '/ping'));
+    await stub.bot.handleUpdate(stub.tap(-100999, PLAYER, '/ping'));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(asked).toEqual(['-100999', String(AUTHOR), '-100999']);
+  });
+});
+
+describe('registerChatMenus', () => {
+  it('sets each other chat’s menu by its id or @username, and reports a refusal', async () => {
+    const calls: unknown[][] = [];
+    const lines: string[] = [];
+    let n = 0;
+    await registerChatMenus(
+      {
+        setMyCommands: (...args: unknown[]) => (
+          calls.push(args),
+          n++ === 0 ? Promise.resolve(true) : Promise.reject(new Error('400'))
+        ),
+      } as never,
+      new Map([
+        ['-100999', PUBLIC_MENU],
+        ['@other_lobby', PUBLIC_MENU],
+      ]),
+      (l) => lines.push(l)
+    );
+    expect(calls.map((c) => c[1])).toEqual([
+      { scope: { type: 'chat', chat_id: -100999 } },
+      { scope: { type: 'chat', chat_id: '@other_lobby' } },
+    ]);
+    expect(lines).toEqual([
+      'telegram: command menu of -100999 set',
+      'telegram: command menu of @other_lobby failed: Error: 400',
+    ]);
   });
 });
 

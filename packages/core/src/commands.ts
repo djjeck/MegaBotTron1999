@@ -1,12 +1,15 @@
 /**
  * Chat commands (docs/bot-os-api.md §2 `interface.commands`, P11). A plugin declares its commands
  * in its manifest (name, help, arguments, aliases, and the description of the players' menus) and
- * its instance offers a handler for each; the core lists them (`core.commands()`) for the chat
- * surface, which registers them in its menus and answers them, in reply to whoever asked.
+ * its instance offers a handler for each. A chat surface serves only those a commands edge of the
+ * graph serves from its connector (bot-os.md D109: no edge, no chat command): the core gives it
+ * them (`core.served(node)`), each with where it is answered (`where`, the edge's chats) and the
+ * edge's senders and dry run held by the core, and the surface registers each in the menus of the
+ * chats it is served in and answers it there, in reply to whoever asked.
  *
- * The answer is the surface's, as a page of the web UI is: a plugin's handler says what to answer,
- * and the surface sends it where the command came from. What a plugin sends on its own goes through
- * the outbox, in its mode (§4.6, P10).
+ * The answer goes to the asker in the chat asked (D29), within the edge: the core records each
+ * (`core.send`, its origin `command /name`) and, on a dry-run edge, logs it and sends nothing.
+ * What a plugin sends on its own goes through the outbox, within its chat-out edges (§4.6, P10).
  *
  * The types are the network's least: a text, plain or Markdown, with buttons that each run a
  * command again; a photo, as bytes or by the id the network gave it once sent. Nothing in here
@@ -63,6 +66,16 @@ export interface Answer {
 /** What was asked: the text typed after the command, trimmed. */
 export interface Request {
   args: string;
+  /** The chat it was asked in, as its connector names it (a Telegram chat's id), when known. */
+  chat?: string;
+}
+
+/** Where a chat surface answers a command (bot-os.md D109), as its commands edge says. */
+export interface CommandScope {
+  /** The chats it is answered in, as the connector names them (an id, a `@username`). */
+  chats: readonly string[];
+  /** Every private chat with the account too. */
+  privateChats: boolean;
 }
 
 /** Who asked: the network's id and username, and whether it is the instance's owner. */
@@ -94,4 +107,19 @@ export interface ChatCommand extends CommandHandler {
   owner: boolean;
   /** In no menu: a button's action, or typed by hand. */
   hidden: boolean;
+  /**
+   * Where a surface answers it (D109), as the commands edge that serves it says; none: the core's
+   * own, the owner's controls, answered in the owner's chat alone.
+   */
+  where?: CommandScope;
+}
+
+/** Whether `chat`, by its names (an id, a `@username`) and kind, is in `scope` (D109). */
+export function inScope(
+  scope: CommandScope,
+  chat: { names: readonly string[]; private: boolean }
+): boolean {
+  if (scope.privateChats && chat.private) return true;
+  const names = chat.names.map((n) => n.toLowerCase());
+  return scope.chats.some((c) => names.includes(c.toLowerCase()));
 }

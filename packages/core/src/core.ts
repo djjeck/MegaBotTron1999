@@ -22,7 +22,13 @@ import { type z } from 'zod';
 import { answerWindowMs, type BackoffView, readAnswer } from './answers.ts';
 import { Bus, type BusEvent, type BusHandle } from './bus.ts';
 import { type Clock } from './clock.ts';
-import { type ChatCommand, type CommandButton, type CommandHandler } from './commands.ts';
+import {
+  type Answer,
+  type Asker,
+  type ChatCommand,
+  type CommandButton,
+  type CommandHandler,
+} from './commands.ts';
 import { type Connector, handleOf, type Inbound, type ReadFilter } from './connector.ts';
 import { Controls, type StopRecord, type StopSource } from './controls.ts';
 import { Costs, type NodeCost, type OwnCost } from './costs.ts';
@@ -30,6 +36,8 @@ import { DEFAULT_DRIFT, type DriftCounts, DriftMonitor, type DriftRecord } from 
 import { type EventReader, type LogCursor, type LogEntry, type LogTail } from './event-log.ts';
 import {
   type Binding,
+  commandEdges,
+  type CommandsBinding,
   defaultGraph,
   downText,
   type Graph,
@@ -83,7 +91,7 @@ import {
   type PluginContext,
   type PluginInterface,
 } from './plugin.ts';
-import { type InputPort } from './ports.ts';
+import { type InputPort, OWNER } from './ports.ts';
 import { holds } from './react.ts';
 import { type Render, resvgRender } from './render.ts';
 import { type KeptTimer, PluginScheduler } from './scheduler.ts';
@@ -270,6 +278,8 @@ export const STOP_DOC = '_stop';
 export const MODE_DOC = '_mode';
 /** The core's document of the first start's migration of the modes into states (D64). */
 export const STATES_DOC = 'node-states';
+/** The core's document of the first start's commands edges (D109: no edge, no chat command). */
+export const COMMANDS_DOC = 'command-edges';
 /** How often the orphaned instances are looked for: daily. */
 const SWEEP_MS = 86_400_000;
 
@@ -676,9 +686,10 @@ export class Core {
 
   /**
    * The chat commands of the plugins up (running, or stopped since they started), in load order,
-   * for the chat surface (§2 `interface.commands`, P11). A command whose plugin shuts down, or
-   * fails, since is answered by nobody: its handler does nothing. The core's own cards end with
-   * `home`, the surface's way back to the owner's main card (`CoreOptions.home` by default).
+   * whatever edge serves them (§2 `interface.commands`, P11): the admin side's, every plugin's. A
+   * command whose plugin shuts down, or fails, since is answered by nobody: its handler does
+   * nothing. The core's own cards end with `home`, the surface's way back to the owner's main card
+   * (`CoreOptions.home` by default). A chat surface is served `served(node)`, those its edges serve.
    */
   commands(home: CommandButton | undefined = this.o.home): ChatCommand[] {
     const out: ChatCommand[] = [];
@@ -719,6 +730,112 @@ export class Core {
       })
     );
     return out.map(asOwner);
+  }
+
+  /**
+   * The chat commands the chat surface of connector `node` answers (bot-os.md D109): each command
+   * of a plugin up that a commands edge from `node` serves, with where it is answered (`where`, the
+   * edge's chats), who may ask (the edge's `senders`, before the plugin's own `allow`) and its
+   * answers held as a send is (each recorded, `core.send` with the origin `command /<name>`, and on
+   * a dry-run edge logged and never sent); then the core's own, the owner's controls, answered in
+   * the owner's chat alone, as before (D56: that chat is in the graph, the connector's `owner`).
+   * No edge, no chat command.
+   */
+  served(node: string, home: CommandButton | undefined = this.o.home): ChatCommand[] {
+    const all = this.commands(home);
+    const account = this.entries.get(node)?.node.account ?? '';
+    const out: ChatCommand[] = [];
+    for (const e of this.entries.values())
+      for (const [port, input] of Object.entries(e.node.ports)) {
+        if (input.type !== 'commands') continue;
+        for (const b of e.node.inputs.get(port) ?? []) {
+          if (b.node !== node || b.commands === undefined) continue;
+          const edge = b.commands;
+          for (const c of all)
+            if (c.plugin === e.id && (edge.serves === undefined || edge.serves.includes(c.name)))
+              out.push(this.servedOne(c, edge, b.dryRun === true, account));
+        }
+      }
+    return [...out, ...all.filter((c) => c.plugin === 'core')];
+  }
+
+  /** A plugin's command as one commands edge serves it (D109). */
+  private servedOne(
+    c: ChatCommand,
+    edge: CommandsBinding,
+    dryRun: boolean,
+    account: string
+  ): ChatCommand {
+    const { senders } = edge;
+    const may = (a: Asker): boolean =>
+      senders === undefined ||
+      senders.some((s) =>
+        s === OWNER
+          ? a.owner === true
+          : s === a.id || s.replace(/^@/u, '').toLowerCase() === a.username?.toLowerCase()
+      );
+    const allow = c.allow;
+    return {
+      ...c,
+      where: { chats: [...edge.chats], privateChats: edge.privateChats },
+      ...(senders === undefined && allow === undefined
+        ? {}
+        : { allow: (a: Asker) => may(a) && (allow === undefined || allow(a)) }),
+      run: (answer, request) =>
+        c.run(this.heldAnswer(answer, c, account, request.chat ?? '', dryRun), request),
+    };
+  }
+
+  /**
+   * A command's answer held as a send is (D109, P10): recorded (`core.send`, the origin
+   * `command /<name>`), and on a dry-run edge logged and never sent (a photo's id then none).
+   */
+  private heldAnswer(
+    answer: Answer,
+    c: ChatCommand,
+    account: string,
+    chat: string,
+    dryRun: boolean
+  ): Answer {
+    const log = (text: string, outcome: SendRecord['outcome'], reason?: string): void => {
+      const r: SendRecord = {
+        type: 'core.send',
+        t: this.o.clock.now(),
+        plugin: c.plugin,
+        account,
+        chat,
+        origin: `command /${c.name}`,
+        mode: dryRun ? 'dry-run' : 'live',
+        text,
+        outcome,
+        ...(reason === undefined ? {} : { reason }),
+      };
+      this.counted(r);
+      this.o.record?.(r);
+    };
+    const held = async <T>(text: string, go: () => Promise<T>): Promise<T | undefined> => {
+      if (dryRun) {
+        log(text, 'dry-run');
+        return undefined;
+      }
+      try {
+        const r = await go();
+        log(text, 'sent');
+        return r;
+      } catch (e) {
+        log(text, 'failed', message(e));
+        throw e;
+      }
+    };
+    return {
+      text: async (text, format, options) => {
+        await held(text, () => answer.text(text, format, options));
+      },
+      photo: (photo) =>
+        held(typeof photo === 'string' ? '[photo]' : `[photo ${photo.filename}]`, () =>
+          answer.photo(photo)
+        ),
+    };
   }
 
   /**
@@ -816,12 +933,13 @@ export class Core {
     for (const entry of this.entries.values()) await this.startOne(entry);
     // Every plugin has started: each hears it, in load order (§3).
     for (const entry of this.entries.values()) await this.readyOne(entry);
-    // The chat surfaces answer the commands from now on, each with its own way home.
+    // The chat surfaces answer the commands their edges serve from now on (D109), each with its
+    // own way home.
     for (const entry of this.entries.values()) {
       if (entry.up !== true) continue;
       const surface = entry.instance?.surface;
       try {
-        surface?.serve(this.commands(surface.home ?? this.o.home));
+        surface?.serve(this.served(entry.id, surface.home ?? this.o.home));
       } catch (e) {
         this.logger(entry.id).error(`serve failed: ${message(e)}`);
       }
@@ -1125,13 +1243,20 @@ export class Core {
     const file = this.o.graphFile;
     if (given === undefined && file !== undefined) {
       const r = file.read();
-      // No graph yet: nothing to migrate, ever (D64).
-      if (!r.exists) return { raw: this.migrateModes(file, undefined), fromFile: true };
+      // No graph yet: nothing to migrate, ever (D64, D109).
+      if (!r.exists)
+        return {
+          raw: this.migrateCommands(file, this.migrateModes(file, undefined), false),
+          fromFile: true,
+        };
       if ('error' in r) {
         this.refused = [{ text: r.error }];
         return { raw: EMPTY_GRAPH, fromFile: true };
       }
-      return { raw: this.migrateModes(file, r.raw), fromFile: true };
+      return {
+        raw: this.migrateCommands(file, this.migrateModes(file, r.raw), true),
+        fromFile: true,
+      };
     }
     if (typeof given === 'function' || given === undefined) {
       const manifests = this.plugins.flatMap((p) => {
@@ -1199,6 +1324,46 @@ export class Core {
       modes: Object.fromEntries(modes),
     });
     return migrated;
+  }
+
+  /**
+   * The first start since chat commands need an edge (bot-os.md D109): the saved graph (`saved`,
+   * one an older release wrote) gets the commands edges that keep each plugin's commands answered
+   * where and to whom its connectors answered them (`commandEdges`), live; the file is written (a
+   * version of the history, `migrated`), recorded (`core.graph`, `commandEdges`) and the owner told
+   * which edges were added (a `graph-migrated` notice). Done once (`command-edges` in the core's
+   * store), so an edge the owner removes later stays removed; a fresh instance has nothing to add.
+   */
+  private migrateCommands(file: GraphFile, raw: unknown, saved: boolean): unknown {
+    const core = this.stores.internal(CORE);
+    if (core.get(COMMANDS_DOC) !== undefined) return raw;
+    const manifests = new Map<string, Manifest>();
+    for (const p of this.plugins)
+      try {
+        const m = parseManifest(p.manifest);
+        if (!manifests.has(m.id)) manifests.set(m.id, m);
+      } catch {
+        // The check says why.
+      }
+    const upgraded = saved ? this.upgrade(raw) : raw;
+    const { graph, added } = saved ? commandEdges(upgraded, manifests) : { graph: raw, added: [] };
+    if (added.length > 0) {
+      file.adopt((g) => this.upgrade(g));
+      file.save(graph as Graph, { source: 'migrated', upgrade: (g) => this.upgrade(g) });
+      this.o.record?.({
+        type: 'core.graph',
+        t: this.o.clock.now(),
+        event: 'migrated',
+        commandEdges: added,
+      });
+      this.notice({
+        kind: 'graph-migrated',
+        text: `Chat commands now need an edge from the connector that answers them: ${added.length} added, live, so each is answered where and to whom it was (${added.join('; ')}); remove or narrow them in the editor`,
+        detail: { edges: added },
+      });
+    }
+    core.put(COMMANDS_DOC, { migrated: new Date(this.o.clock.now()).toISOString(), added });
+    return added.length > 0 ? graph : raw;
   }
 
   /**

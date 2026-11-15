@@ -264,6 +264,14 @@ describe('the nodes as the graph view shows them', () => {
         help: 'any helper',
       },
       lobby: { type: 'chat-in', network: 'irc', label: 'chat-in of irc', optional: true },
+      // Its chat commands, served by the connectors whose edges bind it (D109).
+      commands: {
+        type: 'commands',
+        commands: ['poke'],
+        label: 'commands',
+        optional: true,
+        help: 'Its chat commands: the connectors that answer them, where, and to whom',
+      },
     });
     // Its old chat inputs are chat-out outputs too, of the same names (module API 1).
     expect(b?.outputs).toMatchObject({

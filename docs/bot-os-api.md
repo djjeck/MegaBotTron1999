@@ -45,7 +45,7 @@ instance does not start.
 | `description`   | One line, for the UI and the agents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `archived`      | An archive (bot-os.md D32): built and tested, but refused in every instance's graph; only a run that says `allowArchived` (a test, the dev kit, a manual-test tool) runs it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `inputs`        | Its input ports, by name (§2.1): what it consumes, each of a port type, with the binding the default graph gives it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `outputs`       | Its declared output ports, by name (§2.1): its `chat-out`s, what it sends through a connector's account, with the binding the default graph gives each. Its other outputs are derived                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `outputs`       | Its declared output ports, by name (§2.1): its `chat-out`s, what it sends through a connector's account, with the binding the default graph gives each; a connector's `commands`, the plugins' chat commands it serves (bot-os.md D109). Its other outputs are derived, and so is a plugin's `commands` input, from its `interface.commands`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `requires`      | Shorthand (§2.1): the plugins it needs started first, by id, read as input ports. The load order follows them; a missing one or a cycle fails the start, naming it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `games`         | `registers`: the namespaces whose event types it defines (its game's, or its own id); `consumes`: those whose events it reads (P7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `events`        | The event types it registers, `<namespace>.<name>` → zod schema of the payload (§4.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -127,27 +127,37 @@ and, for the users' menus, a description in their language (`menu`; a command wi
 answered but not listed there). The instance offers a handler for each (`commands`:
 `run(answer, request)`, and `allow(asker)` for a command answered only to some; a command declared
 and not offered fails the plugin at `create`), and two commands or aliases of one name fail the
-load. `core.commands()` lists the running plugins' commands, in load order, for the chat surface,
-which registers them in its menus and answers them where they were asked
-(`packages/core/src/commands.ts`). The answer is the surface's (D29): the handler says what to
-answer (`Answer`: a text, plain or Markdown, with buttons that each run a command again and an
-expiry in a group; a photo, as bytes or by the network's id of one sent before), and the surface
-sends it in reply to the asker (`Asker`: the network's id and username, and whether it is the
-owner), outside the plugin's outbox. What a plugin sends on its own goes through its outbox, within
-its chat-out edges, each sending for real or as a dry run (§4.6). The surface is a connector's
-(`ChatSurface`): the core serves every running connector that offers one the commands (`serve`),
-once every plugin has started, the core's own cards ending with that surface's way home (`home`,
-§4.11). A surface is the owner's interactive control (commands, cards and their buttons), not a
-report channel: it tells the owner nothing on its own (bot-os.md D94).
+load. **No edge, no chat command** (bot-os.md D109): a plugin with commands has a `commands` input
+(§2.1), and a chat answers a command only where a commands edge from its connector serves it.
+`core.commands()` lists the running plugins' commands, in load order, every one of them, for the
+admin side; `core.served(node)` those the commands edges from a connector's node serve, each with
+where (`where`: the edge's `chats` and `privateChats`, `inScope`), its `allow` the edge's `senders`
+then the plugin's own, and its answers held by the edge, then the core's own. The surface registers
+each in the menus of the chats it is served in, and answers it there alone, with the chat asked in
+(`Request.chat`) (`packages/core/src/commands.ts`). The answer is the surface's (D29), within the
+edge: the handler says what to answer (`Answer`: a text, plain or Markdown, with buttons that each
+run a command again and an expiry in a group; a photo, as bytes or by the network's id of one sent
+before), and the surface sends it in reply to the asker (`Asker`: the network's id and username, and
+whether it is the owner), in the chat asked; each answer is recorded as a send (`core.send`, its
+`origin` `command /<name>`, `sent` or `failed`), and a dry-run edge logs it (`dry-run`) and sends
+nothing. What a plugin sends on its own goes through its outbox, within its chat-out edges, each
+sending for real or as a dry run (§4.6). The surface is a connector's (`ChatSurface`): the core
+serves every running connector that offers one its commands (`serve(core.served(node))`), once every
+plugin has started, the core's own cards ending with that surface's way home (`home`, §4.11). A
+surface is the owner's interactive control (commands, cards and their buttons), not a report
+channel: it tells the owner nothing on its own (bot-os.md D94).
 
 **The owner's commands.** A command may be the owner's (`owner: true`): the core answers it to the
-owner only (`Asker.owner`), and the surface only in the owner's chat, never in a group. A command
-may be `hidden`: in no menu, the owner's included, for the actions of buttons that may also be typed
-by hand. A button's action is a command: as typed (`/report 8`), or in short, `name:args` or a bare
-name (`opt:fast:on`, `kill`; `tapOf` reads both), which keeps the owner's buttons within Telegram's
-64 bytes. A tap runs the command again and redraws the message tapped with its answer, unless the
-answer says `keep`. The core adds its own commands after the plugins' (§4.11); a plugin's command of
-one of their names fails the load.
+owner only (`Asker.owner`), and the surface only in the owner's chat, never in a group; it needs a
+commands edge that names the owner's chat, as any plugin command does (D109), which cannot widen it.
+The core's own controls (§4.11) need none: they are answered in the owner's chat, which the
+connector's config names (`owner`, bot-os.md D56). A command may be `hidden`: in no menu, the
+owner's included, for the actions of buttons that may also be typed by hand. A button's action is a
+command: as typed (`/report 8`), or in short, `name:args` or a bare name (`opt:fast:on`, `kill`;
+`tapOf` reads both), which keeps the owner's buttons within Telegram's 64 bytes. A tap runs the
+command again and redraws the message tapped with its answer, unless the answer says `keep`. The
+core adds its own commands after the plugins' (§4.11); a plugin's command of one of their names
+fails the load.
 
 ### 2.1 Ports and the graph
 
@@ -158,12 +168,13 @@ its type. The instance's wiring is that graph, kept as data (`packages/core/src/
 edges are the permissions (P6): a plugin reads a chat, sends through an outbox, uses an interface or
 hears a namespace's events only through a port an edge binds.
 
-| Port type   | Output                                                                                                             | Input                                                                                                                         |
-| ----------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `chat-in`   | `chat`: a connector's account, of its network (derived)                                                            | `{ type: 'chat-in', network?, when?, sameAs? }` (declared); its edge carries the chats it `reads` and its `senders`           |
-| `chat-out`  | `{ type: 'chat-out', network?, many?, owner?, single? }` (declared in `outputs`); its edge carries what it `sends` | `chat`: a connector's account (derived), bound to any number of senders; their edges carry the chats sent to and `commands`   |
-| `events`    | `events` (`<ns>-events` with more than one): each namespace it registers (derived)                                 | `{ type: 'events', namespace }`, bound to any number of instances; it hears only theirs; `namespace` may be `{ config: key }` |
-| `interface` | `interface`: its declared reads and actions (every plugin has one, derived)                                        | `{ type: 'interface', plugin, members }`; none for a plugin it only needs started first; no `plugin`: a contract              |
+| Port type   | Output                                                                                                                          | Input                                                                                                                                                                                 |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat-in`   | `chat`: a connector's account, of its network (derived)                                                                         | `{ type: 'chat-in', network?, when?, sameAs? }` (declared); its edge carries the chats it `reads` and its `senders`                                                                   |
+| `chat-out`  | `{ type: 'chat-out', network?, many?, owner?, single? }` (declared in `outputs`); its edge carries what it `sends`              | `chat`: a connector's account (derived), bound to any number of senders; their edges carry the chats sent to and `commands`                                                           |
+| `events`    | `events` (`<ns>-events` with more than one): each namespace it registers (derived)                                              | `{ type: 'events', namespace }`, bound to any number of instances; it hears only theirs; `namespace` may be `{ config: key }`                                                         |
+| `interface` | `interface`: its declared reads and actions (every plugin has one, derived)                                                     | `{ type: 'interface', plugin, members }`; none for a plugin it only needs started first; no `plugin`: a contract                                                                      |
+| `commands`  | `{ type: 'commands' }` (declared in `outputs`, a connector's alone, of its account's network); its edges carry what each serves | `commands`: a plugin's chat commands (derived from `interface.commands`), bound to any number of connectors; each edge carries `serves`, `chats`, `privateChats`, `senders`, `dryRun` |
 
 **Chats flow left to right** (bot-os.md D60): only parsers read chats, actors only send, and
 everything else consumes events and interfaces. A chat-in edge runs from a connector's chat-in
@@ -208,6 +219,23 @@ not resolved to an id), with `me` for the account's own messages; without `sende
 written before has no `senders`, so it reads from anyone as it did: nothing converts. The edge field
 is `senders`, not `from`, since an edge's `from` is its output end. _Any chat from anyone_ is
 allowed, and the editor flags it as broad. Sending stays explicit: a chat-out edge lists its chats.
+
+**A commands edge** (bot-os.md D109) runs from a connector's `commands` output to a plugin's
+`commands` input, derived from its manifest's `interface.commands` (a port declared under that name
+is refused; a plugin with no commands has none; the input is optional: unbound, no chat asks it
+anything). It carries: `serves`, the commands it serves, by name (none: every one; the check refuses
+one its plugin does not declare); `chats`, the chats it answers in, named as the connector names
+them (`Surface.id`, picked in the chat picker), and `privateChats`, every private chat with the
+account too (an edge with neither answers nowhere: the check warns of it); `senders`, who may ask,
+by `@username` (without case) or id, `owner` for the connector's owner (none: anyone), before the
+plugin's own `allow`; and `dryRun`, which logs each answer as sent and sends nothing (a new edge
+drawn in the editor starts one, P10). A connector serves commands by declaring the output
+(`{ type: 'commands', help?, servedBefore? }`, only a connector may) and offering a chat surface
+(§4.5); `servedBefore` says where it answered every command before D109, for the first start's
+migration (§2.3). One edge per connector and plugin; a plugin served by two bots has two. These
+fields belong to it alone (`only a commands edge carries serves, chats and privateChats`), as
+`senders` belongs to it and to a chat-in. Its `serves` is not a chat-out's `commands`, the first
+words a plugin may send.
 
 A chat-in or an events input may say `when: { config: key }`, a key of its plugin's `config` schema:
 the node has the port only while its config sets that key (the reactor reads a chat only with a
@@ -445,10 +473,22 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
       "commands": ["/play"],
       "dryRun": true
     },
-    { "from": "quest.interface", "to": "quest-turns.parser", "type": "interface" }
+    { "from": "quest.interface", "to": "quest-turns.parser", "type": "interface" },
+    {
+      "from": "bot.commands",
+      "to": "quest-stats.commands",
+      "type": "commands",
+      "serves": ["map"],
+      "chats": ["-1001000000001"],
+      "senders": ["owner", "@alice"],
+      "dryRun": true
+    }
   ]
 }
 ```
+
+(The `bot` and `quest-stats` nodes, a `telegram-bot` and a plugin of a `/map` command, are left out
+of `nodes` here.)
 
 Here `quest-turns` sends its turns as a dry run, logged and not sent, until the owner switches its
 edge to send for real; a node `"disabled": true` would not start at all (§2.1, Node states). Both
@@ -463,6 +503,18 @@ it (without case), and the key dropped, so the owner picks nothing again
 (`{ "from": "owner-notice.chat", "to": "telegram-bot.chat", "sends": ["1000000002"] }` and the
 node's `"chat": "1000000002"` become the same edge and a node without `chat`). The file is rewritten
 by the next save.
+
+**Chat commands, first served by an edge** (bot-os.md D109): the first start of the release that
+made commands need an edge gives a saved graph (`commandEdges`), from each connector node whose
+`commands` output says what it served before (`servedBefore`) and whose config sets its `when` key
+(a `telegram-bot` with its `owner`), an edge to each node with commands not joined to it already:
+every command, in the chats its `chats` keys name (its `owner`'s and its `group`) and every private
+chat, to anyone, live, as they were answered:
+`{ "from": "bot.commands", "to": "map.commands", "type": "commands", "chats": ["1000000002", "-1001000000001"], "privateChats": true }`.
+The file is written as a version of the history (`migrated`), the write recorded (`core.graph`,
+`event: "migrated"`, `commandEdges`), and the owner told which edges were added (a `graph-migrated`
+notice, §4.16). It is done once per instance (`command-edges` in the core's store), so that an edge
+the owner removes afterwards stays removed; a fresh instance, with no file, adds none.
 
 **An input a plugin no longer has** (bot-os.md D99): a node whose plugin declares `droppedInputs`
 (the turn actor's chat-in `chat`, gone in 0.1.21) loads with its edges to those inputs dropped
@@ -1313,9 +1365,10 @@ does), text alone anywhere else (IRC, another chat), and none while the instance
 setup wizard (#45) wires one first. The owner's chat surface (bot-os.md D56) is the interactive
 control, not a report channel: a `telegram-bot` node configured with its `owner` (the owner's
 Telegram user id: the owner's private chat with the bot, §5) answers the owner's commands, cards and
-buttons there. Only the owner's chat may use the owner's commands and their buttons: the surface
-answers them to the owner alone (`Asker.owner`), never in a group. The owner's controls are the
-core's (§4.11).
+buttons there; a plugin's commands are answered only where a commands edge from it serves them
+(§2.1, bot-os.md D109). Only the owner's chat may use the owner's commands and their buttons: the
+surface answers them to the owner alone (`Asker.owner`), never in a group. The owner's controls are
+the core's (§4.11).
 
 ### 4.9 Secrets
 
@@ -1798,20 +1851,22 @@ node the retry-loop guard holds back, its command refused for the same reason th
 §4.6, D98, about that node; `detail`: `account`, `chat`, `command`, `reason`, `count`; told by
 `owner-notice` among its `other` kinds), `unanswered` (a command no answer came for in its window,
 once until that node's command is answered in that chat, §4.6, D107, about that node; `detail`:
-`account`, `chat`, `command`, `withinS`; told among the `other` kinds) and `graph-refused` (the
-saved graph refused at the load, so that no node runs, D94; `detail.problems`; no node hears it, the
-events panel shows it). **A plugin raises** its own through `ctx.notice(kind, text, detail?)`, about
-its node: a state node raises `refused` for each event it refuses (D72; `detail`: `event`, `at`,
-`reason`); and `told` through `ctx.notify(text, buttons?)` (§4.8, D94; `detail.buttons`, which
-`buttonsOf(notice)` reads). A kind is lower-case words and dashes; raising one sends nothing. **A
-plugin whose manifest declares `notices: true`** gets `ctx.notices`: `subscribe(handler)` hears the
-notices raised since the instance started first (the newest `NOTICES_KEPT`, 200), so that the load's
-warnings and a node failed at its start reach a node started after them, then each as it is raised,
-while its node is up; the time its handler takes is its node's (D77). The notices live in memory
-(`core.notices()` lists them), and **each is recorded** as it is raised (`core.notice`: `kind`,
-`node?`, `text`, `detail?`), so that the editor's events panel shows every notice whether a node
-tells it or not (D94), beside the records it was raised with (`core.plugin`, `core.drift`,
-`core.queue`, `<id>.refused`).
+`account`, `chat`, `command`, `withinS`; told among the `other` kinds), `graph-refused` (the saved
+graph refused at the load, so that no node runs, D94; `detail.problems`; no node hears it, the
+events panel shows it) and `graph-migrated` (the saved graph rewritten at the first start of a
+release, the commands edges added so that every command is answered as before, D109; `detail.edges`,
+each `from → to`; told among the `other` kinds). **A plugin raises** its own through
+`ctx.notice(kind, text, detail?)`, about its node: a state node raises `refused` for each event it
+refuses (D72; `detail`: `event`, `at`, `reason`); and `told` through `ctx.notify(text, buttons?)`
+(§4.8, D94; `detail.buttons`, which `buttonsOf(notice)` reads). A kind is lower-case words and
+dashes; raising one sends nothing. **A plugin whose manifest declares `notices: true`** gets
+`ctx.notices`: `subscribe(handler)` hears the notices raised since the instance started first (the
+newest `NOTICES_KEPT`, 200), so that the load's warnings and a node failed at its start reach a node
+started after them, then each as it is raised, while its node is up; the time its handler takes is
+its node's (D77). The notices live in memory (`core.notices()` lists them), and **each is recorded**
+as it is raised (`core.notice`: `kind`, `node?`, `text`, `detail?`), so that the editor's events
+panel shows every notice whether a node tells it or not (D94), beside the records it was raised with
+(`core.plugin`, `core.drift`, `core.queue`, `<id>.refused`).
 
 `owner-notice` (§5) tells a kind it does not name as `other`. Its view (`GET /plugins/<id>/view`,
 D72) shows the notices waiting by kind with when each is due, when each kind was last told, whether
@@ -1914,19 +1969,24 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   group (`owner`, `group`, in its node's config, each picked among its chats and kept by id, D96),
   it is the instance's chat surface, the owner's interactive control (§4.8, bot-os.md D56)
   (`telegram-surface.ts`): the switchboard on its bot (`telegram-switchboard.ts`, on
-  grammy-switchboard), the plugins' commands answered in the group, the owner's chat and any other
-  private chat (`telegram-commands.ts`), and the menus kept registered. It tells the owner nothing
-  on its own (D94): a send with buttons (`SendOptions.buttons`, an `owner-notice` telling a `told`
-  notice) to the owner's chat goes through the surface's switchboard, whose taps run the owner's
-  commands as a card's do; to any other chat, the text alone. Nothing hands its bot out (P9). Its
-  `deny` (D100: people and bots picked among its chats, never its owner) drops their commands in a
-  group, and their taps on buttons there, before any edge or its surface sees them; each drop is
-  recorded (`telegram-bot.denied`, on the Events page) and counted in its node's view and on its
-  card; silent unless `denyReply` sets one line to answer, at most once in 10 minutes per person.
-  Its `home` (D105) is the command of the owner's main card, as typed (`/menu`, `/menu main`) or
-  short (`menu`, `menu:main`), at most 64 bytes: the core's own cards on its surface (`/plugins`,
-  `/settings`) end with a button that runs it, labelled `homeLabel` (`🏠 Home` by default); unset,
-  they have none.
+  grammy-switchboard), the owner's controls answered in the owner's chat, and the plugins' commands
+  that the commands edges from its `commands` output serve (D109), each answered only in the chats
+  its edge names (the group, the owner's chat, every private chat with `privateChats`, another chat
+  it is in) and listed in those chats' menus alone (the switchboard's two, every private chat's, and
+  Telegram's `chat` scope for another chat) (`telegram-commands.ts`), the menus kept registered.
+  Without an `owner` it is no surface, and its commands edges answer nothing. Its `servedBefore`
+  (`{ when: 'owner', chats: ['owner', 'group'], privateChats: true }`) is where it answered every
+  command before D109, for the migration (§2.3). It tells the owner nothing on its own (D94): a send
+  with buttons (`SendOptions.buttons`, an `owner-notice` telling a `told` notice) to the owner's
+  chat goes through the surface's switchboard, whose taps run the owner's commands as a card's do;
+  to any other chat, the text alone. Nothing hands its bot out (P9). Its `deny` (D100: people and
+  bots picked among its chats, never its owner) drops their commands in a group, and their taps on
+  buttons there, before any edge or its surface sees them; each drop is recorded
+  (`telegram-bot.denied`, on the Events page) and counted in its node's view and on its card; silent
+  unless `denyReply` sets one line to answer, at most once in 10 minutes per person. Its `home`
+  (D105) is the command of the owner's main card, as typed (`/menu`, `/menu main`) or short (`menu`,
+  `menu:main`), at most 64 bytes: the core's own cards on its surface (`/plugins`, `/settings`) end
+  with a button that runs it, labelled `homeLabel` (`🏠 Home` by default); unset, they have none.
 - **`telegram-user`** (`packages/connectors/src/plugins/telegram-user.ts`, on GramJS in
   `packages/connectors/src/transport/telegram-user.ts`): the owner's own account, from three secrets
   (`telegram_user_api_id`, `telegram_user_api_hash`, `telegram_user_session`). It monitors the chats
