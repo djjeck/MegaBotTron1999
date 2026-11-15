@@ -9,13 +9,90 @@
  * each command's spacing for the queued sends (D73: the least seconds between two of it in one
  * chat; empty, the connector's default), and
  * whether it is a dry run (D64): **Dry-run** logs what it would send, as sent, and sends nothing;
- * **Send for real** sends. Then its removal. The edges are the permissions (P6): a plugin reads and
- * sends only what its edge says.
+ * **Send for real** sends. A commands edge (D109), from a connector to a plugin's chat commands:
+ * which of them it answers (checkboxes, every one by default), the `chats` it answers them in (in
+ * the chat picker) and every private chat (`privateChats`), who may ask (`senders`: anyone, or a
+ * list with _the owner_), and its dry run, which logs each answer and sends none. Then its removal.
+ * The edges are the permissions (P6): a plugin reads, sends and answers only what its edge says.
  */
 import type { GraphEdge, GraphNode, PortView } from '#src/ui/api.ts';
 import type { EdgeChange } from './draft.ts';
 import { Payloads } from './Payloads.tsx';
 import { CHATS_KEY, EdgeChats, RowsField, Senders } from './Surfaces.tsx';
+
+/** A chat-out's or a commands edge's dry run (D64, D109): logged as sent, and nothing goes out. */
+function DryRun(props: {
+  label: string;
+  dryRun: boolean;
+  set: (dryRun: true | undefined) => void;
+  /** What it does, either way. */
+  dry: string;
+  live: string;
+}) {
+  return (
+    <>
+      <div className="toggle" role="radiogroup" aria-label={props.label}>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={props.dryRun}
+          className={props.dryRun ? 'on' : ''}
+          onClick={() => props.set(true)}
+        >
+          Dry-run
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={!props.dryRun}
+          className={props.dryRun ? '' : 'on danger'}
+          onClick={() => props.set(undefined)}
+        >
+          Send for real
+        </button>
+      </div>
+      <p className="muted small">{props.dryRun ? props.dry : props.live} Applied with Apply.</p>
+    </>
+  );
+}
+
+/**
+ * The chat commands a commands edge serves (D109), as checkboxes over its plugin's: unset, every
+ * one (a command added to the plugin later too).
+ */
+function Serves(props: {
+  commands: readonly string[];
+  value: readonly string[] | undefined;
+  set: (v: string[] | undefined) => void;
+}) {
+  const on = props.value ?? props.commands;
+  const flip = (c: string, checked: boolean): void => {
+    const next = props.commands.filter((x) => (x === c ? checked : on.includes(x)));
+    props.set(next.length === props.commands.length ? undefined : next);
+  };
+  return (
+    <fieldset className="field" aria-label="serves">
+      <legend>
+        <code>serves</code>: the commands it answers
+      </legend>
+      {props.commands.map((c) => (
+        <label key={c} className="block">
+          <input
+            type="checkbox"
+            aria-label={`answers /${c}`}
+            checked={on.includes(c)}
+            onChange={(e) => flip(c, e.target.checked)}
+          />{' '}
+          <code>/{c}</code>
+        </label>
+      ))}
+      <small className="muted">
+        All of them while every box is ticked, those the plugin adds later too. Not a chat-out
+        edge’s <code>commands</code>, the words a plugin may send.
+      </small>
+    </fieldset>
+  );
+}
 
 /** The connector's monitored chats, as its config lists them; undefined: every chat. */
 function monitoredOf(node: GraphNode | undefined): string[] | undefined {
@@ -87,6 +164,7 @@ export function EdgeDetails(props: {
   const { edge } = props;
   const reads = edge.type === 'chat-in';
   const sends = edge.type === 'chat-out';
+  const answers = edge.type === 'commands';
   const name = `${edge.from} → ${edge.to}`;
   const connector = props.connector?.id;
   const monitored = monitoredOf(props.connector);
@@ -139,35 +217,68 @@ export function EdgeDetails(props: {
             set={(senders) => props.change({ senders })}
           />
         </section>
+      ) : answers ? (
+        <section>
+          <h3>How it answers</h3>
+          <DryRun
+            label="how it answers"
+            dryRun={edge.dryRun === true}
+            set={(dryRun) => props.change({ dryRun })}
+            dry="A dry run: each answer is logged as sent, and nothing goes out."
+            live="It answers for real, within the commands, chats and senders below."
+          />
+          <h3>What it answers, where, to whom</h3>
+          <Serves
+            commands={props.input?.type === 'commands' ? (props.input.commands ?? []) : []}
+            value={edge.serves}
+            set={(serves) => props.change({ serves })}
+          />
+          <EdgeChats
+            name="chats"
+            help="The chats it answers them in, and lists them in the menus of; it answers in no other"
+            connector={connector}
+            monitored={undefined}
+            value={edge.chats}
+            set={(c) => props.change({ chats: c === '*' ? [] : c })}
+          />
+          <label className="block">
+            <input
+              type="checkbox"
+              aria-label="every private chat"
+              checked={edge.privateChats === true}
+              onChange={(e) => props.change({ privateChats: e.target.checked ? true : undefined })}
+            />{' '}
+            Every private chat with {connector ?? 'its connector'} too{' '}
+            <span className="muted small">(anyone who writes to it)</span>
+          </label>
+          {(edge.chats ?? []).length === 0 && edge.privateChats !== true ? (
+            <p className="warning small" role="note">
+              No chat named: it answers nowhere.
+            </p>
+          ) : null}
+          <Senders
+            connector={connector}
+            value={edge.senders}
+            set={(senders) => props.change({ senders })}
+            self={{
+              token: 'owner',
+              label: 'The owner',
+              hint: `${connector ?? 'the connector'}’s owner`,
+              legend: 'who may ask',
+            }}
+          />
+          <p className="muted small">The plugin may answer fewer still: its own check applies.</p>
+        </section>
       ) : sends ? (
         <section>
           <h3>How it sends</h3>
-          <div className="toggle" role="radiogroup" aria-label="how it sends">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={edge.dryRun === true}
-              className={edge.dryRun === true ? 'on' : ''}
-              onClick={() => props.change({ dryRun: true })}
-            >
-              Dry-run
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={edge.dryRun !== true}
-              className={edge.dryRun === true ? '' : 'on danger'}
-              onClick={() => props.change({ dryRun: undefined })}
-            >
-              Send for real
-            </button>
-          </div>
-          <p className="muted small">
-            {edge.dryRun === true
-              ? 'A dry run: what the plugin sends here is logged as sent, and nothing goes out.'
-              : 'It sends for real, within the chats and commands below.'}{' '}
-            Applied with Apply.
-          </p>
+          <DryRun
+            label="how it sends"
+            dryRun={edge.dryRun === true}
+            set={(dryRun) => props.change({ dryRun })}
+            dry="A dry run: what the plugin sends here is logged as sent, and nothing goes out."
+            live="It sends for real, within the chats and commands below."
+          />
           <h3>What it sends</h3>
           {props.output?.type === 'chat-out' && props.output.single !== undefined ? (
             <p className="muted small" role="note">

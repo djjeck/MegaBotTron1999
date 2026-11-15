@@ -337,4 +337,63 @@ describe('an edge whose chats are its node’s only setting (D97)', () => {
     );
     expect(screen.getByText(/It reads the one chat its/u).textContent).toContain('chat output');
   });
+
+  it('sets a commands edge: its commands, its chats, every private chat, who may ask (D109)', async () => {
+    fakeCore({ routes: { 'GET /accounts/bot/surfaces?peers=1': [...listed([LOBBY])] } });
+    const change = vi.fn();
+    const edge: GraphEdge = {
+      from: 'bot.commands',
+      to: 'map.commands',
+      type: 'commands',
+      chats: [],
+      dryRun: true,
+    };
+    const input = {
+      type: 'commands' as const,
+      commands: ['map', 'ban'],
+      label: 'commands',
+      optional: true,
+    };
+    const { rerender } = render(
+      <EdgeDetails
+        edge={edge}
+        problems={[]}
+        connector={{ id: 'bot', plugin: 'bot' }}
+        input={input}
+        change={change}
+        remove={vi.fn()}
+      />
+    );
+    expect(screen.getByRole('note').textContent).toContain('it answers nowhere');
+    // Every command, by default: one unticked leaves the others.
+    const map = screen.getByLabelText('answers /map') as HTMLInputElement;
+    expect(map.checked).toBe(true);
+    fireEvent.click(map);
+    expect(change).toHaveBeenLastCalledWith({ serves: ['ban'] });
+    fireEvent.click(screen.getByLabelText('every private chat'));
+    expect(change).toHaveBeenLastCalledWith({ privateChats: true });
+    fireEvent.click(screen.getByLabelText('only these'));
+    expect(change).toHaveBeenLastCalledWith({ senders: ['owner'] });
+    fireEvent.click(
+      within(screen.getByRole('radiogroup', { name: 'how it answers' })).getByText('Send for real')
+    );
+    expect(change).toHaveBeenLastCalledWith({ dryRun: undefined });
+    // Ticked back to all of them: every command, unset.
+    rerender(
+      <EdgeDetails
+        edge={{ ...edge, serves: ['ban'], privateChats: true, senders: ['owner'] }}
+        problems={[]}
+        connector={{ id: 'bot', plugin: 'bot' }}
+        input={input}
+        change={change}
+        remove={vi.fn()}
+      />
+    );
+    expect(screen.queryByRole('note')).toBeNull();
+    expect((screen.getByLabelText('owner') as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByLabelText('answers /map'));
+    expect(change).toHaveBeenLastCalledWith({ serves: undefined });
+    fireEvent.click(screen.getByLabelText('every private chat'));
+    expect(change).toHaveBeenLastCalledWith({ privateChats: undefined });
+  });
 });

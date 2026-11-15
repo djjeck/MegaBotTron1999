@@ -77,6 +77,27 @@ describe('the graph printed', () => {
       edges: [...graph.edges].reverse(),
     };
     expect(graphText(reordered)).toBe(graphText(graph));
+    // A commands edge (D109): what it serves, where, to whom.
+    expect(
+      graphText({
+        version: 2,
+        nodes: [],
+        edges: [
+          {
+            from: 'irc.commands',
+            to: 'game.commands',
+            type: 'commands',
+            serves: ['map'],
+            chats: ['#a'],
+            privateChats: true,
+            senders: ['owner'],
+            dryRun: true,
+          },
+        ],
+      }).split('\n')[2]
+    ).toBe(
+      '  irc.commands → game.commands (commands): from owner; serves map; in #a; in private chats; dry-run'
+    );
     expect(
       graphText({ version: 2, nodes: [{ id: 'a', plugin: 'a', instance: 'a' }], edges: [] })
     ).toBe('nodes:\n  a (a)\nedges:');

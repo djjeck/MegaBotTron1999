@@ -94,6 +94,8 @@ import {
   removeEdge,
   removeNode,
   sameGraph,
+  servedNote,
+  servesText,
   syncEdgeChats,
   updateEdge,
   updateNode,
@@ -391,6 +393,10 @@ export function GraphPage({
             portProblems,
             warnings: warned.nodes.get(c.node) ?? [],
             portWarnings,
+            // Where its chat commands are served (D109), on its commands input.
+            ...(c.view.inputs['commands']?.type === 'commands'
+              ? { portNotes: { commands: servedNote(c.node, draft?.edges ?? []) } }
+              : {}),
             side: c.side,
             twinSelected: !selectedHere && c.side !== undefined && chosen.has(c.node),
           },
@@ -455,10 +461,13 @@ export function GraphPage({
           type: e.type,
           problem: problems[0],
           warning: warnings[0],
-          dryRun: e.type === 'chat-out' && e.dryRun === true,
-          carries: carriesOf(
-            from.port === undefined ? undefined : outputs.get(from.node)?.[from.port]
-          ),
+          dryRun: (e.type === 'chat-out' || e.type === 'commands') && e.dryRun === true,
+          carries:
+            e.type === 'commands'
+              ? servesText(e)
+              : carriesOf(
+                  from.port === undefined ? undefined : outputs.get(from.node)?.[from.port]
+                ),
         },
         // The rhombus at its midpoint is the edge's handle for the keyboard and the screen reader
         // (`PortEdge.tsx`); the line stays clickable.
@@ -990,7 +999,7 @@ export function GraphPage({
                 </span>
                 <span
                   className="legend-item"
-                  title="a chat-out edge that logs what it would send, and sends nothing"
+                  title="a chat-out edge that logs what it would send, or a commands edge what it would answer, and sends nothing"
                 >
                   <span className="rhombus-sample hollow" /> dry run
                 </span>

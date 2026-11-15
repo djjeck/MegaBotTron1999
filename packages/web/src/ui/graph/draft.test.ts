@@ -27,6 +27,8 @@ import {
   removeNode,
   removePort,
   sameGraph,
+  servedNote,
+  servesText,
   syncEdgeChats,
   updateEdge,
   updateNode,
@@ -735,5 +737,89 @@ describe('an edge dragged (#4)', () => {
     expect(bindProblem(face, port({ type: 'interface', plugin: 'cards', members: [] }))).toBe(
       'interface port cannot bind interface port'
     );
+  });
+
+  it('binds a connector’s commands output to a plugin’s commands input alone (D109)', () => {
+    const served = port({ type: 'commands', network: 'telegram', label: 'commands of telegram' });
+    expect(bindProblem(served, port({ type: 'commands', commands: ['map'] }))).toBeUndefined();
+    expect(bindProblem(port({ type: 'chat-in' }), port({ type: 'commands' }))).toBe(
+      'chat-in port cannot bind commands port'
+    );
+    expect(bindProblem(served, port({ type: 'chat-in' }))).toBe(
+      'commands of telegram cannot bind chat-in port'
+    );
+  });
+});
+
+describe('a commands edge (D109)', () => {
+  it('starts a dry run in the connector’s owner’s chat', () => {
+    const bot: PluginView = {
+      plugin: 'bot',
+      version: '0.1.0',
+      description: 'a bot',
+      kinds: ['connector'],
+      inputs: {},
+      outputs: { commands: { type: 'commands', label: 'commands of telegram', optional: false } },
+      interface: { reads: [], actions: [], commands: [] },
+      secrets: [],
+      configSecrets: [],
+      events: [],
+      configChats: [{ key: 'owner', kinds: ['private'], owner: true }],
+    };
+    const g: Graph = {
+      version: 2,
+      nodes: [
+        { id: 'bot', plugin: 'bot', config: { owner: 1000000002 } },
+        { id: 'map', plugin: 'map' },
+      ],
+      edges: [],
+    };
+    expect(
+      edgeOf(
+        { source: 'bot', sourceHandle: 'commands', target: 'map', targetHandle: 'commands' },
+        new Map([['bot', bot]]),
+        g
+      )
+    ).toEqual({
+      from: 'bot.commands',
+      to: 'map.commands',
+      type: 'commands',
+      chats: ['1000000002'],
+      dryRun: true,
+    });
+  });
+
+  it('says what it serves, where and to whom, in words, and where a plugin is served', () => {
+    const e = { from: 'bot.commands', to: 'map.commands', type: 'commands' as const };
+    expect(servesText({ ...e, chats: ['#a'] })).toBe('answers every command in 1 chat, to anyone');
+    expect(
+      servesText({
+        ...e,
+        serves: ['map', 'ban'],
+        chats: ['#a', '#b'],
+        privateChats: true,
+        senders: ['owner', '@alice'],
+        dryRun: true,
+      })
+    ).toBe(
+      'answers /map, /ban in 2 chats and every private chat, to the owner and 1 other; a dry run'
+    );
+    expect(servesText({ ...e, serves: [], senders: [] })).toBe(
+      'answers no command in no chat, to no one'
+    );
+    expect(servedNote('map', [])).toBe('no edge serves its commands: no chat asks it anything');
+    expect(servedNote('map', [{ ...e, privateChats: true }])).toBe(
+      'bot answers every command in every private chat, to anyone'
+    );
+  });
+
+  it('changes what it serves, where, and its dry run', () => {
+    const e = { from: 'bot.commands', to: 'map.commands', type: 'commands' as const };
+    const g: Graph = { version: 2, nodes: [], edges: [{ ...e, chats: [], dryRun: true }] };
+    const key = edgeKey(e);
+    expect(
+      updateEdge(g, key, { serves: ['map'], chats: ['#a'], privateChats: true, dryRun: undefined })
+        .edges
+    ).toEqual([{ ...e, serves: ['map'], chats: ['#a'], privateChats: true }]);
   });
 });

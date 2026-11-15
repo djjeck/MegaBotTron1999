@@ -12,7 +12,9 @@
  * running one can be killed (D44). Its forms stay editable whatever its state. Its group (D69),
  * the lane it is drawn in, is picked among the draft's, or named anew. Its outputs say what they
  * carry (D71): an events output its event types, an interface output its members. A node up that
- * keeps a state (D72) shows it, drawn from its schema; a running connector, its queue (D73).
+ * keeps a state (D72) shows it, drawn from its schema; a running connector, its queue (D73). Its
+ * chat commands say where the commands edges serve them (D109), each chat by name, or that no edge
+ * does; a connector's, which commands of which plugins it serves.
  */
 import { useState } from 'react';
 import type {
@@ -30,10 +32,10 @@ import type {
   PortView,
 } from '#src/ui/api.ts';
 import { isSplit } from './cards.ts';
-import { ChatPicker } from './ChatPicker.tsx';
+import { ChatPicker, named, useSurfaces } from './ChatPicker.tsx';
 import { withDefaults } from './defaults.ts';
 import type { PortChange } from './draft.ts';
-import { endOf, instanceOf } from './draft.ts';
+import { edgeKey, endOf, instanceOf } from './draft.ts';
 import { heardTypes, Payloads } from './Payloads.tsx';
 import { ConnectorQueue } from './Queue.tsx';
 import type { CustomControl } from './SchemaForm.tsx';
@@ -287,6 +289,104 @@ function Members(props: { title: string; members: MemberView[] }) {
             {m.input === undefined || m.input['properties'] === undefined ? null : (
               <SchemaForm legend={`${m.name} input`} schema={m.input} />
             )}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+/** A connector's chats, by their names where it lists them (D96), as an edge names them. */
+function ChatNames(props: { connector: string; chats: readonly string[] }) {
+  const s = useSurfaces(props.connector);
+  const name = (c: string): string =>
+    (s.state === 'listed' ? s.surfaces.find((x) => named(x, c))?.title : undefined) ?? c;
+  return <>{props.chats.map(name).join(', ')}</>;
+}
+
+/** Where a commands edge answers (D109): its chats by name, every private chat, its senders. */
+function Where(props: { edge: GraphEdge }) {
+  const { edge } = props;
+  const connector = endOf(edge.from).node;
+  const chats = edge.chats ?? [];
+  return (
+    <>
+      {chats.length === 0 && edge.privateChats !== true ? (
+        'in no chat'
+      ) : (
+        <>
+          in {chats.length === 0 ? null : <ChatNames connector={connector} chats={chats} />}
+          {chats.length > 0 && edge.privateChats === true ? ' and ' : null}
+          {edge.privateChats === true ? 'every private chat' : null}
+        </>
+      )}
+      {edge.senders === undefined
+        ? ', to anyone'
+        : `, to ${edge.senders.map((x) => (x === 'owner' ? 'the owner' : x)).join(', ')}`}
+      {edge.dryRun === true ? <span className="muted"> (a dry run)</span> : null}
+    </>
+  );
+}
+
+/**
+ * A plugin's chat commands (P11), each with where the commands edges to its `commands` input
+ * serve it (D109): by which connector, in which chats, to whom; none, no chat asks it.
+ */
+function ChatCommands(props: { node: string; members: MemberView[]; edges: readonly GraphEdge[] }) {
+  if (props.members.length === 0) return null;
+  const serving = props.edges.filter(
+    (e) => e.type === 'commands' && endOf(e.to).node === props.node
+  );
+  return (
+    <>
+      <h4>Commands</h4>
+      {serving.length === 0 ? (
+        <p className="warning small" role="note" aria-label="commands served">
+          No commands edge serves them: no chat asks it anything. Draw one from a connector’s{' '}
+          <code>commands</code> output to its <code>commands</code> input.
+        </p>
+      ) : null}
+      <ul aria-label="its commands">
+        {props.members.map((m) => {
+          const by = serving.filter((e) => e.serves === undefined || e.serves.includes(m.name));
+          return (
+            <li key={m.name}>
+              <code>
+                {m.name}
+                {m.args === undefined ? '' : ` ${m.args}`}
+              </code>{' '}
+              {m.help}
+              {m.owner === true ? <span className="muted"> (owner’s)</span> : null}
+              {serving.length === 0 ? null : by.length === 0 ? (
+                <div className="muted small">Served nowhere.</div>
+              ) : (
+                by.map((e) => (
+                  <div key={edgeKey(e)} className="small">
+                    By <code>{endOf(e.from).node}</code> <Where edge={e} />
+                  </div>
+                ))
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </>
+  );
+}
+
+/** A connector's commands edges (D109): the plugins whose commands it serves, where, to whom. */
+function Served(props: { node: string; edges: readonly GraphEdge[] }) {
+  const out = props.edges.filter((e) => e.type === 'commands' && endOf(e.from).node === props.node);
+  if (out.length === 0) return null;
+  return (
+    <>
+      <h4>Commands it serves</h4>
+      <ul aria-label="commands it serves">
+        {out.map((e) => (
+          <li key={edgeKey(e)}>
+            <code>{endOf(e.to).node}</code>:{' '}
+            {e.serves === undefined ? 'every command' : e.serves.map((c) => `/${c}`).join(', ')}{' '}
+            <Where edge={e} />
           </li>
         ))}
       </ul>
@@ -787,7 +887,8 @@ export function NodeDetails(props: {
         <Outputs ports={view.outputs} view={view} />
         <Members title="Reads" members={i.reads} />
         <Members title="Actions" members={i.actions} />
-        <Members title="Commands" members={i.commands} />
+        <ChatCommands node={view.id} members={i.commands} edges={props.edges ?? []} />
+        <Served node={view.id} edges={props.edges ?? []} />
       </section>
       <p>
         <button type="button" className="danger" onClick={props.remove}>

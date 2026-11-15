@@ -207,11 +207,12 @@ export function MonitoredChats(props: {
 }
 
 /**
- * An edge's chats (a chat-in's `reads`, a chat-out's `sends`) picked among its connector's monitored
- * chats (all of its chats while its config lists none); with `any`, a box for all of them (`'*'`).
+ * An edge's chats (a chat-in's `reads`, a chat-out's `sends`, a commands edge's `chats`) picked
+ * among its connector's monitored chats (all of its chats while its config lists none); with `any`,
+ * a box for all of them (`'*'`).
  */
 export function EdgeChats(props: {
-  name: 'reads' | 'sends';
+  name: 'reads' | 'sends' | 'chats';
   help: string;
   connector: string | undefined;
   /** The connector's config's `chats`. */
@@ -258,26 +259,38 @@ export function EdgeChats(props: {
   );
 }
 
+/** A chat-in's own box among its senders: the account's own messages (`me`). */
+const ME_BOX = {
+  token: 'me',
+  label: 'Me',
+  hint: 'the account’s own messages',
+  legend: 'whom it hears',
+};
+
 /**
- * A chat-in edge's senders: anyone (unset), or a list: the account's own messages (`me`) and
- * senders by @username, the bots among its surfaces suggested.
+ * An edge's senders: anyone (unset), or a list: a box of its own (a chat-in's `me`, the account's
+ * own messages; a commands edge's `owner`, the connector's owner, D109) and senders by @username,
+ * the bots among its surfaces suggested.
  */
 export function Senders(props: {
   connector: string | undefined;
   value: readonly string[] | undefined;
   set: (v: string[] | undefined) => void;
+  /** Its own box: `me` by default. */
+  self?: { token: string; label: string; hint: string; legend: string };
 }) {
+  const self = props.self ?? ME_BOX;
   const s = useSurfaces(props.connector);
   const anyone = props.value === undefined;
   const list = props.value ?? [];
-  const me = list.includes('me');
-  const named = list.filter((x) => x !== 'me');
+  const me = list.includes(self.token);
+  const named = list.filter((x) => x !== self.token);
   const bots =
     s.state === 'listed' ? s.surfaces.filter((x) => x.kind === 'bot').map((x) => x.id) : [];
   return (
     <fieldset className="field surfaces" aria-label="senders">
       <legend>
-        <code>senders</code>: whom it hears
+        <code>senders</code>: {self.legend}
       </legend>
       <label>
         <input
@@ -295,7 +308,7 @@ export function Senders(props: {
           name="senders"
           aria-label="only these"
           checked={!anyone}
-          onChange={() => props.set(['me'])}
+          onChange={() => props.set([self.token])}
         />{' '}
         Only these
       </label>
@@ -304,11 +317,11 @@ export function Senders(props: {
           <label className="block">
             <input
               type="checkbox"
-              aria-label="me"
+              aria-label={self.token}
               checked={me}
-              onChange={(e) => props.set(e.target.checked ? ['me', ...named] : named)}
+              onChange={(e) => props.set(e.target.checked ? [self.token, ...named] : named)}
             />{' '}
-            Me <span className="muted small">(the account’s own messages)</span>
+            {self.label} <span className="muted small">({self.hint})</span>
           </label>
           <RowsField
             name="senders list"
@@ -316,7 +329,7 @@ export function Senders(props: {
             placeholder="@QuestBot"
             value={named}
             suggest={bots}
-            set={(v) => props.set(me ? ['me', ...v] : v)}
+            set={(v) => props.set(me ? [self.token, ...v] : v)}
           />
         </>
       )}

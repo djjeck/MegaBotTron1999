@@ -31,6 +31,8 @@ export interface PluginNodeData extends Record<string, unknown> {
   /** The check's warnings (D89) on the node, and on each of its ports by name: they refuse nothing. */
   warnings?: string[];
   portWarnings?: Record<string, string[]>;
+  /** A line more about some of its ports, by name: where its commands are served (D109). */
+  portNotes?: Record<string, string>;
   /** A connector's in or out card; none for a node of one card. */
   side?: CardSide;
   /** Its node is selected through its other card. */
@@ -56,11 +58,13 @@ function Port(props: {
   info: PortTypeInfo | undefined;
   problems: string[] | undefined;
   warnings: string[] | undefined;
+  note?: string | undefined;
 }) {
-  const { name, port, side, index, info, problems = [], warnings = [] } = props;
+  const { name, port, side, index, info, problems = [], warnings = [], note } = props;
   const top = HEAD_HEIGHT + PORT_ROW * index + PORT_ROW / 2;
   const title =
     `${name}: ${port.label}${port.optional ? ' (optional)' : ''}${port.help === undefined ? '' : ` — ${port.help}`}` +
+    (note === undefined ? '' : `\n${note}`) +
     problems.map((p) => `\n✗ ${p}`).join('') +
     warnings.map((w) => `\n⚠ ${w}`).join('');
   const refused = problems.length > 0 ? ' refused' : warnings.length > 0 ? ' warned' : '';
@@ -129,6 +133,7 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
     portProblems = {},
     warnings = [],
     portWarnings = {},
+    portNotes = {},
     side,
   } = data;
   const state = stateOf(live, data.disabled === true, data.cleared === true);
@@ -197,6 +202,7 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
           info={portTypes[port.type]}
           problems={portProblems[name]}
           warnings={portWarnings[name]}
+          note={portNotes[name]}
         />
       ))}
       {outputs.map(([name, port], i) => (

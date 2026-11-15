@@ -193,7 +193,8 @@ export function connect(g: Graph, edge: GraphEdge): Graph {
  * The edge an output dragged to an input makes: its two ends, and the type of the output, which
  * the check compares with the input's (`connection` as React Flow gives it; a connector's out
  * card stands for its node, `cards.ts`). A chat-out edge starts a dry run (D64): it sends for
- * real only once the owner says so.
+ * real only once the owner says so; so does a commands edge (D109), which starts answering every
+ * command of its plugin in its connector's owner's chat alone, the owner widening it in its panel.
  */
 export function edgeOf(
   c: { source: string; sourceHandle?: string | null; target: string; targetHandle?: string | null },
@@ -223,6 +224,7 @@ export function edgeOf(
     type === 'chat-in'
       ? configChatsOf(to, toView, (spec) => spec.input === (c.targetHandle ?? ''))
       : [];
+  const chats = type === 'commands' ? ownerOf(from, fromView) : undefined;
   return {
     from: c.sourceHandle == null ? c.source : `${c.source}.${c.sourceHandle}`,
     to: `${targetId}.${c.targetHandle ?? ''}`,
@@ -230,7 +232,8 @@ export function edgeOf(
     ...(reads.length === 0 ? {} : { reads }),
     ...(sends.length === 0 ? {} : { sends }),
     ...(commands === undefined ? {} : { commands: [...commands] }),
-    ...(type === 'chat-out' ? { dryRun: true } : {}),
+    ...(chats === undefined ? {} : { chats }),
+    ...(type === 'chat-out' || type === 'commands' ? { dryRun: true } : {}),
   };
 }
 
@@ -333,12 +336,22 @@ export function syncEdgeChats(
 }
 
 /**
- * What an edge's panel changes: what it carries, and a chat-out's dry run (D64); a key set to
- * undefined is taken away.
+ * What an edge's panel changes: what it carries, and a chat-out's or a commands edge's dry run
+ * (D64, D109); a key set to undefined is taken away.
  */
 export type EdgeChange = {
-  [K in 'reads' | 'senders' | 'sends' | 'commands' | 'minIntervalS' | 'dryRun']?:
-    GraphEdge[K] | undefined;
+  [
+    K in
+      | 'reads'
+      | 'senders'
+      | 'sends'
+      | 'commands'
+      | 'minIntervalS'
+      | 'dryRun'
+      | 'serves'
+      | 'chats'
+      | 'privateChats'
+  ]?: GraphEdge[K] | undefined;
 };
 
 export function updateEdge(g: Graph, key: string, change: EdgeChange): Graph {
@@ -627,4 +640,37 @@ export function bindProblem(output: PortView, input: PortView): string | undefin
   return missing.length === 0
     ? undefined
     : `${output.plugin ?? output.label} does not declare ${missing.join(', ')}`;
+}
+
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/**
+ * What a commands edge serves, in words (D109), its chats counted rather than named (the panel
+ * names them): `answers /map, /ban in 2 chats and every private chat, to the owner and 1 more; a
+ * dry run`.
+ */
+export function servesText(e: GraphEdge): string {
+  const what = e.serves === undefined ? 'every command' : e.serves.map((c) => `/${c}`).join(', ');
+  const chats = (e.chats ?? []).length;
+  const where = [
+    ...(chats === 0 ? [] : [plural(chats, 'chat')]),
+    ...(e.privateChats === true ? ['every private chat'] : []),
+  ];
+  const owner = (e.senders ?? []).includes('owner');
+  const others = (e.senders ?? []).filter((s) => s !== 'owner').length;
+  const who =
+    e.senders === undefined
+      ? 'to anyone'
+      : `to ${[...(owner ? ['the owner'] : []), ...(others === 0 ? [] : [plural(others, 'other')])].join(' and ') || 'no one'}`;
+  return `answers ${e.serves?.length === 0 ? 'no command' : what} ${where.length === 0 ? 'in no chat' : `in ${where.join(' and ')}`}, ${who}${e.dryRun === true ? '; a dry run' : ''}`;
+}
+
+/**
+ * A plugin node's chat commands as the edges to its `commands` input serve them (D109), for its
+ * card: by which connectors, or none, in which case no chat asks it anything.
+ */
+export function servedNote(node: string, edges: readonly GraphEdge[]): string {
+  const serving = edges.filter((e) => e.type === 'commands' && endOf(e.to).node === node);
+  if (serving.length === 0) return 'no edge serves its commands: no chat asks it anything';
+  return serving.map((e) => `${endOf(e.from).node} ${servesText(e)}`).join('\n');
 }
