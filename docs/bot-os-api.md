@@ -2150,7 +2150,51 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   publish(type, payload): void; // its own events: ctx.bus.publish
   store.read(name); store.write(name, value); store.remove(name); store.names(); // ctx.store
   clock.now(): number; // ctx.clock; `Date.now()` and `new Date()` read it too
+  at(time: number | Date, fn: () => unknown): { cancel(): boolean }; // once, at a time (D106)
+  every(ms: number, fn: () => unknown): { cancel(): boolean }; // on each multiple of ms since 1970
   log(...values); log.info(...); log.warn(...); log.error(...); // ctx.log; `console` too
+  ```
+
+  **Its timers** (bot-os.md D106) run on its node's clock (`ctx.clock`: the dev kit's virtual one in
+  tests, each beat fired at its own time as it leaps). `at(time, fn)` runs `fn` once at `time` (ms
+  since the epoch, or a `Date`); a time past fires as soon as it can. `every(ms, fn)` runs `fn` on
+  each whole multiple of `ms` since the epoch (`every(60_000, fn)` at second :00 of each minute,
+  `every(3_600_000, fn)` on the hour, UTC), from the next one on; a beat missed while the host was
+  stalled is skipped, not made up for. Both may be called at any time, in its first run or in a
+  handler or a timer (unlike `on`), and give a handle whose `cancel()` drops it (true if it was
+  still pending). `every` takes 1000 ms at least, and a script has 100 timers pending at most: past
+  either, the call throws, with why. A fire is called as a handler is: within the same limits, in
+  its cost, its error logged (`a timer threw: …`) with the script going on, a hang failing its node
+  (`its script hung: a timer of every(60000) spent over 1000 ms of CPU`). **Timers live in memory
+  only:** the node's stop, its stop by exception, a failure, a restart or a reload drops them all,
+  and the script runs again from the top when it starts. So a script sets its timers in its first
+  run, and keeps what it must remember in `store`; a daily action catches up at start if it was down
+  when it was due:
+
+  ```ts
+  // Once a day at 06:00 UTC, and at start if today's was missed.
+  const HOUR = 6;
+  const today = (): string => new Date().toISOString().slice(0, 10);
+  function next(): Date {
+    const d = new Date();
+    d.setUTCHours(HOUR, 0, 0, 0);
+    if (d.getTime() <= clock.now()) d.setUTCDate(d.getUTCDate() + 1);
+    return d;
+  }
+  function daily(): void {
+    if (new Date().getUTCHours() >= HOUR && store.read('daily') !== today()) {
+      store.write('daily', today());
+      enqueue('chat', '@QuestBot', '/daily');
+    }
+    at(next(), daily);
+  }
+  daily();
+
+  // Each minute, at second :00.
+  every(60_000, async () => {
+    const n = (await use('state').state.count({ name: 'lantern' })) as number;
+    if (n === 0) enqueue('chat', '@QuestBot', '/buy lantern');
+  });
   ```
 
   A queued send's handle is awaited for its outcome (§4.6), with `status()` and `cancel()` (a
@@ -2171,13 +2215,13 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   node failed with why (`its script hung: a handler of quest.tick spent over 1000 ms of CPU`,
   `its script ran out of memory (its limit is 64 MB)`), the instance up. Its calls to the main
   thread are messages: an interface's member called there, a send queued there, its store's writes
-  (read from a copy beside it), its events and its log lines; its clock is the main thread's time as
-  the event was handed over. **In the dev kit** (§4.10), `scriptPlugin({ isolation: 'in-process' })`
-  runs the same runtime in the main thread, on the kit's virtual clock, its calls direct, so that a
-  run is deterministic. There is no worker to kill there, so its limit is vm's `timeout` on each
-  synchronous run, `callMs` of real time
-  (`its script hung: a handler of quest.tick took over 1000 ms`); a loop after an `await` is not
-  caught, nor its memory limited.
+  (read from a copy beside it), its events, its log lines and its timers, armed there and told to it
+  as each is due; its clock is the main thread's time as the event or the timer was handed over.
+  **In the dev kit** (§4.10), `scriptPlugin({ isolation: 'in-process' })` runs the same runtime in
+  the main thread, on the kit's virtual clock, its calls direct, so that a run is deterministic.
+  There is no worker to kill there, so its limit is vm's `timeout` on each synchronous run, `callMs`
+  of real time (`its script hung: a handler of quest.tick took over 1000 ms`); a loop after an
+  `await` is not caught, nor its memory limited.
 
 - **`statePlugin`** (`packages/turns/src/state-plugin.ts`, bot-os.md D72): a game's player state (an
   inventory, a profile), kept by the shell from the events its parsers publish, one plugin per

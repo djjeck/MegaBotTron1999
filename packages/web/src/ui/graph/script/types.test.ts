@@ -254,6 +254,10 @@ describe('a script node’s API', () => {
       on('quest-state', (e) => log(e.type));
       on('examine.looked', (e) => log(e.item));
       await outbox('chat').enqueue('@QuestBot', '/look x');
+      const daily = at(new Date(clock.now() + 1000), () => log('daily'));
+      const minute = every(60_000, async () => { await null; });
+      const cancelled: boolean = daily.cancel() && minute.cancel();
+      at(clock.now(), () => log(cancelled));
     `;
     expect(diagnostics(dts, good)).toEqual([]);
     const bad = `
@@ -264,8 +268,10 @@ describe('a script node’s API', () => {
       enqueue('other', '@QuestBot', '/look');
       publish('examine.looked', { item: 1, n: 2 });
       const x: number = process.pid;
+      at('tomorrow', () => {});
+      every(60_000);
     `;
-    expect(diagnostics(dts, bad).length).toBeGreaterThanOrEqual(7);
+    expect(diagnostics(dts, bad).length).toBeGreaterThanOrEqual(9);
   }, 30_000);
 
   it('types several ports of a kind, each by its name (D84)', () => {

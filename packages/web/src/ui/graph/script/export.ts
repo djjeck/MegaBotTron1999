@@ -2,7 +2,8 @@
  * A script node exported as a module's plugin (docs/bot-os.md D79): a TypeScript file whose
  * `definePlugin` manifest is built from the node's declared ports and own events, and whose
  * `create` runs the script as typed, on a few lines that give it the script API from the plugin
- * context (`on`, `use`, `outbox`, `enqueue`, `publish`, `store`, `clock`, `log`), typed as the
+ * context (`on`, `use`, `outbox`, `enqueue`, `publish`, `store`, `clock`, `at`, `every`, `log`),
+ * typed as the
  * editor typed it (its `.d.ts`, without its `declare`s); and a `module.json` for it. Moving a
  * script to a repository is then a copy, not a rewrite. Pure: the editor downloads its result.
  */
@@ -70,7 +71,7 @@ export function exportScript(
  * script API given from the plugin context. As a module's plugin it runs in the shell's process,
  * with no worker and no limits of its own.
  */
-import { definePlugin, type Plugin, type PluginInterface } from '@megabottron1999/core';
+import { definePlugin, type Plugin, type PluginInterface, type TimerHandle } from '@megabottron1999/core';
 import { z } from 'zod';
 
 ${types}
@@ -130,7 +131,48 @@ ${events.join('\n')}
         error: (...v: unknown[]) => ctx.log.error(line(v)),
       });
       const console = { log, info: log.info, warn: log.warn, error: log.error };
-      void [on, use, outbox, enqueue, publish, store, clock, log, console];
+      // Its timers (docs/bot-os.md D106), on the plugin's clock: armed once it starts, dropped when
+      // it stops; one of every() re-armed for the next multiple of its interval as it fires.
+      const timers = new Map<number, TimerHandle | undefined>();
+      const waiting: (() => void)[] = [];
+      let started = false;
+      let nextTimer = 1;
+      const timer = (first: number, fn: () => unknown, ms?: number): ScriptTimer => {
+        const id = nextTimer++;
+        const arm = (t: number): void => {
+          if (!timers.has(id)) return;
+          const wait = Math.min(2 ** 31 - 1, Math.max(0, t - ctx.clock.now()));
+          timers.set(
+            id,
+            ctx.clock.setTimeout(() => {
+              if (ctx.clock.now() < t) return arm(t);
+              if (ms === undefined) timers.delete(id);
+              else arm((Math.floor(Math.max(t, ctx.clock.now()) / ms) + 1) * ms);
+              Promise.resolve()
+                .then(fn)
+                .catch((e: unknown) => ctx.log.warn(\`a timer threw: \${String(e)}\`));
+            }, wait)
+          );
+        };
+        timers.set(id, undefined);
+        if (started) arm(first);
+        else waiting.push(() => arm(first));
+        return {
+          cancel: () => {
+            if (!timers.has(id)) return false;
+            ctx.clock.clearTimeout(timers.get(id));
+            timers.delete(id);
+            return true;
+          },
+        };
+      };
+      const at = (time: number | Date, fn: () => unknown): ScriptTimer =>
+        timer(typeof time === 'number' ? time : time.getTime(), fn);
+      const every = (ms: number, fn: () => unknown): ScriptTimer => {
+        if (!(ms >= 1000)) throw new RangeError(\`every(\${ms}, fn): its interval is 1000 ms at least\`);
+        return timer((Math.floor(ctx.clock.now() / ms) + 1) * ms, fn, ms);
+      };
+      void [on, use, outbox, enqueue, publish, store, clock, at, every, log, console];
 
       // The script, as typed in the editor.
 ${indented(code, '      ')}
@@ -138,6 +180,8 @@ ${indented(code, '      ')}
       const stops: (() => void)[] = [];
       return {
         start() {
+          started = true;
+          for (const arm of waiting.splice(0)) arm();
           for (const h of handlers)
             stops.push(
               ctx.bus.subscribe(h.type, (event) => {
@@ -148,7 +192,10 @@ ${indented(code, '      ')}
             );
         },
         stop() {
+          started = false;
           for (const s of stops.splice(0)) s();
+          for (const h of timers.values()) ctx.clock.clearTimeout(h);
+          timers.clear();
         },
       };
     },

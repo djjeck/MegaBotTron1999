@@ -419,6 +419,11 @@ interface QueuedSend extends PromiseLike<QueuedResult> {
   /** Drops it if it still waits: whether it did. */
   cancel(): Promise<boolean>;
 }
+/** A timer of at() or every(). */
+interface ScriptTimer {
+  /** Drops it if it is still pending: whether it was. */
+  cancel(): boolean;
+}
 /** Registers a handler of an event type it hears (while the script loads). */
 declare function on<T extends keyof ScriptEvents>(type: T, fn: (event: ScriptEvents[T]) => unknown): void;
 /** Registers a handler of every event of a namespace it hears (while the script loads). */
@@ -445,6 +450,13 @@ declare const store: {
 };
 /** The node's clock (Date reads it too). */
 declare const clock: { now(): number };
+/**
+ * Runs fn at a time (ms since the epoch, or a Date) by its clock: one past, as soon as it can. Set
+ * at any time; in memory only, dropped when its node stops or restarts (keep what must last in store).
+ */
+declare function at(time: number | Date, fn: () => unknown): ScriptTimer;
+/** Runs fn every ms (1000 at least), on each whole multiple of ms since the epoch: every(60_000, fn) at :00. */
+declare function every(ms: number, fn: () => unknown): ScriptTimer;
 /** Its log lines, prefixed with its node's id. */
 declare const log: {
   (...values: unknown[]): void;

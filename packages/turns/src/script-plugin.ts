@@ -22,11 +22,16 @@
  *   clock, so that tests and simulations stay deterministic: there is no worker to kill, so each
  *   synchronous run is cut by vm's limit, `callMs` of real time; a loop after an await is not
  *   caught, nor its memory limited.
+ * - **Its timers** (`at`, `every`, D106) are armed on its node's clock (`ctx.clock`), here in the
+ *   main thread, whichever the isolation: in a worker, the runtime asks for each by a message and
+ *   hears each as it is due, as it hears an event; in the dev kit, they run on its virtual clock as
+ *   it leaps. All are dropped when its node stops, is stopped (`pause`) or fails: in memory only.
  * - **It reaches** its node's ports, its own store, its queue, the clock and a logger: never a
  *   secret, nor the files, nor the network. The `vm` context is no security boundary: the code is
  *   the owner's own (D28, D75).
  */
 import {
+  type Clock,
   definePlugin,
   type Instance,
   type ManifestInput,
@@ -34,6 +39,7 @@ import {
   type PluginContext,
   type PluginInterface,
   type QueuedSend,
+  type TimerHandle,
 } from '@megabottron1999/core';
 import { stripTypeScriptTypes } from 'node:module';
 import vm from 'node:vm';
@@ -41,6 +47,7 @@ import { Worker } from 'node:worker_threads';
 import { z } from 'zod';
 import {
   type CallEnd,
+  nextMultiple,
   type ScriptBridge,
   type ScriptCancel,
   ScriptRuntime,
@@ -267,7 +274,61 @@ interface Runner {
    */
   usage(): { cpuMs?: number; heapBytes?: number };
   dispatch(pattern: string, event: unknown): void;
+  /** Drops its timers, and arms none from now on. */
+  pause(): void;
   close(): Promise<void>;
+}
+
+/** The longest wait a timer holds (Node's): a longer one is armed again on the way. */
+const MAX_WAIT = 2 ** 31 - 1;
+
+/** A script's timers, armed on its node's clock (D106). */
+interface HostTimers {
+  schedule(id: number, at: number, every: number | undefined): void;
+  unschedule(id: number): void;
+  /** Drops them all, and arms none from now on. */
+  clear(): void;
+}
+
+/**
+ * A script's timers on `clock`: each, once due by it, is told to `fire`. One whose clock says it
+ * is not due yet when it goes off (a wait longer than a timer holds, or a timer early by a
+ * millisecond) is armed again for the rest. One of `every` is armed again before it fires, for the
+ * next multiple of its interval after the time it was due or now, whichever is later: a beat
+ * missed while the host stalled is not made up for, and a leap of the dev kit's clock fires each
+ * beat on the way, at its own time.
+ */
+function hostTimers(clock: Clock, fire: (id: number) => void): HostTimers {
+  const armed = new Map<number, TimerHandle>();
+  let cleared = false;
+  const schedule = (id: number, at: number, every: number | undefined): void => {
+    clock.clearTimeout(armed.get(id));
+    armed.delete(id);
+    if (cleared) return;
+    const wait = Math.min(MAX_WAIT, Math.max(0, at - clock.now()));
+    armed.set(
+      id,
+      clock.setTimeout(() => {
+        armed.delete(id);
+        if (clock.now() < at) return schedule(id, at, every);
+        if (every !== undefined)
+          schedule(id, nextMultiple(Math.max(at, clock.now()), every), every);
+        fire(id);
+      }, wait)
+    );
+  };
+  return {
+    schedule,
+    unschedule: (id) => {
+      clock.clearTimeout(armed.get(id));
+      armed.delete(id);
+    },
+    clear: () => {
+      cleared = true;
+      for (const h of armed.values()) clock.clearTimeout(h);
+      armed.clear();
+    },
+  };
 }
 
 /** The script plugin: one node per script, each with its own ports, code and limits. */
@@ -296,7 +357,7 @@ export function scriptPlugin(options: ScriptPluginOptions = {}): Plugin {
         stats.maxMs = Math.max(stats.maxMs, end.ms);
         if (end.error !== undefined) {
           stats.errors += 1;
-          ctx.log.warn(`a handler threw: ${end.error}`);
+          ctx.log.warn(`${end.timer === true ? 'a timer' : 'a handler'} threw: ${end.error}`);
         }
       };
       const bridge = hostBridge(ctx, c);
@@ -321,6 +382,10 @@ export function scriptPlugin(options: ScriptPluginOptions = {}): Plugin {
             `loaded, ${isolation === 'worker' ? 'in a worker' : 'in process'}: ${patterns.length === 0 ? 'no handler' : `on ${patterns.join(', ')}`}`
           );
         },
+        // Stopped by exception (D64): it is not woken by its timers until it starts again.
+        pause() {
+          runner.pause();
+        },
         async stop() {
           for (const u of unsubscribe.splice(0)) u();
           await runner.close();
@@ -332,8 +397,11 @@ export function scriptPlugin(options: ScriptPluginOptions = {}): Plugin {
   });
 }
 
+/** The bridge but its timers, which each runner arms on its own (`hostTimers`). */
+type HostBridge = Omit<ScriptBridge, 'schedule' | 'unschedule'>;
+
 /** The main thread's side of the bridge: the node's context, within what its ports reach. */
-function hostBridge(ctx: PluginContext, c: ScriptConfig): ScriptBridge {
+function hostBridge(ctx: PluginContext, c: ScriptConfig): HostBridge {
   const sends = new Map<number, QueuedSend>();
   return {
     use: async (port, member, input) => {
@@ -387,13 +455,29 @@ const publishesOf = (ctx: PluginContext, c: ScriptConfig): string[] =>
 function inProcessRunner(
   ctx: PluginContext,
   c: ScriptConfig,
-  bridge: ScriptBridge,
+  bridge: HostBridge,
   ended: (end: CallEnd) => void,
   fail: (why: string) => void
 ): Runner {
+  let closed = false;
+  const stop = (): void => {
+    closed = true;
+    timers.clear();
+  };
+  const timers = hostTimers(ctx.clock, (id) => {
+    if (closed) return;
+    try {
+      runtime.fire(id, ended, () => performance.now());
+    } catch (e) {
+      stop();
+      fail(`its script hung: ${message(e)}`);
+    }
+  });
   const runtime = new ScriptRuntime({
     bridge: {
       ...bridge,
+      schedule: (id, at, every) => timers.schedule(id, at, every),
+      unschedule: (id) => timers.unschedule(id),
       // A call's promise handled here too: a script that does not await it leaves no unhandled
       // rejection behind in the main thread.
       use: (...a) => {
@@ -407,7 +491,6 @@ function inProcessRunner(
     publishes: publishesOf(ctx, c),
     id: ctx.id,
   });
-  let closed = false;
   return {
     load: async () => {
       try {
@@ -424,13 +507,14 @@ function inProcessRunner(
       try {
         runtime.dispatch(pattern, event, ended, () => performance.now());
       } catch (e) {
-        closed = true;
+        stop();
         fail(`its script hung: ${message(e)}`);
       }
     },
     usage: () => ({}),
+    pause: () => timers.clear(),
     close: () => {
-      closed = true;
+      stop();
       return Promise.resolve();
     },
   };
@@ -440,7 +524,7 @@ function inProcessRunner(
 function workerRunner(
   ctx: PluginContext,
   c: ScriptConfig,
-  bridge: ScriptBridge,
+  bridge: HostBridge,
   ended: (end: CallEnd) => void,
   fail: (why: string) => void
 ): Runner {
@@ -463,9 +547,9 @@ function workerRunner(
   let running: string | undefined;
   // Its script's CPU and heap, as it last said when it got idle (D87): nothing is polled.
   let usage: { cpuMs?: number; heapBytes?: number } = {};
-  // The messages posted that may run its code (events, answers, outcomes), and those it has said it
-  // handled; and whether its first run is still going. It is watched only while one of these is
-  // unfinished: an idle script runs no code of its own, as nothing but those messages wakes it.
+  // The messages posted that may run its code (events, timers, answers, outcomes), and those it has
+  // said it handled; and whether its first run is still going. It is watched only while one of these
+  // is unfinished: an idle script runs no code of its own, as nothing but those messages wakes it.
   let posted = 0;
   let handled = 0;
   let loading = true;
@@ -477,9 +561,12 @@ function workerRunner(
     post(m);
     wake();
   };
+  // Its timers, on the node's clock: each due one posted to it, as an event is.
+  const timers = hostTimers(ctx.clock, (id) => send({ op: 'timer', id, now: ctx.clock.now() }));
   const end = (why: string): void => {
     if (closing) return;
     closing = true;
+    timers.clear();
     clearTimeout(ping);
     void worker?.terminate();
     refused?.(new Error(`its script ${why}`));
@@ -605,6 +692,12 @@ function workerRunner(
           ctx.log.error(`publish ${m.type}: ${message(e)}`);
         }
         return;
+      case 'schedule':
+        timers.schedule(m.id, m.at, m.every);
+        return;
+      case 'unschedule':
+        timers.unschedule(m.id);
+        return;
       case 'write':
         bridge.write(m.name, m.value);
         return;
@@ -647,8 +740,10 @@ function workerRunner(
       send({ op: 'event', pattern, event, now: ctx.clock.now() });
     },
     usage: () => usage,
+    pause: () => timers.clear(),
     close: async () => {
       closing = true;
+      timers.clear();
       clearTimeout(ping);
       await worker?.terminate();
     },

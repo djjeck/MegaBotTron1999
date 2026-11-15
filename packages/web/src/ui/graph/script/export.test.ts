@@ -66,6 +66,10 @@ on('quest.gain', async (e) => {
   publish('examine.looked', { item: e.name, n, x: null });
 });
 on('quest', () => { throw new Error('every event'); });
+every(60_000, () => log.info('minute', clock.now() % 60_000));
+at(new Date(clock.now() + 1_000), () => log.info('at'));
+at(clock.now() + 2_000, () => { throw new Error('late'); });
+at(clock.now() + 3_000, () => log.info('never')).cancel();
 `,
 };
 
@@ -190,6 +194,16 @@ describe('a script node exported as a plugin (D79)', () => {
       item: 'lantern',
       n: 1,
     });
+    // Its timers, on the kit's clock.
+    kit.runUntil(kit.clock.now() + 60_000);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(lines.filter((l) => /minute|at$|timer|never/u.test(l)).sort()).toEqual([
+      'examine: at',
+      'examine: minute 0',
+      'examine: warning: a timer threw: Error: late',
+    ]);
+    const pending = kit.clock.pending;
     await kit.stop();
+    expect(kit.clock.pending).toBeLessThan(pending);
   });
 });

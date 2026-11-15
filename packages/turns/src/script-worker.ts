@@ -57,11 +57,14 @@ const runtime = new ScriptRuntime({
     remove: (name) => post({ op: 'remove', name }),
     log: (level, line) => post({ op: 'log', level, line }),
     now,
+    // Its timers are armed on its host's clock (D106), which posts each one as it is due.
+    schedule: (id, at, every) => post({ op: 'schedule', id, at, every }),
+    unschedule: (id) => post({ op: 'unschedule', id }),
   },
 });
 
 // What its script costs (docs/bot-os.md D87): the CPU this thread spends from a message that may run
-// the script's code (an event, a call's answer, a send's outcome; its first run) until it is idle
+// the script's code (an event, a timer due, a call's answer, a send's outcome; its first run) until it is idle
 // again, the microtasks that message started drained (an immediate runs only then). A loop in
 // there never gets idle, and its host's watchdog kills it. Each time it gets idle it tells its host
 // how many such messages it has handled, its CPU so far and its heap: its host watches it only
@@ -112,6 +115,14 @@ function handle(m: Exclude<FromHost, { op: 'ping' }>): void {
       runtime.dispatch(
         m.pattern,
         m.event,
+        (end) => post({ op: 'ended', end }),
+        () => performance.now()
+      );
+      return;
+    case 'timer':
+      tick(m.now);
+      runtime.fire(
+        m.id,
         (end) => post({ op: 'ended', end }),
         () => performance.now()
       );

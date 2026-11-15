@@ -23,6 +23,10 @@
  * - `store.read(name)`, `store.write(name, value)`, `store.remove(name)`, `store.names()`: its own
  *   documents (`ctx.store`), read from a copy kept beside it.
  * - `clock.now()` (`ctx.clock`), and `Date`, whose `now()` and `new Date()` are the clock's.
+ * - `at(time, fn)`, `every(ms, fn)`: timers on its node's clock (docs/bot-os.md D106), set at any
+ *   time, each a handle with `cancel()`; in memory only, all dropped when its node stops. The
+ *   runtime keeps them and calls each when its host says it is due (`fire`); the host arms them on
+ *   `ctx.clock`.
  * - `log(...)`, `log.info`, `log.warn`, `log.error` (`ctx.log`); `console` is the same.
  *
  * Nothing in here imports anything but Node's own modules: the worker loads it as it is.
@@ -79,6 +83,31 @@ export interface ScriptBridge {
   remove(name: string): void;
   log(level: LogLevel, line: string): void;
   now(): number;
+  /**
+   * Arms its timer `id` for the time `at`, and, with an interval `every`, for each next multiple of
+   * it after that, until it is disarmed: its host calls `fire(id)` each time. The host re-arms one
+   * of `every` itself, so that a clock that leaps (the dev kit's) fires each beat on the way without
+   * waiting on the runtime.
+   */
+  schedule(id: number, at: number, every: number | undefined): void;
+  /** Disarms its timer `id`. */
+  unschedule(id: number): void;
+}
+
+/** The least interval of `every(ms, fn)`, in ms (D106). */
+export const MIN_EVERY_MS = 1000;
+/** The most timers a script may have pending at once (D106). */
+export const MAX_TIMERS = 100;
+
+/** A timer of the script's: its function, and its interval if it repeats. */
+interface Timer {
+  fn: () => unknown;
+  every: number | undefined;
+}
+
+/** What a script's timer gives it: `cancel()`, whether it was still pending. */
+export interface ScriptTimer {
+  cancel(): boolean;
 }
 
 /** The runtime's limits. */
@@ -92,10 +121,12 @@ export interface ScriptLimits {
   callMs?: number;
 }
 
-/** A handler call's end: how long it took, and its error, if it threw. */
+/** A handler's or a timer's call's end: how long it took, and its error, if it threw. */
 export interface CallEnd {
   ms: number;
   error?: string;
+  /** A timer's call (D106), not a handler's. */
+  timer?: true;
 }
 
 /** A script that held its thread past its limit: the node is failed with it. */
@@ -146,6 +177,9 @@ export class ScriptRuntime {
   private readonly handlers: { pattern: string; fn: (e: unknown) => unknown }[] = [];
   private loading = true;
   private nextSend = 1;
+  /** Its timers pending, by id (D106). */
+  private readonly timers = new Map<number, Timer>();
+  private nextTimer = 1;
   /** Its own documents, as its store keeps them. */
   private readonly docs: Map<string, unknown>;
   /** The event types it may publish: its own. */
@@ -225,6 +259,21 @@ export class ScriptRuntime {
         names: (): string[] => [...this.docs.keys()].sort(),
       },
       clock: { now: () => this.bridge.now() },
+      at: (time: unknown, fn: unknown): ScriptTimer => {
+        const t = timeOf(time);
+        if (t === undefined || typeof fn !== 'function')
+          throw new TypeError(
+            'at(time, fn): a time (ms since the epoch, or a Date), and a function'
+          );
+        return this.addTimer('at', t, fn as () => unknown, undefined);
+      },
+      every: (ms: unknown, fn: unknown): ScriptTimer => {
+        if (typeof ms !== 'number' || !Number.isFinite(ms) || typeof fn !== 'function')
+          throw new TypeError('every(ms, fn): an interval in ms, and a function');
+        if (ms < MIN_EVERY_MS)
+          throw new RangeError(`every(${ms}, fn): its interval is ${MIN_EVERY_MS} ms at least`);
+        return this.addTimer('every', nextMultiple(this.bridge.now(), ms), fn as () => unknown, ms);
+      },
       log: logger,
       console: { log: info, info, warn: logger.warn, error: logger.error },
       __now: () => this.bridge.now(),
@@ -285,30 +334,81 @@ export class ScriptRuntime {
     ended: (end: CallEnd) => void,
     now: () => number
   ): void {
-    for (const h of this.handlers) {
-      if (h.pattern !== pattern) continue;
-      const started = now();
-      let result: unknown;
-      this.context['__handler'] = h.fn;
-      this.context['__event'] = plain(event);
-      try {
-        this.running(`a handler of ${pattern}`);
-        result = CALL.runInContext(this.context, this.runOptions());
-      } catch (e) {
-        if (timedOut(e))
-          throw new ScriptTimeout(`a handler of ${pattern} took over ${this.limits.callMs} ms`);
-        ended({ ms: now() - started, error: message(e) });
-        continue;
-      } finally {
-        this.running(undefined);
-        delete this.context['__handler'];
-        delete this.context['__event'];
-      }
-      Promise.resolve(result).then(
-        () => ended({ ms: now() - started }),
-        (e: unknown) => ended({ ms: now() - started, error: message(e) })
+    for (const h of this.handlers)
+      if (h.pattern === pattern)
+        this.call(`a handler of ${pattern}`, h.fn, plain(event), ended, now);
+  }
+
+  /**
+   * Calls its timer `id`, due now (D106), as a handler is called: its synchronous run within the
+   * limit, if it has one (a ScriptTimeout past it), then what it awaits, its end told to `ended`.
+   * One cancelled since it was armed is not called; one of `at` is done with once called, one of
+   * `every` stays pending, its host re-arming it.
+   */
+  fire(id: number, ended: (end: CallEnd) => void, now: () => number): void {
+    const t = this.timers.get(id);
+    if (t === undefined) return;
+    if (t.every === undefined) this.timers.delete(id);
+    const what = t.every === undefined ? 'a timer of at()' : `a timer of every(${t.every})`;
+    this.call(what, t.fn, undefined, (end) => ended({ ...end, timer: true }), now);
+  }
+
+  /** How many timers it has pending. */
+  pendingTimers(): number {
+    return this.timers.size;
+  }
+
+  /** A new timer, armed: refused past the most a script may have. */
+  private addTimer(
+    name: 'at' | 'every',
+    at: number,
+    fn: () => unknown,
+    every: number | undefined
+  ): ScriptTimer {
+    if (this.timers.size >= MAX_TIMERS)
+      throw new Error(
+        `${name}(): it has ${MAX_TIMERS} timers pending, the most a script may (cancel one first)`
       );
+    const id = this.nextTimer++;
+    this.timers.set(id, { fn, every });
+    this.bridge.schedule(id, at, every);
+    return {
+      cancel: () => {
+        if (!this.timers.delete(id)) return false;
+        this.bridge.unschedule(id);
+        return true;
+      },
+    };
+  }
+
+  /** One call of the script's, `what` it is: a handler's or a timer's. */
+  private call(
+    what: string,
+    fn: (e: unknown) => unknown,
+    arg: unknown,
+    ended: (end: CallEnd) => void,
+    now: () => number
+  ): void {
+    const started = now();
+    let result: unknown;
+    this.context['__handler'] = fn;
+    this.context['__event'] = arg;
+    try {
+      this.running(what);
+      result = CALL.runInContext(this.context, this.runOptions());
+    } catch (e) {
+      if (timedOut(e)) throw new ScriptTimeout(`${what} took over ${this.limits.callMs} ms`);
+      ended({ ms: now() - started, error: message(e) });
+      return;
+    } finally {
+      this.running(undefined);
+      delete this.context['__handler'];
+      delete this.context['__event'];
     }
+    Promise.resolve(result).then(
+      () => ended({ ms: now() - started }),
+      (e: unknown) => ended({ ms: now() - started, error: message(e) })
+    );
   }
 
   /** The members of an interface part, each a call through the bridge. */
@@ -348,6 +448,20 @@ export class ScriptRuntime {
     };
   }
 }
+
+/** A time, as `at` takes it: ms since the epoch, or a Date (of any realm); undefined if neither. */
+function timeOf(time: unknown): number | undefined {
+  const t =
+    typeof time === 'object' &&
+    time !== null &&
+    typeof (time as { getTime?: unknown }).getTime === 'function'
+      ? (time as { getTime(): unknown }).getTime()
+      : time;
+  return typeof t === 'number' && Number.isFinite(t) ? t : undefined;
+}
+
+/** The first whole multiple of `ms` since the epoch after `t`. */
+export const nextMultiple = (t: number, ms: number): number => (Math.floor(t / ms) + 1) * ms;
 
 function safeJson(v: unknown): string {
   try {

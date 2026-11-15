@@ -24,7 +24,7 @@ import {
   scriptManifest,
   scriptPlugin,
 } from '#src/script-plugin.ts';
-import { ScriptRuntime } from '#src/script-runtime.ts';
+import { MAX_TIMERS, ScriptRuntime } from '#src/script-runtime.ts';
 import { statePlugin } from '#src/state-plugin.ts';
 
 /** The made-up game's parser: what the test says, published. */
@@ -158,6 +158,22 @@ const until = async (ok: () => boolean, ms = 5000): Promise<void> => {
     await new Promise((r) => setTimeout(r, 5));
   }
 };
+
+/** A bridge that answers little, and says what it is asked. */
+const bridge = (lines: string[]) => ({
+  use: () => Promise.resolve(undefined),
+  enqueue: () => {},
+  cancel: () => Promise.resolve(false),
+  held: () => Promise.resolve({ until: 7, reason: 'cooldown: cooldown' }),
+  publish: () => {},
+  write: () => {},
+  remove: (n: string) => void lines.push(`remove ${n}`),
+  log: (level: string, line: string) => void lines.push(`${level} ${line}`),
+  now: () => 42,
+  schedule: (id: number, at: number, every: number | undefined) =>
+    void lines.push(`schedule ${id} ${at} ${every}`),
+  unschedule: (id: number) => void lines.push(`unschedule ${id}`),
+});
 
 describe('a script node’s config', () => {
   it('starts with code that loads and does nothing', () => {
@@ -534,18 +550,6 @@ describe('a script node in a worker', () => {
 });
 
 describe('the script runtime', () => {
-  const bridge = (lines: string[]) => ({
-    use: () => Promise.resolve(undefined),
-    enqueue: () => {},
-    cancel: () => Promise.resolve(false),
-    held: () => Promise.resolve({ until: 7, reason: 'cooldown: cooldown' }),
-    publish: () => {},
-    write: () => {},
-    remove: (n: string) => void lines.push(`remove ${n}`),
-    log: (level: string, line: string) => void lines.push(`${level} ${line}`),
-    now: () => 42,
-  });
-
   it('holds the API alone, and refuses misuse with why', async () => {
     const lines: string[] = [];
     const r = new ScriptRuntime({
@@ -603,6 +607,207 @@ describe('the script runtime', () => {
         id: 'u',
       }).load('let a; let a;', 'u.ts')
     ).rejects.toThrow("Identifier 'a' has already been declared");
+  });
+});
+
+describe('a script’s timers (D106)', () => {
+  const T0 = Date.parse('2026-11-12T10:00:00Z');
+  /** Its timers' lines, those of a test's own words. */
+  const timerLines = (lines: string[]) =>
+    lines.filter((l) =>
+      /^examine: (past|later|from a handler|minute|seven|warning: a timer)/u.test(l)
+    );
+
+  for (const isolation of ['in-process', 'worker'] as const)
+    describe(isolation, () => {
+      it('fires at() and every() on its node’s clock, as the dev kit’s leaps', async () => {
+        const code = `
+          const t0 = clock.now();
+          every(60_000, () => log.info('minute', new Date().toISOString()));
+          every(7_000, () => log.info('seven', clock.now() % 7_000));
+          at(t0 - 1_000, () => log.info('past', clock.now() - t0));
+          const later = at(new Date(t0 + 30_000), () => log.info('later'));
+          at(t0 + 90_000, () => { throw new Error('boom'); });
+          on('quest.tick', () => {
+            at(clock.now() + 5_000, () => log.info('from a handler', clock.now() - t0));
+            log.info('cancelled', later.cancel(), later.cancel());
+          });
+        `;
+        const { kit, parser, lines } = await run(isolation, examineConfig(code));
+        parser.publish?.('quest.tick', {});
+        await until(() => lines.includes('examine: cancelled true false'));
+        const end = T0 + 3 * 60_000 + 10_000;
+        kit.runUntil(end);
+        let sevens = 0;
+        for (let t = Math.floor(T0 / 7_000 + 1) * 7_000; t <= end; t += 7_000) sevens++;
+        await until(() => timerLines(lines).length === 6 + sevens);
+        const own = timerLines(lines).filter((l) => !l.includes('seven'));
+        expect(own).toEqual([
+          'examine: past 0',
+          'examine: from a handler 5000',
+          'examine: minute 2026-11-12T10:01:00.000Z',
+          'examine: warning: a timer threw: boom',
+          'examine: minute 2026-11-12T10:02:00.000Z',
+          'examine: minute 2026-11-12T10:03:00.000Z',
+        ]);
+        // Each beat of every(7 s) on a whole multiple of 7 s since the epoch.
+        expect(new Set(timerLines(lines).filter((l) => l.includes('seven')))).toEqual(
+          new Set(['examine: seven 0'])
+        );
+        await until(() => (kit.core.cost('examine')?.own?.errors ?? 0) === 1);
+        expect(kit.core.state('examine')?.state).toBe('running');
+        await kit.stop();
+      });
+
+      it('drops its timers when its node is stopped, by the owner or for good', async () => {
+        const code = `every(60_000, () => log.info('minute', new Date().toISOString()));`;
+        const { kit, lines } = await run(isolation, examineConfig(code));
+        const pending = kit.clock.pending;
+        kit.runUntil(T0 + 60_000);
+        await until(() => timerLines(lines).length === 1);
+        expect(kit.clock.pending).toBe(pending);
+        expect(kit.core.stopNode('examine', 'held', 'owner')).toBe(true);
+        expect(kit.clock.pending).toBe(pending - 1);
+        kit.runUntil(T0 + 10 * 60_000);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(timerLines(lines)).toEqual(['examine: minute 2026-11-12T10:01:00.000Z']);
+        await kit.stop();
+        // Started and stopped for good: its timers dropped with it.
+        const again = await run(isolation, examineConfig(code));
+        const armed = again.kit.clock.pending;
+        await again.kit.stop();
+        expect(again.kit.clock.pending).toBeLessThan(armed);
+        again.kit.runUntil(T0 + 10 * 60_000);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(timerLines(again.lines)).toEqual([]);
+      });
+
+      it('fails its node when a timer holds its thread past its limit', async () => {
+        const code = `every(1_000, () => { for (;;) {} });`;
+        const { kit } = await run(isolation, {
+          ...examineConfig(code),
+          limits: { callMs: 50, memoryMb: 64 },
+        });
+        kit.runUntil(T0 + 1_000);
+        await until(() => kit.core.state('examine')?.state === 'failed');
+        expect(kit.core.state('examine')?.reason).toBe(
+          isolation === 'worker'
+            ? 'its script hung: a timer of every(1000) spent over 50 ms of CPU'
+            : 'its script hung: a timer of every(1000) took over 50 ms'
+        );
+        await kit.stop();
+      });
+    });
+
+  it('runs a daily action once a day, caught up at start from its store', async () => {
+    // The example of docs/bot-os-api.md §5, its send a log line here.
+    const code = `
+      const HOUR = 6; // 06:00 UTC
+      const today = (): string => new Date().toISOString().slice(0, 10);
+      function next(): Date {
+        const d = new Date();
+        d.setUTCHours(HOUR, 0, 0, 0);
+        if (d.getTime() <= clock.now()) d.setUTCDate(d.getUTCDate() + 1);
+        return d;
+      }
+      function daily(): void {
+        if (new Date().getUTCHours() >= HOUR && store.read('daily') !== today()) {
+          store.write('daily', today());
+          log.info('later: daily', new Date().toISOString());
+        }
+        at(next(), daily);
+      }
+      daily();
+    `;
+    const { kit, lines } = await run('in-process', examineConfig(code));
+    kit.runUntil(Date.parse('2026-11-14T12:00:00Z'));
+    expect(timerLines(lines)).toEqual([
+      'examine: later: daily 2026-11-12T10:00:00.000Z',
+      'examine: later: daily 2026-11-13T06:00:00.000Z',
+      'examine: later: daily 2026-11-14T06:00:00.000Z',
+    ]);
+    await kit.stop();
+  });
+
+  it('fires a time further off than a timer holds, once it is due', async () => {
+    const code = `at(clock.now() + 40 * 86_400_000, () => log.info('later', new Date().toISOString()));`;
+    const { kit, lines } = await run('in-process', examineConfig(code));
+    kit.runUntil(T0 + 39 * 86_400_000);
+    expect(timerLines(lines)).toEqual([]);
+    kit.runUntil(T0 + 41 * 86_400_000);
+    expect(timerLines(lines)).toEqual(['examine: later 2026-12-22T10:00:00.000Z']);
+    await kit.stop();
+  });
+
+  it('refuses a bad time, a short interval and one timer too many, with why', async () => {
+    const lines: string[] = [];
+    const ends: unknown[] = [];
+    const r = new ScriptRuntime({
+      bridge: { ...bridge(lines), now: () => 61_500 },
+      limits: { callMs: 100 },
+      documents: {},
+      publishes: [],
+      id: 't',
+    });
+    await r.load(
+      `
+      for (const bad of [() => at('soon', () => {}), () => at(new Date(NaN), () => {}),
+          () => at(1, 'fn'), () => every(999, () => {}), () => every('1s', () => {})])
+        try { bad(); } catch (e) { log.error(e.message); }
+      const a = at(new Date(70_000), () => log.info('a'));
+      every(60_000, () => log.info('beat'));
+      const all = [];
+      try { for (;;) all.push(at(0, () => {})); } catch (e) { log.error(all.length, e.message); }
+      log.info(all[0].cancel(), all[0].cancel());
+      at(0, () => {});
+      on('x.y', () => a.cancel());
+      `,
+      't.ts'
+    );
+    const fire = (id: number) =>
+      r.fire(
+        id,
+        (e) => ends.push(e),
+        () => 0
+      );
+    expect(lines.filter((l) => !l.startsWith('schedule') && !l.startsWith('unschedule'))).toEqual([
+      'error at(time, fn): a time (ms since the epoch, or a Date), and a function',
+      'error at(time, fn): a time (ms since the epoch, or a Date), and a function',
+      'error at(time, fn): a time (ms since the epoch, or a Date), and a function',
+      'error every(999, fn): its interval is 1000 ms at least',
+      'error every(ms, fn): an interval in ms, and a function',
+      `error ${MAX_TIMERS - 2} at(): it has ${MAX_TIMERS} timers pending, the most a script may (cancel one first)`,
+      'info true false',
+    ]);
+    // at() as asked; every() at the next whole minute.
+    expect(lines.filter((l) => l.startsWith('schedule')).slice(0, 2)).toEqual([
+      'schedule 1 70000 undefined',
+      'schedule 2 120000 60000',
+    ]);
+    expect(lines).toContain('unschedule 3');
+    expect(r.pendingTimers()).toBe(MAX_TIMERS);
+    lines.length = 0;
+    fire(2);
+    fire(2);
+    fire(1);
+    fire(1);
+    fire(9_999);
+    await Promise.resolve();
+    expect(lines).toEqual(['info beat', 'info beat', 'info a']);
+    expect(r.pendingTimers()).toBe(MAX_TIMERS - 1);
+    // Cancelled once fired: nothing left to cancel.
+    r.dispatch(
+      'x.y',
+      {},
+      () => {},
+      () => 0
+    );
+    expect(lines).not.toContain('unschedule 1');
+    expect(ends).toEqual([
+      { ms: 0, timer: true },
+      { ms: 0, timer: true },
+      { ms: 0, timer: true },
+    ]);
   });
 });
 

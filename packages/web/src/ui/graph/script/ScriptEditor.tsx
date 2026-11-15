@@ -31,6 +31,10 @@ export const API_CALLS: [string, string][] = [
   ['publish(type, payload)', 'An event of its own'],
   ['store.read(name), store.write(name, value)', 'Its own documents, kept across restarts'],
   ['clock.now()', 'The node’s clock, in ms; Date reads it too'],
+  [
+    'at(time, fn), every(ms, fn)',
+    'Timers on its clock: once at a time, or on each multiple of ms (1 s at least); cancel()',
+  ],
   ['log(...), log.warn(...), log.error(...)', 'Its log lines, prefixed with its id'],
 ];
 

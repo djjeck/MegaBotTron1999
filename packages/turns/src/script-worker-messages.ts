@@ -22,9 +22,10 @@ export interface WorkerData {
   now: number;
 }
 
-/** From the host: an event to handle, an answer to a call, a send's outcome, a ping. */
+/** From the host: an event to handle, a timer due, an answer to a call, a send's outcome, a ping. */
 export type FromHost =
   | { op: 'event'; pattern: string; event: unknown; now: number }
+  | { op: 'timer'; id: number; now: number }
   | { op: 'answer'; id: number; ok: true; value: unknown }
   | { op: 'answer'; id: number; ok: false; error: string }
   | { op: 'sent'; send: number; result: SendOutcome }
@@ -52,13 +53,15 @@ export type FromWorker =
       cancel: ScriptCancel | undefined;
     }
   | { op: 'publish'; type: string; payload: Record<string, unknown> }
+  | { op: 'schedule'; id: number; at: number; every: number | undefined }
+  | { op: 'unschedule'; id: number }
   | { op: 'write'; name: string; value: unknown }
   | { op: 'remove'; name: string }
   | { op: 'log'; level: LogLevel; line: string }
   | { op: 'pong' }
   | {
       op: 'idle';
-      /** The messages that may run its code (events, answers, outcomes) handled so far. */
+      /** The messages that may run its code (events, timers, answers, outcomes) handled so far. */
       handled: number;
       /** The CPU its thread spent running them and its first run, in ms. */
       cpuMs: number;
