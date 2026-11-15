@@ -150,6 +150,36 @@ describe('Answers', () => {
     expect(a.answered(['@QuestBot'], undefined, read('ok'))).toBeUndefined();
   });
 
+  it('tells the owner once of a command no answer came for, until one of its sends is answered', () => {
+    const { a, clock, notices } = answers();
+    // The bot ignores /buy in this chat: each send goes unanswered.
+    for (let i = 0; i < 3; i++) a.expect(['p'], '@QuestBot', '/buy', 120_000);
+    clock.advance(120_000);
+    expect(notices).toEqual([
+      {
+        kind: 'unanswered',
+        node: 'p',
+        text: 'p sent /buy to @QuestBot and read no answer to it within 120 s: the bot may ignore it there',
+        detail: { account: 'tg:me', chat: '@QuestBot', command: '/buy', withinS: 120 },
+      },
+    ]);
+    // Another node's, another command's: told apart.
+    a.expect(['q'], '@QuestBot', '/buy', 1000);
+    a.expect(['p'], '@QuestBot', '/give', 1000);
+    clock.advance(1000);
+    expect(notices.map((n) => `${String(n.node)} ${String(n.detail?.['command'])}`)).toEqual([
+      'p /buy',
+      'q /buy',
+      'p /give',
+    ]);
+    // Answered once, a later silence is told again.
+    a.expect(['p'], '@QuestBot', '/buy', 1000);
+    a.answered(['@QuestBot'], undefined, { ...read('ok'), commands: ['/buy'] });
+    a.expect(['p'], '@QuestBot', '/buy', 1000);
+    clock.advance(1000);
+    expect(notices).toHaveLength(4);
+  });
+
   it("holds a command group back until an answer's retryAt, the latest kept", () => {
     const { a, clock } = answers();
     a.answered(

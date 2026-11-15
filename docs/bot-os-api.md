@@ -1235,7 +1235,15 @@ the node decides again from its state.
   of one of its commands to that chat (by any of its names, D90) that waits for an answer: the one
   the message replies to (`replyTo`, the network's id of the send), else the oldest. A send waits
   for an answer when a node up that reads its chat on that account declares one for its command, for
-  the longest `withinS` of them; past it, `unanswered`. A dry run waits for none.
+  the longest `withinS` of them; past it, `unanswered`, and the owner is told once with an
+  `unanswered` notice (§4.16, D107) until a send of that command by that node to that chat is
+  answered: a bot that ignores a command in a chat (a game's command it takes only in a group) is
+  seen. A dry run waits for none. **A declaration names only the commands that can draw its event:**
+  the core cannot tell which of its commands a message answers, so the oldest waiting send of any of
+  them takes it, one the bot ignored included, and a declaration wider than its commands pairs an
+  answer with the wrong send and feeds the guard the wrong refusals (D107). A parser that reads
+  several chats with a bot that answers some commands in only some of them says so in the payload (a
+  field of its own, such as `private`) and declares those commands `unless` it.
 - **`await enqueue(…)`** settles, for such a send, once it is answered:
   `{ outcome: 'sent', answer }`; `status()` says `sent` meanwhile. Any other send settles as it
   goes, as before. `send` and `deliver` return at once as before, but their sends wait for an answer
@@ -1781,20 +1789,22 @@ the chat by its title and says what to do; `detail`: `account`, `chat`, `reason`
 warning of the graph's check at the load, D89, D90, about its node if it names one), `backoff` (a
 node the retry-loop guard holds back, its command refused for the same reason three times in a row,
 §4.6, D98, about that node; `detail`: `account`, `chat`, `command`, `reason`, `count`; told by
-`owner-notice` among its `other` kinds) and `graph-refused` (the saved graph refused at the load, so
-that no node runs, D94; `detail.problems`; no node hears it, the events panel shows it). **A plugin
-raises** its own through `ctx.notice(kind, text, detail?)`, about its node: a state node raises
-`refused` for each event it refuses (D72; `detail`: `event`, `at`, `reason`); and `told` through
-`ctx.notify(text, buttons?)` (§4.8, D94; `detail.buttons`, which `buttonsOf(notice)` reads). A kind
-is lower-case words and dashes; raising one sends nothing. **A plugin whose manifest declares
-`notices: true`** gets `ctx.notices`: `subscribe(handler)` hears the notices raised since the
-instance started first (the newest `NOTICES_KEPT`, 200), so that the load's warnings and a node
-failed at its start reach a node started after them, then each as it is raised, while its node is
-up; the time its handler takes is its node's (D77). The notices live in memory (`core.notices()`
-lists them), and **each is recorded** as it is raised (`core.notice`: `kind`, `node?`, `text`,
-`detail?`), so that the editor's events panel shows every notice whether a node tells it or not
-(D94), beside the records it was raised with (`core.plugin`, `core.drift`, `core.queue`,
-`<id>.refused`).
+`owner-notice` among its `other` kinds), `unanswered` (a command no answer came for in its window,
+once until that node's command is answered in that chat, §4.6, D107, about that node; `detail`:
+`account`, `chat`, `command`, `withinS`; told among the `other` kinds) and `graph-refused` (the
+saved graph refused at the load, so that no node runs, D94; `detail.problems`; no node hears it, the
+events panel shows it). **A plugin raises** its own through `ctx.notice(kind, text, detail?)`, about
+its node: a state node raises `refused` for each event it refuses (D72; `detail`: `event`, `at`,
+`reason`); and `told` through `ctx.notify(text, buttons?)` (§4.8, D94; `detail.buttons`, which
+`buttonsOf(notice)` reads). A kind is lower-case words and dashes; raising one sends nothing. **A
+plugin whose manifest declares `notices: true`** gets `ctx.notices`: `subscribe(handler)` hears the
+notices raised since the instance started first (the newest `NOTICES_KEPT`, 200), so that the load's
+warnings and a node failed at its start reach a node started after them, then each as it is raised,
+while its node is up; the time its handler takes is its node's (D77). The notices live in memory
+(`core.notices()` lists them), and **each is recorded** as it is raised (`core.notice`: `kind`,
+`node?`, `text`, `detail?`), so that the editor's events panel shows every notice whether a node
+tells it or not (D94), beside the records it was raised with (`core.plugin`, `core.drift`,
+`core.queue`, `<id>.refused`).
 
 `owner-notice` (§5) tells a kind it does not name as `other`. Its view (`GET /plugins/<id>/view`,
 D72) shows the notices waiting by kind with when each is due, when each kind was last told, whether

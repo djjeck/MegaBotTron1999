@@ -12,7 +12,10 @@
  *   (as the send-queue watchdog hears one, D93), which a declaration matches, answers the send of
  *   one of its commands to that chat that waits for an answer: the one the message replies to, else
  *   the oldest. A send waits for an answer when a running parser that reads its chat declares one
- *   for its command; past its window (`withinS`), it is `unanswered`.
+ *   for its command; past its window (`withinS`), it is `unanswered`, and the owner told once
+ *   (an `unanswered` notice, D107) until that node's command is answered in that chat. A
+ *   declaration names only the commands that can draw its event: the oldest waiting send of any of
+ *   them takes it, a send the bot ignores included.
  * - **Kept here, per account:** the sends waiting, the cooldowns each answer's `retryAt` sets (per
  *   chat and command, for every command of its declaration, `holds`), and the retry-loop guard,
  *   which backs off a node whose command keeps being refused for the same reason.
@@ -197,6 +200,8 @@ export class Answers {
   /** Until when a command rests in a chat (`<chat> <command>`, the chat without case), and why. */
   private readonly cool = new Map<string, { until: number; reason: string }>();
   private readonly guards = new Map<string, Guard>();
+  /** The nodes' commands told unanswered (D107), by `guardKey`, until one of them is answered. */
+  private readonly silent = new Set<string>();
 
   constructor(o: AnswersOptions) {
     this.o = o;
@@ -209,6 +214,7 @@ export class Answers {
     e.timer = this.o.clock.setTimeout(() => {
       this.settle(e, { status: 'unanswered' });
       this.o.unanswered?.(e.plugins, chat, command);
+      for (const plugin of e.plugins) this.tellUnanswered(plugin, chat, command, withinMs);
     }, withinMs);
     return {
       plugins: e.plugins,
@@ -267,8 +273,28 @@ export class Answers {
         : (ours.find((p) => p.id === replyTo) ?? ours.find((p) => p.id === undefined));
     if (e === undefined) return undefined;
     this.settle(e, answer);
-    for (const plugin of e.plugins) this.guard(plugin, e.chat, e.command, answer);
+    for (const plugin of e.plugins) {
+      this.silent.delete(guardKey(plugin, e.chat, e.command));
+      this.guard(plugin, e.chat, e.command, answer);
+    }
     return { plugins: e.plugins, chat: e.chat, command: e.command };
+  }
+
+  /**
+   * A node's send that no answer came for in its window (D107): the owner is told once, with an
+   * `unanswered` notice, until a send of that command by that node to that chat is answered; a bot
+   * that ignores a command there (a game's command it takes only in a group) is then seen.
+   */
+  private tellUnanswered(plugin: string, chat: string, command: string, withinMs: number): void {
+    const key = guardKey(plugin, chat, command);
+    if (this.silent.has(key)) return;
+    this.silent.add(key);
+    this.o.notice?.({
+      kind: 'unanswered',
+      node: plugin,
+      text: `${plugin} sent ${command} to ${chat} and read no answer to it within ${Math.round(withinMs / 1000)} s: the bot may ignore it there`,
+      detail: { account: this.o.account, chat, command, withinS: withinMs / 1000 },
+    });
   }
 
   /**

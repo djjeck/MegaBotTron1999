@@ -34,7 +34,8 @@ never their values.
 - `src/answers.ts`: command answers (docs/bot-os.md D98): the parsers' declared answers (a
   manifest's `answers`), the sends waiting for theirs (`await enqueue(…)` settles with `answer`),
   the cooldowns their `retryAt` sets per chat and command, and the retry-loop guard, which backs off
-  a node refused again and again for one reason (`GET /status`'s `backoff`, a `backoff` notice).
+  a node refused again and again for one reason (`GET /status`'s `backoff`, a `backoff` notice), and
+  the `unanswered` notice of a command no answer came for (D107).
 - `src/paths.ts`: dotted paths into a payload (`valueAt`, `matches`, `holds`), as reactions, cancels
   and answers read them.
 - `src/notices.ts`: the owner's notices (docs/bot-os.md D91, D94): what needs the owner's attention,
