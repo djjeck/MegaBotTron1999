@@ -379,6 +379,42 @@ describe('the telegram-bot plugin’s login (D116)', () => {
     await core.stop();
   });
 
+  it('refuses on a second node the token of a bot a first one holds, naming it (D121)', async () => {
+    const stub = stubBot();
+    stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
+    stub.bot.start = () => new Promise<void>(() => {});
+    stub.bot.stop = () => Promise.resolve();
+    const core = new Core({
+      clock: new VirtualClock(),
+      documents: { 'quest-bot': { login: { token: TOKEN } } },
+      graph: {
+        version: 2,
+        nodes: [
+          { id: 'quest-bot', plugin: 'telegram-bot' },
+          { id: 'new-bot', plugin: 'telegram-bot' },
+        ],
+        edges: [],
+      },
+    });
+    core.register(telegramBotPlugin({ listen: new Promise(() => {}), bot: () => stub.bot }));
+    await core.start();
+    expect(await core.controls.loginAct('new-bot', 'token', { token: TOKEN })).toMatchObject({
+      value: {
+        status: 'needed',
+        error: expect.stringContaining('used by the node quest-bot already') as unknown,
+      },
+    });
+    // Forgotten there, it is taken here.
+    await core.controls.loginAct('quest-bot', 'logout', {});
+    expect(await core.controls.loginAct('new-bot', 'token', { token: TOKEN })).toMatchObject({
+      value: { status: 'done' },
+    });
+    expect(await core.controls.loginAct('quest-bot', 'token', { token: TOKEN })).toMatchObject({
+      value: { error: expect.stringContaining('the node new-bot') as unknown },
+    });
+    await core.stop();
+  });
+
   it('loads a node whose config still names the Docker secrets it once read (D118)', () => {
     const core = new Core({ clock: new VirtualClock() });
     core.register(telegramBotPlugin());

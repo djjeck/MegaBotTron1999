@@ -198,6 +198,48 @@ describe('a telegram-user login (D116)', () => {
     expect(login.state()).toMatchObject({ status: 'done', as: 'Alice', restart: true });
   });
 
+  it('refuses an account another node is logged in as, ending its new session (D121)', async () => {
+    const store = memoryStore();
+    store.write(LOGIN_DOC, API);
+    let scanned: (user: unknown) => void = () => {};
+    const ended: unknown[] = [];
+    const { client, calls } = fakeClient({
+      qr: (p) => {
+        void p.qrCode?.({ token: Buffer.from('code'), expires: 30 });
+        return new Promise((r) => (scanned = r));
+      },
+    });
+    const claimed: (string | undefined)[] = [];
+    const { login, logged } = setUp({
+      client: (api, session) =>
+        Object.assign(client(api, session), {
+          invoke: (r: unknown) => (ended.push(r), Promise.reject(new Error('gone'))),
+        }),
+      store,
+      taken: (user) => (user === '5000001' ? 'my-account' : undefined),
+      claim: (user) => claimed.push(user),
+    });
+    await login.act('qr', {});
+    scanned({ username: 'alice', id: 5000001 });
+    await tick();
+    await tick();
+    expect(login.state()).toMatchObject({
+      status: 'needed',
+      error: expect.stringContaining('logged in on the node my-account already') as unknown,
+    });
+    expect(ended).toHaveLength(1);
+    expect(calls).toContain('disconnect');
+    expect(store.read(LOGIN_DOC)).toEqual(API);
+    expect(claimed).toEqual([]);
+    expect(logged).toContain('refused a login as the account of the node my-account');
+    // Another account: kept, and claimed.
+    await login.act('qr', {});
+    scanned({ username: 'bob', id: 5000002 });
+    await tick();
+    expect(login.state()).toMatchObject({ status: 'done', as: '@bob' });
+    expect(claimed).toEqual(['5000002']);
+  });
+
   it('ends a login that fails, with why, and one cancelled or left unanswered', async () => {
     const store = memoryStore();
     store.write(LOGIN_DOC, API);

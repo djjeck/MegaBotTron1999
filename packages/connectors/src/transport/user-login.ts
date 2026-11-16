@@ -21,6 +21,7 @@ import {
   type Store,
   type TimerHandle,
 } from '@megabottron1999/core';
+import { Api } from 'telegram';
 import {
   type ApiCredentials,
   type QrCodeAuthParams,
@@ -52,6 +53,8 @@ export interface UserLoginClient {
   disconnect(): Promise<unknown>;
   signInUser(api: ApiCredentials, params: UserAuthParams): Promise<unknown>;
   signInUserWithQrCode(api: ApiCredentials, params: QrCodeAuthParams): Promise<unknown>;
+  /** A raw request: the logout of a session refused (`auth.logOut`). */
+  invoke?(request: Api.auth.LogOut): Promise<unknown>;
 }
 
 /** What a login asks now. */
@@ -153,6 +156,13 @@ export interface UserLoginOptions {
   self: () => string | undefined;
   /** A client to log in with, on the session given (GramJS's, in the image). */
   client: (api: ApiCredentials, session: StringSession) => UserLoginClient;
+  /**
+   * The node of the same plugin logged in as this user (by id) already, if any (D121): one account
+   * is one node's.
+   */
+  taken?: (user: string) => string | undefined;
+  /** This node is logged in as this user now, or as none (`undefined`, logged out). */
+  claim?: (user: string | undefined) => void;
   /** Ends the running connector's session on Telegram and stops it. */
   logOut?: () => Promise<void>;
   /** Marks a value secret, to be redacted (`ctx.secrets.remember`). */
@@ -421,10 +431,16 @@ export class UserLogin implements Login {
     run().then(
       (user) => {
         if (attempt.over) return;
+        const id = userId(user);
+        const other = id === undefined ? undefined : this.o.taken?.(id);
+        if (other !== undefined) {
+          void this.refuse(attempt, client, other);
+          return;
+        }
         const saved = session.save();
         this.o.remember(saved);
         this.as = userName(user);
-        const id = userId(user);
+        if (id !== undefined) this.o.claim?.(id);
         this.o.store.write(LOGIN_DOC, {
           ...api,
           session: saved,
@@ -443,6 +459,23 @@ export class UserLogin implements Login {
     );
     await attempt.next(this.o.clock, SETTLE_MS);
     return this.state();
+  }
+
+  /**
+   * A login as an account another node holds (D121): its new session ended on Telegram at once, so
+   * that no stray device is left, and the login over with why.
+   */
+  private async refuse(attempt: Attempt, client: UserLoginClient, other: string): Promise<void> {
+    try {
+      await client.invoke?.(new Api.auth.LogOut());
+    } catch {
+      // Ended or not, it is not kept: the owner may end it from the phone's Devices.
+    }
+    this.o.log(`refused a login as the account of the node ${other}`);
+    await this.finish(
+      attempt,
+      `this account is logged in on the node ${other} already: one account is one node’s. Log out there first, or log in with another account.`
+    );
   }
 
   /** The login over, logged in or not: its client disconnected, its error kept. */
@@ -491,6 +524,7 @@ export class UserLogin implements Login {
       this.o.store.write(LOGIN_DOC, { apiId: doc.apiId, apiHash: doc.apiHash });
     this.source = undefined;
     this.as = undefined;
+    this.o.claim?.(undefined);
     this.changed = true;
     this.o.log('logged out: the session is ended');
     return this.state();

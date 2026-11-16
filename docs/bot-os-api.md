@@ -1171,7 +1171,14 @@ action, where it led and whom as, never a value). `telegram-bot` asks for its to
 (GramJS's `signInUserWithQrCode`, renewed as it expires) or by phone (the number, the code, the 2FA
 password), one login at a time, dropped after 5 minutes without an answer; its logout ends the
 session on Telegram too (`auth.logOut`), and its sessions show in the account's Devices as the app
-registered at my.telegram.org on the device `MegaBotTron1999`.
+registered at my.telegram.org on the device `MegaBotTron1999`. **No credentials twice** (bot-os.md
+D121): a bot or an account is one node's, since two connectors polling one bot's token conflict on
+Telegram and one account's two sessions would each hear and send as it. `telegram-bot` refuses a
+token whose bot (the id before its colon) another node of the plugin holds, before asking Telegram;
+`telegram-user` refuses an account (its user id, kept with the login) another node is logged in as,
+its new session ended at once (`auth.logOut`). The refusal names that node; forgetting the token or
+logging out there frees it. The nodes compared are those loaded in this run, each from what its
+store keeps.
 
 As built (`packages/core/src/connector.ts`): a connector plugin's instance offers its `connector`,
 whose account must be its node's (`ctx.account`; a test's fake connector, given an account of its

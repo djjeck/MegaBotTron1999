@@ -34,12 +34,22 @@ export interface BotLoginOptions {
   source: 'store' | undefined;
   /** Whom the running connector is, once connected. */
   self: () => string | undefined;
+  /**
+   * The node of the same plugin that holds the bot of this id already, if any (D121): two nodes
+   * polling one bot's token conflict on Telegram.
+   */
+  taken?: (bot: string) => string | undefined;
+  /** This node holds the bot of this id now, or none (`undefined`, its token forgotten). */
+  claim?: (bot: string | undefined) => void;
   /** Asks Telegram who a token's bot is (`getMe`); rejects for a token it refuses. */
   check: (token: string) => Promise<{ username?: string | undefined }>;
   /** Marks a value secret, to be redacted (`ctx.secrets.remember`). */
   remember: (value: string) => void;
   log: (line: string) => void;
 }
+
+/** The bot's id, the part of its token before the colon: what tells two tokens of one bot. */
+export const botOf = (token: string): string => token.slice(0, token.indexOf(':'));
 
 const CANCEL: LoginAction = { name: 'cancel', label: 'Cancel' };
 
@@ -121,6 +131,7 @@ export class BotLogin implements Login {
       case 'logout':
         if (this.source !== 'store') throw new Error('the login does not offer logout now');
         this.o.store.remove(BOT_LOGIN_DOC);
+        this.o.claim?.(undefined);
         this.source = undefined;
         this.as = undefined;
         this.changed = true;
@@ -135,6 +146,12 @@ export class BotLogin implements Login {
     this.o.remember(token);
     if (!TOKEN.test(token)) {
       this.error = 'not a bot token: @BotFather gives one as 123456789:AA…';
+      return this.state();
+    }
+    const bot = botOf(token);
+    const other = this.o.taken?.(bot);
+    if (other !== undefined) {
+      this.error = `this bot’s token is used by the node ${other} already: two connectors polling one bot conflict on Telegram. Forget the token there first, or make another bot with @BotFather.`;
       return this.state();
     }
     let me: { username?: string | undefined };
@@ -158,6 +175,7 @@ export class BotLogin implements Login {
       token,
       ...(this.as === undefined ? {} : { as: this.as }),
     } satisfies BotLoginDoc);
+    this.o.claim?.(bot);
     this.source = 'store';
     this.changed = true;
     this.replacing = false;

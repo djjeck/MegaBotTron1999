@@ -36,7 +36,7 @@ import {
 } from '@megabottron1999/core';
 import { type Bot } from 'grammy';
 import { z } from 'zod';
-import { BOT_LOGIN_DOC, BotLogin, type BotLoginDoc } from '#src/transport/bot-login.ts';
+import { BOT_LOGIN_DOC, BotLogin, type BotLoginDoc, botOf } from '#src/transport/bot-login.ts';
 import { createBot, TelegramBotConnector } from '#src/transport/telegram-bot.ts';
 import { DenyList } from '#src/transport/telegram-deny.ts';
 import { TelegramSurface } from '#src/transport/telegram-surface.ts';
@@ -143,6 +143,8 @@ export function telegramBotPlugin(
   // Its network's; a node's account is `telegram-bot:<node id>` (D119).
   const account = 'telegram-bot:bot';
   const make = o.bot ?? createBot;
+  // The bot each of its nodes holds, by node (D121): a token is refused on a second node.
+  const held = new Map<string, string>();
   return definePlugin({
     manifest: {
       id: TELEGRAM_BOT,
@@ -177,18 +179,25 @@ export function telegramBotPlugin(
       const log = (line: string): void => ctx.log.info(line);
       const config = ctx.config as TelegramBotConfig;
       const token = ctx.store.read<BotLoginDoc>(BOT_LOGIN_DOC)?.token;
+      if (token !== undefined) held.set(ctx.id, botOf(token));
       const ref: { connector?: TelegramBotConnector } = {};
       const login = new BotLogin({
         store: ctx.store,
         clock: ctx.clock,
         source: token === undefined ? undefined : 'store',
         self: () => ref.connector?.self(),
+        taken: (bot) => [...held].find(([node, b]) => node !== ctx.id && b === bot)?.[0],
+        claim: (bot) => (bot === undefined ? held.delete(ctx.id) : held.set(ctx.id, bot)),
         check: (t) => make(t, log).api.getMe(),
         remember: (value) => ctx.secrets?.remember(value),
         log,
       });
       if (token === undefined)
-        return { connector: new LoginNeeded(ctx.account ?? account, 'telegram'), login };
+        return {
+          connector: new LoginNeeded(ctx.account ?? account, 'telegram'),
+          login,
+          stop: () => void held.delete(ctx.id),
+        };
       const bot = make(token, log);
       // The surface hears the connector's status; the connector polls once the surface listens.
       const surface =
@@ -266,6 +275,7 @@ export function telegramBotPlugin(
         login,
         start: () => c.start(),
         stop: async () => {
+          held.delete(ctx.id);
           surface?.stop();
           await c.stop();
         },

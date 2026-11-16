@@ -60,6 +60,24 @@ describe('a telegram-bot login (D116)', () => {
     expect(login.state()).toMatchObject({ status: 'done', as: '@ExampleBot' });
   });
 
+  it('refuses a token of a bot another node holds, naming it, unchecked (D121)', async () => {
+    const claimed: (string | undefined)[] = [];
+    const { login, checked, store } = setUp({
+      taken: (bot) => (bot === '123456' ? 'quest-bot' : undefined),
+      claim: (bot) => claimed.push(bot),
+    });
+    expect(await login.act('token', { token: TOKEN })).toMatchObject({
+      status: 'needed',
+      error: expect.stringContaining('used by the node quest-bot already') as unknown,
+    });
+    expect(checked).toEqual([]);
+    expect(store.read(BOT_LOGIN_DOC)).toBeUndefined();
+    const other = `654321:${TOKEN.slice(7)}`;
+    expect((await login.act('token', { token: other })).status).toBe('done');
+    expect(await login.act('logout', {})).toMatchObject({ status: 'needed' });
+    expect(claimed).toEqual(['654321', undefined]);
+  });
+
   it('says why Telegram refused a token, or did not answer', async () => {
     const { login, clock } = setUp({
       check: (t) =>

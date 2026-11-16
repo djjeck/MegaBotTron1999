@@ -99,9 +99,10 @@ with its own authentication, rather than publishing the port.
   type your app's API id and hash once (my.telegram.org → API development tools; each deployment
   registers its own app), then **Log in with a QR code** and scan it in Telegram's Settings →
   Devices → Link Desktop Device (or log in with your phone number, the code and your 2FA password).
-  Then **Restart now**, and tick its chats. The credentials are kept in the connector's store in
-  `/data`, so in its backups. **Log out** (an account's) ends the session on Telegram too; it also
-  shows in Telegram's Devices, where it can be ended from the phone. The `telegram_bot_token` and
+  Then **Restart now**, and tick its chats. A bot, or an account, is one node's: the login refuses
+  one another node holds, naming it. The credentials are kept in the connector's store in `/data`,
+  so in its backups. **Log out** (an account's) ends the session on Telegram too; it also shows in
+  Telegram's Devices, where it can be ended from the phone. The `telegram_bot_token` and
   `telegram_user_*` secrets of earlier releases are read no more: remove them from the deployment,
   and log in from the node instead.
 

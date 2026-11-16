@@ -73,6 +73,8 @@ export function telegramUserPlugin(
     o.loginClient ??
     ((api: Omit<UserCredentials, 'session'>, session: StringSession): UserLoginClient =>
       createTelegramClient({ ...api, session: '' }, session));
+  // The account each of its nodes is logged in as, by node (D121): one is refused on a second node.
+  const held = new Map<string, string>();
   return definePlugin({
     manifest: {
       id: TELEGRAM_USER,
@@ -93,6 +95,7 @@ export function telegramUserPlugin(
         kept?.session === undefined
           ? undefined
           : { apiId: kept.apiId, apiHash: kept.apiHash, session: kept.session };
+      if (credentials !== undefined && kept?.user !== undefined) held.set(ctx.id, kept.user);
       const log = (line: string): void => ctx.log.info(line);
       const loginOf = (c?: TelegramUserConnector): UserLogin =>
         new UserLogin({
@@ -101,6 +104,8 @@ export function telegramUserPlugin(
           source: credentials === undefined ? undefined : 'store',
           self: () => c?.self(),
           client: makeLogin,
+          taken: (user) => [...held].find(([node, u]) => node !== ctx.id && u === user)?.[0],
+          claim: (user) => (user === undefined ? held.delete(ctx.id) : held.set(ctx.id, user)),
           ...(c === undefined ? {} : { logOut: () => c.logOut() }),
           remember: (value) => ctx.secrets?.remember(value),
           log,
@@ -110,7 +115,7 @@ export function telegramUserPlugin(
         return {
           connector: new LoginNeeded(ctx.account ?? account, 'telegram'),
           login,
-          stop: () => login.drop(),
+          stop: () => (held.delete(ctx.id), login.drop()),
         };
       }
       const connector = new TelegramUserConnector({
@@ -138,6 +143,7 @@ export function telegramUserPlugin(
         login,
         start: () => connector.start(),
         stop: async () => {
+          held.delete(ctx.id);
           await login.drop();
           await connector.stop();
         },

@@ -327,6 +327,47 @@ describe('the telegram-user plugin', () => {
 
 describe('the telegram-user plugin’s login (D116)', () => {
   const data = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tg-user-'));
+
+  it('refuses on a second node the account a first one is logged in as, naming it (D121)', async () => {
+    const ended: unknown[] = [];
+    const scan = (): UserLoginClient => ({
+      connect: () => Promise.resolve(true),
+      disconnect: () => Promise.resolve(),
+      signInUser: () => Promise.reject(new Error('no')),
+      signInUserWithQrCode: async (_api, p) => {
+        await p.qrCode?.({ token: Buffer.from('code'), expires: 30 });
+        return { username: 'alice', id: 5000001 };
+      },
+      invoke: (r) => (ended.push(r), Promise.resolve(true)),
+    });
+    const core = new Core({
+      clock: new VirtualClock(),
+      documents: {
+        mine: { login: { ...LOGIN, as: '@alice', user: '5000001' } },
+        again: { login: { apiId: LOGIN.apiId, apiHash: LOGIN.apiHash } },
+      },
+      graph: {
+        version: 2,
+        nodes: [
+          { id: 'mine', plugin: 'telegram-user' },
+          { id: 'again', plugin: 'telegram-user' },
+        ],
+        edges: [],
+      },
+    });
+    core.register(telegramUserPlugin({ client, loginClient: scan }));
+    await core.start();
+    await core.controls.loginAct('again', 'qr', {});
+    await new Promise((r) => setImmediate(r));
+    expect(core.controls.login('again')).toMatchObject({
+      value: {
+        status: 'needed',
+        error: expect.stringContaining('logged in on the node mine already') as unknown,
+      },
+    });
+    expect(ended).toHaveLength(1);
+    await core.stop();
+  });
   const keep = (dir: string, doc: unknown) => {
     fs.mkdirSync(path.join(dir, 'instances', 'telegram-user'), { recursive: true });
     fs.writeFileSync(
