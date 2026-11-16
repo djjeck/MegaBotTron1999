@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { LoginState } from '#src/ui/api.ts';
+import type { LoginState, NodeView } from '#src/ui/api.ts';
 import { ConnectorLogin, QrCode } from './ConnectorLogin.tsx';
+import { NodeDetails } from './NodeDetails.tsx';
 
 afterEach(() => {
   cleanup();
@@ -129,5 +130,86 @@ describe('a connector’s login in its panel (D116)', () => {
     const path = container.querySelector('path')?.getAttribute('d') ?? '';
     expect(path.length).toBeGreaterThan(100);
     expect(container.querySelector('svg')?.getAttribute('width')).toBe('100');
+  });
+});
+
+describe('a Telegram-like connector’s panel, as a first setup sees it (D122)', () => {
+  const view: NodeView = {
+    id: 'quest-bot',
+    plugin: 'telegram-bot',
+    version: '0.1.0',
+    description: 'A bot',
+    kinds: ['connector'],
+    account: 'telegram-bot:quest-bot',
+    network: 'telegram-bot',
+    login: true,
+    configSchema: {
+      type: 'object',
+      properties: {
+        homeLabel: { type: 'string', default: 'Home', description: 'The back button’s label' },
+        unansweredAt: { type: 'integer', default: 10, description: 'How many' },
+        liveGraceS: { type: 'number', default: 120, description: 'How old' },
+      },
+    },
+    inputs: {},
+    outputs: {},
+    interface: { reads: [], actions: [], commands: [] },
+    secrets: [],
+    configSecrets: [],
+    events: [],
+  };
+  const panel = (connection?: { state: 'closed'; phase: string }) =>
+    render(
+      <NodeDetails
+        node={{ id: 'quest-bot', plugin: 'telegram-bot' }}
+        view={view}
+        {...(connection === undefined
+          ? {}
+          : {
+              live: {
+                id: 'quest-bot',
+                plugin: 'telegram-bot',
+                description: 'A bot',
+                kinds: ['connector'],
+                state: 'running',
+                settings: {},
+                reads: [],
+                actions: [],
+              },
+              account: { id: 'quest-bot', plugin: 'telegram-bot', state: 'running', connection },
+            })}
+        problems={[]}
+        configErrors={{}}
+        settingErrors={{}}
+        secretNames={[]}
+        groups={[]}
+        change={() => {}}
+        remove={() => {}}
+        kill={() => {}}
+        cleared={false}
+        clearStop={() => {}}
+      />
+    );
+
+  it('says to apply, then to log in first; folds the connector’s tuning; asks no account', () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => {}))
+    );
+    panel();
+    expect(screen.getByText(/It logs in from here once it runs/u)).toBeDefined();
+    expect(screen.getByRole('note').textContent).toContain('Log in first');
+    const tuning = screen.getByRole('group', { name: 'config tuning' });
+    expect(tuning.textContent).toContain('unansweredAt');
+    expect(tuning.textContent).toContain('liveGraceS');
+    expect(tuning.textContent).not.toContain('homeLabel');
+    expect(screen.queryByRole('textbox', { name: 'account' })).toBeNull();
+    expect(screen.getByLabelText('account').textContent).toBe('quest-bot');
+    cleanup();
+    panel({ state: 'closed', phase: 'needs login' });
+    expect(screen.getByRole('note').textContent).toContain('Log in first');
+    cleanup();
+    panel({ state: 'closed', phase: 'closed' });
+    expect(screen.queryByRole('note')).toBeNull();
   });
 });

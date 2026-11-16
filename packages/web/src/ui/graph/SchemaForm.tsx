@@ -249,10 +249,14 @@ export function SchemaForm(props: {
   secretNames?: readonly string[];
   errors?: Record<string, string[]>;
   custom?: Readonly<Record<string, CustomControl>>;
+  /** Keys drawn last, folded under "Tuning": fields a first setup leaves at their defaults. */
+  folded?: readonly string[];
 }) {
   const properties = (props.schema['properties'] ?? {}) as Record<string, JsonSchema>;
   const required = (props.schema['required'] ?? []) as string[];
-  const entries = Object.entries(properties);
+  const all = Object.entries(properties);
+  const folded = all.filter(([name]) => props.folded?.includes(name) === true);
+  const entries = all.filter(([name]) => props.folded?.includes(name) !== true);
   const onChange = props.onChange;
   const editing: Editing | undefined =
     onChange === undefined
@@ -276,20 +280,33 @@ export function SchemaForm(props: {
   return (
     <fieldset className="schema">
       <legend>{props.legend}</legend>
-      {entries.length === 0 ? (
-        <p className="muted">nothing to set</p>
-      ) : (
-        entries.map(([name, schema]) => (
-          <Field
-            key={name}
-            name={name}
-            schema={schema}
-            value={props.value?.[name]}
-            required={required.includes(name)}
-            set={setter(name)}
-            editing={editing}
-          />
-        ))
+      {entries.length === 0 && folded.length === 0 ? <p className="muted">nothing to set</p> : null}
+      {entries.map(([name, schema]) => (
+        <Field
+          key={name}
+          name={name}
+          schema={schema}
+          value={props.value?.[name]}
+          required={required.includes(name)}
+          set={setter(name)}
+          editing={editing}
+        />
+      ))}
+      {folded.length === 0 ? null : (
+        <details className="tuning" aria-label={`${props.legend} tuning`}>
+          <summary>Tuning</summary>
+          {folded.map(([name, schema]) => (
+            <Field
+              key={name}
+              name={name}
+              schema={schema}
+              value={props.value?.[name]}
+              required={required.includes(name)}
+              set={setter(name)}
+              editing={editing}
+            />
+          ))}
+        </details>
       )}
     </fieldset>
   );

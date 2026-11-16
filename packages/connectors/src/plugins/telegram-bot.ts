@@ -54,7 +54,7 @@ export const telegramBotConfig = z
       .int()
       .optional()
       .describe(
-        'The owner, picked among its chats (by their user id): their private chat with the bot alone answers the owner’s commands, and runs the buttons of the notices an owner-notice node sends there'
+        'You, its owner, picked among its chats once you have written to the bot: your private chat with it answers your commands (/plugins, /settings) and runs the buttons of the notices an owner-notice node sends there; unset, it answers no owner command'
       ),
     group: z
       .number()

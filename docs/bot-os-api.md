@@ -1695,16 +1695,20 @@ node, listed in their panels and in the review, and counted in the map's bar bes
 (`N warnings`), without keeping Apply from the draft. A node's config starts filled with its
 schema's defaults (nested objects within), written to the draft as if typed; a node opened shows the
 defaults of the fields its config leaves unset filled in, unmarked, and writes them with its first
-change, so that merely opening a node changes nothing. A field's description is its help. A node
-selected shows its forms, editable, a key of `configSecrets` as a choice of `GET /secrets`, a list
-of strings or numbers as rows of plain fields (add, remove; an empty row written nowhere), a record
-of plain values as rows of a key and a value (its type picked where the schema allows several), JSON
-only for what these do not draw, and what each of its outputs carries, not its type, which the graph
-draws (bot-os.md D71): an events output, the event types its plugin registers in that namespace
-(`types` of its port in `GET /available`), each with its schema's description (§4.4) and its
-payload's JSON Schema (`schema`); a chat-out output that declares its commands, each with its
-spacing (bot-os.md D74); an interface output, its members' names, folded, opening on each one's
-signature (from its schemas: `actions.sent({ chat: string, id?: string, t: number })`,
+change, so that merely opening a node changes nothing. A field's description is its help. A
+connector's fields that every connector shares (`commandIntervalS`, `unansweredAt`,
+`unansweredAtBy`, `liveGraceS`) are drawn last, folded under **Tuning** (bot-os.md D122); a
+connector that logs in says, above its config while it is not logged in, to log in first, its chats
+being picked from those it sees once connected. A node selected shows its forms, editable, a key of
+`configSecrets` as a choice of `GET /secrets`, a list of strings or numbers as rows of plain fields
+(add, remove; an empty row written nowhere), a record of plain values as rows of a key and a value
+(its type picked where the schema allows several), JSON only for what these do not draw, and what
+each of its outputs carries, not its type, which the graph draws (bot-os.md D71): an events output,
+the event types its plugin registers in that namespace (`types` of its port in `GET /available`),
+each with its schema's description (§4.4) and its payload's JSON Schema (`schema`); a chat-out
+output that declares its commands, each with its spacing (bot-os.md D74); an interface output, its
+members' names, folded, opening on each one's signature (from its schemas:
+`actions.sent({ chat: string, id?: string, t: number })`,
 `state.rest() → { until: number, why: string }`) and help; another output, its port in words. An
 events edge, and the events input of the node it enters, show what it carries (#3): each event type
 with its payload's fields by dotted path and type (`outcome.item?: string`), from its schema

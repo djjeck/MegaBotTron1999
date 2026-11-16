@@ -81,7 +81,9 @@ the server that guards them.
   dashed; its panel's **Dry-run / Send for real** switch, and a node's **Enabled** switch, are
   changes of the draft, applied with Apply. A node's config and settings are forms made from its
   schemas (a connector's account is nothing to type: its node's id, read-only under **Advanced**,
-  docs/bot-os.md D119), each field's description as its help; a new node's config starts filled with
+  docs/bot-os.md D119), each field's description as its help, a connector's shared tuning
+  (`commandIntervalS`, `unansweredAt`, `unansweredAtBy`, `liveGraceS`) folded under **Tuning**, and
+  a connector not yet logged in told to log in first (D122); a new node's config starts filled with
   its schema's defaults, and an opened node shows its unset ones filled in, written with its first
   change (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a secret a
   choice of the secrets' names, a connector's secrets listed under its config, each by name, whether

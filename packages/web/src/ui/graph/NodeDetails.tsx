@@ -514,6 +514,21 @@ export function AccountFold(props: {
   );
 }
 
+/**
+ * The fields every connector's config shares (the core's `commandIntervalS`, `unansweredAt`,
+ * `unansweredAtBy` and `liveGraceS`): its queue's spacing, its watchdog and its catch-up's grace,
+ * which a first setup leaves at their defaults, so folded under Tuning (D122).
+ */
+export const CONNECTOR_TUNING = [
+  'commandIntervalS',
+  'unansweredAt',
+  'unansweredAtBy',
+  'liveGraceS',
+];
+
+/** The phase of a connector that needs a login (the core's `NEEDS_LOGIN`, D116). */
+const NEEDS_LOGIN_PHASE = 'needs login';
+
 /** The script plugin's id (D76): its nodes' config is edited as ports and code. */
 const SCRIPT = 'script';
 
@@ -894,7 +909,7 @@ export function NodeDetails(props: {
           />
         ) : (
           <p className="muted small">
-            It logs in from here once it runs: apply it, then its Login shows here.
+            It logs in from here once it runs: <strong>Apply</strong>, and its Login shows here.
           </p>
         )
       ) : null}
@@ -920,6 +935,12 @@ export function NodeDetails(props: {
       )}
       <section hidden={scripted}>
         <h3>Config</h3>
+        {view.login === true && (!running || account?.connection?.phase === NEEDS_LOGIN_PHASE) ? (
+          <p className="note small" role="note">
+            Log in first, above: its chats (its owner, its group, those it monitors) are picked from
+            the ones it sees once it is logged in and connected.
+          </p>
+        ) : null}
         {view.configSchema === undefined ? (
           <p className="muted">no config</p>
         ) : (
@@ -932,6 +953,7 @@ export function NodeDetails(props: {
             secretKeys={view.configSecrets}
             secretNames={props.secretNames}
             errors={props.configErrors}
+            {...(connector ? { folded: CONNECTOR_TUNING } : {})}
             custom={chatControls(
               node.id,
               view.configChats ?? [],
