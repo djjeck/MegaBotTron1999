@@ -420,19 +420,13 @@ function Served(props: { node: string; edges: readonly GraphEdge[] }) {
  * (`GET /secrets`); unknown until they are read.
  */
 function SecretSources(props: {
-  /** It logs in from its node (D116): its declared secrets are a fallback. */
-  login?: boolean;
   declared: readonly string[];
   keys: readonly string[];
   config: Readonly<Record<string, unknown>> | undefined;
   provided: readonly string[] | undefined;
 }) {
-  const rows: { name: string; why: string; optional?: boolean }[] = [
-    ...props.declared.map((name) =>
-      props.login === true
-        ? { name, why: 'its fallback, without a login from its node', optional: true }
-        : { name, why: 'read by its plugin' }
-    ),
+  const rows: { name: string; why: string }[] = [
+    ...props.declared.map((name) => ({ name, why: 'read by its plugin' })),
     ...props.keys.flatMap((key) => {
       const name = props.config?.[key];
       return typeof name === 'string' && name !== ''
@@ -454,8 +448,6 @@ function SecretSources(props: {
                 <span className="muted">(not known yet)</span>
               ) : set ? (
                 <span className="ok">set</span>
-              ) : r.optional === true ? (
-                <span className="muted">not provided</span>
               ) : (
                 <strong className="error">not provided</strong>
               )}
@@ -469,9 +461,6 @@ function SecretSources(props: {
         <code>/run/secrets</code> in the image). Its value is never shown here. A secret not
         provided fails the check and the start; it is added with the deployment’s Docker secrets,
         then a restart.
-        {props.login === true
-          ? ' This connector logs in from its panel instead (its Login, while it runs): its own secrets are then optional, a login taking their place.'
-          : null}
       </small>
     </section>
   );
@@ -934,7 +923,6 @@ export function NodeDetails(props: {
           />
         )}
         <SecretSources
-          login={view.login === true}
           declared={view.secrets}
           keys={view.configSecrets}
           config={node.config}

@@ -19,7 +19,7 @@ knows no game. See [README.md](README.md) for the overview.
 ### Read the documentation first
 
 - [README.md](README.md): what the project is, how to run it, how plugins work.
-- [docs/bot-os.md](docs/bot-os.md): the principles (P1–P17) and the decisions (D1–D117). Check every
+- [docs/bot-os.md](docs/bot-os.md): the principles (P1–P17) and the decisions (D1–D118). Check every
   design choice against them; a choice that breaks one changes the principle there, with its reason,
   or is dropped.
 - [docs/bot-os-api.md](docs/bot-os-api.md): the plugin API, as built.
@@ -62,8 +62,8 @@ Address every error before marking a sub-task complete.
   alone; the test and type tools stay at the root.
 - **Secrets** are Docker secrets (files under `/run/secrets`, `packages/core/src/secrets.ts`), never
   environment variables, and go only to the connector plugin that declares them; a connector that
-  logs in from its node keeps its credentials in its own store instead, the secrets a fallback
-  (bot-os.md D116).
+  logs in from its node keeps its credentials in its own store instead, never in secrets (bot-os.md
+  D116, D118).
 - **People** are referred to as they/them.
 
 ## Conventions

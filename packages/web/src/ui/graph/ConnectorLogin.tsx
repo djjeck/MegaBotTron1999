@@ -122,12 +122,7 @@ export function ConnectorLogin(props: {
               : 'needs login'}
         </span>
         {state.as === undefined ? null : <> as {state.as}</>}
-        {state.source === undefined ? null : (
-          <span className="muted">
-            {' '}
-            ({state.source === 'store' ? 'kept in its store' : 'from its Docker secrets'})
-          </span>
-        )}
+        {state.source === undefined ? null : <span className="muted"> (kept in its store)</span>}
       </p>
       {state.note === undefined ? null : <p className="muted">{state.note}</p>}
       {state.error === undefined ? null : (

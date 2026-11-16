@@ -1,7 +1,7 @@
 /**
  * A connector's login from its node (docs/bot-os-api.md §4.5, bot-os.md D116, #11): a connector
  * whose manifest says `login` keeps its credentials in its own store, from a login the owner does
- * in its node's panel, its Docker secrets a fallback. It runs without either, as a connector that
+ * in its node's panel, never in Docker secrets (bot-os.md D118). It runs without either, as a connector that
  * needs a login (`LoginNeeded`), so that a new one can be added, applied and logged in.
  *
  * The login itself is the connector's (a bot's token, a user's QR code or phone, …); the core and
@@ -54,15 +54,15 @@ export interface LoginStep {
 export interface LoginState {
   /** `needed`: no credentials; `pending`: a login under way; `done`: it has credentials. */
   status: 'needed' | 'pending' | 'done';
-  /** Where its credentials come from: its store (a login from its node) or its Docker secrets. */
-  source?: 'store' | 'secrets';
+  /** Where its credentials come from: its store (a login from its node, D118: never a secret). */
+  source?: 'store';
   /** Whom it is logged in as, where it knows (`@ExampleBot`). */
   as?: string;
   /**
    * Its credentials changed since it started (a login, a logout): a restart puts them in force.
    */
   restart?: boolean;
-  /** A line on where it stands (its credentials are the Docker secrets). */
+  /** A line on where it stands (restart to connect with it). */
   note?: string;
   /** What it asks now, if anything. */
   step?: LoginStep;

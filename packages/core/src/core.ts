@@ -1562,8 +1562,7 @@ export class Core {
         if (typeof value === 'string' && SECRET_NAME.test(value)) named.push(value);
         else problems.push(`plugin ${id}: config ${key}: expected the name of a secret`);
       }
-      // A connector that logs in from its node holds its declared secrets as a fallback (D116).
-      for (const name of [...(manifest.login ? [] : manifest.secrets), ...named])
+      for (const name of [...manifest.secrets, ...named])
         if (this.o.secrets?.has(name) !== true)
           problems.push(
             `plugin ${id}: the secret ${name} is not provided (${this.o.secrets?.dir ?? 'no secrets'}/${name})`

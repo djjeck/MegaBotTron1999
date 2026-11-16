@@ -12,8 +12,8 @@ import { definePlugin, type PluginContext } from './plugin.ts';
 const TOKEN = 'a-token-of-the-store-xyz';
 
 /**
- * A connector that logs in (D116): its token from its store, else its Docker secret, else it
- * needs a login; `token` checks one (`good` passes) and keeps it.
+ * A connector that logs in (D116, D118): its token from its store, else it needs a login; `token`
+ * checks one (`good` passes) and keeps it.
  */
 function loginConnector(grab: (ctx: PluginContext) => void = () => {}) {
   return definePlugin({
@@ -23,24 +23,20 @@ function loginConnector(grab: (ctx: PluginContext) => void = () => {}) {
       kinds: ['connector'],
       description: 'logs in',
       account: 'tg:me',
-      secrets: ['tg_token'],
       login: true,
     },
     create: (ctx) => {
       grab(ctx);
       const kept = ctx.store.read<{ token: string }>('login')?.token;
       if (kept !== undefined) ctx.secrets?.remember(kept);
-      const fromSecrets = ctx.secrets?.has('tg_token') === true;
       let state: LoginState =
         kept !== undefined
           ? { status: 'done', source: 'store', actions: [{ name: 'logout', label: 'Log out' }] }
-          : fromSecrets
-            ? { status: 'done', source: 'secrets', actions: [] }
-            : {
-                status: 'needed',
-                step: { title: 'Token', fields: [{ name: 'token', label: 'Token', secret: true }] },
-                actions: [{ name: 'token', label: 'Check', submit: true }],
-              };
+          : {
+              status: 'needed',
+              step: { title: 'Token', fields: [{ name: 'token', label: 'Token', secret: true }] },
+              actions: [{ name: 'token', label: 'Check', submit: true }],
+            };
       const login: Login = {
         state: () => state,
         act: (action, values) => {
@@ -87,7 +83,7 @@ async function serve(core: Core) {
 }
 
 describe('a connector that logs in from its node (D116)', () => {
-  it('runs without its secret, needing a login, and its secrets say so', async () => {
+  it('runs without credentials, needing a login', async () => {
     let ctx: PluginContext | undefined;
     const core = new Core({ clock: new VirtualClock(1), secrets: secretsWith({}) });
     core.register(loginConnector((c) => (ctx = c)));
@@ -98,9 +94,7 @@ describe('a connector that logs in from its node (D116)', () => {
       phase: NEEDS_LOGIN,
       detail: 'log in from its node',
     });
-    expect(ctx?.secrets?.has('tg_token')).toBe(false);
     expect(ctx?.secrets?.has('other')).toBe(false);
-    expect(() => ctx?.secrets?.get('tg_token')).toThrow('the secret tg_token is not provided');
     await core.stop();
   });
 
@@ -154,17 +148,23 @@ describe('a connector that logs in from its node (D116)', () => {
     ]);
   });
 
-  it('takes its store over its secrets, and its secrets without a login', async () => {
-    const core = new Core({
-      clock: new VirtualClock(1),
-      secrets: secretsWith({ tg_token: 'the-secret-token' }),
-    });
-    core.register(loginConnector());
-    await core.start();
-    expect(core.controls.login('tg')).toEqual({
-      value: { status: 'done', source: 'secrets', actions: [] },
-    });
-    await core.stop();
+  it('requires the secrets it declares, as any connector: a login is no fallback for them', () => {
+    const core = new Core({ clock: new VirtualClock(1), secrets: secretsWith({}) });
+    core.register(
+      definePlugin({
+        manifest: {
+          id: 'tg',
+          version: '0.1.0',
+          kinds: ['connector'],
+          description: 'logs in, with a key',
+          account: 'tg:me',
+          secrets: ['tg_key'],
+          login: true,
+        },
+        create: () => ({ connector: new LoginNeeded('tg:me', 'tg') }),
+      })
+    );
+    expect(() => core.load()).toThrow('the secret tg_key is not provided');
   });
 
   it('reports a login whose state throws, redacted', async () => {

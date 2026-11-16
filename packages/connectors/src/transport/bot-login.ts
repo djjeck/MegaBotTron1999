@@ -1,8 +1,8 @@
 /**
  * A `telegram-bot` connector's login from its node (docs/bot-os.md D116, #11): the token @BotFather
  * gives, pasted in its node's panel, checked with Telegram (`getMe`: "connected as @ExampleBot")
- * and kept in the connector's store (`login`), which the next start reads before the
- * `telegram_bot_token` Docker secret. Forgetting it drops it from the store; revoking it is
+ * and kept in the connector's store (`login`), which the next start reads: its only place, no
+ * Docker secret (D118). Forgetting it drops it from the store; revoking it is
  * @BotFather's (`/revoke`). The token is marked secret as soon as it is typed (`remember`), so that
  * the core redacts it from whatever it prints, records or answers.
  */
@@ -30,9 +30,7 @@ export interface BotLoginOptions {
   store: Store;
   clock: Clock;
   /** Where its token came from at the start: undefined, it needs a login. */
-  source: 'store' | 'secrets' | undefined;
-  /** The `telegram_bot_token` secret is provided: its fallback. */
-  secrets: boolean;
+  source: 'store' | undefined;
   /** Whom the running connector is, once connected. */
   self: () => string | undefined;
   /** Asks Telegram who a token's bot is (`getMe`); rejects for a token it refuses. */
@@ -47,7 +45,7 @@ const CANCEL: LoginAction = { name: 'cancel', label: 'Cancel' };
 /** The login of a `telegram-bot` connector (`Instance.login`). */
 export class BotLogin implements Login {
   private readonly o: BotLoginOptions;
-  private source: 'store' | 'secrets' | undefined;
+  private source: 'store' | undefined;
   private as: string | undefined;
   private changed = false;
   /** The owner asked to paste a token though it has one. */
@@ -85,34 +83,20 @@ export class BotLogin implements Login {
           ...(this.replacing ? [CANCEL] : []),
         ],
       };
-    const note =
-      this.source === 'secrets'
-        ? this.changed
-          ? 'Its token is forgotten: at the restart it uses the telegram_bot_token Docker secret again, unless a token is pasted here.'
-          : 'Its token is the telegram_bot_token Docker secret. A token pasted here takes its place; the secret stays a fallback.'
-        : this.changed
-          ? 'Restart to connect with it.'
-          : undefined;
+    const note = this.changed ? 'Restart to connect with it.' : undefined;
     return {
       status: 'done',
       ...base,
       ...who,
       ...(note === undefined ? {} : { note }),
       actions: [
+        { name: 'replace', label: 'Use another token' },
         {
-          name: 'replace',
-          label: this.source === 'secrets' ? 'Paste a token' : 'Use another token',
+          name: 'logout',
+          label: 'Forget the token',
+          confirm:
+            'Forget the bot’s token? The connector stops at the restart until a token is pasted again. To revoke the token itself, send /revoke to @BotFather.',
         },
-        ...(this.source === 'store'
-          ? [
-              {
-                name: 'logout',
-                label: 'Forget the token',
-                confirm:
-                  'Forget the bot’s token? The connector stops at the restart until a token is pasted again (or uses its Docker secret, if there is one). To revoke the token itself, send /revoke to @BotFather.',
-              },
-            ]
-          : []),
       ],
     };
   }
@@ -133,7 +117,7 @@ export class BotLogin implements Login {
       case 'logout':
         if (this.source !== 'store') throw new Error('the login does not offer logout now');
         this.o.store.remove(BOT_LOGIN_DOC);
-        this.source = this.o.secrets ? 'secrets' : undefined;
+        this.source = undefined;
         this.as = undefined;
         this.changed = true;
         this.o.log('its token is forgotten');

@@ -16,7 +16,6 @@ function setUp(o: Partial<BotLoginOptions> = {}) {
     store,
     clock,
     source: undefined,
-    secrets: false,
     self: () => undefined,
     check: (t) => (checked.push(t), Promise.resolve({ username: 'ExampleBot' })),
     remember: (v) => remembered.push(v),
@@ -81,55 +80,26 @@ describe('a telegram-bot login (D116)', () => {
     expect((await odd.act('token', { token: TOKEN })).error).toBe('Telegram refused it: odd');
   });
 
-  it('forgets a token of its store, its Docker secret then the fallback', async () => {
+  it('forgets a token of its store, then needs a login; takes another token in its place', async () => {
     const store = new Stores().open('kept');
     store.write(BOT_LOGIN_DOC, { token: TOKEN });
-    const { login, remembered } = setUp({
-      store,
-      source: 'store',
-      secrets: true,
-      self: () => 'ExampleBot',
-    });
+    const { login, remembered } = setUp({ store, source: 'store', self: () => 'ExampleBot' });
     expect(remembered).toEqual([TOKEN]);
     expect(login.state()).toMatchObject({ status: 'done', source: 'store', as: '@ExampleBot' });
     await expect(login.act('token', { token: TOKEN })).rejects.toThrow(
       'the login does not ask for a token now'
     );
-    expect(await login.act('logout', {})).toMatchObject({
-      status: 'done',
-      source: 'secrets',
-      restart: true,
-      note: expect.stringContaining('uses the telegram_bot_token Docker secret again') as unknown,
-    });
-    expect(store.read(BOT_LOGIN_DOC)).toBeUndefined();
-    await expect(login.act('logout', {})).rejects.toThrow('does not offer logout now');
-    await expect(login.act('other', {})).rejects.toThrow('does not offer other now');
-  });
-
-  it('needs a login once forgotten without a secret; takes a token over its secret', async () => {
-    const store = new Stores().open('alone');
-    store.write(BOT_LOGIN_DOC, { token: TOKEN });
-    const { login } = setUp({ store, source: 'store' });
-    expect((await login.act('logout', {})).status).toBe('needed');
-    const { login: secret } = setUp({
-      source: 'secrets',
-      secrets: true,
-      self: () => '@ExampleBot',
-    });
-    expect(secret.state()).toMatchObject({
-      status: 'done',
-      source: 'secrets',
-      as: '@ExampleBot',
-      note: expect.stringContaining('is the telegram_bot_token Docker secret') as unknown,
-      actions: [{ name: 'replace', label: 'Paste a token' }],
-    });
-    expect((await secret.act('replace', {})).actions.map((a) => a.name)).toEqual([
+    expect((await login.act('replace', {})).actions.map((a) => a.name)).toEqual([
       'token',
       'cancel',
     ]);
-    expect((await secret.act('cancel', {})).status).toBe('done');
-    await secret.act('replace', {});
-    expect(await secret.act('token', { token: TOKEN })).toMatchObject({
+    expect((await login.act('cancel', {})).status).toBe('done');
+    expect(await login.act('logout', {})).toMatchObject({ status: 'needed', restart: true });
+    expect(store.read(BOT_LOGIN_DOC)).toBeUndefined();
+    await expect(login.act('logout', {})).rejects.toThrow('does not offer logout now');
+    await expect(login.act('other', {})).rejects.toThrow('does not offer other now');
+    await login.act('replace', {});
+    expect(await login.act('token', { token: TOKEN })).toMatchObject({
       status: 'done',
       source: 'store',
     });

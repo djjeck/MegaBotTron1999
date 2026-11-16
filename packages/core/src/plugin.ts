@@ -42,8 +42,7 @@ export interface PluginContext {
   readonly store: Store;
   /**
    * A connector's secrets (§4.9, P9): those its manifest declares, from the Docker secrets. Other
-   * kinds of plugin receive none. `has` says whether one is provided (a connector that logs in
-   * from its node holds them as a fallback); `remember` marks a value as secret, to be redacted
+   * kinds of plugin receive none. `has` says whether one is provided; `remember` marks a value as secret, to be redacted
    * from the logs, the records and the errors like the Docker secrets (a credential it keeps in its
    * store, an answer to its login).
    */

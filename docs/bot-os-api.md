@@ -55,7 +55,7 @@ instance does not start.
 | `settings`      | A zod object: what the owner changes at runtime, each key with its default and its help (`.describe()`). Kept in the plugin's store, offered to every control surface (P11)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `secrets`       | The secrets it needs, by name (`znc_password`). Only a `connector` may declare any (P9); the manifest of any other kind that does is refused                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `configSecrets` | The keys of its `config` whose values name a secret (§4.9): a connector run as several nodes, each with a credential its node's config names. Only a `connector`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `login`         | A connector that logs in from its node (§4.5, bot-os.md D116): its instance offers a `login`, it keeps the credentials in its store, and the secrets it declares are a fallback, not required at the load. Only a `connector`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `login`         | A connector that logs in from its node (§4.5, bot-os.md D116, D118): its instance offers a `login` and keeps the credentials in its store, never in Docker secrets; the secrets it declares, if any, are required as any connector's. Only a `connector`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `model`         | A connector to a model that bills by the call (§4.5, bot-os.md D117): the editor marks its node with a `$`, and it logs each call with its cost. Only a `connector`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `monitors`      | Optional, a connector's: which chats its node monitors, so that the check warns of a chat-in edge reading one it does not (§2.3, bot-os.md D89): `'all'`, every chat it hears; or `{ config: key }`, the key of its `config` holding the chat (a string) or the chats (a list), unset meaning every chat; chats compare without case. Undeclared: unknown, and nothing is warned of. `{ config: key, aliases: true }`: a chat may go by several names (an id, a `@username`, bot-os.md D90), which its running connector tells (`chatNames`, §4.5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `notices`       | Optional, `true` for a plugin that hears the owner's notices (`ctx.notices`, §4.16, bot-os.md D91), as `owner-notice` does; false by default                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -1140,28 +1140,27 @@ twice. One heard live twice (or live after the catch-up delivered it) is deliver
 
 **A login from its node** (bot-os.md D116, `packages/core/src/login.ts`): a connector whose manifest
 says `login` keeps its credentials in its own store (`login`, a document of mode 600 like the rest),
-from a login the owner does in its node's panel, and reads them at `create` before its Docker
-secrets, which stay a fallback and are not required at the load. Without either it runs all the
-same, as a `LoginNeeded` connector: `closed`, its phase `needs login` (which its card shows),
-hearing, sending and listing nothing, so that a new connector is added, applied, logged in and
-restarted, and its chats ticked. Its instance offers a `login`, `{ state(), act(action, values) }`:
-where it stands (`LoginState`: `status` `needed`, `pending` or `done`; `source`, `store` or
-`secrets`; `as`, whom it is logged in as; `restart`, its credentials changed since the start, which
-a restart puts in force; a `note`; an `error`, why the last answer failed; the `step` it asks, with
-a `title`, a how-to `text`, a `link`, a `qr` link to show as a QR code and when it `expires`, and
-its `fields`, each a line of text, `secret` ones typed unseen; and the `actions` offered, buttons
-that send the step's fields when they `submit`, ask first when they say `confirm`). The web UI draws
-it generically, as it draws a form from a schema, knowing no network. A connector marks each value
-typed and each credential it keeps secret (`ctx.secrets.remember`), so that the core redacts them
-from what it prints, records and answers; the core records each action (`core.login`: the node, the
-action, where it led and whom as, never a value). `telegram-bot` asks for its token (checked with
-`getMe`, "as @ExampleBot") and forgets it on demand (revoking it is @BotFather's `/revoke`);
-`telegram-user` asks for its API id and hash once (my.telegram.org; those of its secrets spare
-typing them), then logs in by QR code (GramJS's `signInUserWithQrCode`, renewed as it expires) or by
-phone (the number, the code, the 2FA password), one login at a time, dropped after 5 minutes without
-an answer; its logout ends the session on Telegram too (`auth.logOut`), and its sessions show in the
-account's Devices as the app registered at my.telegram.org on the device `MegaBotTron1999`. Either
-connector logged in from its secrets offers a login in their place.
+from a login the owner does in its node's panel, and reads them at `create`: their only place, no
+Docker secret (bot-os.md D118). Without them it runs all the same, as a `LoginNeeded` connector:
+`closed`, its phase `needs login` (which its card shows), hearing, sending and listing nothing, so
+that a new connector is added, applied, logged in and restarted, and its chats ticked. Its instance
+offers a `login`, `{ state(), act(action, values) }`: where it stands (`LoginState`: `status`
+`needed`, `pending` or `done`; `source`, `store`; `as`, whom it is logged in as; `restart`, its
+credentials changed since the start, which a restart puts in force; a `note`; an `error`, why the
+last answer failed; the `step` it asks, with a `title`, a how-to `text`, a `link`, a `qr` link to
+show as a QR code and when it `expires`, and its `fields`, each a line of text, `secret` ones typed
+unseen; and the `actions` offered, buttons that send the step's fields when they `submit`, ask first
+when they say `confirm`). The web UI draws it generically, as it draws a form from a schema, knowing
+no network. A connector marks each value typed and each credential it keeps secret
+(`ctx.secrets.remember`), so that the core redacts them from what it prints, records and answers;
+the core records each action (`core.login`: the node, the action, where it led and whom as, never a
+value). `telegram-bot` asks for its token (checked with `getMe`, "as @ExampleBot") and forgets it on
+demand (revoking it is @BotFather's `/revoke`); `telegram-user` asks for its API id and hash once
+(my.telegram.org), then logs in by QR code (GramJS's `signInUserWithQrCode`, renewed as it expires)
+or by phone (the number, the code, the 2FA password), one login at a time, dropped after 5 minutes
+without an answer; its logout ends the session on Telegram too (`auth.logOut`), and its sessions
+show in the account's Devices as the app registered at my.telegram.org on the device
+`MegaBotTron1999`.
 
 As built (`packages/core/src/connector.ts`): a connector plugin's instance offers its `connector`,
 whose account must be the manifest's (or its node's); `ConnectorBase` keeps the listeners and the
@@ -1455,14 +1454,13 @@ provided, never their values, for the editor's choice); the editor's node panel 
 secrets (those it declares and those its config names), each by name, whether it is provided (from
 those names), and where it comes from, a Docker secret, never its value; no other kind of plugin has
 `ctx.secrets`; a secret declared or named and not provided, or a value that is no secret's name,
-fails the load (and the graph's check), naming it and its file, but for the secrets a connector that
-logs in from its node declares (`login`, §4.5, bot-os.md D116), a fallback it asks for with
-`secrets.has(name)`. `secrets.remember(value)` marks a value the connector holds as secret, to be
-redacted as the Docker secrets are: a credential it keeps in its store, a value typed in its login.
-`core.secretStore` keeps the core's own secrets (a login done later through the UI), each in
-`/data/core/secrets/<name>.json` of mode 600: AES-256-GCM with a random IV and the secret's name as
-additional data, under a key derived (HKDF-SHA256) from the `bot_os_key` Docker secret; without that
-secret it stores nothing.
+fails the load (and the graph's check), naming it and its file, a connector that logs in from its
+node (`login`, §4.5) included. `secrets.remember(value)` marks a value the connector holds as
+secret, to be redacted as the Docker secrets are: a credential it keeps in its store, a value typed
+in its login. `core.secretStore` keeps the core's own secrets (a login done later through the UI),
+each in `/data/core/secrets/<name>.json` of mode 600: AES-256-GCM with a random IV and the secret's
+name as additional data, under a key derived (HKDF-SHA256) from the `bot_os_key` Docker secret;
+without that secret it stores nothing.
 
 **Backups and secrets.** The Docker secrets are not in the data volume: back them up where the
 deployment keeps them. The credentials a connector keeps from a login in its node (bot-os.md D116: a
@@ -2062,12 +2060,12 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
 - **`telegram-bot`** (`packages/connectors/src/plugins/telegram-bot.ts`, on grammY in
   `packages/connectors/src/transport/telegram-bot.ts`): a bot, made at `create` (with auto-retry)
   from the token pasted in its node's panel (§4.5, D116: `bot-login.ts`, checked with `getMe`, kept
-  in its store), else its `telegram_bot_token` secret, else needing a login, connected and polling
-  at `start` with retries (a backoff capped at ten minutes). Its status is `connecting` until
-  `getMe` answers, `connected` while it polls; its own name is the bot's username. It hears every
-  message Telegram delivers the bot and sends through the account's outbox (`deliver`, to a chat id
-  or an `@username`; a 429 longer than auto-retry waits out becomes `FloodWait`); `commandIntervalS`
-  in its config is its queue's default interval between two sends of a command (D73), and
+  in its store, no Docker secret, D118), else needing a login, connected and polling at `start` with
+  retries (a backoff capped at ten minutes). Its status is `connecting` until `getMe` answers,
+  `connected` while it polls; its own name is the bot's username. It hears every message Telegram
+  delivers the bot and sends through the account's outbox (`deliver`, to a chat id or an
+  `@username`; a 429 longer than auto-retry waits out becomes `FloodWait`); `commandIntervalS` in
+  its config is its queue's default interval between two sends of a command (D73), and
   `unansweredAt`, `unansweredAtBy` its watchdog's threshold (§4.6, D93). With `chats` in its config
   (picked among its chats, D96) it monitors only those for the plugins; its surfaces are the chats
   it has seen, its owner and its group (§4.5), and the updates Telegram kept while it was down come
@@ -2095,23 +2093,20 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
 - **`telegram-user`** (`packages/connectors/src/plugins/telegram-user.ts`, on GramJS in
   `packages/connectors/src/transport/telegram-user.ts`): the owner's own account, from a login in
   its node's panel (§4.5, D116: `user-login.ts`, the API pair once, then a QR code or the phone; the
-  session kept in its store, its logout ending it on Telegram too), else three secrets
-  (`telegram_user_api_id`, `telegram_user_api_hash`, `telegram_user_session`), else needing a login;
-  the image's `packages/connectors/tools/telegram-login.ts` logs in (the API id and hash, the phone,
-  the code, the 2FA password) and prints the session string (bot-os.md D115). It monitors the chats
-  of its configuration (`chats`, picked among its chats, D96: a group by its id, a private chat by
-  the other's `@username`, or their id when they have none), or every chat of the account when
-  `chats` is unset (a new connection), each edge reading a subset (§2.1); it lists its dialogs,
-  monitored or not, as its surfaces (§4.5: those active this week by default, any by a search), and
-  catches up at each connection on what its readers' chats said while it was down, each message once
-  (§4.5, D62, D66), marked `missed`, and `playback` too once older than its config's `liveGraceS`
-  (120 s by default, from the message's time to its delivery, D83): a message missed by a quick
-  restart is news. It starts without waiting, retries every minute, and raises a `told` notice of
-  the first failure (`ctx.notify`, §4.8); a message carries its id, the one it replies to, and `own`
-  for the owner's own from any device. It sends only through the account's outbox (`deliver`, with
-  the message's id), its queue's default interval between two sends of a command its config's
-  `commandIntervalS` (D73), its watchdog's threshold `unansweredAt` and `unansweredAtBy` (§4.6,
-  D93); GramJS's flood waits become `FloodWait`.
+  session kept in its store, its logout ending it on Telegram too; no Docker secret, D118), else
+  needing a login. It monitors the chats of its configuration (`chats`, picked among its chats, D96:
+  a group by its id, a private chat by the other's `@username`, or their id when they have none), or
+  every chat of the account when `chats` is unset (a new connection), each edge reading a subset
+  (§2.1); it lists its dialogs, monitored or not, as its surfaces (§4.5: those active this week by
+  default, any by a search), and catches up at each connection on what its readers' chats said while
+  it was down, each message once (§4.5, D62, D66), marked `missed`, and `playback` too once older
+  than its config's `liveGraceS` (120 s by default, from the message's time to its delivery, D83): a
+  message missed by a quick restart is news. It starts without waiting, retries every minute, and
+  raises a `told` notice of the first failure (`ctx.notify`, §4.8); a message carries its id, the
+  one it replies to, and `own` for the owner's own from any device. It sends only through the
+  account's outbox (`deliver`, with the message's id), its queue's default interval between two
+  sends of a command its config's `commandIntervalS` (D73), its watchdog's threshold `unansweredAt`
+  and `unansweredAtBy` (§4.6, D93); GramJS's flood waits become `FloodWait`.
 - **`ServiceConnector`** (`packages/connectors/src/plugins/service.ts`): for a connector plugin that
   holds an account's secrets and offers what it makes from them through its declared interface, but
   has no chat: it reads and sends nothing. The `anthropic` connector is one.

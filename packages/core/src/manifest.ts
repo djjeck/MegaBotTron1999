@@ -103,8 +103,8 @@ export const manifestSchema = z
     configSecrets: z.array(z.string().min(1)).default([]),
     /**
      * A connector that logs in from its node (docs/bot-os-api.md §4.5, bot-os.md D116): its
-     * instance offers a `login`, keeps the credentials in its store, and its declared secrets are a
-     * fallback, not required: without either it runs, needing a login.
+     * instance offers a `login` and keeps the credentials in its store, not in Docker secrets
+     * (D118); without them it runs, needing a login.
      */
     login: z.boolean().default(false),
     /**

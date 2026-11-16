@@ -40,7 +40,6 @@ import {
   type TimerHandle,
 } from '@megabottron1999/core';
 import { Api, TelegramClient } from 'telegram';
-import { type UserAuthParams } from 'telegram/client/auth.js';
 import { NewMessage } from 'telegram/events/index.js';
 import { Logger, LogLevel } from 'telegram/extensions/Logger.js';
 import { StringSession } from 'telegram/sessions/index.js';
@@ -824,46 +823,4 @@ export function createTelegramClient(
     baseLogger: new Logger(LogLevel.ERROR),
     deviceModel: DEVICE_MODEL,
   });
-}
-
-/** The part of GramJS's `TelegramClient` the login uses; tests pass a fake. */
-export interface LoginClient {
-  start(params: UserAuthParams): Promise<void>;
-  disconnect(): Promise<void>;
-}
-
-/** Asks the author one question; `secret` answers are not echoed. */
-export type Ask = (question: string, secret?: boolean) => Promise<string>;
-
-/**
- * Logs in afresh as the author, asking for the phone number, the code Telegram sends and the 2FA
- * password if the account has one; the session string to store as `TELEGRAM_USER_SESSION`. The
- * first error ends it (a wrong code, too): the author runs it again.
- */
-export async function login(
-  credentials: Omit<UserCredentials, 'session'>,
-  ask: Ask,
-  make: (session: StringSession) => LoginClient = (s) =>
-    createTelegramClient({ ...credentials, session: '' }, s)
-): Promise<string> {
-  const session = new StringSession('');
-  const client = make(session);
-  let failure: Error | undefined;
-  try {
-    await client.start({
-      phoneNumber: () => ask('Phone number (international, +39…): '),
-      phoneCode: () => ask('The code Telegram sent: '),
-      password: (hint) => ask(`2FA password${hint ? ` (hint: ${hint})` : ''}: `, true),
-      // True stops the login; GramJS then throws its own AUTH_USER_CANCEL, so keep the cause.
-      onError: (err) => {
-        failure = err;
-        return Promise.resolve(true);
-      },
-    });
-  } catch (err) {
-    throw failure ?? err;
-  } finally {
-    await client.disconnect();
-  }
-  return session.save();
 }

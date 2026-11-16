@@ -54,11 +54,8 @@ restart costs nothing.
   price logged as unknown), and keeps its last 24 hours by node and model in its store (`spend.ts`,
   which another model connector can reuse), shown on its card, its panel and its page **Spend**.
 
-Their secrets come from Docker secrets, never from variables. The two Telegram connectors also log
-in from their node's panel (docs/bot-os.md D116): `bot-login.ts` takes a bot's token (checked with
-`getMe`), `user-login.ts` an account's API id and hash, then a QR code or the phone, the code and
-the 2FA password; each keeps what it gets in its store (`login`), read before the secrets, which
-stay a fallback, and without either runs needing a login (`LoginNeeded`). `tools/telegram-login.ts`,
-shipped in the image (docs/bot-os.md D115), creates a `telegram-user` session string:
-`docker run -it --rm <image> node packages/connectors/tools/telegram-login.ts` asks for the API id
-and hash, the phone number, the code and the 2FA password, and prints it.
+Their secrets come from Docker secrets, never from variables. The two Telegram connectors take none:
+they log in from their node's panel (docs/bot-os.md D116, D118): `bot-login.ts` takes a bot's token
+(checked with `getMe`), `user-login.ts` an account's API id and hash, then a QR code or the phone,
+the code and the 2FA password; each keeps what it gets in its store (`login`), its only place, and
+without it runs needing a login (`LoginNeeded`).

@@ -292,7 +292,7 @@ export interface PluginView {
   interface: { reads: MemberView[]; actions: MemberView[]; commands: MemberView[] };
   /** The Docker secrets it declares, and the keys of its config that name one (§4.9). */
   secrets: string[];
-  /** It logs in from its node (D116): its declared secrets are a fallback. */
+  /** It logs in from its node (D116, D118): its credentials in its store. */
   login?: boolean;
   /** A connector to a model, which bills by the call (D117): its node is marked with a `$`. */
   model?: boolean;

@@ -6,7 +6,6 @@ import {
   NEEDS_LOGIN,
   VirtualClock,
 } from '@megabottron1999/core';
-import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -50,7 +49,7 @@ const pinger = () =>
   });
 
 describe('the telegram-bot plugin', () => {
-  it('makes the bot from its own secret, polls once the app listens, and stops it', async () => {
+  it('makes the bot from its kept token, polls once the app listens, and stops it', async () => {
     const tokens: string[] = [];
     const stub = stubBot();
     let polling = false;
@@ -60,7 +59,7 @@ describe('the telegram-bot plugin', () => {
     let listen: () => void = () => {};
     const core = new Core({
       clock: new VirtualClock(),
-      secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
+      documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
     });
     core.register(
       telegramBotPlugin({
@@ -104,7 +103,7 @@ describe('the telegram-bot plugin', () => {
   it('makes a real grammY bot by default', async () => {
     const core = new Core({
       clock: new VirtualClock(),
-      secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
+      documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
     });
     core.register(telegramBotPlugin({ name: 'OtherBot', listen: new Promise(() => {}) }));
     await core.start();
@@ -118,7 +117,7 @@ describe('the telegram-bot plugin', () => {
     stub.bot.start = () => new Promise<void>(() => {});
     const core = new Core({
       clock: new VirtualClock(),
-      secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
+      documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
       config: { 'telegram-bot': { owner: AUTHOR } },
     });
     core.register(telegramBotPlugin({ bot: () => stub.bot, sleep: () => Promise.resolve() }));
@@ -135,7 +134,7 @@ describe('the telegram-bot plugin', () => {
     stub.bot.stop = () => Promise.resolve();
     const core = new Core({
       clock: new VirtualClock(),
-      secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
+      documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
       config: { 'telegram-bot': { owner: AUTHOR, group: GROUP, unansweredAtBy: { '/turn': 2 } } },
       graph: served(),
     });
@@ -191,7 +190,7 @@ describe('the telegram-bot plugin', () => {
     stub.bot.stop = () => Promise.resolve();
     const core = new Core({
       clock: new VirtualClock(),
-      secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
+      documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
       config: { 'telegram-bot': { owner: AUTHOR } },
     });
     core.register(telegramBotPlugin({ bot: () => stub.bot }));
@@ -223,7 +222,7 @@ describe('the telegram-bot plugin', () => {
     const records: { type: string }[] = [];
     const core = new Core({
       clock: new VirtualClock(),
-      secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
+      documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
       record: (r) => void records.push(r as { type: string }),
       config: { 'telegram-bot': { owner: AUTHOR, group: GROUP, deny: ['66'] } },
       graph: served(),
@@ -269,7 +268,7 @@ describe('the telegram-bot plugin', () => {
       const records: { type: string; origin?: string; outcome?: string; chat?: string }[] = [];
       const core = new Core({
         clock: new VirtualClock(),
-        secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
+        documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
         record: (r) => void records.push(r as (typeof records)[number]),
         config: { 'telegram-bot': { owner: AUTHOR, group: GROUP } },
         ...(graph === undefined ? {} : { graph }),
@@ -325,7 +324,7 @@ describe('the telegram-bot plugin', () => {
     stub.bot.stop = () => Promise.resolve();
     const core = new Core({
       clock: new VirtualClock(),
-      secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
+      documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
       config: { 'telegram-bot': { owner: AUTHOR, home: '/menu' } },
     });
     core.register(telegramBotPlugin({ bot: () => stub.bot }));
@@ -364,7 +363,7 @@ describe('the telegram-bot plugin’s login (D116)', () => {
     const tokens: string[] = [];
     const stub = stubBot();
     stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
-    const core = new Core({ clock: new VirtualClock(), secrets: secretsWith({}) });
+    const core = new Core({ clock: new VirtualClock() });
     core.register(telegramBotPlugin({ bot: (token) => (tokens.push(token), stub.bot) }));
     await core.start();
     expect(core.state('telegram-bot')?.state).toBe('running');
@@ -380,7 +379,20 @@ describe('the telegram-bot plugin’s login (D116)', () => {
     await core.stop();
   });
 
-  it('makes the bot from its store’s token over its secret', async () => {
+  it('loads a node whose config still names the Docker secrets it once read (D118)', () => {
+    const core = new Core({ clock: new VirtualClock() });
+    core.register(telegramBotPlugin());
+    const config = { token: 'telegram_bot_token', secret: 'telegram_bot_token', owner: AUTHOR };
+    expect(
+      core.check({
+        version: 2,
+        nodes: [{ id: 'bot', plugin: 'telegram-bot', config }],
+        edges: [],
+      })
+    ).toMatchObject({ ok: true });
+  });
+
+  it('makes the bot from its store’s token, in its volume', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-bot-'));
     fs.mkdirSync(path.join(dir, 'instances', 'telegram-bot'), { recursive: true });
     fs.writeFileSync(
@@ -392,11 +404,7 @@ describe('the telegram-bot plugin’s login (D116)', () => {
     stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
     stub.bot.start = () => new Promise<void>(() => {});
     stub.bot.stop = () => Promise.resolve();
-    const core = new Core({
-      clock: new VirtualClock(),
-      dataDir: dir,
-      secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
-    });
+    const core = new Core({ clock: new VirtualClock(), dataDir: dir });
     core.register(
       telegramBotPlugin({ listen: Promise.resolve(), bot: (t) => (tokens.push(t), stub.bot) })
     );

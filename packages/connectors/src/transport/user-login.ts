@@ -3,7 +3,8 @@
  * and hash, entered once, then a login by QR code (scanned in Telegram's Settings → Devices → Link
  * Desktop Device) or by phone (the number, the code Telegram sends, the 2FA password if set). The
  * session string it gives is kept in the connector's store (`login`, beside the API pair), which
- * the next start reads before the Docker secrets. A logout ends the session on Telegram's side too.
+ * the next start reads: their only place, no Docker secret (D118). A logout ends the session on
+ * Telegram's side too.
  *
  * GramJS drives a login through callbacks that it awaits (`signInUser`, `signInUserWithQrCode`);
  * here each callback is a question left open (`Attempt`) until the owner's answer comes through
@@ -135,11 +136,7 @@ export interface UserLoginOptions {
   store: Store;
   clock: Clock;
   /** Where its credentials came from at the start: undefined, it needs a login. */
-  source: 'store' | 'secrets' | undefined;
-  /** The Docker secrets hold a whole login (the API pair and a session): its fallback. */
-  secrets?: boolean;
-  /** The API pair of the Docker secrets, if they hold one: a login needs it typed in no more. */
-  secretApi?: ApiCredentials | undefined;
+  source: 'store' | undefined;
   /** Whom the running connector is logged in as. */
   self: () => string | undefined;
   /** A client to log in with, on the session given (GramJS's, in the image). */
@@ -158,11 +155,9 @@ const CANCEL: LoginAction = { name: 'cancel', label: 'Cancel' };
 export class UserLogin implements Login {
   private readonly o: UserLoginOptions;
   /** Where its credentials are now: changed by a login or a logout since the start. */
-  private source: 'store' | 'secrets' | undefined;
+  private source: 'store' | undefined;
   private as: string | undefined;
   private changed = false;
-  /** The owner asked to log in here though the Docker secrets hold a session. */
-  private replacing = false;
   /** The owner asked to type the API pair again. */
   private retyping = false;
   private attempt: Attempt | undefined;
@@ -182,11 +177,12 @@ export class UserLogin implements Login {
     return this.o.store.read<LoginDoc>(LOGIN_DOC);
   }
 
-  /** The API pair a login uses: the store's, else the Docker secrets'. */
+  /** The API pair a login uses: the store's, unless the owner types it again. */
   private api(): ApiCredentials | undefined {
     const doc = this.doc();
-    if (doc !== undefined && !this.retyping) return { apiId: doc.apiId, apiHash: doc.apiHash };
-    return this.retyping ? undefined : this.o.secretApi;
+    return doc === undefined || this.retyping
+      ? undefined
+      : { apiId: doc.apiId, apiHash: doc.apiHash };
   }
 
   state(): LoginState {
@@ -207,17 +203,7 @@ export class UserLogin implements Login {
     }
     const as = this.changed ? this.as : (this.as ?? this.o.self());
     const who = as === undefined ? {} : { as };
-    if (this.source !== undefined && !this.replacing) {
-      if (this.source === 'secrets')
-        return {
-          status: 'done',
-          ...base,
-          ...who,
-          note: this.changed
-            ? 'Logged out: at the restart it uses its Docker secrets again (telegram_user_session), unless it logs in here.'
-            : 'Its session is the telegram_user_session Docker secret. A login here takes its place; the secret stays a fallback.',
-          actions: [{ name: 'replace', label: 'Log in here instead' }],
-        };
+    if (this.source !== undefined)
       return {
         status: 'done',
         ...base,
@@ -235,8 +221,7 @@ export class UserLogin implements Login {
                 },
               ],
       };
-    }
-    const back = this.replacing ? [CANCEL] : [];
+    const back = this.retyping ? [CANCEL] : [];
     if (this.api() === undefined)
       return {
         status: 'needed',
@@ -338,11 +323,7 @@ export class UserLogin implements Login {
       return this.state();
     }
     switch (action) {
-      case 'replace':
-        if (this.source === 'secrets') this.replacing = true;
-        return this.state();
       case 'cancel':
-        this.replacing = false;
         this.retyping = false;
         return this.state();
       case 'retype':
@@ -353,7 +334,7 @@ export class UserLogin implements Login {
       case 'qr':
       case 'phone': {
         const api = this.api();
-        if (api === undefined || (this.source !== undefined && !this.replacing))
+        if (api === undefined || this.source !== undefined)
           throw new Error(`the login does not offer ${action} now`);
         return this.begin(api, action);
       }
@@ -431,7 +412,6 @@ export class UserLogin implements Login {
         this.source = 'store';
         this.as = userName(user);
         this.changed = true;
-        this.replacing = false;
         this.o.log(`logged in as ${this.as ?? 'the account'}; a restart connects it`);
         void this.finish(attempt, undefined);
       },
@@ -488,7 +468,7 @@ export class UserLogin implements Login {
     const doc = this.doc();
     if (doc !== undefined)
       this.o.store.write(LOGIN_DOC, { apiId: doc.apiId, apiHash: doc.apiHash });
-    this.source = this.o.secrets === true ? 'secrets' : undefined;
+    this.source = undefined;
     this.as = undefined;
     this.changed = true;
     this.o.log('logged out: the session is ended');

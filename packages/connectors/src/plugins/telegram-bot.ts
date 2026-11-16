@@ -1,9 +1,9 @@
 /**
  * The `telegram-bot` connector plugin (docs/bot-os-api.md §4.5): a Telegram bot, on grammY
  * (packages/connectors/src/transport/telegram-bot.ts). Its token is pasted in its node's panel
- * (bot-os.md D116, `bot-login.ts`: checked with `getMe`, kept in its store), or else the
- * `telegram_bot_token` Docker secret (P9), which it alone receives; without either it runs needing a
- * login (`LoginNeeded`). It makes the bot from the token at `create`, connects and
+ * (bot-os.md D116, D118, `bot-login.ts`: checked with `getMe`, kept in its store, never a Docker
+ * secret); without one it runs needing a login (`LoginNeeded`). It makes the bot from the token at
+ * `create`, connects and
  * polls at `start` (once the app listens), and stops it at `stop`. Other plugins get a handle, and
  * send through the account's outbox.
  *
@@ -13,7 +13,7 @@
  * output serves (bot-os.md D109), in the chats that edge names, polling only once the core has
  * served it the commands. Without an `owner` it is no surface, and its commands edges answer
  * nothing. It reports nothing on its own (bot-os.md D94): an `owner-notice` node sends the owner's notices
- * through it, those with buttons to the owner's chat through its surface, whose taps run them. The token stays in the connector's secrets, and nothing hands it out:
+ * through it, those with buttons to the owner's chat through its surface, whose taps run them. The token stays in the connector's store, and nothing hands it out:
  * no plugin, and not the wiring, gets the bot (P9).
  *
  * Its `home` (bot-os.md D105) is the command of the owner's main card: the core's own cards
@@ -42,7 +42,6 @@ import { DenyList } from '#src/transport/telegram-deny.ts';
 import { TelegramSurface } from '#src/transport/telegram-surface.ts';
 
 export const TELEGRAM_BOT = 'telegram-bot';
-export const BOT_TOKEN = 'telegram_bot_token';
 
 /**
  * Its configuration, in its node of the graph (v0's `TELEGRAM_AUTHOR_ID` and `TELEGRAM_GROUP_ID`
@@ -153,8 +152,7 @@ export function telegramBotPlugin(
       description:
         'A Telegram bot: the owner’s commands, the public commands, and the chats it monitors',
       account,
-      secrets: [BOT_TOKEN],
-      // Its token from its node's panel, its secret a fallback (D116).
+      // Its token from its node's panel, kept in its store (D116, D118).
       login: true,
       config: telegramBotConfig,
       // The chats its config lists; unset, every chat (D89). A chat goes by its id and its
@@ -179,15 +177,12 @@ export function telegramBotPlugin(
     create: (ctx) => {
       const log = (line: string): void => ctx.log.info(line);
       const config = ctx.config as TelegramBotConfig;
-      const kept = ctx.store.read<BotLoginDoc>(BOT_LOGIN_DOC)?.token;
-      const secret = ctx.secrets?.has(BOT_TOKEN) === true;
-      const token = kept ?? (secret ? ctx.secrets?.get(BOT_TOKEN) : undefined);
+      const token = ctx.store.read<BotLoginDoc>(BOT_LOGIN_DOC)?.token;
       const ref: { connector?: TelegramBotConnector } = {};
       const login = new BotLogin({
         store: ctx.store,
         clock: ctx.clock,
-        source: kept !== undefined ? 'store' : token === undefined ? undefined : 'secrets',
-        secrets: secret,
+        source: token === undefined ? undefined : 'store',
         self: () => ref.connector?.self(),
         check: (t) => make(t, log).api.getMe(),
         remember: (value) => ctx.secrets?.remember(value),

@@ -1,11 +1,8 @@
 import { FloodWait, type Inbound, type ReadFilter, VirtualClock } from '@megabottron1999/core';
 import { Api } from 'telegram';
-import { type UserAuthParams } from 'telegram/client/auth.js';
 import { returnBigInt } from 'telegram/Helpers.js';
-import { type StringSession } from 'telegram/sessions/index.js';
 import { describe, expect, it } from 'vitest';
 import {
-  type Ask,
   CATCH_UP_CAP,
   CATCH_UP_PAUSE_MS,
   CATCH_UP_RETRY_MAX_MS,
@@ -13,8 +10,6 @@ import {
   DIALOGS_TTL_MS,
   type GramClient,
   LAST_SEEN_DOC,
-  login,
-  type LoginClient,
   type RawDialog,
   type RawMessage,
   RETRY_MS,
@@ -669,57 +664,6 @@ describe('createTelegramClient', () => {
   it('builds a client without connecting', () => {
     const client = createTelegramClient({ apiId: 1, apiHash: '0'.repeat(32), session: '' });
     expect(client.connected).toBeFalsy();
-  });
-});
-
-describe('login', () => {
-  const credentials = { apiId: 1, apiHash: '0'.repeat(32) };
-
-  function loginClient(run: (p: UserAuthParams, session: StringSession) => Promise<void>) {
-    const calls: string[] = [];
-    const make = (session: StringSession): LoginClient => ({
-      start: (p) => run(p, session),
-      disconnect: () => (calls.push('disconnect'), Promise.resolve()),
-    });
-    return { make, calls };
-  }
-
-  it('asks for the phone, the code and the 2FA password, unechoed, and returns the session', async () => {
-    const asked: [string, boolean | undefined][] = [];
-    const ask: Ask = (q, secret) => (asked.push([q, secret]), Promise.resolve('x'));
-    const { make, calls } = loginClient(async (p, session) => {
-      if (typeof p.phoneNumber !== 'string') await p.phoneNumber();
-      await p.phoneCode();
-      await p.password?.('cat');
-      await p.password?.();
-      session.save = () => '1BQANOTAREALSESSION';
-    });
-    const saved = await login(credentials, ask, make);
-    expect(asked).toEqual([
-      ['Phone number (international, +39…): ', undefined],
-      ['The code Telegram sent: ', undefined],
-      ['2FA password (hint: cat): ', true],
-      ['2FA password: ', true],
-    ]);
-    expect(saved).toBe('1BQANOTAREALSESSION');
-    expect(calls).toEqual(['disconnect']);
-  });
-
-  it('stops at the first error and throws it, not GramJS cancel', async () => {
-    const { make, calls } = loginClient(async (p) => {
-      if (await p.onError(new Error('PHONE_CODE_INVALID'))) throw new Error('AUTH_USER_CANCEL');
-    });
-    await expect(login(credentials, () => Promise.resolve(''), make)).rejects.toThrow(
-      'PHONE_CODE_INVALID'
-    );
-    expect(calls).toEqual(['disconnect']);
-  });
-
-  it('throws an error raised outside the callbacks as it is', async () => {
-    const { make } = loginClient(() => Promise.reject(new Error('API_ID_INVALID')));
-    await expect(login(credentials, () => Promise.resolve(''), make)).rejects.toThrow(
-      'API_ID_INVALID'
-    );
   });
 });
 

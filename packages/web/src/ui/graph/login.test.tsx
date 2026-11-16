@@ -97,8 +97,8 @@ describe('a connector’s login in its panel (D116)', () => {
     const sent = stubLogin([
       {
         status: 'done',
-        source: 'secrets',
-        note: 'From the secrets.',
+        source: 'store',
+        note: 'Kept.',
         actions: [{ name: 'logout', label: 'Log out', confirm: 'Sure?' }],
       },
       { status: 409, error: 'the login does not offer logout now' },
@@ -115,7 +115,7 @@ describe('a connector’s login in its panel (D116)', () => {
       'textContent',
       'the login does not offer logout now'
     );
-    expect(screen.getByText('(from its Docker secrets)')).toBeTruthy();
+    expect(screen.getByText('(kept in its store)')).toBeTruthy();
   });
 
   it('says why its login cannot be read', async () => {

@@ -95,11 +95,6 @@ describe('a telegram-user login (D116)', () => {
     expect((await login.act('cancel', {})).step?.title).toBe('Log in to Telegram');
   });
 
-  it('takes the API pair of the Docker secrets, typed in no more', () => {
-    const { login } = setUp({ client: fakeClient({}).client, secretApi: API });
-    expect(login.state().step?.title).toBe('Log in to Telegram');
-  });
-
   it('logs in by phone: the number, a wrong code asked again, the 2FA password', async () => {
     const store = memoryStore();
     store.write(LOGIN_DOC, API);
@@ -258,7 +253,7 @@ describe('a telegram-user login (D116)', () => {
     await expect(login.act('logout', {})).rejects.toThrow('does not offer logout');
   });
 
-  it('says why a logout failed, and falls back to the Docker secrets after one', async () => {
+  it('says why a logout failed, and needs a login after one', async () => {
     const store = memoryStore();
     store.write(LOGIN_DOC, { ...API, session: SESSION });
     let fail = true;
@@ -266,7 +261,6 @@ describe('a telegram-user login (D116)', () => {
       client: fakeClient({}).client,
       store,
       source: 'store',
-      secrets: true,
       logOut: () => (fail ? Promise.reject(new Error('not connected')) : Promise.resolve()),
     });
     expect(await login.act('logout', {})).toMatchObject({
@@ -274,29 +268,13 @@ describe('a telegram-user login (D116)', () => {
       error: 'the logout failed: not connected',
     });
     fail = false;
-    expect(await login.act('logout', {})).toMatchObject({
-      status: 'done',
-      source: 'secrets',
-      restart: true,
-      note: expect.stringContaining('uses its Docker secrets again') as unknown,
-    });
+    expect(await login.act('logout', {})).toMatchObject({ status: 'needed', restart: true });
   });
 
-  it('offers a login in place of the Docker secrets’ session', async () => {
-    const { login } = setUp({ client: fakeClient({}).client, source: 'secrets', secretApi: API });
-    expect(login.state()).toMatchObject({
-      status: 'done',
-      source: 'secrets',
-      actions: [{ name: 'replace' }],
-    });
-    expect((await login.act('replace', {})).actions.map((a) => a.name)).toEqual([
-      'qr',
-      'phone',
-      'retype',
-      'cancel',
-    ]);
-    expect((await login.act('cancel', {})).status).toBe('done');
+  it('offers no other action than its own', async () => {
+    const { login } = setUp({ client: fakeClient({}).client });
     await expect(login.act('nonsense', {})).rejects.toThrow('does not offer nonsense');
+    await expect(login.act('replace', {})).rejects.toThrow('does not offer replace');
   });
 
   it('drops the session of its store when its API pair changes', async () => {
