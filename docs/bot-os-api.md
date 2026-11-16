@@ -483,8 +483,9 @@ time in ms). The load refuses a node on an instance of another plugin, and two n
 instance. An instance that no node references, of the running graph or of the saved one (§2.3), for
 7 days (`ORPHAN_MS`) is deleted, with its state: the core looks at start and then daily
 (`core.sweepInstances`), touching the instances referenced, prints each one deleted and records it
-(`core.instance`, `event: "deleted"`). While the saved graph does not read, nothing is deleted. A
-directory without its record (put there by hand) is listed and left alone. `core.instances()`, and
+(`core.instance`, `event: "deleted"`, with the `instance`; the same type's `started` and `stopped`
+are the whole instance's, §3). While the saved graph does not read, nothing is deleted. A directory
+without its record (put there by hand) is listed and left alone. `core.instances()`, and
 `GET /instances`, list them: each with its plugin, its times, the node that runs on it, and whether
 a node uses it (`used`).
 
@@ -703,7 +704,19 @@ registered ─ manifests, graph and config valid ─▶ starting ─ create(), s
 
 `packages/core/src/core.ts` runs it (`Core`: `register`, `load`, `start`, `stop`, `stopNode`,
 `clearStop`, `status`); every change of state is logged as `core.plugin`, with the plugin, the state
-and the reason.
+and the reason, but those a start or a stop of the whole instance makes as expected (bot-os.md
+D114). At a start (every start: after a restart, a `SIGTERM` or a crash alike) a node's `starting`
+and `running`, and its being `disabled` or `inactive` at the load, are folded into one record once
+every node has heard `ready`: `core.instance`, `event: "started"`, with the release (`version`,
+`commit`), how long the start took (`ms`), and the nodes by state (`running`, and when there are
+any, `disabled`, `inactive` as `{ id, reason }`, `stopped`, `failed`). At a stop of the instance
+(`core.stop(why)`: `POST /restart`, `SIGTERM`, `SIGINT`, the only ways it stops; a crash logs
+nothing) each node's `stopping` and `stopped` are folded into `core.instance`, `event: "stopped"`,
+with `why` (`restart`, `SIGTERM`, `SIGINT`), `ms`, and the nodes `stopped`, in the order they
+stopped. What goes wrong in them is still logged node by node: a node `failed` (at its start or its
+`ready`), one `stopped` by a stop kept in its instance, and one whose `stop` failed or took too long
+(`stopped`, its `reason` `stop failed: …`). A node's change at runtime (a stop, a cascade, a
+failure, a cleared stop) is logged as it happens.
 
 - **Errors of the deployment** fail the whole instance at load, before any plugin runs, naming the
   plugin and what is wrong: a bad manifest, two plugins with one id, a bad graph, a cycle, a bad

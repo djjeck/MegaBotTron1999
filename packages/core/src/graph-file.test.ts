@@ -750,8 +750,8 @@ describe('shutdown', () => {
   it('stops the core, closes, and exits 0, once', async () => {
     const steps: string[] = [];
     const end = shutdown({
-      stop: () => {
-        steps.push('stop');
+      stop: (why) => {
+        steps.push(`stop (${why})`);
         return Promise.resolve();
       },
       close: () => steps.push('close'),
@@ -760,7 +760,12 @@ describe('shutdown', () => {
       print: (l) => steps.push(l),
     });
     await Promise.all([end('restart'), end('SIGTERM')]);
-    expect(steps).toEqual(['megabottron1999: stopping (restart)', 'stop', 'close', 'exit 0']);
+    expect(steps).toEqual([
+      'megabottron1999: stopping (restart)',
+      'stop (restart)',
+      'close',
+      'exit 0',
+    ]);
   });
 
   it('exits anyway when the stop hangs past its cap, or fails', async () => {

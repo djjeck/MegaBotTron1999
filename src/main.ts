@@ -213,7 +213,7 @@ console.log(
 // The end, at a signal or the owner's restart: the core stops first, its plugins' state kept, then
 // the process exits 0, for Docker's `restart: unless-stopped` to start it again after a restart.
 const end = shutdown({
-  stop: () => core.stop(),
+  stop: (why) => core.stop(why),
   close: () => {
     gitModules.stop();
     control.close();

@@ -660,6 +660,8 @@ describe('statePlugin', () => {
 
   it('fails a node whose kept state its schema refuses, and reads its namespaces apart', async () => {
     const run = await boot();
+    // Something read, for its state to be kept.
+    await run.emit('quest.gain', { name: 'rope' });
     await run.core.stop();
     const file = path.join(dir, 'data', 'instances', 'quest-state', `${STATE_DOC}.json`);
     fs.writeFileSync(file, JSON.stringify({ ...run.kept(), state: { inventory: 1 } }));

@@ -221,6 +221,110 @@ describe('Core', () => {
     expect(c.state('after')?.state).toBe('failed');
   });
 
+  it('folds a start’s and a stop’s expected changes into one record each, the rest node by node (D114)', async () => {
+    const clock = new VirtualClock(1000);
+    const seen: string[] = [];
+    const { core: c, records } = core({
+      clock,
+      stopTimeoutMs: 100,
+      build: { version: '0.1.29', commit: 'abcdef1234' },
+      graph: {
+        version: 2,
+        nodes: [
+          { id: 'a', plugin: 'a' },
+          { id: 'off', plugin: 'off', disabled: true },
+          { id: 'needs', plugin: 'needs' },
+          { id: 'bad', plugin: 'bad' },
+          { id: 'stuck', plugin: 'stuck' },
+        ],
+        edges: [{ from: 'off.interface', to: 'needs.off' }],
+      },
+    });
+    c.register(
+      plugin('a', seen, {
+        instance: {
+          start: () => {
+            clock.advance(5);
+          },
+        },
+      }),
+      plugin('off', seen),
+      plugin('needs', seen, { requires: ['off'] }),
+      plugin('bad', seen, { instance: { start: () => Promise.reject(new Error('bad start')) } }),
+      plugin('stuck', seen, {
+        instance: {
+          stop: () => {
+            throw new Error('stuck');
+          },
+        },
+      })
+    );
+    await c.start();
+    const lifecycle = () =>
+      records.filter((r) => r.type === 'core.plugin' || r.type === 'core.instance');
+    expect(lifecycle()).toEqual([
+      { type: 'core.plugin', t: 1005, plugin: 'bad', state: 'failed', reason: 'bad start' },
+      {
+        type: 'core.instance',
+        t: 1005,
+        event: 'started',
+        version: '0.1.29',
+        commit: 'abcdef1234',
+        ms: 5,
+        running: ['a', 'stuck'],
+        disabled: ['off'],
+        inactive: [{ id: 'needs', reason: 'needs off (disabled)' }],
+        failed: ['bad'],
+      },
+    ]);
+    records.length = 0;
+    clock.advance(10);
+    await c.stop('restart');
+    expect(lifecycle()).toEqual([
+      {
+        type: 'core.plugin',
+        t: 1015,
+        plugin: 'stuck',
+        state: 'stopped',
+        reason: 'stop failed: stuck',
+      },
+      {
+        type: 'core.instance',
+        t: 1015,
+        event: 'stopped',
+        why: 'restart',
+        ms: 0,
+        stopped: ['stuck', 'a'],
+      },
+    ]);
+  });
+
+  it('logs each change of a node’s state at runtime, and a start stopped by a kept stop', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'core-'));
+    const seen: string[] = [];
+    const first = core({ dataDir });
+    first.core.register(plugin('a', seen), plugin('b', seen));
+    await first.core.start();
+    expect(first.core.stopNode('a', 'enough', 'owner')).toBe(true);
+    expect(first.records.filter((r) => r.type === 'core.plugin')).toEqual([
+      { type: 'core.plugin', t: 1000, plugin: 'a', state: 'stopped', reason: 'enough' },
+    ]);
+    await first.core.stop();
+    const again = core({ dataDir });
+    again.core.register(plugin('a', seen), plugin('b', seen));
+    await again.core.start();
+    expect(again.records.filter((r) => r.type === 'core.plugin')).toEqual([
+      { type: 'core.plugin', t: 1000, plugin: 'a', state: 'stopped', reason: 'enough' },
+    ]);
+    expect(again.records.find((r) => r.type === 'core.instance')).toMatchObject({
+      event: 'started',
+      running: ['b'],
+      stopped: ['a'],
+    });
+    await again.core.stop();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
   it('logs a stop that fails or takes too long, and stops the rest', async () => {
     const clock = new VirtualClock();
     const seen: string[] = [];

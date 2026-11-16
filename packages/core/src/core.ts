@@ -10,6 +10,9 @@
  *   the plugins that use it); one that throws fails, stopped, with those that require it.
  * - `stop` runs in the reverse order, keeping what each plugin's `serialise` returns, which its
  *   next `create` gets back as `restored`.
+ * - Every change of a node's state is logged (`core.plugin`), but those a start or a stop of the
+ *   whole instance makes as expected, folded into one record each (`core.instance`, `started` and
+ *   `stopped`, bot-os.md D114); what goes wrong in them is logged node by node.
  * - A node's state (bot-os.md D64): a node `disabled` in the graph, or `stopped` (a safety stop, a
  *   drift pause, the owner's kill or stop, kept in its instance as `_stop.json` across restarts),
  *   is not started, nor is one whose required ports bind a node down (`inactive`, derived at the
@@ -263,6 +266,18 @@ interface Entry {
  */
 const READING: ReadonlySet<PluginState> = new Set(['registered', 'starting', 'running']);
 
+/**
+ * The changes of state a start or a stop of the whole instance makes as expected, folded into its
+ * summary (D114), as is a `stopped` with no reason; the others are logged one by one.
+ */
+const FOLDED: ReadonlySet<string> = new Set([
+  'starting',
+  'running',
+  'stopping',
+  'disabled',
+  'inactive',
+]);
+
 /** The core's own store, beside the instances'. */
 const CORE = CORE_STORE;
 /** The core's document, in each instance's store, of its stop (bot-os.md D64). */
@@ -287,6 +302,11 @@ export class Core {
   /** The graph as loaded, every edge written out (§2.1). */
   private loadedGraph?: Graph;
   private started = false;
+  /**
+   * The instance starts or stops as a whole (bot-os.md D114): the nodes' expected changes of state
+   * are folded into its summary, not logged one by one.
+   */
+  private folding = false;
   private loaded = false;
   /** Every plugin's settings, for the control surfaces (§2, P11). */
   readonly settings: SettingsRegistry;
@@ -934,8 +954,14 @@ export class Core {
     if (this.started) throw new Error('the core is started once');
     this.started = true;
     this.summaries.started();
+    const from = this.o.clock.now();
     this.load();
-    for (const entry of this.entries.values()) await this.startOne(entry);
+    this.folding = true;
+    try {
+      for (const entry of this.entries.values()) await this.startOne(entry);
+    } finally {
+      this.folding = false;
+    }
     // Every plugin has started: each hears it, in load order (§3).
     for (const entry of this.entries.values()) await this.readyOne(entry);
     // The chat surfaces answer the commands their edges serve from now on (D109), each with its
@@ -949,7 +975,37 @@ export class Core {
         this.logger(entry.id).error(`serve failed: ${message(e)}`);
       }
     }
+    this.recordStarted(from);
     this.sweepDaily();
+  }
+
+  /**
+   * The start's summary (D114): the release, how long it took, and the nodes by state; those
+   * failed or stopped by a kept stop are logged on their own too.
+   */
+  private recordStarted(from: number): void {
+    const now = this.o.clock.now();
+    const of = (state: string) =>
+      [...this.entries.values()].filter((e) => e.status.state === state);
+    const ids = (state: string) => {
+      const list = of(state).map((e) => e.id);
+      return list.length === 0 ? {} : { [state]: list };
+    };
+    const inactive = of('inactive').map((e) => ({ id: e.id, reason: e.status.reason }));
+    const { build } = this.o;
+    this.o.record?.({
+      type: 'core.instance',
+      t: now,
+      event: 'started',
+      ...(build === undefined ? {} : { version: build.version }),
+      ...(build?.commit === undefined ? {} : { commit: build.commit }),
+      ms: now - from,
+      running: of('running').map((e) => e.id),
+      ...ids('disabled'),
+      ...(inactive.length === 0 ? {} : { inactive }),
+      ...ids('stopped'),
+      ...ids('failed'),
+    });
   }
 
   /**
@@ -1021,6 +1077,7 @@ export class Core {
       [...this.entries.values()].map((e) => e.node),
       (n) => stops.has(n.id)
     );
+    this.folding = true;
     for (const [id, d] of down) {
       const entry = this.entries.get(id) as Entry;
       const stop = stops.get(id);
@@ -1030,6 +1087,7 @@ export class Core {
         this.set(entry, 'inactive', downText(d).slice('inactive: '.length));
       else this.set(entry, d.state);
     }
+    this.folding = false;
   }
 
   /**
@@ -1086,28 +1144,48 @@ export class Core {
    * Stops the plugins up (running, or stopped since they started), in the reverse order, keeping
    * what they serialise; a node stopped by exception stays so in its instance.
    */
-  async stop(): Promise<void> {
+  async stop(why?: string): Promise<void> {
+    const from = this.o.clock.now();
     this.o.clock.clearTimeout(this.sweepTimer);
     // What waits in the queues goes no further: a queued send does not outlive the process (D73).
     for (const outbox of this.outboxes.values()) outbox.dropQueued(undefined, 'the instance stops');
     await this.shutting;
-    for (const entry of [...this.entries.values()].reverse()) {
-      const { instance } = entry;
-      if (instance === undefined || entry.up !== true) continue;
-      entry.up = false;
-      this.set(entry, 'stopping');
-      entry.scheduler?.disarm();
-      this.bus.drop(entry.id);
-      this.noticeFeed.drop(entry.id);
-      try {
-        if (instance.serialise !== undefined)
-          this.stores.internal(entry.node.instance).put(RESTORE, instance.serialise());
-        await this.withTimeout(() => instance.stop?.(), entry.id);
-      } catch (e) {
-        this.logger(entry.id).error(`stop failed: ${message(e)}`);
+    const stopped: string[] = [];
+    this.folding = true;
+    try {
+      for (const entry of [...this.entries.values()].reverse()) {
+        const { instance } = entry;
+        if (instance === undefined || entry.up !== true) continue;
+        entry.up = false;
+        this.set(entry, 'stopping');
+        entry.scheduler?.disarm();
+        this.bus.drop(entry.id);
+        this.noticeFeed.drop(entry.id);
+        let failed: string | undefined;
+        try {
+          if (instance.serialise !== undefined)
+            this.stores.internal(entry.node.instance).put(RESTORE, instance.serialise());
+          await this.withTimeout(() => instance.stop?.(), entry.id);
+        } catch (e) {
+          failed = `stop failed: ${message(e)}`;
+          this.logger(entry.id).error(failed);
+        }
+        // A stop that failed or took too long is logged on its own (D114).
+        this.set(entry, 'stopped', failed);
+        stopped.push(entry.id);
       }
-      this.set(entry, 'stopped');
+    } finally {
+      this.folding = false;
     }
+    const now = this.o.clock.now();
+    this.o.record?.({
+      type: 'core.instance',
+      t: now,
+      event: 'stopped',
+      ...(why === undefined ? {} : { why }),
+      ms: now - from,
+      stopped,
+    });
   }
 
   /**
@@ -1960,6 +2038,9 @@ export class Core {
       ...(reason === undefined ? {} : { reason }),
       ...(stop === undefined ? {} : { stop }),
     };
+    // A start or a stop of the whole instance folds what goes as expected into its summary (D114).
+    if (this.folding && (FOLDED.has(state) || (state === 'stopped' && reason === undefined)))
+      return;
     this.o.record?.({
       type: 'core.plugin',
       t: this.o.clock.now(),

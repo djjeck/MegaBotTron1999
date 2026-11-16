@@ -8,8 +8,8 @@
 import { type Clock } from './clock.ts';
 
 export interface ShutdownOptions {
-  /** Stops the core, keeping each plugin's state. */
-  stop(): Promise<void>;
+  /** Stops the core, keeping each plugin's state; `why`, the end's (`SIGTERM`, `restart`). */
+  stop(why: string): Promise<void>;
   /** Closes the listeners, once the core has stopped. */
   close?(): void;
   /** Ends the process (`process.exit`; a test's stub). */
@@ -33,7 +33,7 @@ export function shutdown(o: ShutdownOptions): (why: string) => Promise<void> {
       });
       let outcome: unknown;
       try {
-        outcome = await Promise.race([o.stop(), cap]);
+        outcome = await Promise.race([o.stop(why), cap]);
       } catch (e) {
         o.print?.(
           `megabottron1999: the stop failed: ${e instanceof Error ? e.message : String(e)}`
