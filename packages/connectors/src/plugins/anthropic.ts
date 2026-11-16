@@ -8,12 +8,29 @@
  *
  * A refusal, an answer cut short, an unreadable one or an error of the API is a failed answer
  * (`ok: false`, with why), never an exception, so that a plugin's loop survives the network.
+ *
+ * A model connector (bot-os.md D117, its manifest's `model`): it logs every call itself, whoever
+ * calls (`anthropic.call`: the calling node, the model, the tokens and the cost in USD from its
+ * config's `prices`, a model without one logged with its cost unknown and a warning), and keeps the
+ * last 24 hours by calling node and by model (`spend.ts`), on its card, its page and its panel.
  */
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import { definePlugin, type Plugin } from '@megabottron1999/core';
+import { type ActionCall, definePlugin, type Plugin } from '@megabottron1999/core';
 import { z } from 'zod';
 import { ServiceConnector } from './service.ts';
+import {
+  type CallRecord,
+  costOf,
+  modelPrice,
+  OWNER_CALLER,
+  priceOf,
+  type Prices,
+  SPEND_PAGE,
+  SPEND_WIDGET,
+  SpendLedger,
+  spendStatus,
+} from './spend.ts';
 
 export const ANTHROPIC = 'anthropic';
 export const ANTHROPIC_KEY = 'anthropic_api_key';
@@ -24,6 +41,45 @@ export type Effort = (typeof EFFORTS)[number];
 /** How long the API keeps a cached system prompt: its default five minutes, or an hour. */
 export const CACHE_TTLS = ['5m', '1h'] as const;
 export type CacheTtl = (typeof CACHE_TTLS)[number];
+
+/** The day the default prices were read from Anthropic's published pricing. */
+export const PRICES_AS_OF = '2026-11-03';
+
+/** A price whose cache writes cost 1.25 times its input for 5 minutes, and twice for an hour. */
+const priced = (input: number, output: number, cacheRead: number) => ({
+  input,
+  output,
+  cacheWrite5m: input * 1.25,
+  cacheWrite1h: input * 2,
+  cacheRead,
+});
+
+/**
+ * The current Claude models' prices, in USD per million tokens, as Anthropic publishes them for its
+ * own API (`PRICES_AS_OF`): input, output, cache writes (5 minutes: 1.25 times the input; an hour:
+ * twice), cache reads. Claude Haiku 5.5's are five times higher for a prompt over 100K tokens.
+ */
+export const PRICES: Prices = {
+  'claude-fable-5-2': priced(8, 40, 0.2),
+  'claude-mythos-5-2': priced(8, 40, 0.2),
+  'claude-fable-5-1': priced(10, 50, 0.25),
+  'claude-mythos-5-1': priced(10, 50, 0.25),
+  'claude-fable-5': priced(10, 50, 1),
+  'claude-mythos-5': priced(10, 50, 1),
+  'claude-opus-5-5': priced(4, 20, 0.2),
+  'claude-opus-5': priced(5, 25, 0.5),
+  'claude-opus-4-8': priced(5, 25, 0.5),
+  'claude-opus-4-7': priced(5, 25, 0.5),
+  'claude-opus-4-6': priced(5, 25, 0.5),
+  'claude-sonnet-5-5': priced(2, 10, 0.1),
+  'claude-sonnet-5': priced(2, 10, 0.2),
+  'claude-sonnet-4-6': priced(3, 15, 0.3),
+  'claude-haiku-5-5': {
+    ...priced(0.1, 0.5, 0.01),
+    over: { promptTokens: 100_000, ...priced(0.5, 2.5, 0.05) },
+  },
+  'claude-haiku-4-5': priced(1, 5, 0.1),
+};
 
 export const anthropicConfig = z.object({
   model: z.string().min(1).default(DEFAULT_MODEL).describe('The model asked by default'),
@@ -42,6 +98,12 @@ export const anthropicConfig = z.object({
     .default('5m')
     .describe(
       'How long the system prompt stays cached: 5m (the API’s default), or 1h for calls further apart (a dearer write)'
+    ),
+  prices: z
+    .record(z.string().min(1), modelPrice)
+    .default(PRICES)
+    .describe(
+      `Each model’s prices, in USD per million tokens (Anthropic’s published pricing, ${PRICES_AS_OF}): what each call is logged as costing; a model not here is logged with its cost unknown`
     ),
 });
 
@@ -71,7 +133,8 @@ export type AskResult<T = unknown> =
   | { ok: true; text: string; output?: T; model: string; usage: AskUsage }
   | { ok: false; error: string; usage?: AskUsage };
 
-export type Ask = <T = unknown>(request: AskRequest<T>) => Promise<AskResult<T>>;
+/** `ask`; the core tells it who calls (D117), which a caller does not pass. */
+export type Ask = <T = unknown>(request: AskRequest<T>, call?: ActionCall) => Promise<AskResult<T>>;
 
 /** The part of the SDK's client that `ask` uses. */
 export type AnthropicClient = Pick<Anthropic, 'messages'>;
@@ -174,9 +237,18 @@ export function anthropicPlugin(o: AnthropicPluginOptions = {}): Plugin {
       kinds: ['connector'],
       description: 'The Claude API: asks a model, with structured output',
       account,
+      model: true,
       secrets: [ANTHROPIC_KEY],
       config: anthropicConfig,
+      widget: SPEND_WIDGET,
+      page: SPEND_PAGE,
       interface: {
+        state: {
+          status: {
+            help: 'What it spent over the last 24 hours, by calling node and by model',
+            output: spendStatus,
+          },
+        },
         actions: {
           ask: {
             help: 'Asks a model: a prompt, an optional system prompt and a schema for the answer',
@@ -188,10 +260,45 @@ export function anthropicPlugin(o: AnthropicPluginOptions = {}): Plugin {
     },
     create: (ctx) => {
       const config = ctx.config as z.infer<typeof anthropicConfig>;
-      const ask = askWith(makeClient(ctx.secrets?.get(ANTHROPIC_KEY) ?? ''), config);
+      const asked = askWith(makeClient(ctx.secrets?.get(ANTHROPIC_KEY) ?? ''), config);
+      const ledger = new SpendLedger(ctx.store, ctx.clock);
+      const unpriced = new Set<string>();
+      /** Logs a call and counts it: its cost, or unknown for a model of no price. */
+      const logged = (r: AskRequest, result: AskResult, node: string): void => {
+        const model = result.ok ? result.model : (r.model ?? config.model);
+        const used = result.usage ?? {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        };
+        const price = priceOf(config.prices, model);
+        if (price === undefined && !unpriced.has(model)) {
+          unpriced.add(model);
+          ctx.log.warn(
+            `no price for the model ${model}: its calls are logged with their cost unknown; add it to the config’s prices`
+          );
+        }
+        const record: CallRecord = {
+          node,
+          model,
+          ok: result.ok,
+          ...(result.ok ? {} : { error: result.error }),
+          ...used,
+          usd: price === undefined ? null : costOf(price, used, r.cacheTtl ?? config.cacheTtl),
+        };
+        ctx.record(`${ANTHROPIC}.call`, { ...record });
+        ledger.add(record);
+      };
+      const ask: Ask = async <T>(r: AskRequest<T>, call?: ActionCall): Promise<AskResult<T>> => {
+        const result = await asked(r);
+        logged(r as AskRequest, result as AskResult, call?.node ?? OWNER_CALLER);
+        return result;
+      };
       return {
         connector: new ServiceConnector(ctx.account ?? account, ANTHROPIC),
-        interface: { actions: { ask } },
+        interface: { state: { status: () => ledger.status() }, actions: { ask } },
+        cost: () => ({ spend: ledger.spend() }),
       };
     },
   });

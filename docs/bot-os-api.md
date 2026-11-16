@@ -1173,6 +1173,15 @@ chat-in output, `chat`, which the readers' edges leave, and a chat-out input, `c
 senders' edges reach (§2.1, bot-os.md D60). The wiring reaches the full connector with
 `core.connector(id)`. The shell's connectors are in §5.
 
+**A model connector** (bot-os.md D117): a connector whose manifest says `model: true` spends money
+on each call, so the editor marks its node with a `$`, and it accounts for its calls itself, since
+the core tells each action who calls it (`ActionCall`, §2): one record per call in the event log,
+`<plugin>.call`, with the calling node, the model, the tokens and the cost in USD (`null` for a
+model it has no price for, never guessed); its last 24 hours in its `status` read, by calling node,
+shown by its widget and page (§2, Widgets and pages); and their total in its `Instance.cost`
+(`spend`, §4.11). The `anthropic` connector is one (§5; `packages/connectors/src/plugins/spend.ts`
+does the accounting for any).
+
 ### 4.6 The outbox
 
 One per account; every send goes through it (bot-os.md §3). A plugin gets its handle with
@@ -1836,7 +1845,9 @@ type AskResult<T> =
 `ask` never throws: a refusal (`refused`), an answer cut short (`answer cut short`), an answer that
 does not fit the schema (`unreadable answer`) and an error of the API or the network
 (`API error 429 …`) are failed answers, so that a plugin's loop survives them. The owner may call it
-too, as the action `ask` of the control API (without a schema, which JSON cannot carry).
+too, as the action `ask` of the control API (without a schema, which JSON cannot carry). Every call,
+failed ones included, is logged by the connector with its caller and its cost (§5, bot-os.md D117):
+a plugin need not count what it asks.
 
 ### 4.14 From closures to the context
 
@@ -2110,7 +2121,29 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   offers `ask` as its interface's action, for the plugins an edge binds to it. A system prompt is
   sent with a cache breakpoint, so calls that share one pay for it once; `cacheTtl` says how long it
   stays cached: `5m` (the API's default) or `1h`, for calls more than five minutes apart (writing it
-  costs more, reading it the same), and a request may ask its own.
+  costs more, reading it the same), and a request may ask its own. **A model connector**
+  (`model: true`, §4.5, bot-os.md D117): it logs each call, whoever asked, as an `anthropic.call`
+  record,
+  `{ node, model, ok, error?, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, usd }`
+  (`node` the calling node, `(owner)` for the panel; never the prompt or the answer), its cost from
+  its config's `prices`: USD per million tokens by model id,
+  `{ input, output, cacheWrite5m, cacheWrite1h, cacheRead, over? }` (`over`,
+  `{ promptTokens, …the same }`, the prices of a prompt longer than that), a dated snapshot
+  (`<id>-20251001`) priced as its id, the cache writes priced by the call's `cacheTtl`. Its default
+  (`PRICES`) is Anthropic's published pricing for its own API on 2026-11-03 (`PRICES_AS_OF`): Claude
+  Fable 5.2 and Mythos 5.2 at 8/40 (input/output; cache reads 0.20), Fable 5.1 and Mythos 5.1 at
+  10/50 (0.25), Fable 5 and Mythos 5 at 10/50 (1), Opus 5.5 at 4/20 (0.20), Opus 5, 4.8, 4.7 and 4.6
+  at 5/25 (0.50), Sonnet 5.5 at 2/10 (0.10), Sonnet 5 at 2/10 (0.20), Sonnet 4.6 at 3/15 (0.30),
+  Haiku 5.5 at 0.10/0.50 (0.01), and 0.50/2.50 for a prompt over 100K tokens, and Haiku 4.5 at 1/5
+  (0.10); a 5-minute cache write at 1.25 times the input, an hour's at twice. The config replaces
+  the table whole: a node that sets `prices` names every model it uses. A model it has no price for
+  is logged with `usd: null`, counted as unpriced, and warned of once a run
+  (`no price for the model …`). Its last 24 hours are kept in its store (`spend`, by the hour, by
+  node and model; the hours that overlap the last 24), so a restart keeps them: its `status` read
+  gives `{ calls, cost, usd, unpriced, since, byNode, byModel }` and the four token counts (`cost`
+  in words, `$0.42 + 2 unpriced`), its widget shows `Last 24 h — Cost: $0.42 · Calls: 14` on its
+  card, its panel's Status breaks it down by calling node, its page **Spend** has a table by node
+  and one by model, and its `Instance.cost` gives the costs its `spend` (§4.11).
 - **`turnParserPlugin`** (`packages/turns/src/turn-parser.ts`): one parser plugin per game bot, each
   made from its bot's grammar (`read`), which knows the game. Each reads, on the owner's account
   (`telegram-user`), the private chat with its bot and, when its edge also reads it, the game's

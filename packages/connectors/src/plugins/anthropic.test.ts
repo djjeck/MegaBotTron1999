@@ -181,6 +181,100 @@ describe('the anthropic plugin', () => {
     expect(core.connector('anthropic')?.account).toBe('anthropic:api');
   });
 
+  it('logs each call itself, its caller, tokens and cost, and keeps the last 24 hours', async () => {
+    const records: Record<string, unknown>[] = [];
+    const warnings: string[] = [];
+    const asker = definePlugin({
+      manifest: {
+        id: 'asker',
+        version: '0.1.0',
+        kinds: ['agent'],
+        description: 'Asks',
+        inputs: { llm: { type: 'interface', plugin: 'anthropic', members: ['actions.ask'] } },
+      },
+      create: (ctx) => ({
+        async start() {
+          const { actions } = ctx.use<{ actions: { ask: Ask } }>('llm');
+          await actions.ask({ prompt: 'hi', system: 'Be brief.' });
+          await actions.ask({ prompt: 'hi', model: 'claude-new-1' });
+          await actions.ask({ prompt: 'hi', model: 'claude-new-1' });
+        },
+      }),
+    });
+    const core = new Core({
+      clock: new VirtualClock(),
+      secrets: secretsWith({ anthropic_api_key: 'sk-example-key' }),
+      record: (r) => {
+        if (r.type === 'anthropic.call') records.push(r as unknown as Record<string, unknown>);
+      },
+      print: (line) => {
+        if (line.includes('no price')) warnings.push(line);
+      },
+    });
+    core.register(
+      anthropicPlugin({ client: () => fakeClient({ text: 'hello', cache: true }) }),
+      asker
+    );
+    await core.start();
+    // The owner's call from the panel is no node's.
+    expect(await core.controls.act('anthropic', 'ask', { prompt: 'hi' })).toMatchObject({
+      output: { ok: true },
+    });
+    // 10 input, 5 output, 3 cache reads and 2 writes at Claude Opus 5.5's prices.
+    const usd = (10 * 4 + 5 * 20 + 3 * 0.2 + 2 * 5) / 1_000_000;
+    expect(records).toHaveLength(4);
+    expect(records[0]).toMatchObject({
+      type: 'anthropic.call',
+      node: 'asker',
+      model: DEFAULT_MODEL,
+      ok: true,
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadTokens: 3,
+      cacheWriteTokens: 2,
+    });
+    expect(records[0]?.['usd']).toBeCloseTo(usd);
+    expect(records[1]).toMatchObject({ node: 'asker', model: 'claude-new-1', usd: null });
+    expect(records[3]).toMatchObject({ node: '(owner)', model: DEFAULT_MODEL });
+    // An unknown model's cost is unknown, said once.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('no price for the model claude-new-1');
+    const node = core.controls.status().plugins.find((p) => p.id === 'anthropic');
+    expect(node?.widget).toMatchObject({ calls: 4, unpriced: 2 });
+    expect((node?.widget as { byNode: unknown[] }).byNode).toMatchObject([
+      { node: 'asker', calls: 3, unpriced: 2 },
+      { node: '(owner)', calls: 1 },
+    ]);
+    expect(node?.cost?.own?.spend).toMatchObject({ calls: 4, unpriced: 2 });
+    expect(node?.cost?.own?.spend?.usd).toBeCloseTo(2 * usd);
+    await core.stop();
+  });
+
+  it('logs a failed call too, at no cost when nothing was used', async () => {
+    const records: Record<string, unknown>[] = [];
+    const core = new Core({
+      clock: new VirtualClock(),
+      secrets: secretsWith({ anthropic_api_key: 'sk-example-key' }),
+      record: (r) => {
+        if (r.type === 'anthropic.call') records.push(r as unknown as Record<string, unknown>);
+      },
+    });
+    core.register(anthropicPlugin({ client: () => fakeClient(new Error('offline')) }));
+    await core.start();
+    await core.controls.act('anthropic', 'ask', { prompt: 'hi', model: 'claude-haiku-5-5' });
+    expect(records).toEqual([
+      expect.objectContaining({
+        node: '(owner)',
+        model: 'claude-haiku-5-5',
+        ok: false,
+        error: 'offline',
+        inputTokens: 0,
+        usd: 0,
+      }),
+    ]);
+    await core.stop();
+  });
+
   it('makes the SDK’s client by default, under the account name it is given', async () => {
     const core = new Core({
       clock: new VirtualClock(),
