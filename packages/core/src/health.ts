@@ -3,11 +3,14 @@
  * /health` (and `HEAD`) answers 200 while every enabled connector is connected, 503 otherwise,
  * with the process's uptime, whether the instance is on and each connector's status as JSON; 404
  * elsewhere. It reveals no config, chat, account or secret: a connector is named by its node's id
- * and its plugin. A connector the owner disabled or stopped does not count; one failed, or not yet
- * connected, does. The instance being off is the owner's choice, said but not counted.
+ * and its plugin. A connector the owner disabled or stopped does not count, nor one waiting for its
+ * login (bot-os.md D125: it is logged in from the web UI, which a failing check would take off the
+ * proxy); one failed, or not yet connected, does. The instance being off is the owner's choice,
+ * said but not counted.
  */
 import http from 'node:http';
 import { type AccountControl } from './controls.ts';
+import { NEEDS_LOGIN } from './login.ts';
 
 /** What the health needs of the controls. */
 export interface HealthSource {
@@ -18,9 +21,12 @@ export interface HealthSource {
 export interface ConnectorHealth {
   id: string;
   plugin: string;
-  /** Its connection's (`connected`, `connecting`, `closed`), or its node's without one (`failed`). */
+  /**
+   * Its connection's (`connected`, `connecting`, `closed`), `needs login` for one waiting for its
+   * login, or its node's without a connection (`failed`).
+   */
   status: string;
-  /** False for a connector the owner disabled or stopped, which the verdict leaves out. */
+  /** False for a connector the owner disabled or stopped, or waiting for its login: left out. */
   counted: boolean;
 }
 
@@ -38,12 +44,15 @@ const SET_ASIDE = new Set(['disabled', 'stopped']);
 
 /** The health now. */
 export function health(source: HealthSource, uptimeS: number): Health {
-  const connectors = source.accounts().map((a) => ({
-    id: a.id,
-    plugin: a.plugin,
-    status: a.connection?.state ?? a.state,
-    counted: !SET_ASIDE.has(a.state),
-  }));
+  const connectors = source.accounts().map((a) => {
+    const login = a.connection?.phase === NEEDS_LOGIN;
+    return {
+      id: a.id,
+      plugin: a.plugin,
+      status: login ? NEEDS_LOGIN : (a.connection?.state ?? a.state),
+      counted: !login && !SET_ASIDE.has(a.state),
+    };
+  });
   return {
     ok: connectors.every((c) => !c.counted || c.status === 'connected'),
     uptimeS,

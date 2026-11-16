@@ -903,14 +903,19 @@ export function NodeDetails(props: {
         </p>
       )}
       {view.login === true ? (
-        running ? (
+        // A stopped connector still logs in (D125): its login is the instance's, not its run's.
+        running || stop !== undefined ? (
           <ConnectorLogin
             node={view.id}
             {...(props.restart === undefined ? {} : { restart: props.restart })}
           />
-        ) : (
+        ) : live === undefined ? (
           <p className="muted small">
             It logs in from here once it runs: <strong>Apply</strong>, and its Login shows here.
+          </p>
+        ) : (
+          <p className="muted small">
+            It logs in from here while it runs or is stopped; it is {live.state} now.
           </p>
         )
       ) : null}

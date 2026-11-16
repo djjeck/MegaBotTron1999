@@ -1678,9 +1678,11 @@ connector's `healthPort` must be another), `GET /health` (or `HEAD`) answers 200
 connector is connected and 503 otherwise, with
 `{ ok, uptimeS, on, connectors: [{ id, plugin, status, counted }] }`: `on` the owner's switch (said,
 not counted: off is the owner's choice), each connector's `status` its connection's (`connected`,
-`connecting`, `closed`) or, without one, its node's (`failed`), and `counted` false for one the
-owner disabled or stopped, which the verdict leaves out. It reveals no config, account, chat or
-secret. The image's `HEALTHCHECK` probes it (every 30 s, after a start period of 60 s).
+`connecting`, `closed`), `needs login` for one waiting for its login, or, without one, its node's
+(`failed`), and `counted` false for one the owner disabled or stopped, or waiting for its login (it
+logs in from the web UI, which a proxy leaving unhealthy containers out would take away; bot-os.md
+D125), which the verdict leaves out. It reveals no config, account, chat or secret. The image's
+`HEALTHCHECK` probes it (every 30 s, after a start period of 60 s).
 
 **The web UI's login** (`packages/web/src/server/auth.ts`, bot-os.md D45) is meant for a trusted
 network: behind it the owner installs modules and edits script nodes (§5), code that runs with the

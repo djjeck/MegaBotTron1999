@@ -137,9 +137,9 @@ with its own authentication, rather than publishing the port.
   `git.example.lan: the server's certificate isn't trusted (…): mount its CA and set NODE_EXTRA_CA_CERTS`.
 
 - **Ports:** 8082 is the web UI. 8080 is the health endpoint (`HEALTH_PORT`): `GET /health` answers
-  200 while every enabled connector is connected, 503 otherwise, and the image's `HEALTHCHECK`
-  probes it; set `HEALTH_PORT` empty to turn it off, and disable the healthcheck with it. The
-  control API listens on the container's loopback (8081) only.
+  200 while every enabled connector is connected (one waiting for its login, D125, is left out), 503
+  otherwise, and the image's `HEALTHCHECK` probes it; set `HEALTH_PORT` empty to turn it off, and
+  disable the healthcheck with it. The control API listens on the container's loopback (8081) only.
 - The container runs as the `node` user, from `/app`, with `node src/main.ts`.
 
 To build the image yourself:

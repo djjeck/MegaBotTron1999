@@ -66,6 +66,23 @@ describe('health', () => {
   });
 });
 
+describe('health of a connector waiting for its login', () => {
+  it('leaves it out, saying so, so the web UI it logs in from stays reachable (D125)', () => {
+    const waiting: AccountControl = {
+      ...connected('t'),
+      connection: { state: 'closed', phase: 'needs login', detail: 'log in from its node' },
+    };
+    const h = health(source([connected('a'), waiting]), 1);
+    expect(h.ok).toBe(true);
+    expect(h.connectors).toContainEqual({
+      id: 't',
+      plugin: 'chat',
+      status: 'needs login',
+      counted: false,
+    });
+  });
+});
+
 describe('healthServer', () => {
   let server: http.Server | undefined;
   afterEach(() => {

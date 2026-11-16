@@ -170,7 +170,7 @@ describe('a Telegram-like connector’s panel, as a first setup sees it (D122)',
     configSecrets: [],
     events: [],
   };
-  const panel = (connection?: { state: 'closed'; phase: string }) =>
+  const panel = (connection?: { state: 'closed'; phase: string }, stopped = false) =>
     render(
       <NodeDetails
         node={{ id: 'quest-bot', plugin: 'telegram-bot' }}
@@ -183,12 +183,22 @@ describe('a Telegram-like connector’s panel, as a first setup sees it (D122)',
                 plugin: 'telegram-bot',
                 description: 'A bot',
                 kinds: ['connector'],
-                state: 'running',
+                ...(stopped
+                  ? {
+                      state: 'stopped' as const,
+                      stop: { reason: 'killed by the owner', time: '', source: 'owner' as const },
+                    }
+                  : { state: 'running' as const }),
                 settings: {},
                 reads: [],
                 actions: [],
               },
-              account: { id: 'quest-bot', plugin: 'telegram-bot', state: 'running', connection },
+              account: {
+                id: 'quest-bot',
+                plugin: 'telegram-bot',
+                state: stopped ? 'stopped' : 'running',
+                connection,
+              },
             })}
         problems={[]}
         configErrors={{}}
@@ -223,6 +233,27 @@ describe('a Telegram-like connector’s panel, as a first setup sees it (D122)',
     cleanup();
     panel({ state: 'closed', phase: 'closed' });
     expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it('shows a stopped connector’s Login, a stop not hiding it (D125)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              status: 'needed',
+              step: { title: 'The bot’s token', fields: [{ name: 'token', label: 'Token' }] },
+              actions: [{ name: 'token', label: 'Check and save', submit: true }],
+            }),
+            { headers: { 'content-type': 'application/json' } }
+          )
+        )
+      )
+    );
+    panel({ state: 'closed', phase: 'closed' }, true);
+    expect(await screen.findByText('The bot’s token')).toBeDefined();
+    expect(screen.queryByText(/It logs in from here/u)).toBeNull();
   });
 });
 
