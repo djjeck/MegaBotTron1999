@@ -2,7 +2,7 @@
  * What each node costs (docs/bot-os.md D77), to find the top offenders: the time its handlers take
  * where the core hands it an event, a message or a timer, measured around each call; and what a
  * node's instance says of its own (`Instance.cost`: a script's worker thread, its CPU, its heap and
- * its handlers' calls). Time is the process's own (`performance.now()`), real time, never a
+ * its handlers' calls; a model connector's money, D117). Time is the process's own (`performance.now()`), real time, never a
  * plugin's clock: the dev kit's is virtual. Kept in memory, from the start.
  */
 
@@ -32,6 +32,18 @@ export interface OwnCost {
   cpuMs?: number;
   /** Its heap in use, in bytes. */
   heapBytes?: number;
+  /** What a model connector spent of the owner's money over the last 24 hours (D117). */
+  spend?: Spend;
+}
+
+/**
+ * Money a node spent (D117): a model connector's calls over the last 24 hours (by the hour, so up to
+ * an hour more), their cost in USD, and how many of them had no price, so cost unknown.
+ */
+export interface Spend {
+  usd: number;
+  calls: number;
+  unpriced: number;
 }
 
 /** A node's cost, as `GET /status` gives it (`PluginControl.cost`). */

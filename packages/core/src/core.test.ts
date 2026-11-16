@@ -7,7 +7,7 @@ import { type BusEvent } from './bus.ts';
 import { VirtualClock } from './clock.ts';
 import { Core, type CoreRecord, StartError } from './core.ts';
 import { FakeConnector } from './devkit.ts';
-import { definePlugin, type Instance, type Plugin } from './plugin.ts';
+import { type ActionCall, definePlugin, type Instance, type Plugin } from './plugin.ts';
 import { type MigrationStore } from './store.ts';
 
 /** A test plugin that writes its hooks to `seen`. */
@@ -429,11 +429,17 @@ describe('Core', () => {
         return {
           interface: {
             state: { score: () => score, secret: () => 42 },
-            actions: { add: (n: number) => (score += n) },
+            actions: {
+              add: (n: number, call?: ActionCall) => {
+                callers.push(call?.node);
+                return (score += n);
+              },
+            },
           },
         };
       },
     });
+    const callers: (string | undefined)[] = [];
     let got:
       | { state: { score: () => number; secret?: unknown }; actions: { add(n: number): void } }
       | undefined;
@@ -463,6 +469,8 @@ describe('Core', () => {
     await c.start();
     got?.actions.add(2);
     expect(got?.state.score()).toBe(3);
+    // The action hears who called it, which the caller did not pass (D117).
+    expect(callers).toEqual(['player']);
     expect(got?.state.secret).toBeUndefined();
     // A plugin only required is used with none of its members; one not bound, not at all.
     expect(errors).toEqual(['player does not use nobody: add an interface input of it']);

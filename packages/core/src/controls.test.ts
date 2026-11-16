@@ -11,7 +11,7 @@ import { KILLED, STOPPED } from './controls.ts';
 import { Core, type CoreRecord } from './core.ts';
 import { FakeConnector, fakeConnectorPlugin } from './devkit.ts';
 import { lamp, showValue } from './owner-commands.ts';
-import { definePlugin, type PluginContext } from './plugin.ts';
+import { type ActionCall, definePlugin, type PluginContext } from './plugin.ts';
 
 /** An actor that sends to `#chat` on the fake account, with its controls declared. */
 function actor(seen: string[], grab: (ctx: PluginContext) => void = () => {}) {
@@ -62,7 +62,11 @@ function actor(seen: string[], grab: (ctx: PluginContext) => void = () => {}) {
             },
           },
           actions: {
-            bump: (input: { by: number }) => (count += input.by),
+            bump: (input: { by: number }, call?: ActionCall) => {
+              // The owner's controls call it as no node (D117).
+              if (call === undefined || call.node !== undefined) throw new Error('not the owner');
+              return (count += input.by);
+            },
             refuse: () => Promise.reject(new Error('not now')),
           },
         },

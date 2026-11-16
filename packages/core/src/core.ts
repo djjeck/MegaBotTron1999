@@ -82,6 +82,7 @@ import {
 } from './outbox.ts';
 import { CORE_COMMANDS, coreCommands } from './owner-commands.ts';
 import {
+  type ActionCall,
   type EventQuery,
   type Instance,
   type Logger,
@@ -1996,7 +1997,7 @@ export class Core {
     const other = node.inputs.get(port)?.[0]?.node;
     const e = other === undefined ? undefined : this.entries.get(other);
     if (e?.up !== true) return undefined;
-    return interfaceOf(e.id, e.instance?.interface ?? {}, input.members);
+    return interfaceOf(e.id, e.instance?.interface ?? {}, input.members, entry.id);
   }
 
   /**
@@ -2131,21 +2132,29 @@ function sourcesOf(node: ResolvedNode): Map<string, Set<string>> {
   return out;
 }
 
-/** The members of a plugin's interface that another uses, and only those. */
+/**
+ * The members of a plugin's interface that another, `caller`, uses, and only those: each action
+ * told who calls it (`ActionCall`, D117), whatever the caller passes beyond its input.
+ */
 function interfaceOf(
   id: string,
   offered: PluginInterface,
-  members: readonly string[]
+  members: readonly string[],
+  caller: string
 ): PluginInterface {
   const out: { state: Record<string, () => unknown>; actions: Record<string, unknown> } = {
     state: {},
     actions: {},
   };
+  const call: ActionCall = { node: caller };
   for (const member of members) {
     const [part, name] = member.split('.', 2) as ['state' | 'actions', string];
     const fn = (offered[part] as Record<string, unknown> | undefined)?.[name];
     if (typeof fn !== 'function') throw new Error(`${id} does not offer ${member}`);
-    out[part][name] = fn;
+    out[part][name] =
+      part === 'actions'
+        ? (input: unknown) => (fn as (input: unknown, call: ActionCall) => unknown)(input, call)
+        : fn;
   }
   return out as PluginInterface;
 }

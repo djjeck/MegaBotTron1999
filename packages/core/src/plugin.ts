@@ -196,13 +196,25 @@ export interface PluginSettingsHandle {
 }
 
 /**
+ * Who calls an action (§2 Interfaces, bot-os.md D117), as the core tells it: the node whose
+ * interface input the call came through, or none for the owner's controls (the panel's actions).
+ */
+export interface ActionCall {
+  node?: string;
+}
+
+/**
  * What a plugin offers others through `use` (§2 `interface`): its typed reads (`state`) and its
  * actions, by the names its manifest declares.
  */
 export interface PluginInterface {
   /** Its reads; one that declares an input takes it, as its schema makes it. */
   state?: Record<string, (input: never) => unknown>;
-  actions?: Record<string, (input: never) => unknown>;
+  /**
+   * Its actions, each called with its input and who calls it (`ActionCall`), which the core adds:
+   * a caller passes the input alone.
+   */
+  actions?: Record<string, (input: never, call?: ActionCall) => unknown>;
 }
 
 /** The hooks of a running plugin, all optional (§3). */

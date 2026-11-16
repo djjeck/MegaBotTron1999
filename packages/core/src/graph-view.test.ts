@@ -255,6 +255,9 @@ describe('the nodes as the graph view shows them', () => {
     // The plugin alone, as the editor's palette offers it: its manifest's account, no node's.
     expect(describePlugin(actor)).not.toHaveProperty('account');
     expect(describePlugin(irc)).toMatchObject({ plugin: 'irc', account: 'irc:me' });
+    // A model connector says so (D117), for its `$` mark; the others say nothing of it.
+    expect(describePlugin(irc)).not.toHaveProperty('model');
+    expect(describePlugin({ ...irc, model: true })).toMatchObject({ model: true });
     expect(views[1]?.outputs).toMatchObject({
       // An events output lists its plugin's types there, with their descriptions (D71).
       events: {

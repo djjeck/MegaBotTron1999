@@ -294,6 +294,8 @@ export interface PluginView {
   secrets: string[];
   /** It logs in from its node (D116): its declared secrets are a fallback. */
   login?: boolean;
+  /** A connector to a model, which bills by the call (D117): its node is marked with a `$`. */
+  model?: boolean;
   configSecrets: string[];
   /** The event types it registers (§4.4). */
   events: string[];
@@ -463,6 +465,7 @@ export function describePlugin(m: Manifest): PluginView {
     secrets: [...m.secrets],
     configSecrets: [...m.configSecrets],
     ...(m.login ? { login: true } : {}),
+    ...(m.model ? { model: true } : {}),
     events: Object.keys(m.events).sort(),
     ...(m.configInputs === undefined
       ? {}

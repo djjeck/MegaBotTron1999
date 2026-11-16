@@ -28,7 +28,7 @@ import { type DriftCounts } from './drift.ts';
 import { type LoginState } from './login.ts';
 import { type Manifest } from './manifest.ts';
 import { type CoalescedView, type QueueEntryView } from './outbox.ts';
-import { type Instance } from './plugin.ts';
+import { type ActionCall, type Instance } from './plugin.ts';
 import { type InputPort } from './ports.ts';
 import { type SettingsRegistry, type SettingValue } from './settings.ts';
 import { type StateView } from './state-view.ts';
@@ -506,10 +506,11 @@ export class Controls {
     const parsed = declared.input.safeParse(input ?? {});
     if (!parsed.success) return { error: issues(parsed.error.issues) };
     const fn = this.host.instance(id)?.interface?.actions?.[name] as
-      ((input: unknown) => unknown) | undefined;
+      ((input: unknown, call: ActionCall) => unknown) | undefined;
     if (typeof fn !== 'function') return { error: `${id} is not running` };
     try {
-      return { output: await fn(parsed.data) };
+      // The owner calls it: no node (D117).
+      return { output: await fn(parsed.data, {}) };
     } catch (e) {
       return { error: message(e), refused: true };
     }

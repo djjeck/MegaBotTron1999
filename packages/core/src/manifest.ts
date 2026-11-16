@@ -108,6 +108,11 @@ export const manifestSchema = z
      */
     login: z.boolean().default(false),
     /**
+     * A connector to a model that bills by the call (docs/bot-os-api.md §4.5, bot-os.md D117): it
+     * spends money, so the editor marks its node with a `$`, and it logs each call with its cost.
+     */
+    model: z.boolean().default(false),
+    /**
      * The steps that bring its store from each older version to the next (docs/bot-os-api.md §4.2):
      * the store's version is the number of them.
      */
@@ -275,6 +280,12 @@ export const manifestSchema = z
         code: 'custom',
         path: ['login'],
         message: 'only a connector logs in (P9)',
+      });
+    if (m.model && !connector)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['model'],
+        message: 'only a connector reaches a model (bot-os.md D52)',
       });
     if (m.configSecrets.length > 0 && !connector)
       ctx.addIssue({

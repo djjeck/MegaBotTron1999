@@ -90,7 +90,7 @@ export {
   StartError,
   STOP_DOC,
 } from './core.ts';
-export { Costs, type DispatchCost, type NodeCost, type OwnCost } from './costs.ts';
+export { Costs, type DispatchCost, type NodeCost, type OwnCost, type Spend } from './costs.ts';
 export {
   defineSimulator,
   DevKit,
@@ -327,6 +327,7 @@ export {
 } from './outbox.ts';
 export { CORE_COMMANDS, coreCommands, lamp, showValue } from './owner-commands.ts';
 export {
+  type ActionCall,
   definePlugin,
   type EventQuery,
   type Instance,

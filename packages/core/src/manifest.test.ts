@@ -17,6 +17,7 @@ describe('parseManifest', () => {
       secrets: [],
       configSecrets: [],
       login: false,
+      model: false,
       configChats: [],
       notices: false,
       summary: false,
@@ -271,6 +272,14 @@ describe('parseManifest', () => {
       /account: only a connector has an account/u
     );
     expect(() => parseManifest({ ...base, secrets: ['Bad-Name'] })).toThrow(/Docker secret name/u);
+  });
+
+  it('marks a model connector (D117), and only a connector', () => {
+    expect(() => parseManifest({ ...base, model: true })).toThrow(
+      /model: only a connector reaches a model/u
+    );
+    const m = parseManifest({ ...base, kinds: ['connector'], account: 'llm:api', model: true });
+    expect(m.model).toBe(true);
   });
 
   it('refuses the core id, a self requirement and events outside the namespaces registered', () => {
