@@ -432,6 +432,14 @@ describe('every chat, and the surfaces', () => {
           isGroup: false,
           entity: {},
         }),
+        // The account's own chat (Saved Messages): never listed, nor found by a search.
+        dialog({
+          id: { toString: () => '5000009' },
+          title: 'Saved Messages',
+          isUser: true,
+          isGroup: false,
+          entity: { username: 'alice', self: true },
+        }),
       ],
     });
     const { c } = make(f);
@@ -455,6 +463,8 @@ describe('every chat, and the surfaces', () => {
     expect((await c.surfaces({ search: 'news' })).map((x) => x.id)).toEqual(['-1004']);
     expect((await c.surfaces({ search: ' lobby ', limit: 5 })).map((x) => x.id)).toEqual([GROUP]);
     expect((await c.surfaces({ search: 'quiz' })).map((x) => x.id)).toEqual(['@Quiz_bot']);
+    expect(await c.surfaces({ search: 'saved' })).toEqual([]);
+    expect(await c.surfaces({ search: '5000009' })).toEqual([]);
     // By any of its names: a bot's id finds it by its @username (D96).
     expect((await c.surfaces({ search: '5000001' })).map((x) => x.id)).toEqual(['@Quiz_bot']);
     expect(await c.surfaces({ limit: 1 })).toHaveLength(1);

@@ -1079,23 +1079,24 @@ latest first, at most 50 once filtered; a search, by title, username or id (any 
 any of them, archived and inactive ones too, of every kind. Both draw on the account's full list of
 dialogs, every kind and both folders (the owner's own folders are filters over them), fetched once
 for 30 s: a fetch with a limit returns the pinned dialogs first, however old, and filled the list
-with them; a basic group upgraded to a supergroup is left out (its supergroup is listed), by the
-connector: GramJS's `ignoreMigrated` keeps those alone, and dropped every user, bot, channel and
-supergroup; `telegram-bot` the chats it has seen in updates, kept in its store (`surfaces`), each by
-its id (the one name the Bot API reaches a person by), its `@username` an alias; its config's
-`owner` and `group`, asked of Telegram (`getChat`) before it has seen them, and listed `unreachable`
-with why when Telegram does not give them (the owner never started the bot; it is not in the group),
-asked again at most every 10 minutes; and one searched by an id or a `@username` no chat seen has,
-asked of Telegram and kept, since the Bot API cannot list a bot's chats and gives it only a chat it
-can reach; and the people it has seen in its groups (the latest 200, in memory only), each
-`unreachable` until they open the bot, for its deny list (bot-os.md D100); `irc` its channel. A chat
-a `telegram-bot` config or edge names by the `@username` of a person it has seen goes to their id,
-so a config saved so keeps working. A connector's `chats` config (the two Telegram ones) is what it
-**monitors**: unset, every chat it has; each chat-in edge reads a subset (`reads`, `"*"` for all of
-them). Its manifest says where its config names them (`monitors`, §2: `chats` for the two Telegram
-ones, `channel` for `irc`), so that the check warns of an edge reading a chat its connector does not
-monitor (§2.3, bot-os.md D89), a chat matched by any of its names (D90). A connector not running
-lists nothing.
+with them; the account's own chat (Saved Messages, whose peer is the account itself) is left out, as
+no chat to monitor or pick; a basic group upgraded to a supergroup is left out (its supergroup is
+listed), by the connector: GramJS's `ignoreMigrated` keeps those alone, and dropped every user, bot,
+channel and supergroup; `telegram-bot` the chats it has seen in updates, kept in its store
+(`surfaces`), each by its id (the one name the Bot API reaches a person by), its `@username` an
+alias; its config's `owner` and `group`, asked of Telegram (`getChat`) before it has seen them, and
+listed `unreachable` with why when Telegram does not give them (the owner never started the bot; it
+is not in the group), asked again at most every 10 minutes; and one searched by an id or a
+`@username` no chat seen has, asked of Telegram and kept, since the Bot API cannot list a bot's
+chats and gives it only a chat it can reach; and the people it has seen in its groups (the latest
+200, in memory only), each `unreachable` until they open the bot, for its deny list (bot-os.md
+D100); `irc` its channel. A chat a `telegram-bot` config or edge names by the `@username` of a
+person it has seen goes to their id, so a config saved so keeps working. A connector's `chats`
+config (the two Telegram ones) is what it **monitors**: unset, every chat it has; each chat-in edge
+reads a subset (`reads`, `"*"` for all of them). Its manifest says where its config names them
+(`monitors`, §2: `chats` for the two Telegram ones, `channel` for `irc`), so that the check warns of
+an edge reading a chat its connector does not monitor (§2.3, bot-os.md D89), a chat matched by any
+of its names (D90). A connector not running lists nothing.
 
 **Missed messages** (bot-os.md D62): what was said while the instance was down is the connector's to
 deliver once, marked `playback` (so nothing acts on it: the reactor skips it, and the replies'

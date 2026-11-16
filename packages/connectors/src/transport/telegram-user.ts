@@ -84,7 +84,7 @@ export interface RawDialog {
   isUser?: boolean | undefined;
   isGroup?: boolean | undefined;
   isChannel?: boolean | undefined;
-  /** The other user (a bot has `bot`), the group or the channel. */
+  /** The other user (a bot has `bot`; the account itself, `self`), the group or the channel. */
   entity?: unknown;
   inputEntity?: unknown;
   /** Its latest message. */
@@ -125,7 +125,7 @@ export interface GramClient {
 }
 
 /** A field of an entity GramJS returned, if it has one. */
-function field(entity: unknown, key: 'username' | 'bot' | 'migratedTo'): unknown {
+function field(entity: unknown, key: 'username' | 'bot' | 'migratedTo' | 'self'): unknown {
   if (typeof entity !== 'object' || entity === null || !(key in entity)) return undefined;
   return (entity as Record<string, unknown>)[key];
 }
@@ -354,7 +354,8 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
    * title, username or id has it, among all of them, the archived and the inactive too. Both draw
    * on the full list, fetched once for `DIALOGS_TTL_MS`: a fetch with a limit would return the
    * pinned chats first, however old, and fill the list with them. The limit is applied last. Each
-   * is named as the connector names it once its config lists it.
+   * is named as the connector names it once its config lists it. The account's own chat (Saved
+   * Messages, whose peer is itself) is never among them.
    */
   async surfaces(query: SurfaceQuery = {}): Promise<Surface[]> {
     if (!this.connected) throw new Error('not connected');
@@ -365,7 +366,8 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     return dialogs
       .map((d): Surface | undefined => {
         const id = this.surfaceName(d);
-        if (id === undefined) return undefined;
+        // The account's own chat (Saved Messages) is no chat to monitor or pick.
+        if (id === undefined || field(d.entity, 'self') === true) return undefined;
         const lastActive = d.date === undefined ? undefined : d.date * 1000;
         const configured = this.listed(this.namesOf(id)) !== undefined;
         if (
