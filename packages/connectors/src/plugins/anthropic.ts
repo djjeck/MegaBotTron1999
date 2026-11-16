@@ -11,7 +11,7 @@
  *
  * A model connector (bot-os.md D117, its manifest's `model`): it logs every call itself, whoever
  * calls (`anthropic.call`: the calling node, the model, the tokens and the cost in USD from its
- * config's `prices`, a model without one logged with its cost unknown and a warning), and keeps the
+ * price table, `PRICES`, a model without one logged with its cost unknown and a warning), and keeps the
  * last 24 hours by calling node and by model (`spend.ts`), on its card, its page and its panel.
  */
 import Anthropic from '@anthropic-ai/sdk';
@@ -22,7 +22,6 @@ import { ServiceConnector } from './service.ts';
 import {
   type CallRecord,
   costOf,
-  modelPrice,
   OWNER_CALLER,
   priceOf,
   type Prices,
@@ -42,7 +41,7 @@ export type Effort = (typeof EFFORTS)[number];
 export const CACHE_TTLS = ['5m', '1h'] as const;
 export type CacheTtl = (typeof CACHE_TTLS)[number];
 
-/** The day the default prices were read from Anthropic's published pricing. */
+/** The day the prices were read from Anthropic's published pricing. */
 export const PRICES_AS_OF = '2026-11-03';
 
 /** A price whose cache writes cost 1.25 times its input for 5 minutes, and twice for an hour. */
@@ -58,6 +57,9 @@ const priced = (input: number, output: number, cacheRead: number) => ({
  * The current Claude models' prices, in USD per million tokens, as Anthropic publishes them for its
  * own API (`PRICES_AS_OF`): input, output, cache writes (5 minutes: 1.25 times the input; an hour:
  * twice), cache reads. Claude Haiku 5.5's are five times higher for a prompt over 100K tokens.
+ * Kept here, not in the config, so that a release updates it (bot-os.md D117); a model not here is
+ * logged with its cost unknown. The cache reads marked "derived" are not published per model: they
+ * follow the published rule of about a tenth of the input price.
  */
 export const PRICES: Prices = {
   'claude-fable-5-2': priced(8, 40, 0.2),
@@ -67,18 +69,18 @@ export const PRICES: Prices = {
   'claude-fable-5': priced(10, 50, 1),
   'claude-mythos-5': priced(10, 50, 1),
   'claude-opus-5-5': priced(4, 20, 0.2),
-  'claude-opus-5': priced(5, 25, 0.5),
-  'claude-opus-4-8': priced(5, 25, 0.5),
-  'claude-opus-4-7': priced(5, 25, 0.5),
-  'claude-opus-4-6': priced(5, 25, 0.5),
+  'claude-opus-5': priced(5, 25, 0.5), // cache read derived
+  'claude-opus-4-8': priced(5, 25, 0.5), // cache read derived
+  'claude-opus-4-7': priced(5, 25, 0.5), // cache read derived
+  'claude-opus-4-6': priced(5, 25, 0.5), // cache read derived
   'claude-sonnet-5-5': priced(2, 10, 0.1),
-  'claude-sonnet-5': priced(2, 10, 0.2),
-  'claude-sonnet-4-6': priced(3, 15, 0.3),
+  'claude-sonnet-5': priced(2, 10, 0.2), // cache read derived
+  'claude-sonnet-4-6': priced(3, 15, 0.3), // cache read derived
   'claude-haiku-5-5': {
-    ...priced(0.1, 0.5, 0.01),
-    over: { promptTokens: 100_000, ...priced(0.5, 2.5, 0.05) },
+    ...priced(0.1, 0.5, 0.01), // cache read derived
+    over: { promptTokens: 100_000, ...priced(0.5, 2.5, 0.05) }, // cache read derived
   },
-  'claude-haiku-4-5': priced(1, 5, 0.1),
+  'claude-haiku-4-5': priced(1, 5, 0.1), // cache read derived
 };
 
 export const anthropicConfig = z.object({
@@ -99,12 +101,8 @@ export const anthropicConfig = z.object({
     .describe(
       'How long the system prompt stays cached: 5m (the API’s default), or 1h for calls further apart (a dearer write)'
     ),
-  prices: z
-    .record(z.string().min(1), modelPrice)
-    .default(PRICES)
-    .describe(
-      `Each model’s prices, in USD per million tokens (Anthropic’s published pricing, ${PRICES_AS_OF}): what each call is logged as costing; a model not here is logged with its cost unknown`
-    ),
+  // No `prices`: the price table is the code's (`PRICES`, D117). A config saved when it had one
+  // still loads: this schema, not a strict one, drops a key it does not know.
 });
 
 /** What `ask` asks. */
@@ -272,11 +270,11 @@ export function anthropicPlugin(o: AnthropicPluginOptions = {}): Plugin {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
         };
-        const price = priceOf(config.prices, model);
+        const price = priceOf(PRICES, model);
         if (price === undefined && !unpriced.has(model)) {
           unpriced.add(model);
           ctx.log.warn(
-            `no price for the model ${model}: its calls are logged with their cost unknown; add it to the config’s prices`
+            `no price for the model ${model}: its calls are logged with their cost unknown until a release prices it`
           );
         }
         const record: CallRecord = {

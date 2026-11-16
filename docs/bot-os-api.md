@@ -2127,18 +2127,20 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   record,
   `{ node, model, ok, error?, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, usd }`
   (`node` the calling node, `(owner)` for the panel; never the prompt or the answer), its cost from
-  its config's `prices`: USD per million tokens by model id,
-  `{ input, output, cacheWrite5m, cacheWrite1h, cacheRead, over? }` (`over`,
-  `{ promptTokens, …the same }`, the prices of a prompt longer than that), a dated snapshot
-  (`<id>-20251001`) priced as its id, the cache writes priced by the call's `cacheTtl`. Its default
-  (`PRICES`) is Anthropic's published pricing for its own API on 2026-11-03 (`PRICES_AS_OF`): Claude
-  Fable 5.2 and Mythos 5.2 at 8/40 (input/output; cache reads 0.20), Fable 5.1 and Mythos 5.1 at
-  10/50 (0.25), Fable 5 and Mythos 5 at 10/50 (1), Opus 5.5 at 4/20 (0.20), Opus 5, 4.8, 4.7 and 4.6
-  at 5/25 (0.50), Sonnet 5.5 at 2/10 (0.10), Sonnet 5 at 2/10 (0.20), Sonnet 4.6 at 3/15 (0.30),
-  Haiku 5.5 at 0.10/0.50 (0.01), and 0.50/2.50 for a prompt over 100K tokens, and Haiku 4.5 at 1/5
-  (0.10); a 5-minute cache write at 1.25 times the input, an hour's at twice. The config replaces
-  the table whole: a node that sets `prices` names every model it uses. A model it has no price for
-  is logged with `usd: null`, counted as unpriced, and warned of once a run
+  its price table, `PRICES` in its code (not its config, so that a release updates it): USD per
+  million tokens by model id, `{ input, output, cacheWrite5m, cacheWrite1h, cacheRead, over? }`
+  (`over`, `{ promptTokens, …the same }`, the prices of a prompt longer than that), a dated snapshot
+  (`<id>-20251001`) priced as its id, the cache writes priced by the call's `cacheTtl`. The table is
+  Anthropic's published pricing for its own API on 2026-11-03 (`PRICES_AS_OF`): Claude Fable 5.2 and
+  Mythos 5.2 at 8/40 (input/output; cache reads 0.20), Fable 5.1 and Mythos 5.1 at 10/50 (0.25),
+  Fable 5 and Mythos 5 at 10/50 (1), Opus 5.5 at 4/20 (0.20), Opus 5, 4.8, 4.7 and 4.6 at 5/25
+  (0.50), Sonnet 5.5 at 2/10 (0.10), Sonnet 5 at 2/10 (0.20), Sonnet 4.6 at 3/15 (0.30), Haiku 5.5
+  at 0.10/0.50 (0.01), and 0.50/2.50 for a prompt over 100K tokens, and Haiku 4.5 at 1/5 (0.10); a
+  5-minute cache write at 1.25 times the input, an hour's at twice. The cache reads of Opus 5 and
+  4.x, Sonnet 5 and 4.6, and both Haiku are not published per model and are derived from the
+  published rule (about a tenth of the input), as the code marks them. A config saved when the
+  prices were its (`prices`) still loads: its schema drops a key it does not know. A model it has no
+  price for is logged with `usd: null`, counted as unpriced, and warned of once a run
   (`no price for the model …`). Its last 24 hours are kept in its store (`spend`, by the hour, by
   node and model; the hours that overlap the last 24), so a restart keeps them: its `status` read
   gives `{ calls, cost, usd, unpriced, since, byNode, byModel }` and the four token counts (`cost`

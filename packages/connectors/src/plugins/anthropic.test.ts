@@ -106,6 +106,10 @@ describe('askWith', () => {
     ]);
     expect(defaults.cacheTtl).toBe('5m');
     expect(anthropicConfig.safeParse({ cacheTtl: '1d' }).success).toBe(false);
+    // The prices are the code's, not the config's (D117): an old config's `prices` is dropped.
+    expect(anthropicConfig.parse({ prices: { 'claude-x': { input: 1 } } })).not.toHaveProperty(
+      'prices'
+    );
   });
 
   it('answers the output parsed by the schema given', async () => {
@@ -167,7 +171,8 @@ describe('the anthropic plugin', () => {
     const core = new Core({
       clock: new VirtualClock(),
       secrets: secretsWith({ anthropic_api_key: 'sk-example-key' }),
-      config: { anthropic: { model: 'claude-sonnet-5-5' } },
+      // A config saved when the prices were the config's still loads, the key dropped (D117).
+      config: { anthropic: { model: 'claude-sonnet-5-5', prices: { 'claude-sonnet-5-5': {} } } },
     });
     core.register(
       anthropicPlugin({ client: (key) => (keys.push(key), fakeClient({ text: 'hello' })) }),

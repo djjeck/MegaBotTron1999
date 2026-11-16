@@ -23,34 +23,25 @@ export const SPEND_DOC = 'spend';
 export const OWNER_CALLER = '(owner)';
 
 /** One model's prices, in USD per million tokens. */
-const rates = {
-  input: z.number().nonnegative().describe('USD per million input tokens'),
-  output: z.number().nonnegative().describe('USD per million output tokens'),
-  cacheWrite5m: z
-    .number()
-    .nonnegative()
-    .describe('USD per million tokens written to the cache for 5 minutes'),
-  cacheWrite1h: z
-    .number()
-    .nonnegative()
-    .describe('USD per million tokens written to the cache for an hour'),
-  cacheRead: z.number().nonnegative().describe('USD per million tokens read from the cache'),
-};
-export const modelPrice = z.object({
-  ...rates,
-  over: z
-    .object({
-      promptTokens: z
-        .number()
-        .int()
-        .positive()
-        .describe('The prompt’s length, in tokens, above which these prices hold'),
-      ...rates,
-    })
-    .optional()
-    .describe('Its prices for a longer prompt, where they differ'),
-});
-export type ModelPrice = z.infer<typeof modelPrice>;
+export interface Rates {
+  input: number;
+  output: number;
+  /** Tokens written to the cache for 5 minutes. */
+  cacheWrite5m: number;
+  /** Tokens written to the cache for an hour. */
+  cacheWrite1h: number;
+  cacheRead: number;
+}
+
+/** A model's prices, and its dearer ones for a prompt over so many tokens, where they differ. */
+export interface ModelPrice extends Rates {
+  over?: Rates & { promptTokens: number };
+}
+
+/**
+ * The price table, by model id: kept in the connector's code, not its config, so that a release
+ * updates it (D117).
+ */
 export type Prices = Readonly<Record<string, ModelPrice>>;
 
 /** What a call used, in tokens. */

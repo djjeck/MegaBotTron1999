@@ -49,10 +49,10 @@ restart costs nothing.
 
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
   structured output by a zod schema. A model connector (docs/bot-os.md D117): it logs each call
-  itself (`anthropic.call`: the calling node, the model, the tokens, the cost in USD from its
-  config's `prices`, Anthropic's published prices by default, a model of no price logged as
-  unknown), and keeps its last 24 hours by node and model in its store (`spend.ts`, which another
-  model connector can reuse), shown on its card, its panel and its page **Spend**.
+  itself (`anthropic.call`: the calling node, the model, the tokens, the cost in USD from its price
+  table, Anthropic's published prices kept in its code so that a release updates them, a model of no
+  price logged as unknown), and keeps its last 24 hours by node and model in its store (`spend.ts`,
+  which another model connector can reuse), shown on its card, its panel and its page **Spend**.
 
 Their secrets come from Docker secrets, never from variables. The two Telegram connectors also log
 in from their node's panel (docs/bot-os.md D116): `bot-login.ts` takes a bot's token (checked with
