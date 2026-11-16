@@ -198,7 +198,7 @@ describe('the reactor', () => {
     const config = {
       match: 'the (?<prize>\\w+) draw opens',
       ignoreCase: true,
-      in: BOT,
+      in: [BOT],
       chat: BOT,
       send: '/look {prize}',
     };
@@ -318,15 +318,18 @@ describe('the reactor', () => {
     );
   });
 
-  it('reads the messages of a list of chats, and one chat as saved before (#7)', async () => {
+  it('reads the messages of a list of chats (#7)', async () => {
     const config = { match: 'draw opens', chat: BOT, send: '/look' };
-    for (const chats of [[BOT, '@OtherBot'], BOT]) {
-      const { account } = await run({ ...config, in: chats }, { live: true, events: false });
-      account.hear({ chat: '@Elsewhere', sender: 'QuestBot', text: 'draw opens', time: T0 });
-      account.hear({ chat: BOT, sender: 'QuestBot', text: 'draw opens', time: T0 });
-      await flush();
-      expect(account.sent).toEqual([{ chat: BOT, text: '/look' }]);
-    }
+    const { account } = await run(
+      { ...config, in: [BOT, '@OtherBot'] },
+      { live: true, events: false }
+    );
+    account.hear({ chat: '@Elsewhere', sender: 'QuestBot', text: 'draw opens', time: T0 });
+    account.hear({ chat: BOT, sender: 'QuestBot', text: 'draw opens', time: T0 });
+    await flush();
+    expect(account.sent).toEqual([{ chat: BOT, text: '/look' }]);
     expect(reactorConfig.safeParse({ ...config, in: [] }).success).toBe(false);
+    // One chat as a string, as 0.1.20 saved it, reads no more (bot-os.md D110).
+    expect(reactorConfig.safeParse({ ...config, in: BOT }).success).toBe(false);
   });
 });

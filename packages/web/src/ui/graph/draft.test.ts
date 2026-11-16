@@ -288,7 +288,7 @@ describe('the draft', () => {
       version: 2,
       nodes: [
         { id: 'bot', plugin: 'bot', config: { owner: 1000000002 } },
-        { id: 'look', plugin: 'reactor', config: { chat: '@QuestBot', in: '#lobby' } },
+        { id: 'look', plugin: 'reactor', config: { chat: '@QuestBot', in: ['#lobby'] } },
         { id: 'teller', plugin: 'teller' },
       ],
       edges: [],
@@ -355,34 +355,39 @@ describe('the draft', () => {
         ],
       };
       const specs = views.get('reactor')?.configChats ?? [];
-      const before = { chat: '@QuestBot', in: '#lobby' };
+      const before = { chat: '@QuestBot', in: ['#lobby'] };
       const after = syncEdgeChats(wired, 'look', specs, before, {
         chat: '@OtherBot',
-        in: '#lobby',
+        in: ['#lobby'],
       });
       expect(after.edges[0]?.sends).toEqual(['#extra', '@OtherBot']);
       expect(after.edges[1]).toBe(wired.edges[1]);
       // A template in its place takes the chat off; nothing changed, the graph as it was.
       expect(
-        syncEdgeChats(wired, 'look', specs, before, { chat: '{chat}', in: '#lobby' }).edges[0]
+        syncEdgeChats(wired, 'look', specs, before, { chat: '{chat}', in: ['#lobby'] }).edges[0]
           ?.sends
       ).toEqual(['#extra']);
       expect(syncEdgeChats(wired, 'look', specs, before, before)).toBe(wired);
       // Its input's: onto the reads, unless it reads every chat.
       expect(
-        syncEdgeChats(wired, 'look', specs, before, { ...before, in: '#side' }).edges[1]?.reads
+        syncEdgeChats(wired, 'look', specs, before, { ...before, in: ['#side'] }).edges[1]?.reads
       ).toEqual(['#side']);
       const every = {
         ...wired,
         edges: [wired.edges[0], { ...wired.edges[1], reads: '*' }],
       } as Graph;
       expect(
-        syncEdgeChats(every, 'look', specs, before, { ...before, in: '#side' }).edges[1]?.reads
+        syncEdgeChats(every, 'look', specs, before, { ...before, in: ['#side'] }).edges[1]?.reads
       ).toBe('*');
       // Picked where its edge names it already, by any case: named once.
       expect(
-        syncEdgeChats(wired, 'look', specs, { in: '#lobby' }, { chat: '@questbot', in: '#lobby' })
-          .edges[0]?.sends
+        syncEdgeChats(
+          wired,
+          'look',
+          specs,
+          { in: ['#lobby'] },
+          { chat: '@questbot', in: ['#lobby'] }
+        ).edges[0]?.sends
       ).toEqual(['@QuestBot', '#extra']);
       // People it recognises (D100) go on no edge, nor keep a chat on one.
       const people = [...specs, { key: 'deny', output: 'chat', sender: true as const }];
@@ -392,7 +397,7 @@ describe('the draft', () => {
       expect(
         syncEdgeChats(wired, 'look', people, before, {
           chat: '@OtherBot',
-          in: '#lobby',
+          in: ['#lobby'],
           deny: ['@QuestBot'],
         }).edges[0]?.sends
       ).toEqual(['#extra', '@OtherBot']);

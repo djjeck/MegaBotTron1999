@@ -55,8 +55,9 @@ export const reactorConfig = z
         'A regular expression the messages read on its chat input must match; its named groups, `(?<item>…)`, go into the payload. Or set `on`'
       ),
     in: z
-      // A list (#7), as react() takes; one chat, as 0.1.20 and before saved it, still reads.
-      .union([z.array(z.string().min(1)).min(1), z.string().min(1)])
+      // A list (#7), as react() takes.
+      .array(z.string().min(1))
+      .min(1)
       .optional()
       .describe(
         'With `match`: the chats whose messages it reads; every chat its edge reads if unset'
@@ -207,7 +208,7 @@ export function reactorPlugin(): Plugin {
               c.on ??
               ({
                 match: new RegExp(c.match as string, c.ignoreCase ? 'iu' : 'u'),
-                ...(c.in === undefined ? {} : { chats: typeof c.in === 'string' ? [c.in] : c.in }),
+                ...(c.in === undefined ? {} : { chats: c.in }),
               } as const),
             when: c.when,
             chat: c.chat,

@@ -26,9 +26,9 @@ a game's player state, the script node, and the node that tells the owner what n
   chat-in input (there only with `match`) matches its `match`, and the payload's fields equal its
   `when`, it sends its `send` template to its `chat`, through its chat-out output's outbox; a fixed
   `chat` picked in the editor is written on its edge too (D97); `in`, the chats a message is read
-  in, is a list (one chat, as saved before, still reads). Its `status` read gives its last reaction
-  and its reactions by outcome, kept in its store across restarts and shown in its node panel and
-  card. One plugin, run as one instance per reaction.
+  in, is a list (one chat as a string, as 0.1.20 saved it, is refused: D110). Its `status` read
+  gives its last reaction and its reactions by outcome, kept in its store across restarts and shown
+  in its node panel and card. One plugin, run as one instance per reaction.
 - `statePlugin` (`src/state-plugin.ts`): a game's player state (an inventory, a profile), from a
   spec the game gives: the state's zod schema, its initial value, the event types it applies (a
   required events input per namespace, so that its parser stopped takes it down), a pure reducer,

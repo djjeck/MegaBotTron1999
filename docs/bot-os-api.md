@@ -2076,17 +2076,17 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   (`reactorConfig`): `on`, the event type it reacts to (or a namespace), or `match`, a regular
   expression the messages read on its chat-in input must match (its named groups in the payload),
   with `in` (the chats whose messages it reads, a list picked among its chat-in connector's, D96,
-  #7; one chat as a string, as 0.1.20 saved it, still reads; every chat its edge reads without) and
-  `ignoreCase`; exactly one of `on` and `match`. Then `when` (dotted paths of the payload, each
-  equal to its value), `chat` (picked among its chat-out connector's chats, or a `{path}` template,
-  D96) and `send` (a `{path}` template of the payload), the chat picked for `chat` and `in` written
-  by the editor on its edge's `sends` and `reads` too, and replaced there when the pick changes
-  (D97: a template names no chat ahead, so a `{chat}` reaction's edge lists by hand the chats it may
-  answer in), and `maxAgeS` (how old an event may be, unset by default: any age, an event played
-  back skipped by its mark, D88). Its ports: `chat`, a chat-out output, the account it sends through
-  (on any network), whose edge carries the chat it sends to and its commands; `chat`, a chat-in
-  input there only with `match` (`when: { config: 'match' }`, §2.1), the chats it reads; and
-  `events`, whose namespace is the one of its `on` (§2.1): there only with `on`
+  #7; one chat as a string, as 0.1.20 saved it, is refused since D110; every chat its edge reads
+  without) and `ignoreCase`; exactly one of `on` and `match`. Then `when` (dotted paths of the
+  payload, each equal to its value), `chat` (picked among its chat-out connector's chats, or a
+  `{path}` template, D96) and `send` (a `{path}` template of the payload), the chat picked for
+  `chat` and `in` written by the editor on its edge's `sends` and `reads` too, and replaced there
+  when the pick changes (D97: a template names no chat ahead, so a `{chat}` reaction's edge lists by
+  hand the chats it may answer in), and `maxAgeS` (how old an event may be, unset by default: any
+  age, an event played back skipped by its mark, D88). Its ports: `chat`, a chat-out output, the
+  account it sends through (on any network), whose edge carries the chat it sends to and its
+  commands; `chat`, a chat-in input there only with `match` (`when: { config: 'match' }`, §2.1), the
+  chats it reads; and `events`, whose namespace is the one of its `on` (§2.1): there only with `on`
   (`when: { config: 'on' }`) and then required, bound to the nodes whose events it hears (the check
   refuses a reactor on events that no edge binds), and not a port at all of a reactor on messages.
   So a reactor on events only sends. Each reaction is recorded as `reactor.reaction`, and each send
