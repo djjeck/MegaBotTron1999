@@ -13,6 +13,9 @@
  * says so; a chat it does not know at all is shown as such. A peer's chat, picked, is asked of the
  * connector first, which then lists it if it can reach it.
  *
+ * A picker of one chat (radio buttons) for an optional key offers **None** first, picked while it
+ * holds no chat, which takes the key away: a key such as a bot's `owner` can be unset as it was.
+ *
  * A picker of people to recognise rather than chats to send to (`sender`, a `telegram-bot`'s deny
  * list, bot-os.md D100) says nothing of reaching them: a peer's person is picked at once, by id,
  * and one the connector does not know is still shown by the name a peer has for them.
@@ -230,6 +233,8 @@ export function ChatPicker(props: {
   set: (v: string[]) => void;
   /** One chat at most: picking another replaces it. */
   single?: boolean;
+  /** With `single`, it may hold none: a **None** choice comes first, which clears it. */
+  optional?: boolean;
   /** The kinds of chat it offers; any without. */
   kinds?: readonly Kind[];
   /** People to recognise, not chats to send to (D100): nothing said of reaching them. */
@@ -318,6 +323,23 @@ export function ChatPicker(props: {
       : [];
 
   const choose = (v: string): void => props.set(single ? [v] : [...value, v]);
+  // An optional single pick may be cleared: its **None**, picked while it holds nothing.
+  const none =
+    single && props.optional === true ? (
+      <label className="chat-none">
+        <input
+          type="radio"
+          name={`${props.label}-pick`}
+          aria-label={`no ${props.label}`}
+          checked={value.length === 0}
+          disabled={props.disabled === true || asking !== undefined}
+          onChange={(e) => {
+            if (e.target.checked) props.set([]);
+          }}
+        />{' '}
+        None
+      </label>
+    ) : null;
   const drop = (v: string): void =>
     props.set(value.filter((x) => x.toLowerCase() !== v.toLowerCase()));
   /** A peer's chat: asked of this connector first, which lists it if it can reach it. */
@@ -399,6 +421,7 @@ export function ChatPicker(props: {
       {note !== undefined ? (
         <>
           <p className="muted small">{note}</p>
+          {none}
           {value.length === 0 ? null : (
             <ul className="chats" aria-label={`${props.label} picked`}>
               {picked.map((r) => line(r, true))}
@@ -436,14 +459,8 @@ export function ChatPicker(props: {
             disabled={props.disabled}
             onChange={(e) => setSearch(e.target.value)}
           />
+          {none}
           <ul className="chats" aria-label={`${props.label} chats`}>
-            {single && value.length > 0 && props.disabled !== true ? (
-              <li className="chat-row">
-                <button type="button" className="link small" onClick={() => props.set([])}>
-                  clear
-                </button>
-              </li>
-            ) : null}
             {picked.map((r) => line(r, true))}
             {offered.map((r) => line(r, false))}
             {peers.map((r) => line(r, false))}

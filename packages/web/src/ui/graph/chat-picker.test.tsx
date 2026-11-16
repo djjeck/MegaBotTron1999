@@ -55,6 +55,7 @@ const view = (surfaces: Surface[], peers?: { connector: string; surfaces: Surfac
 function Harness(props: {
   initial: string[];
   single?: boolean;
+  optional?: boolean;
   kinds?: Surface['kind'][];
   sender?: boolean;
 }) {
@@ -68,6 +69,7 @@ function Harness(props: {
         set={setValue}
         now={NOW}
         {...(props.single === true ? { single: true } : {})}
+        {...(props.optional === true ? { optional: true } : {})}
         {...(props.kinds === undefined ? {} : { kinds: props.kinds })}
         {...(props.sender === true ? { sender: true } : {})}
       />
@@ -108,14 +110,16 @@ describe('the chat picker (D96)', () => {
     expect(valueOf()).toBe('["-1001"]');
   });
 
-  it('picks one, of the kinds asked, finds it by id, and clears it', async () => {
+  it('picks one, of the kinds asked, finds it by id, and clears it with None when optional', async () => {
     fakeApi({
       'GET /accounts/bot/surfaces?peers=1': [...view([QUEST, HALL, ADA])],
       'GET /accounts/bot/surfaces?search=5&peers=1': [...view([ADA])],
       'GET /accounts/bot/surfaces?search=zzz&peers=1': [...view([])],
     });
-    render(<Harness initial={[]} single kinds={['private']} />);
+    render(<Harness initial={[]} single optional kinds={['private']} />);
     await screen.findByLabelText('Ada');
+    // Nothing picked: None is.
+    expect((screen.getByLabelText('no chat') as HTMLInputElement).checked).toBe(true);
     expect(screen.queryByLabelText('Guild Hall')).toBeNull();
     fireEvent.change(screen.getByLabelText('search chat'), { target: { value: '5' } });
     await waitFor(() => expect(rows()).toEqual(['personAda@ada_x3 days ago']));
@@ -124,7 +128,24 @@ describe('the chat picker (D96)', () => {
     expect((screen.getByLabelText('Ada') as HTMLInputElement).type).toBe('radio');
     fireEvent.change(screen.getByLabelText('search chat'), { target: { value: 'zzz' } });
     expect(await screen.findByText('No chat matches.')).toBeDefined();
-    fireEvent.click(screen.getByRole('button', { name: 'clear' }));
+    expect((screen.getByLabelText('no chat') as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByLabelText('no chat'));
+    expect(valueOf()).toBe('[]');
+    expect((screen.getByLabelText('no chat') as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('offers no None for a single pick that must hold a chat, and None where none can be listed', async () => {
+    fakeApi({ 'GET /accounts/bot/surfaces?peers=1': [...view([ADA])] });
+    const { unmount } = render(<Harness initial={['5']} single kinds={['private']} />);
+    await screen.findByLabelText('Ada');
+    expect(screen.queryByLabelText('no chat')).toBeNull();
+    unmount();
+    fakeApi({
+      'GET /accounts/bot/surfaces?peers=1': [200, { running: false, listed: false, surfaces: [] }],
+    });
+    render(<Harness initial={['5']} single optional />);
+    await screen.findByText('Apply first to list its chats.');
+    fireEvent.click(screen.getByLabelText('no chat'));
     expect(valueOf()).toBe('[]');
   });
 

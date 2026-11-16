@@ -1521,6 +1521,10 @@ ul.chats {
   gap: 0.35rem;
   min-width: 0;
 }
+.chat-picker .chat-none {
+  display: block;
+  padding: 0.15rem 0.2rem;
+}
 .chat-row.picked {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }

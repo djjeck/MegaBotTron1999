@@ -111,6 +111,7 @@ function chatControls(
   edges: readonly GraphEdge[]
 ): Record<string, CustomControl> {
   const props = (schema?.['properties'] ?? {}) as Record<string, JsonSchema>;
+  const required = (schema?.['required'] ?? []) as string[];
   return Object.fromEntries(
     specs.map((spec): [string, CustomControl] => {
       const type = props[spec.key]?.['type'];
@@ -132,6 +133,7 @@ function chatControls(
                 noConnector={`Draw its ${spec.output ?? spec.input ?? ''} edge to a connector first, to pick from its chats.`}
                 value={template ? [] : chatValues(value)}
                 single={!many}
+                optional={!required.includes(spec.key)}
                 {...(spec.kinds === undefined ? {} : { kinds: spec.kinds })}
                 sender={spec.sender === true}
                 set={(v) => {
