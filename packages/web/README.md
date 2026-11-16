@@ -131,50 +131,53 @@ the server that guards them.
   sheet's edge and closes it; the rollback is the History page's. Under it, the **Costs** tab opens
   the nodes by cost (`Costs.tsx`, docs/bot-os.md D77: since the start, the CPU a script's worker
   spent running its code or else the time in its handlers, sortable by any column, the top three
-  marked), each node's name selecting it. **What belongs to a node is on it** (docs/bot-os.md D111):
-  a connector's cards show its connection (`connected`, `connecting`, `closed`, its step on hover)
-  and its panel its account as it runs, as whom, and its connection (`GET /accounts`); every node's
-  panel says what it costs, its share and whether it is among the top three, and, while it runs, its
-  status (read there, so its reads offer no **Read** of it), its settings in force (each set at once
-  with its **Set**, as `/set` does in chat, above the form of the settings a fresh instance starts
-  with) and its reads and actions, each called with **Read** or **Run**, its input in a form made
-  from its schema, its answer under it (`NodeControls.tsx`). **A connector's login** (docs/bot-os.md
-  D116): one that logs in from its node (a Telegram one) says `needs login` on its card until it has
-  credentials, and its panel, while it runs, shows its **Login** as its connector says it
-  (`ConnectorLogin.tsx`, `GET` and `POST /plugins/<id>/login`): a step's title, how-to and link, a
-  QR code drawn from its link (`qrcode-generator`, renewed as the login asks again every 2 s while
-  under way), its fields (a secret one typed unseen, cleared once sent) and its buttons (a logout
-  asking first); once its credentials changed, **Restart now** restarts the instance as Apply does.
-  Its Docker secrets show as its fallback, not required. **Widgets and pages** (docs/bot-os.md
-  D112): a node whose plugin declares a widget shows it in one line on its card while it runs
-  (`Widget.tsx`'s `WidgetLine`, `widget-text.ts`: its fields, a count, a list's first items, a
-  table's rows counted, an amount out of its total with a bar, or how long until a time, moving with
-  the clock), from `GET /status`'s `widget`, its card a line taller for it; one that declares a page
-  has **Open its page** in its panel while it runs, which leads to `#/node/<id>` (`NodePage.tsx`, in
-  no menu): the page's sections drawn in full (`WidgetSection`), each read asked every five seconds.
-  The map's bar heads with the instance's switches: `instance on` or `off`, **Turn off** (asking
-  first) or **Turn on**, and **Kill all** (every plugin's safety stop, asking first). Select one
-  node or several (Shift, Ctrl or Cmd with a click; Shift and drag for a box) and **Kill selected**
-  kills each: its plugin's own safety stop, then stopped, kept across restarts; a stopped node's
-  panel has **Clear stop**, a change of the draft that Review lists and Apply makes (`clear-stop`,
-  then the restart), and its forms stay editable. Nodes start in columns (`layout.ts`) and can be
-  moved. **Swimlanes** (docs/bot-os.md D69): a node's panel sets its **Group** (none, one of the
-  draft's, or **new group…**, named and set), a change of the draft like any other; a draft with
-  groups is drawn in lanes (`layout.ts`'s `swimlanes`, `lanes.ts`, `LaneNode.tsx`): the same global
-  columns, each group a tinted band with its name at its top left, in the order of its first node,
-  the ungrouped nodes in an unlabelled band last, and the connectors' in and out cards outside every
-  band, at the left and the right (a connector's group is ignored, which its panel says). A card is
-  its lane's child in React Flow, and stays in its lane when dragged. A lane's label zooms to fit
-  it; resting on a node dims what it does not reach, and on a lane's label everything outside the
-  lane but its edges and the connectors they reach; the minimap tints each lane. Its colour comes
-  from a fixed palette, by a hash of its name, the next free one when an earlier lane has it.
-  **Modules** (`#/modules`, `ModulesPage.tsx`, docs/bot-os.md D67, D102) lists the modules
-  installed, each with its version, its source (a folder upload, a tarball, or a repository on
-  GitHub or a self-hosted Git server, linked at its commit) and when it was installed. It installs
-  modules from a folder, chosen (**Choose folder**) or dropped on the page, or from a repository's
-  link: a public GitHub one (`https://github.com/<owner>/<repo>` or `…/tree/<ref>/<path>`), or one
-  on a Git server added under **Git servers** (`GitServers.tsx`: each server with its token's Docker
-  secret, picked from `GET /modules/hosts`'s names, added with `POST /modules/hosts`, removed with
+  marked; and a model connector's money over the last 24 hours, docs/bot-os.md D117), each node's
+  name selecting it. **A model connector** (its manifest's `model`, D117) has a `$` on its card, so
+  that the owner watches it; what it spent shows on its card through its widget, and in its panel's
+  Cost line. **What belongs to a node is on it** (docs/bot-os.md D111): a connector's cards show its
+  connection (`connected`, `connecting`, `closed`, its step on hover) and its panel its account as
+  it runs, as whom, and its connection (`GET /accounts`); every node's panel says what it costs, its
+  share and whether it is among the top three, and, while it runs, its status (read there, so its
+  reads offer no **Read** of it), its settings in force (each set at once with its **Set**, as
+  `/set` does in chat, above the form of the settings a fresh instance starts with) and its reads
+  and actions, each called with **Read** or **Run**, its input in a form made from its schema, its
+  answer under it (`NodeControls.tsx`). **A connector's login** (docs/bot-os.md D116): one that logs
+  in from its node (a Telegram one) says `needs login` on its card until it has credentials, and its
+  panel, while it runs, shows its **Login** as its connector says it (`ConnectorLogin.tsx`, `GET`
+  and `POST /plugins/<id>/login`): a step's title, how-to and link, a QR code drawn from its link
+  (`qrcode-generator`, renewed as the login asks again every 2 s while under way), its fields (a
+  secret one typed unseen, cleared once sent) and its buttons (a logout asking first); once its
+  credentials changed, **Restart now** restarts the instance as Apply does. Its Docker secrets show
+  as its fallback, not required. **Widgets and pages** (docs/bot-os.md D112): a node whose plugin
+  declares a widget shows it in one line on its card while it runs (`Widget.tsx`'s `WidgetLine`,
+  `widget-text.ts`: its fields, a count, a list's first items, a table's rows counted, an amount out
+  of its total with a bar, or how long until a time, moving with the clock), from `GET /status`'s
+  `widget`, its card a line taller for it; one that declares a page has **Open its page** in its
+  panel while it runs, which leads to `#/node/<id>` (`NodePage.tsx`, in no menu): the page's
+  sections drawn in full (`WidgetSection`), each read asked every five seconds. The map's bar heads
+  with the instance's switches: `instance on` or `off`, **Turn off** (asking first) or **Turn on**,
+  and **Kill all** (every plugin's safety stop, asking first). Select one node or several (Shift,
+  Ctrl or Cmd with a click; Shift and drag for a box) and **Kill selected** kills each: its plugin's
+  own safety stop, then stopped, kept across restarts; a stopped node's panel has **Clear stop**, a
+  change of the draft that Review lists and Apply makes (`clear-stop`, then the restart), and its
+  forms stay editable. Nodes start in columns (`layout.ts`) and can be moved. **Swimlanes**
+  (docs/bot-os.md D69): a node's panel sets its **Group** (none, one of the draft's, or **new
+  group…**, named and set), a change of the draft like any other; a draft with groups is drawn in
+  lanes (`layout.ts`'s `swimlanes`, `lanes.ts`, `LaneNode.tsx`): the same global columns, each group
+  a tinted band with its name at its top left, in the order of its first node, the ungrouped nodes
+  in an unlabelled band last, and the connectors' in and out cards outside every band, at the left
+  and the right (a connector's group is ignored, which its panel says). A card is its lane's child
+  in React Flow, and stays in its lane when dragged. A lane's label zooms to fit it; resting on a
+  node dims what it does not reach, and on a lane's label everything outside the lane but its edges
+  and the connectors they reach; the minimap tints each lane. Its colour comes from a fixed palette,
+  by a hash of its name, the next free one when an earlier lane has it. **Modules** (`#/modules`,
+  `ModulesPage.tsx`, docs/bot-os.md D67, D102) lists the modules installed, each with its version,
+  its source (a folder upload, a tarball, or a repository on GitHub or a self-hosted Git server,
+  linked at its commit) and when it was installed. It installs modules from a folder, chosen
+  (**Choose folder**) or dropped on the page, or from a repository's link: a public GitHub one
+  (`https://github.com/<owner>/<repo>` or `…/tree/<ref>/<path>`), or one on a Git server added under
+  **Git servers** (`GitServers.tsx`: each server with its token's Docker secret, picked from
+  `GET /modules/hosts`'s names, added with `POST /modules/hosts`, removed with
   `DELETE /modules/hosts/<host>`), a module's own folder or a repository's that holds several. The
   folder's paths, its `module.json` files and its `.gitignore` files go to `POST /modules/plan`
   (`src/ui/module-folder.ts`), a link to `POST /modules/link`; the modules found, but those under

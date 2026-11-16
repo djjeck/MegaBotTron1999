@@ -909,6 +909,12 @@ main.wide > .page {
   color: var(--muted);
 }
 
+/* A model connector spends money on each call (D117). */
+.badge.model {
+  color: var(--warn);
+  font-weight: bold;
+}
+
 .port-name {
   position: absolute;
   font-size: 0.75rem;

@@ -11,7 +11,8 @@
  * its twin is. A node that keeps a state (D72) shows a line of it, from its pins. A connector's
  * cards show its account's connection (D111): connected, connecting or closed, with its step. A
  * node whose plugin declares a widget (D112) shows it in a line while it runs, its card a line
- * taller for it whatever its state, so that the map does not move as nodes start and stop.
+ * taller for it whatever its state, so that the map does not move as nodes start and stop. A
+ * model connector, which spends money on each call, is marked with a `$` (D117).
  */
 import type { Node, NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
@@ -175,6 +176,16 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
       aria-disabled={greyed}
     >
       <div className="head">
+        {view.model === true ? (
+          <span
+            className="badge model"
+            role="img"
+            aria-label="a model: it spends money"
+            title="A model: each call costs money. Watch its state, and its last 24 hours."
+          >
+            $
+          </span>
+        ) : null}
         <strong>{title}</strong>
         {view.plugin === view.id ? null : <span className="muted"> {view.plugin}</span>}
         <div className="muted small">{view.kinds.join(', ')}</div>

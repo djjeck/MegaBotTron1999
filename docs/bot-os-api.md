@@ -1530,7 +1530,8 @@ control API, the web UI and later the agents, whose grants will be subsets of it
   `unpriced`, the calls of a model with no price, whose cost is unknown. Each node's panel in the
   editor says its own, and the editor's **Costs** side sheet (`#/resources` opens it, bot-os.md
   D111) lists the nodes by cost, a worker's CPU or else its handlers' time, most first, sortable by
-  any column, the top three marked with their share. The timing costs about 0.16 µs a handler call.
+  any column (a model's spend one of them), the top three marked with their share. The timing costs
+  about 0.16 µs a handler call.
 - **The owner's changes:** a declared read (`read`) and a declared action (`act`), whose input is
   checked against the action's schema (an error names the field) and which the plugin refuses by
   throwing, with why; a node's stop cleared (`clearStop`), for the next start. No control raises a

@@ -5,10 +5,11 @@
  * from `GET /status`, which the editor reads already. Each node's own in its panel (`CostLine`),
  * with its share of the whole and whether it is among the top three; all of them in the editor's
  * **Costs** side sheet (`CostTable`), a table sorted by its cost, most first, by any column with a
- * click, the top three marked, each node's name selecting it.
+ * click, the top three marked, each node's name selecting it. A model connector's money over the
+ * last 24 hours is beside its time (`own.spend`, D117): what it spent, and its calls.
  */
 import { useState } from 'react';
-import type { NodeCost, PluginControl } from '#src/ui/api.ts';
+import type { NodeCost, PluginControl, Spend } from '#src/ui/api.ts';
 
 /** A node's row: its cost, the CPU of its worker or its handlers' time, and the rest. */
 export interface CostRow {
@@ -22,6 +23,8 @@ export interface CostRow {
   avgMs: number;
   maxMs: number;
   heapMb?: number;
+  /** A model connector's money over the last 24 hours (D117). */
+  spend?: Spend;
 }
 
 /** Each node's row, from its cost as `GET /status` gives it. */
@@ -42,6 +45,7 @@ export function costRows(plugins: readonly PluginControl[]): CostRow[] {
       avgMs: calls === 0 ? 0 : ms / calls,
       maxMs: own?.maxMs ?? c.dispatch.maxMs,
       ...(own?.heapBytes === undefined ? {} : { heapMb: own.heapBytes / 2 ** 20 }),
+      ...(own?.spend === undefined ? {} : { spend: own.spend }),
     };
   });
 }
@@ -90,8 +94,21 @@ export function CostLine({ cost }: { cost: Ranked }) {
         {ms(row.maxMs)}
         {row.heapMb === undefined ? '' : ` · ${row.heapMb.toFixed(1)} MB heap`}; since the start
       </span>
+      {row.spend === undefined ? null : (
+        <>
+          <br />
+          <span className="badge model">$</span> {spent(row.spend)} over the last 24 hours
+        </>
+      )}
     </>
   );
+}
+
+/** A model's money in words: `$0.42, 14 calls`, and the calls of no price, whose cost is unknown. */
+export function spent(s: Spend): string {
+  const usd = s.usd === 0 ? '$0' : s.usd < 0.01 ? `$${s.usd.toFixed(4)}` : `$${s.usd.toFixed(2)}`;
+  const calls = `${s.calls} call${s.calls === 1 ? '' : 's'}`;
+  return `${usd}, ${calls}${s.unpriced === 0 ? '' : ` (${s.unpriced} of no price, cost unknown)`}`;
 }
 
 type Key = Exclude<keyof CostRow, 'state'>;
@@ -107,6 +124,7 @@ const COLUMNS: { key: Key; title: string; help: string }[] = [
   { key: 'avgMs', title: 'Avg', help: 'A call’s time, on average' },
   { key: 'maxMs', title: 'Max', help: 'The longest call' },
   { key: 'heapMb', title: 'Heap', help: 'A worker’s heap in use' },
+  { key: 'spend', title: 'Spent', help: 'A model’s money over the last 24 hours, and its calls' },
 ];
 
 export const ms = (v: number): string =>
@@ -128,8 +146,8 @@ export function CostTable(props: {
   const rows = [...ranked.values()].map((r) => r.row);
   if (rows.length === 0) return <p className="muted">No node runs.</p>;
   rows.sort((a, b) => {
-    const x = a[sort.key];
-    const y = b[sort.key];
+    const x = sort.key === 'spend' ? a.spend?.usd : a[sort.key];
+    const y = sort.key === 'spend' ? b.spend?.usd : b[sort.key];
     const order =
       typeof x === 'string' || typeof y === 'string'
         ? String(x ?? '').localeCompare(String(y ?? ''))
@@ -212,6 +230,7 @@ export function CostTable(props: {
                   <td>{ms(r.avgMs)}</td>
                   <td>{ms(r.maxMs)}</td>
                   <td>{r.heapMb === undefined ? '' : `${r.heapMb.toFixed(1)} MB`}</td>
+                  <td>{r.spend === undefined ? '' : spent(r.spend)}</td>
                 </tr>
               );
             })}
