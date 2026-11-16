@@ -158,6 +158,11 @@ export interface PluginControl {
   actions: string[];
   /** Its own account of itself, if it declares a `status` read and runs. */
   status?: unknown;
+  /**
+   * What its widget shows (bot-os.md D112): the output of the read its widget names, while it
+   * runs and the read answers; the web UI draws it on its card as the widget says.
+   */
+  widget?: unknown;
   /** One line of the state it keeps, for its card, if it offers a view (bot-os.md D72). */
   summary?: string;
   /** What it costs, since the start (bot-os.md D77). */
@@ -215,6 +220,14 @@ export class Controls {
         }
         const reads = Object.keys(m.interface.state ?? {});
         const status = reads.includes('status') ? this.read(id, 'status') : undefined;
+        const w = m.widget;
+        // Its status, read already, is not read again for a widget that shows it.
+        const widget =
+          w === undefined
+            ? undefined
+            : w.read === 'status' && w.input === undefined && status !== undefined
+              ? status
+              : this.read(id, w.read, w.input);
         const summary = this.summary(id);
         const cost = this.host.cost?.(id);
         const backoff = this.host.backoffs?.(id) ?? [];
@@ -230,6 +243,7 @@ export class Controls {
           reads,
           actions: Object.keys(m.interface.actions ?? {}),
           ...(status !== undefined && 'value' in status ? { status: status.value } : {}),
+          ...(widget !== undefined && 'value' in widget ? { widget: widget.value } : {}),
           ...(summary === undefined ? {} : { summary }),
           ...(cost === undefined ? {} : { cost }),
           ...(backoff.length === 0 ? {} : { backoff }),

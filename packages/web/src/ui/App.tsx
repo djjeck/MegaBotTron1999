@@ -9,8 +9,9 @@
  * between, which alone scrolls, and a bottom bar for small print, such as diagnostics: the release
  * the instance runs and its commit, how long it has run and its memory (`GET /instance`, read every
  * minute and after a restart). The bars stay where they are.
- * Every page is reached by the URL's hash (`#/admin`); a page added here is a line of `PAGES`, as
- * the widgets will be. Old routes keep leading somewhere: an admin section's (`#/graph-history`) to
+ * Every page is reached by the URL's hash (`#/admin`); a page added here is a line of `PAGES`. A
+ * node's own page (D112), declared by its plugin, is `#/node/<id>`, in no menu, opened from its
+ * node's panel; its widget is on its card. Old routes keep leading somewhere: an admin section's (`#/graph-history`) to
  * it, scrolled to the section; one whose features moved into the editor (`#/plugins`,
  * `#/resources`) to the editor, the side sheet it names open.
  */
@@ -26,6 +27,7 @@ import { ADMIN_SECTIONS, AdminPage } from './pages/AdminPage.tsx';
 import { DriftPage } from './pages/DriftPage.tsx';
 import { EventsPage } from './pages/EventsPage.tsx';
 import { ModulesPage } from './pages/ModulesPage.tsx';
+import { NodePage } from './pages/NodePage.tsx';
 
 /**
  * What every page gets: the way to say the session is gone, and why (the login says it), and the
@@ -63,6 +65,17 @@ export const PAGES: Page[] = [
 ];
 
 /**
+ * A node's full page (D112), at `#/node/<id>`: in no menu, opened from its node's panel; the
+ * node's id is the route's section.
+ */
+export const NODE_PAGE: Page = {
+  route: 'node',
+  title: 'Node page',
+  wide: false,
+  page: (p) => <NodePage {...p} />,
+};
+
+/**
  * The old routes of what moved into the editor (D111), and the side sheet each opens, if one: the
  * instance's switches are on the map's bar, an account and a plugin on its node.
  */
@@ -75,10 +88,14 @@ export const MOVED: Readonly<Record<string, Sheet | undefined>> = {
 };
 
 /**
- * The page a route leads to, and its section: an admin section's old route leads to it, and one
- * whose features moved into the editor to the editor.
+ * The page a route leads to, and its section: a node's page (`node/<id>`) to it, its id the
+ * section; an admin section's old route to it, and one whose features moved into the editor to the
+ * editor.
  */
-export function resolve(route: string): { page: Page; section?: string } {
+export function resolve(path: string): { page: Page; section?: string } {
+  const [route = '', ...rest] = path.split('/');
+  if (route === NODE_PAGE.route && rest.length > 0)
+    return { page: NODE_PAGE, section: decodeURIComponent(rest.join('/')) };
   const page = PAGES.find((p) => p.route === route);
   if (page !== undefined) return { page };
   if (ADMIN_SECTIONS.some((s) => s.id === route))

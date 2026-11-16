@@ -19,7 +19,8 @@
  * What the Admin page showed of a node is here (D111): a connector's account as it runs, as whom,
  * and its connection; what the node costs (D77), its share of the whole and whether it is among the
  * top three; and, while it runs, its own status, its settings in force, set at once, and its reads
- * and actions, called from the panel (`NodeControls.tsx`).
+ * and actions, called from the panel (`NodeControls.tsx`). A node whose plugin declares a page
+ * (D112) has a link to it, while it runs.
  */
 import { useState } from 'react';
 import type {
@@ -833,6 +834,11 @@ export function NodeDetails(props: {
         </p>
       )}
       {running && live.status !== undefined ? <NodeStatus status={live.status} /> : null}
+      {running && view.page !== undefined ? (
+        <p>
+          <a href={`#/node/${encodeURIComponent(view.id)}`}>Open its page: {view.page.title}</a>
+        </p>
+      ) : null}
       {running || live?.state === 'stopped' ? <NodeState id={view.id} /> : null}
       {connector && running ? <ConnectorQueue id={view.id} /> : null}
       {!connector ? null : (

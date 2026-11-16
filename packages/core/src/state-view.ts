@@ -6,6 +6,9 @@
  * reads them; the helpers are shared by the plugins that make a view and the UI that draws one.
  */
 import { type JsonSchema } from './graph-view.ts';
+import { plainSchema } from './widgets.ts';
+
+export { plainSchema };
 
 /** When, and by what event, a part of a state was set: the event's time and its type. */
 export interface Stamp {
@@ -50,26 +53,6 @@ export function valueAtPath(value: unknown, path: string | undefined): unknown {
   }
   return v;
 }
-
-/**
- * A JSON Schema without its wrappers: one of an `anyOf` that is not null (an optional or nullable
- * value), and a `$ref`-free schema as zod writes it.
- */
-export function plainSchema(schema: JsonSchema | undefined): JsonSchema {
-  if (schema === undefined) return {};
-  const choices = schema['anyOf'] as JsonSchema[] | undefined;
-  if (Array.isArray(choices)) {
-    const real = choices.filter((c) => c['type'] !== 'null');
-    if (real.length === 1) return { ...plainSchema(real[0]), ...pick(schema) };
-  }
-  return schema;
-}
-
-/** The labels a wrapper carries over what it wraps. */
-const pick = (s: JsonSchema): JsonSchema =>
-  Object.fromEntries(
-    ['description', 'title', 'default'].filter((k) => k in s).map((k) => [k, s[k]])
-  );
 
 /** The schema at a dotted path: through objects' properties, records' values and arrays' items. */
 export function schemaAtPath(schema: JsonSchema, path: string | undefined): JsonSchema | undefined {

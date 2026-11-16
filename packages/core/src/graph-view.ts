@@ -18,6 +18,7 @@ import {
   type OutputPort,
   PORT_TYPE_INFO,
 } from './ports.ts';
+import { type Widget, type WidgetPage } from './widgets.ts';
 
 /** The graph file, in the data volume. */
 export const GRAPH_FILE = 'graph.json';
@@ -298,6 +299,9 @@ export interface PluginView {
   configInputs?: { key: string; types: ('events' | 'interface')[] };
   /** The keys of its config that name a chat, picked from a connector's chats (D96). */
   configChats?: ConfigChatView[];
+  /** Its node's widget, drawn on its card, and its full page, opened from its panel (D112). */
+  widget?: Widget;
+  page?: WidgetPage;
 }
 
 /** A key of a config that names a chat (bot-os.md D96), as the editor picks it. */
@@ -463,6 +467,8 @@ export function describePlugin(m: Manifest): PluginView {
     ...(m.configChats.length === 0
       ? {}
       : { configChats: m.configChats.map((c) => structuredClone(c) as ConfigChatView) }),
+    ...(m.widget === undefined ? {} : { widget: structuredClone(m.widget) }),
+    ...(m.page === undefined ? {} : { page: structuredClone(m.page) }),
   };
 }
 

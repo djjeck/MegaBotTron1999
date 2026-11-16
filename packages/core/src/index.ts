@@ -406,3 +406,15 @@ export {
   TALLY_KEPT_MS,
   TALLY_MAX,
 } from './summary.ts';
+export {
+  fieldPath,
+  pageSchema,
+  schemaAt,
+  type Widget,
+  WIDGET_PATH,
+  type WidgetField,
+  widgetIssues,
+  type WidgetPage,
+  widgetSchema,
+  type WidgetShow,
+} from './widgets.ts';

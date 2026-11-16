@@ -69,12 +69,14 @@ sibling module or the docs flags nothing); **Update** installs it. Nothing is in
 but by you. The Modules page also installs a `.tar.gz` and rolls a module back to its previous
 version. In the graph, each node shows what belongs to it: its state, a connector's connection, and
 in its panel what it costs and, while it runs, its status, settings, reads and actions; the
-instance's off and kill switches head the map's bar (D111). The History page shows the graph's
-history (each version applied in the last 7 days, what changed, whether the instance started on it,
-and a rollback to it) (D59, D61). A **script** node runs TypeScript typed in its panel, on the ports
-its panel declares, each in a worker thread of its own ([docs/bot-os.md](docs/bot-os.md) D76). In a
-real deployment, use Docker or Compose secrets, and put the UI behind a reverse proxy with HTTPS,
-and on the internet with its own authentication, rather than publishing the port.
+instance's off and kill switches head the map's bar (D111). A plugin may declare a widget, drawn in
+a line on its node's card, and a page of its own, opened from its node's panel, both made from its
+reads (D112). The History page shows the graph's history (each version applied in the last 7 days,
+what changed, whether the instance started on it, and a rollback to it) (D59, D61). A **script**
+node runs TypeScript typed in its panel, on the ports its panel declares, each in a worker thread of
+its own ([docs/bot-os.md](docs/bot-os.md) D76). In a real deployment, use Docker or Compose secrets,
+and put the UI behind a reverse proxy with HTTPS, and on the internet with its own authentication,
+rather than publishing the port.
 
 - **`/data`** is the instance's state: the graph (`graph.json`, and its versions in
   `graph-history/`), each plugin instance's state (`instances/<id>/`), the core's own (`core/`), the

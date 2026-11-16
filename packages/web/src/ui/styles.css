@@ -813,6 +813,51 @@ main.wide > .page {
   font-variant-numeric: tabular-nums;
 }
 
+/* A node's widget (D112): one line on its card, cut short, whole on hover. */
+.widget-line {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  overflow: hidden;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.widget-line span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.widget-line progress {
+  flex: 0 0 3rem;
+  height: 0.5rem;
+}
+
+/* A node's page (D112): its sections, each a read's value drawn as its plugin declares. */
+.widget-section dl .pair {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.widget-section dt {
+  color: var(--muted);
+}
+
+.widget-section dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.widget-section .counter strong {
+  font-size: 1.6rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.widget-section progress {
+  width: 12rem;
+  vertical-align: middle;
+}
+
 .warning-icon {
   color: var(--bad);
 }

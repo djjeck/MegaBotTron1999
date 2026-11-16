@@ -9,7 +9,9 @@
  * with what. A connector is drawn as two cards, its in card and
  * its out card (`cards.ts`, D60): each is titled with its side, and shows itself selected while
  * its twin is. A node that keeps a state (D72) shows a line of it, from its pins. A connector's
- * cards show its account's connection (D111): connected, connecting or closed, with its step.
+ * cards show its account's connection (D111): connected, connecting or closed, with its step. A
+ * node whose plugin declares a widget (D112) shows it in a line while it runs, its card a line
+ * taller for it whatever its state, so that the map does not move as nodes start and stop.
  */
 import type { Node, NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
@@ -23,6 +25,7 @@ import type {
 } from '#src/ui/api.ts';
 import type { CardSide } from './cards.ts';
 import { cardTitle } from './cards.ts';
+import { WidgetLine } from './Widget.tsx';
 
 export interface PluginNodeData extends Record<string, unknown> {
   view: NodeView;
@@ -54,10 +57,16 @@ export type PluginNodeType = Node<PluginNodeData, 'plugin'>;
 /** The height of a node's head and of each row of ports, for the layout. */
 export const HEAD_HEIGHT = 110;
 export const PORT_ROW = 22;
+/** The line a widget takes in a node's head (D112). */
+export const WIDGET_ROW = 20;
 
-/** A node's height, from its ports. */
+/** Where a node's ports start: below its head, and its widget's line if it declares one. */
+const headOf = (view: NodeView): number =>
+  HEAD_HEIGHT + (view.widget === undefined ? 0 : WIDGET_ROW);
+
+/** A node's height, from its head and its ports. */
 export const nodeHeight = (view: NodeView): number =>
-  HEAD_HEIGHT +
+  headOf(view) +
   PORT_ROW * Math.max(Object.keys(view.inputs).length, Object.keys(view.outputs).length);
 
 function Port(props: {
@@ -65,13 +74,15 @@ function Port(props: {
   port: PortView;
   side: 'in' | 'out';
   index: number;
+  /** Where the ports start: below the head. */
+  head: number;
   info: PortTypeInfo | undefined;
   problems: string[] | undefined;
   warnings: string[] | undefined;
   note?: string | undefined;
 }) {
-  const { name, port, side, index, info, problems = [], warnings = [], note } = props;
-  const top = HEAD_HEIGHT + PORT_ROW * index + PORT_ROW / 2;
+  const { name, port, side, index, head, info, problems = [], warnings = [], note } = props;
+  const top = head + PORT_ROW * index + PORT_ROW / 2;
   const title =
     `${name}: ${port.label}${port.optional ? ' (optional)' : ''}${port.help === undefined ? '' : ` — ${port.help}`}` +
     (note === undefined ? '' : `\n${note}`) +
@@ -201,6 +212,11 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
             {state.why}
           </div>
         )}
+        {view.widget === undefined ||
+        live?.state !== 'running' ||
+        live.widget === undefined ? null : (
+          <WidgetLine widget={view.widget} reads={view.interface.reads} value={live.widget} />
+        )}
         {problems.length > 0 ? (
           <div className="error small" title={problems.join('\n')}>
             ✗ {problems[0]}
@@ -218,6 +234,7 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
           port={port}
           side="in"
           index={i}
+          head={headOf(view)}
           info={portTypes[port.type]}
           problems={portProblems[name]}
           warnings={portWarnings[name]}
@@ -231,6 +248,7 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
           port={port}
           side="out"
           index={i}
+          head={headOf(view)}
           info={portTypes[port.type]}
           problems={portProblems[name]}
           warnings={portWarnings[name]}

@@ -61,6 +61,8 @@ instance does not start.
 | `state`         | `{ version, migrations }`: the schema version of its store and the steps from each older one (§4.2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `drift`         | The parser's threshold for an unrecoverable rate of unread messages (§4.7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `interface`     | What it offers people, commands and agents (P11): `commands` (chat commands: name, help, arguments), `actions` (typed calls that change something: zod input and output) and `state` (typed reads, by name: zod output). The web UI, the chat commands and the agent interface are all made from these descriptions, and nothing else                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `widget`        | Optional: its node's widget (bot-os.md D112), one section made from one of its reads, drawn in a line on each of its nodes' cards (below, Widgets and pages)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `page`          | Optional: its node's full page (bot-os.md D112), `{ title, sections }`, sections of the widget's kinds, opened from its node's panel (below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `node`          | Optional: each node's own manifest, from its config and its id, for a plugin whose ports its node's config declares (below, bot-os.md D74)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `configInputs`  | Optional, with `node`: where its nodes declare their own inputs, `{ key, types }`: the key of its `config` holding a record of input ports by name, written as a manifest's, and the types it takes there (`events`, `interface`); the editor adds one there for an edge dropped on such a node (below, bot-os.md D80)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `configChats`   | Optional: the keys of its `config` that name a chat (bot-os.md D96), `[{ key, output?, input?, kinds?, template?, owner?, sender? }]`, so that the editor picks each in its chat picker from its connector's chats instead of having the owner type an id: the connector is its own node (a connector's, no port named), or the one at the other end of the edge from its chat-out `output` or to its chat-in `input`; a string or a list holds the chats as the connector names them (`Surface.id`), a number a chat by its numeric id; `kinds` the kinds it takes (`private`, `group`, `channel`, `bot`); `template`, a `{path}` template may stand for the chat instead; `owner`, a connector's key naming its account's owner's chat (`owner()`, §4.5); `sender`, a key naming people it recognises, not chats it sends to (bot-os.md D100): its picker says nothing of reaching them, and the editor writes them on no edge. A chat picked for a key with an `output` or an `input` (not a template) is **written on that edge too** (its `sends`, or its `reads` unless `"*"`), and replaced there when the pick changes, the chats added by hand kept (bot-os.md D97): the edge is what lets it send. `telegram-bot` declares its `owner` (a person, `owner: true`), `group` and `deny` (people and bots, `sender: true`), the reactor its `chat` (or a template) and `in` |
@@ -117,6 +119,79 @@ other is running. A read may declare an `input`, a zod object whose fields are i
 (bot-os.md D72): its function is called with it (`state.get({ path: 'inventory.items' })`), the
 owner's controls parse it against the schema, and the control API takes it from the query
 (`GET /plugins/<id>/state/get?path=inventory.items`); a read without one is called with none.
+
+**Widgets and pages** (bot-os.md P16, D11, D112; `packages/core/src/widgets.ts`). A plugin may
+declare what the web UI draws of each of its nodes, made from its own reads (`interface.state`),
+with no code of its own in the UI: a **widget**, one section drawn in a line on its node's card in
+the graph editor (so keep it to what the owner wants at a glance: the map is for the architecture),
+and a **page**, a title and its sections, for what does not fit there, opened from its node's panel
+(`#/node/<id>`). They are its nodes', not its plugin's: each node shows what its own instance's
+reads answer. A made-up game's ledger, for one:
+
+```ts
+manifest: {
+  // …
+  interface: {
+    state: {
+      ledger: {
+        help: 'Its gold, and what moved it',
+        output: z.object({
+          gold: z.number().describe('Gold'),
+          cap: z.number().describe('Bank cap'),
+          entries: z
+            .array(z.object({ what: z.string().describe('What'), gold: z.number().describe('Gold') }))
+            .describe('Entries'),
+        }),
+      },
+    },
+  },
+  // On its card: `Gold: 40/100`, with a bar.
+  widget: { show: 'progress', read: 'ledger', path: 'gold', of: 'cap' },
+  // Opened from its panel.
+  page: {
+    title: 'Ledger',
+    sections: [
+      { show: 'counter', read: 'ledger', path: 'gold' },
+      { show: 'table', read: 'ledger', path: 'entries', columns: ['what', 'gold'], max: 50 },
+    ],
+  },
+},
+```
+
+A section, in full:
+
+```text
+{
+  show: 'keyValue' | 'counter' | 'list' | 'table' | 'progress' | 'until',
+  read: 'status',          // a read of its interface.state
+  input?: { day: 3 },      // the read's input, for one that takes one, as its schema parses it
+  path?: 'inventory.items', // where its value is in the read's output (dotted; none: all of it)
+  label?: 'Items',         // none: the description of the output's schema there, else the last key
+  // and, by kind:
+  fields?: ['gold', { path: 'name', label: 'Who' }], // keyValue: the fields shown (none: every key)
+  item?: 'name', max?: 20,                            // list: each item's path, at most so many
+  columns: ['what', 'n'], max?: 20,                   // table: a column each, within each row
+  of: 'cap' | 100,                                    // progress: the total, a path or a number
+}
+```
+
+`keyValue` shows a value's fields, `label: value` each (or the value itself, a scalar); `counter` a
+number, or how many items a list or a map holds; `list` a list's items (or a map's values); `table`
+the same as rows; `progress` a number out of its total, as a bar; `until` a time (ms since the
+epoch, or an ISO string) as how long until it, or since, and its UTC time on the page. On the card
+each says one line: `Gold: 40 · Who: alice`, `12 Items`, `Bag: rope, lamp, map +1`, `4 rows`,
+`Quest: 3/10` (with a bar), `Next turn: in 12m 5s`; it moves with the clock, and the card is a line
+taller for it, whether the node runs or not. The manifest's check refuses a section whose read it
+does not declare, an input the read's schema refuses (or any input to a read that takes none), a
+path the read's output schema has not (a path into a value its schema leaves open, `z.unknown()`,
+stands), and a value of a kind the section cannot show (a counter of a string, a list of a number, a
+progress of no number, an `until` of a list):
+`plugin ledger: bad manifest: widget.path: the read status has no silver`. Give the output's fields
+a `.describe()`: it is their label. The core reads the widget's read for each running node with
+`GET /status` (its `widget`, the read's output; none while its read throws), which the editor asks
+every five seconds; the page asks each of its reads (once, however many sections show it) every five
+seconds while it is open. A script node declares neither: it offers no reads (§5), its code running
+in a worker thread that a synchronous read could not ask.
 
 **Chat commands (P11).** A command of `interface.commands` has its `help` (the owner's words: the
 owner's menu, the UI, the agents), its `args`, its `aliases` (other names it answers to, in no menu)
@@ -1369,9 +1444,10 @@ control API, the web UI and later the agents, whose grants will be subsets of it
   `stop`, `{ reason, time, source }`; `inactive`, its `reason` the node it needs,
   `needs tg (disabled)`; `failed` with why), its settings with the values in force, the names of the
   reads and actions its `interface` declares, its own account of itself if it declares a read named
-  `status`, and, if it keeps a state (its instance's `view`, bot-os.md D72), one line of it
-  (`summary`), for its card; a connector whose queue coalesced sends since the start says so there
-  too (`2 sends coalesced: a + b (2)`, D73).
+  `status`, the output of the read its widget names (`widget`, bot-os.md D112), for its card, and,
+  if it keeps a state (its instance's `view`, bot-os.md D72), one line of it (`summary`), for its
+  card; a connector whose queue coalesced sends since the start says so there too
+  (`2 sends coalesced: a + b (2)`, D73).
 - **What holds a node back** (bot-os.md D98), its `backoff` in `GET /status`, while there is any:
   each command the retry-loop guard holds back (§4.6, Command answers),
   `{ account, chat, command, reason, count, until }`.
@@ -1552,46 +1628,50 @@ each, in which chats by name and to whom, or that no edge does, and its card's `
 it in its title; a connector's panel, which plugins' commands it serves. A commands edge drawn
 starts a dry run in its connector's owner's chat; dragged, a connector's commands output binds a
 plugin's commands input and no other port (`bindProblem`). A running connector's panel lists its
-queue. **What the Admin page showed of a node is on it** (bot-os.md D111): a connector's panel says
-its account as it runs, as whom, and its connection's state and step (`GET /accounts`), and its
-cards its connection's state; a node's panel, what it costs (its `cost`, its share of the whole, the
-top three marked), and while it runs its status (its `status`, not offered again among the reads),
-its settings in force, each set at once (`POST /settings`), and its reads and actions, called from
-forms made from their input schemas (`GET /plugins/<id>/state/<name>?<field>=<value>`,
-`POST /plugins/<id>/actions/<name>`), each answer or refusal under it. The map's bar heads with the
-instance's switches: on or off (`POST /off`, asking first, and `POST /on`) and **Kill all**
-(`POST /kill`, asking first); the bottom bar says the instance's release, how long it has run and
-its memory (`GET /instance`). **States and dry runs** (bot-os.md D64, §2.1): a node is drawn greyed
-while disabled in the draft (its panel's **Enabled** switch), in red tones with a warning icon and
-its reason while stopped, greyed with the node it needs while inactive (from `GET /status`); a
-stopped node's panel says why, when and by what, with **Clear stop**. A node added starts disabled,
-and a chat-out or a commands edge drawn starts a dry run: its rhombus hollow and its part from the
-rhombus to the connector greyed and dashed, its panel's **Dry-run / Send for real** switch setting
-`dryRun`. All of these are changes of the draft, listed in the review (a stop cleared as "Stops
-cleared") and made by Apply. A connector is drawn as two cards (`cards.ts`, bot-os.md D60), one node
-in the graph all the same: its **in** card (`telegram-user · in`) at the left, with its chat-in
-output and its other ports, and its **out** card (`telegram-user · out`) in a column of its own at
-the right, with its chat-out input, where the senders' edges end. Each card is placed on its own;
-selecting either selects the node and opens its panel (the other card shows itself selected too);
-removing it removes both, after a confirmation that names them. The split lives in the editor's view
-alone: the graph file holds one node. Each edge has a rhombus at its midpoint in its port type's
-colour (`PortEdge.tsx`, React Flow's `EdgeLabelRenderer`), a button named after the edge
-(`edge irc.chat → dice.channel`) that selects it and opens its panel, by a click or the keyboard.
-Its review shows the diff and two actions: Apply, `PUT /graph/file`, then
-`POST /plugins/<id>/clear-stop` for each stop cleared, then `POST /restart` (none if the core
-refuses the graph, which the review says, nor if the saved graph is what runs already and no stop
-was cleared), and Revert, the draft back to the saved graph; a banner offers Apply (`POST /restart`)
-when the saved file differs from what runs (`differs`). After a restart the page waits on
-`GET /session` for the new process (another `boot` id), and comes back to the page, still logged in.
-One or several running nodes selected can be killed, each by `POST /plugins/<id>/kill`: stopped,
-until their stops are cleared. Its **Text** tab shows the draft printed (the check's `text`),
-read-only, with a copy button (`#/graph-text` opens it), and its **Costs** tab the nodes by cost.
-The rollback is not the editor's: it is the **History** page's (`#/admin`, once Admin;
-`#/graph-history` leads there too), the one thing that page keeps, having no node (bot-os.md D111),
-which lists the versions newest first (time, summary, start, the last that ran marked "last good"),
-shows one opened in two tabs, **Changes** (the review's diff from the saved graph to it) and **As
-text** (the line diff), and rolls back to it after a confirmation repeating the diff, then restarts
-as Apply does.
+queue. **A node's widget and page** (bot-os.md D112, §2, Widgets and pages): a node whose plugin
+declares a widget shows it in a line on its card while it runs (`WidgetLine`, `widget-text.ts`),
+from `GET /status`'s `widget`; one that declares a page has, in its panel while it runs, **Open its
+page**, which leads to `#/node/<id>` (`NodePage.tsx`, in no menu): the page's sections drawn in full
+(`WidgetSection`) from its reads, asked every five seconds. **What the Admin page showed of a node
+is on it** (bot-os.md D111): a connector's panel says its account as it runs, as whom, and its
+connection's state and step (`GET /accounts`), and its cards its connection's state; a node's panel,
+what it costs (its `cost`, its share of the whole, the top three marked), and while it runs its
+status (its `status`, not offered again among the reads), its settings in force, each set at once
+(`POST /settings`), and its reads and actions, called from forms made from their input schemas
+(`GET /plugins/<id>/state/<name>?<field>=<value>`, `POST /plugins/<id>/actions/<name>`), each answer
+or refusal under it. The map's bar heads with the instance's switches: on or off (`POST /off`,
+asking first, and `POST /on`) and **Kill all** (`POST /kill`, asking first); the bottom bar says the
+instance's release, how long it has run and its memory (`GET /instance`). **States and dry runs**
+(bot-os.md D64, §2.1): a node is drawn greyed while disabled in the draft (its panel's **Enabled**
+switch), in red tones with a warning icon and its reason while stopped, greyed with the node it
+needs while inactive (from `GET /status`); a stopped node's panel says why, when and by what, with
+**Clear stop**. A node added starts disabled, and a chat-out or a commands edge drawn starts a dry
+run: its rhombus hollow and its part from the rhombus to the connector greyed and dashed, its
+panel's **Dry-run / Send for real** switch setting `dryRun`. All of these are changes of the draft,
+listed in the review (a stop cleared as "Stops cleared") and made by Apply. A connector is drawn as
+two cards (`cards.ts`, bot-os.md D60), one node in the graph all the same: its **in** card
+(`telegram-user · in`) at the left, with its chat-in output and its other ports, and its **out**
+card (`telegram-user · out`) in a column of its own at the right, with its chat-out input, where the
+senders' edges end. Each card is placed on its own; selecting either selects the node and opens its
+panel (the other card shows itself selected too); removing it removes both, after a confirmation
+that names them. The split lives in the editor's view alone: the graph file holds one node. Each
+edge has a rhombus at its midpoint in its port type's colour (`PortEdge.tsx`, React Flow's
+`EdgeLabelRenderer`), a button named after the edge (`edge irc.chat → dice.channel`) that selects it
+and opens its panel, by a click or the keyboard. Its review shows the diff and two actions: Apply,
+`PUT /graph/file`, then `POST /plugins/<id>/clear-stop` for each stop cleared, then `POST /restart`
+(none if the core refuses the graph, which the review says, nor if the saved graph is what runs
+already and no stop was cleared), and Revert, the draft back to the saved graph; a banner offers
+Apply (`POST /restart`) when the saved file differs from what runs (`differs`). After a restart the
+page waits on `GET /session` for the new process (another `boot` id), and comes back to the page,
+still logged in. One or several running nodes selected can be killed, each by
+`POST /plugins/<id>/kill`: stopped, until their stops are cleared. Its **Text** tab shows the draft
+printed (the check's `text`), read-only, with a copy button (`#/graph-text` opens it), and its
+**Costs** tab the nodes by cost. The rollback is not the editor's: it is the **History** page's
+(`#/admin`, once Admin; `#/graph-history` leads there too), the one thing that page keeps, having no
+node (bot-os.md D111), which lists the versions newest first (time, summary, start, the last that
+ran marked "last good"), shows one opened in two tabs, **Changes** (the review's diff from the saved
+graph to it) and **As text** (the line diff), and rolls back to it after a confirmation repeating
+the diff, then restarts as Apply does.
 
 **A script node** (bot-os.md D76, D78, §5) has its ports in a form in its panel (its events inputs,
 their namespace picked in a list of those offered or typed, a new one with none until picked, its

@@ -51,6 +51,9 @@ never their values.
   declares `summary: true` contributes for a window (`ctx.summary.contribute`), after the core's own
   (each node's sends by outcome, the notices by kind), collected by a node that tells them; the
   instance as it runs, for a start notice; and `Tally`, counts by key and time for a window.
+- `src/widgets.ts`: a node's widget and page (docs/bot-os.md D112): the sections a manifest declares
+  (`widget`, `page`), each a read's value shown as `keyValue`, `counter`, `list`, `table`,
+  `progress` or `until`, and their check against the read's schemas.
 - `src/state-view.ts`: a node's state as the owner sees it (its schema, freshness and pins,
   docs/bot-os.md D72), for the state plugins and the web UI's viewer; `src/event-log.ts` keeps a
   cursor into the log (a length read per day file) for a reader that resumes where it left it.

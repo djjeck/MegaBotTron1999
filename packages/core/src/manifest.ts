@@ -15,6 +15,7 @@ import {
   outputSchema,
   PORT_NAME,
 } from './ports.ts';
+import { pageSchema, widgetIssues, widgetSchema } from './widgets.ts';
 
 export const KINDS = ['connector', 'parser', 'actor', 'stats', 'agent', 'simulator'] as const;
 export type Kind = (typeof KINDS)[number];
@@ -232,8 +233,30 @@ export const manifestSchema = z
       })
       .partial()
       .default({}),
+    /**
+     * Its node's widget (bot-os.md D112, `widgets.ts`): one section, made from one of its reads,
+     * that the editor draws in a line on each of its nodes' cards.
+     */
+    widget: widgetSchema.optional(),
+    /**
+     * Its node's full page (D112): a title and its sections, made from its reads, for what does
+     * not fit on its card, opened from its node's panel.
+     */
+    page: pageSchema.optional(),
   })
   .superRefine((m, ctx) => {
+    const reads = m.interface.state ?? {};
+    if (m.widget !== undefined)
+      for (const i of widgetIssues(m.widget, reads))
+        ctx.addIssue({ code: 'custom', path: ['widget', ...i.path], message: i.message });
+    m.page?.sections.forEach((s, n) => {
+      for (const i of widgetIssues(s, reads))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['page', 'sections', n, ...i.path],
+          message: i.message,
+        });
+    });
     const connector = m.kinds.includes('connector');
     if (m.secrets.length > 0 && !connector)
       ctx.addIssue({

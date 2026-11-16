@@ -2,9 +2,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError } from './api.ts';
 
-/** The page the hash names (`#/plugins` → `plugins`), kept in step with the address bar. */
+/**
+ * The route the hash names (`#/plugins` → `plugins`, `#/node/turn-a` → `node/turn-a`), kept in
+ * step with the address bar.
+ */
 export function useRoute(): string {
-  const read = (): string => window.location.hash.replace(/^#\/?/u, '').split('/')[0] ?? '';
+  const read = (): string => window.location.hash.replace(/^#\/?/u, '');
   const [route, setRoute] = useState(read);
   useEffect(() => {
     const changed = (): void => setRoute(read());

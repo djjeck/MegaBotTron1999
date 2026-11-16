@@ -41,6 +41,9 @@ import type {
   StateView,
   Surface,
   SurfacesView,
+  Widget,
+  WidgetField,
+  WidgetPage,
 } from '@megabottron1999/core';
 
 export type {
@@ -81,6 +84,9 @@ export type {
   StateView,
   Surface,
   SurfacesView,
+  Widget,
+  WidgetField,
+  WidgetPage,
 };
 
 /** What the graph view draws, as `GET /graph/view` gives it; null before the load. */
