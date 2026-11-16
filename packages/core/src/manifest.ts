@@ -186,8 +186,8 @@ export const manifestSchema = z
      * chat (not a template) is copied by the editor into that edge's `sends` or `reads` as the owner
      * picks it, and replaced there when the pick changes (D97): the edge is what lets it send.
      * `sender`: the key names people it recognises, not chats it sends to or reads (a
-     * `telegram-bot`'s `deny`, D100), so the picker says nothing of whether the connector can reach
-     * them, and the editor writes them on no edge.
+     * `telegram-bot`'s `onlyPeople` and `blockPeople`, D128), so the picker says nothing of
+     * whether the connector can reach them, and the editor writes them on no edge.
      */
     configChats: z
       .array(

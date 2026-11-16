@@ -12,7 +12,9 @@
  * **Send for real** sends. A commands edge (D109), from a connector to a plugin's chat commands:
  * which of them it answers (checkboxes, every one by default), the `chats` it answers them in (in
  * the chat picker) and every private chat (`privateChats`), who may ask (`senders`: anyone, or a
- * list with _the owner_), and its dry run, which logs each answer and sends none. Then its removal.
+ * list with _the owner_), all within whom and where its connector works for (a `telegram-bot`'s
+ * gate, bot-os.md D128, which it says), and its dry run, which logs each answer and sends none.
+ * Then its removal.
  * The edges are the permissions (P6): a plugin reads, sends and answers only what its edge says.
  */
 import type { GraphEdge, GraphNode, PortView } from '#src/ui/api.ts';
@@ -235,7 +237,7 @@ export function EdgeDetails(props: {
           />
           <EdgeChats
             name="chats"
-            help="The chats it answers them in, and lists them in the menus of; it answers in no other"
+            help="The chats it answers them in, and lists them in the menus of; it answers in no other, nor where its connector does not work (a Telegram bot's groups)"
             connector={connector}
             monitored={undefined}
             value={edge.chats}
@@ -249,7 +251,9 @@ export function EdgeDetails(props: {
               onChange={(e) => props.change({ privateChats: e.target.checked ? true : undefined })}
             />{' '}
             Every private chat with {connector ?? 'its connector'} too{' '}
-            <span className="muted small">(anyone who writes to it)</span>
+            <span className="muted small">
+              (anyone who writes to it, among those its connector works for)
+            </span>
           </label>
           {(edge.chats ?? []).length === 0 && edge.privateChats !== true ? (
             <p className="warning small" role="note">
@@ -267,7 +271,10 @@ export function EdgeDetails(props: {
               legend: 'who may ask',
             }}
           />
-          <p className="muted small">The plugin may answer fewer still: its own check applies.</p>
+          <p className="muted small">
+            All within whom and where its connector works for (a Telegram bot's groups and people,
+            in its panel); the plugin may answer fewer still: its own check applies.
+          </p>
         </section>
       ) : sends ? (
         <section>

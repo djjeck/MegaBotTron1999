@@ -7,9 +7,9 @@
  * polls at `start` (once the app listens), and stops it at `stop`. Other plugins get a handle, and
  * send through the account's outbox.
  *
- * Configured with the owner's Telegram user id (`owner`) and, optionally, a group (`group`), it is a
- * chat surface (packages/connectors/src/transport/telegram-surface.ts): it answers the owner's
- * controls in the owner's chat, and the plugins' commands that a commands edge from its `commands`
+ * Configured with the owner's Telegram user id (`owner`), it is a chat surface
+ * (packages/connectors/src/transport/telegram-surface.ts): it answers the owner's controls in the
+ * owner's chat, and the plugins' commands that a commands edge from its `commands`
  * output serves (bot-os.md D109), in the chats that edge names, polling only once the core has
  * served it the commands. Without an `owner` it is no surface, and its commands edges answer
  * nothing. It reports nothing on its own (bot-os.md D94): an `owner-notice` node sends the owner's notices
@@ -19,10 +19,13 @@
  * Its `home` (bot-os.md D105) is the command of the owner's main card: the core's own cards
  * (`/plugins`, `/settings`) end with a button back to it, labelled `homeLabel`.
  *
- * Its `deny` list (bot-os.md D100) names the people and bots, picked among its chats, whose
- * commands in a group it drops before any plugin sees them; each drop is recorded
- * (`telegram-bot.denied`, on the Events page) and counted in its node's view and on its card.
- * Silent, unless `denyReply` sets a line to answer with. Its owner is never denied.
+ * Whom and where it works for (bot-os.md D128, its gate, `telegram-gate.ts`): `groups`, any group
+ * it is added to but those in `blockGroups`, or only those in `onlyGroups`; `people`, anyone but
+ * those in `blockPeople`, or only those in `onlyPeople`; its owner always. In a group it does not
+ * work in, nothing reaches a plugin, a command or a message; a command of a person it does not work
+ * for is dropped in any chat, what they say still read. Each command dropped is recorded
+ * (`telegram-bot.denied`, on the Events page) and counted in its node's view and on its card;
+ * silent, unless `denyReply` sets a line to answer a person with.
  */
 import {
   commandIntervalS,
@@ -38,14 +41,19 @@ import { type Bot } from 'grammy';
 import { z } from 'zod';
 import { BOT_LOGIN_DOC, BotLogin, type BotLoginDoc, botOf } from '#src/transport/bot-login.ts';
 import { createBot, TelegramBotConnector } from '#src/transport/telegram-bot.ts';
-import { DenyList } from '#src/transport/telegram-deny.ts';
+import { Gate } from '#src/transport/telegram-gate.ts';
 import { TelegramSurface } from '#src/transport/telegram-surface.ts';
 
 export const TELEGRAM_BOT = 'telegram-bot';
 
+/** The chats a list of the gate names, picked among its chats (D96, D128). */
+const chatList = z.array(z.string().min(1));
+
 /**
  * Its configuration, in its node of the graph (v0's `TELEGRAM_AUTHOR_ID` and `TELEGRAM_GROUP_ID`
- * were environment variables): with an owner, a chat surface, and the owner's chat (bot-os.md D56).
+ * were environment variables): with an owner, a chat surface, and the owner's chat (bot-os.md D56);
+ * where and for whom it works, its gate (D128), each a choice and then the list of that choice
+ * alone (`choices`, `shownWhen`: the form shows them so, D127).
  */
 export const telegramBotConfig = z
   .object({
@@ -56,24 +64,46 @@ export const telegramBotConfig = z
       .describe(
         'You, its owner, picked among its chats once you have written to the bot: your private chat with it answers your commands (/plugins, /settings) and runs the buttons of the notices an owner-notice node sends there; unset, it answers no owner command'
       ),
-    group: z
-      .number()
-      .int()
-      .optional()
-      .describe(
-        'A group, picked among its chats, whose members may use the plugins’ public commands'
-      ),
+    groups: z
+      .enum(['any', 'only'])
+      .default('any')
+      .meta({
+        description:
+          'The groups it works in: in any other, it answers no command and its plugins hear nothing',
+        choices: { any: 'Any group it is added to', only: 'Only these groups' },
+      }),
+    onlyGroups: chatList.optional().meta({
+      description: 'The groups it works in, picked among its chats; none: no group',
+      shownWhen: { groups: 'only' },
+    }),
+    blockGroups: chatList.optional().meta({
+      description:
+        'Optional: groups it ignores all the same, picked among its chats; unset: it works in every group',
+      shownWhen: { groups: 'any' },
+    }),
+    people: z
+      .enum(['anyone', 'only'])
+      .default('anyone')
+      .meta({
+        description:
+          'Whose commands it answers, in groups and private chats; its owner’s always. What others say still reaches the plugins that read the chat',
+        choices: { anyone: 'Anyone', only: 'Only these people' },
+      }),
+    onlyPeople: chatList.optional().meta({
+      description:
+        'The people and bots whose commands it answers, picked among its chats; its owner is always allowed, listed or not',
+      shownWhen: { people: 'only' },
+    }),
+    blockPeople: chatList.optional().meta({
+      description:
+        'Optional: people and bots whose commands it ignores all the same, picked among its chats (never its owner); unset: it answers anyone',
+      shownWhen: { people: 'anyone' },
+    }),
     chats: z
       .array(z.string().min(1))
       .optional()
       .describe(
         'The chats it monitors for the plugins, picked among its chats; unset: every chat it hears'
-      ),
-    deny: z
-      .array(z.string().min(1))
-      .optional()
-      .describe(
-        'People and bots whose commands in a group it ignores, picked among its chats (never its owner); private chats are unaffected'
       ),
     denyReply: z
       .string()
@@ -82,7 +112,7 @@ export const telegramBotConfig = z
       .regex(/^[^\n]*$/u, 'one line')
       .optional()
       .describe(
-        'One line it answers a denied command with, at most once in 10 minutes per person; unset: it ignores them without a word'
+        'One line it answers a person’s command it does not take with, at most once in 10 minutes per person; unset: it ignores them without a word'
       ),
     home: z
       .string()
@@ -106,9 +136,22 @@ export const telegramBotConfig = z
     unansweredAtBy,
     liveGraceS,
   })
-  .refine((c) => c.owner === undefined || !(c.deny ?? []).includes(String(c.owner)), {
-    path: ['deny'],
-    message: 'its owner cannot be denied',
+  .superRefine((c, ctx) => {
+    // A list of the choice not made would hold unseen in the form (D127): refused, not ignored.
+    const only = (key: string, list: unknown, applies: boolean, when: string): void => {
+      if (list !== undefined && !applies)
+        ctx.addIssue({ code: 'custom', path: [key], message: `set only with ${when}` });
+    };
+    only('onlyGroups', c.onlyGroups, c.groups === 'only', 'groups: only');
+    only('blockGroups', c.blockGroups, c.groups === 'any', 'groups: any');
+    only('onlyPeople', c.onlyPeople, c.people === 'only', 'people: only');
+    only('blockPeople', c.blockPeople, c.people === 'anyone', 'people: anyone');
+    if (c.owner !== undefined && (c.blockPeople ?? []).includes(String(c.owner)))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['blockPeople'],
+        message: 'its owner cannot be blocked: it always works for them',
+      });
   });
 export type TelegramBotConfig = z.infer<typeof telegramBotConfig>;
 
@@ -119,9 +162,10 @@ const VIEW_SCHEMA = z.toJSONSchema(
     last: z
       .object({
         t: z.number().describe('When'),
-        chat: z.string().describe('In the group'),
+        chat: z.string().describe('In the chat'),
         chatTitle: z.string().optional().describe('Its title'),
-        sender: z.string().describe('Of whom, as its deny list names them'),
+        sender: z.string().describe('Of whom: as its list names them, else by @username or id'),
+        by: z.enum(['group', 'person']).describe('Why: a group, or a person, it does not work for'),
         command: z.string().describe('The command'),
         replied: z.boolean().describe('Answered with its reply line'),
       })
@@ -159,13 +203,15 @@ export function telegramBotPlugin(
       // The chats its config lists; unset, every chat (D89). A chat goes by its id and its
       // @username, which its connector tells apart (D90).
       monitors: { config: 'chats', aliases: true },
-      // Its owner and its group are picked among its chats, never typed as ids (D96); its owner's
-      // chat is where an owner-notice edge naming no chat sends (D97).
+      // Its owner and its gate's lists are picked among its chats, never typed as ids (D96); its
+      // owner's chat is where an owner-notice edge naming no chat sends (D97).
       configChats: [
         { key: 'owner', kinds: ['private'], owner: true },
-        { key: 'group', kinds: ['group'] },
-        // Whom it denies: people and bots it recognises, not chats it sends to (D100).
-        { key: 'deny', kinds: ['private', 'bot'], sender: true },
+        { key: 'onlyGroups', kinds: ['group'] },
+        { key: 'blockGroups', kinds: ['group'] },
+        // People and bots it recognises, not chats it sends to (D100, D128).
+        { key: 'onlyPeople', kinds: ['private', 'bot'], sender: true },
+        { key: 'blockPeople', kinds: ['private', 'bot'], sender: true },
       ],
       // The plugins' commands it answers, each where and to whom its edge says (D109).
       outputs: {
@@ -201,6 +247,20 @@ export function telegramBotPlugin(
           stop: () => void held.delete(ctx.id),
         };
       const bot = make(token, log);
+      // Where and for whom it works (D128), asked before anything else hears an update.
+      const gate = new Gate({
+        groups:
+          config.groups === 'only'
+            ? { only: config.onlyGroups ?? [] }
+            : { block: config.blockGroups },
+        people:
+          config.people === 'only'
+            ? { only: config.onlyPeople ?? [] }
+            : { block: config.blockPeople },
+        owner: config.owner,
+        reply: config.denyReply,
+        now: () => ctx.clock.now(),
+      });
       // The surface hears the connector's status; the connector polls once the surface listens.
       const surface =
         config.owner === undefined
@@ -208,7 +268,10 @@ export function telegramBotPlugin(
           : new TelegramSurface({
               bot,
               owner: config.owner,
-              ...(config.group === undefined ? {} : { group: config.group }),
+              // No menu in a group it does not work in; a chat named otherwise, as named.
+              menuIn: (chat) =>
+                !/^-\d+$/u.test(chat) ||
+                gate.refusesGroup({ id: Number(chat), type: 'supergroup' }) === undefined,
               log,
               now: () => ctx.clock.now(),
               onStatus: (l) => void ref.connector?.onStatus(l),
@@ -217,30 +280,18 @@ export function telegramBotPlugin(
                 : { home: { label: config.homeLabel, action: config.home } }),
             });
       const listen = Promise.all([o.listen, surface?.listening]);
-      const deny =
-        config.deny === undefined || config.deny.length === 0
-          ? undefined
-          : new DenyList({
-              deny: config.deny,
-              owner: config.owner,
-              reply: config.denyReply,
-              now: () => ctx.clock.now(),
-            });
       const c = new TelegramBotConnector({
         account: ctx.account ?? account,
         bot,
         log,
         listen,
         ...(config.chats === undefined ? {} : { chats: config.chats }),
-        known: [
-          ...(config.owner === undefined ? [] : [{ id: config.owner, role: 'owner' as const }]),
-          ...(config.group === undefined ? [] : [{ id: config.group, role: 'group' as const }]),
-        ],
+        ownerId: config.owner,
         store: ctx.store,
         now: () => ctx.clock.now(),
-        ...(deny === undefined
-          ? {}
-          : { deny, onDenied: (d) => ctx.record(`${TELEGRAM_BOT}.denied`, { ...d }) }),
+        ...(gate.active
+          ? { gate, onDenied: (d) => ctx.record(`${TELEGRAM_BOT}.denied`, { ...d }) }
+          : {}),
         liveGraceMs: config.liveGraceS * 1000,
         ...(o.sleep === undefined ? {} : { sleep: o.sleep }),
         // Buttons a node sends to the owner's chat go through the surface, whose taps run them.
@@ -261,8 +312,8 @@ export function telegramBotPlugin(
       };
       return {
         connector: c,
-        // What it denied since it started (D100), for its node's panel and its card.
-        ...(deny === undefined
+        // What it denied since it started (D128), for its node's panel and its card.
+        ...(!gate.active
           ? {}
           : {
               view: {

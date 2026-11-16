@@ -16,9 +16,9 @@
  * A picker of one chat (radio buttons) for an optional key offers **None** first, picked while it
  * holds no chat, which takes the key away: a key such as a bot's `owner` can be unset as it was.
  *
- * A picker of people to recognise rather than chats to send to (`sender`, a `telegram-bot`'s deny
- * list, bot-os.md D100) says nothing of reaching them: a peer's person is picked at once, by id,
- * and one the connector does not know is still shown by the name a peer has for them.
+ * A picker of people to recognise rather than chats to send to (`sender`, a `telegram-bot`'s lists
+ * of people, bot-os.md D128) says nothing of reaching them: a peer's person is picked at once, by
+ * id, and one the connector does not know is still shown by the name a peer has for them.
  */
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';

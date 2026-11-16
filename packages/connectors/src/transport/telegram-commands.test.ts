@@ -3,20 +3,22 @@ import { Switchboard } from 'grammy-switchboard';
 import { describe, expect, it } from 'vitest';
 import { callbackData, stubBot } from '#test/telegram.ts';
 import {
+  chatMenus,
   type Handlers,
   installPublicCommands,
   PER_CHAT_MS,
   PER_USER_MS,
   type PublicCommandsOptions,
-  registerChatMenus,
   registerPrivateMenu,
   surfaceOf,
   Throttle,
 } from './telegram-commands.ts';
-import { AUTHOR_TOPIC, GROUP_TOPIC, telegramTopics } from './telegram-switchboard.ts';
+import { AUTHOR_TOPIC, telegramTopics } from './telegram-switchboard.ts';
 
 const AUTHOR = 4242;
 const GROUP = -100123;
+/** Another group an edge names: its own throttles. */
+const OTHER = -100777;
 const PLAYER = 7;
 const T0 = Date.UTC(2026, 9, 27, 18, 0, 0);
 
@@ -39,17 +41,11 @@ function chats(handlers?: Handlers, allow?: PublicCommandsOptions['allow']) {
   const stub = stubBot();
   const switchboard = new Switchboard({
     api: stub.bot.api,
-    topics: telegramTopics(AUTHOR, GROUP),
+    topics: telegramTopics(AUTHOR),
     commands: {
       [AUTHOR_TOPIC]: [
         { command: 'status', description: 'Status' },
         ...AUTHOR_MENU,
-        { command: 'brief', description: 'Brief' },
-      ],
-      [GROUP_TOPIC]: [
-        ...PUBLIC_MENU,
-        { command: 'ping', description: 'Ping' },
-        { command: 'bold', description: 'Bold' },
         { command: 'brief', description: 'Brief' },
       ],
     },
@@ -59,17 +55,26 @@ function chats(handlers?: Handlers, allow?: PublicCommandsOptions['allow']) {
   const warned: string[] = [];
   const scheduled: { ms: number; fn: () => void }[] = [];
   stub.bot.use(switchboard);
+  const answering: Handlers = handlers ?? {
+    map: async (a) =>
+      void fileIds.push(await a.photo({ data: Buffer.from([1]), filename: 'mappa.png' })),
+    ping: (a) => a.text('pong'),
+    bold: (a) => a.text('**pong** & <ping>', 'markdown'),
+    brief: (a) => a.text('gone soon', undefined, { deleteInGroupAfterMs: 60_000 }),
+  };
+  // As an edge naming the group and every private chat would serve them (D109).
+  const served = Object.fromEntries(
+    Object.keys(answering).map((name) => [
+      name,
+      (chat: { id: number; type: string }) =>
+        chat.id === GROUP || chat.id === OTHER || chat.type === 'private',
+    ])
+  );
   installPublicCommands(switchboard, stub.bot, {
-    handlers: handlers ?? {
-      map: async (a) =>
-        void fileIds.push(await a.photo({ data: Buffer.from([1]), filename: 'mappa.png' })),
-      ping: (a) => a.text('pong'),
-      bold: (a) => a.text('**pong** & <ping>', 'markdown'),
-      brief: (a) => a.text('gone soon', undefined, { deleteInGroupAfterMs: 60_000 }),
-    },
+    handlers: answering,
+    served,
     aliases: { pong: 'ping', nothing: 'none' },
     ...(allow && { allow }),
-    groupId: GROUP,
     authorId: AUTHOR,
     now: () => now,
     schedule: (ms, fn) => void scheduled.push({ ms, fn }),
@@ -257,6 +262,11 @@ describe('installPublicCommands', () => {
     c.later(PER_USER_MS - PER_CHAT_MS);
     await c.feed(GROUP, 1, '/map');
     expect(c.sent()).toHaveLength(4);
+    // Another group, its own throttles (D128): answered at once, and deleted from there too.
+    await c.feed(OTHER, 1, '/map');
+    await c.feed(OTHER, 1, '/brief');
+    expect(c.to().slice(4)).toEqual([OTHER, OTHER]);
+    expect(c.scheduled).toHaveLength(1);
   });
 
   it('answers an alias as its command, with its throttles, in the same chats', async () => {
@@ -306,17 +316,19 @@ describe('installPublicCommands', () => {
         command('countdown', { menu: 'conto', aliases: ['timer', 'clock'], where: everywhere }),
         command('report', { aliases: ['stats'], allow: owner, where: everywhere }),
       ],
-      { author: AUTHOR, group: GROUP }
+      { author: AUTHOR }
     );
     expect(surface.aliases).toEqual({
       timer: 'countdown',
       clock: 'countdown',
       stats: 'report',
     });
-    expect(surface.publicMenu).toEqual([
+    // The group's menu, in the players' words; every private chat's too.
+    expect(surface.chatMenus.get(String(GROUP))).toEqual([
       { command: 'map', description: 'la mappa' },
       { command: 'countdown', description: 'conto' },
     ]);
+    expect(surface.privateMenu).toEqual(surface.chatMenus.get(String(GROUP)));
     expect(surface.authorMenu.map((c) => c.description)).toEqual([
       'map help',
       'countdown help',
@@ -455,7 +467,7 @@ describe('installPublicCommands', () => {
       expect(c.deleted()).toEqual([[GROUP, c.lastId(GROUP)]]);
     });
 
-    it('sends them through the switchboard in its topics, and redraws there on a tap', async () => {
+    it('sends them through the Bot API in a group, and redraws there on a tap', async () => {
       const c = chats(
         {
           ping: (a, r) =>
@@ -469,7 +481,7 @@ describe('installPublicCommands', () => {
       await c.feed(GROUP, 1, '/ping 1');
       const id = c.lastId(GROUP);
       const [data] = callbackData(c.calls);
-      expect(data).toMatch(/^~.*\/pong 2$/u);
+      expect(data).toBe('/pong 2');
       await c.press(GROUP, 9, data ?? '');
       await c.press(GROUP, 1, data ?? '');
       expect(c.edits()).toEqual([[GROUP, id, 'pong 2']]);
@@ -540,13 +552,12 @@ describe('the owner’s commands', () => {
     const stub = stubBot();
     const switchboard = new Switchboard({
       api: stub.bot.api,
-      topics: telegramTopics(AUTHOR, GROUP),
+      topics: telegramTopics(AUTHOR),
       commands: {
         [AUTHOR_TOPIC]: [
           { command: 'status', description: 'Status' },
           { command: 'kill', description: 'Kill' },
         ],
-        [GROUP_TOPIC]: [{ command: 'map', description: 'The map' }],
       },
     });
     const ran: string[] = [];
@@ -565,7 +576,6 @@ describe('the owner’s commands', () => {
       },
       allow: { status: ownerOnly, kill: ownerOnly, opt: ownerOnly },
       owner: new Set(['status', 'kill', 'opt']),
-      groupId: GROUP,
       authorId: AUTHOR,
       now: () => T0,
       warn: (l) => warned.push(l),
@@ -613,7 +623,7 @@ describe('the owner’s commands', () => {
     for (const text of ['/kill', '/status', '/opt fast:on'])
       await o.feed(o.command(GROUP, AUTHOR, text));
     await o.feed(o.command(PLAYER, AUTHOR, '/kill'));
-    await o.feed(o.tap(GROUP, AUTHOR, '~5:group-kill'));
+    await o.feed(o.tap(GROUP, AUTHOR, 'kill'));
     await o.feed(o.tap(PLAYER, AUTHOR, 'kill'));
     expect(o.ran).toEqual([]);
     await o.feed(o.command(GROUP, AUTHOR, '/map'));
@@ -641,10 +651,10 @@ describe('the owner’s commands', () => {
           where: { chats: [String(AUTHOR), String(GROUP)], privateChats: false },
         }),
       ],
-      { author: AUTHOR, group: GROUP }
+      { author: AUTHOR }
     );
     expect(s.authorMenu.map((c) => c.command)).toEqual(['status', 'map']);
-    expect(s.publicMenu.map((c) => c.command)).toEqual(['map']);
+    expect([...s.chatMenus.keys()]).toEqual([String(GROUP)]);
     expect(s.privateMenu).toEqual([]);
     expect([...s.owner]).toEqual(['status', 'opt']);
   });
@@ -671,14 +681,13 @@ describe('the commands served by edges (D109)', () => {
         command('lobby', { chats: ['@other_lobby', '-100999'], privateChats: false }),
         command('plugins'),
       ],
-      { author: AUTHOR, group: GROUP }
+      { author: AUTHOR }
     );
     expect(s.authorMenu.map((c) => c.command)).toEqual(['dm', 'plugins']);
-    expect(s.publicMenu.map((c) => c.command)).toEqual(['map']);
     expect(s.privateMenu.map((c) => c.command)).toEqual(['dm']);
     expect(
       [...s.chatMenus].map(([chat, m]) => `${chat} ${m.map((c) => c.command).join()}`)
-    ).toEqual(['@other_lobby lobby', '-100999 lobby']);
+    ).toEqual([`${GROUP} map`, '@other_lobby lobby', '-100999 lobby']);
     const at = (name: string, chat: { id: number; type: string; username?: string }) =>
       s.served[name]?.(chat) === true;
     expect(at('map', { id: GROUP, type: 'supergroup' })).toBe(true);
@@ -696,14 +705,13 @@ describe('the commands served by edges (D109)', () => {
     const asked: string[] = [];
     const switchboard = new Switchboard({
       api: stub.bot.api,
-      topics: telegramTopics(AUTHOR, GROUP),
-      commands: { [AUTHOR_TOPIC]: [], [GROUP_TOPIC]: [] },
+      topics: telegramTopics(AUTHOR),
+      commands: { [AUTHOR_TOPIC]: [] },
     });
     stub.bot.use(switchboard);
     installPublicCommands(switchboard, stub.bot, {
       handlers: { ping: (_a, r) => (asked.push(r.chat ?? '?'), Promise.resolve()) },
       served: { ping: (chat) => chat.id === -100999 || chat.id === AUTHOR },
-      groupId: GROUP,
       authorId: AUTHOR,
       now: () => T0,
     });
@@ -716,31 +724,26 @@ describe('the commands served by edges (D109)', () => {
   });
 });
 
-describe('registerChatMenus', () => {
-  it('sets each other chat’s menu by its id or @username, and reports a refusal', async () => {
+describe('chatMenus', () => {
+  it('sets each other chat’s menu by its id or @username, in its chat scope', async () => {
     const calls: unknown[][] = [];
-    const lines: string[] = [];
-    let n = 0;
-    await registerChatMenus(
+    const menus = chatMenus(
       {
-        setMyCommands: (...args: unknown[]) => (
-          calls.push(args),
-          n++ === 0 ? Promise.resolve(true) : Promise.reject(new Error('400'))
-        ),
+        setMyCommands: (...args: unknown[]) => (calls.push(args), Promise.resolve(true)),
       } as never,
       new Map([
         ['-100999', PUBLIC_MENU],
         ['@other_lobby', PUBLIC_MENU],
-      ]),
-      (l) => lines.push(l)
+      ])
     );
-    expect(calls.map((c) => c[1])).toEqual([
-      { scope: { type: 'chat', chat_id: -100999 } },
-      { scope: { type: 'chat', chat_id: '@other_lobby' } },
+    expect(Object.entries(menus).map(([name, m]) => [name, m.chat])).toEqual([
+      ['-100999', -100999],
+      ['@other_lobby', '@other_lobby'],
     ]);
-    expect(lines).toEqual([
-      'telegram: command menu of -100999 set',
-      'telegram: command menu of @other_lobby failed: Error: 400',
+    for (const m of Object.values(menus)) await m.set();
+    expect(calls).toEqual([
+      [PUBLIC_MENU, { scope: { type: 'chat', chat_id: -100999 } }],
+      [PUBLIC_MENU, { scope: { type: 'chat', chat_id: '@other_lobby' } }],
     ]);
   });
 });

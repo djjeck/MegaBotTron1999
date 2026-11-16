@@ -1,10 +1,10 @@
 /**
  * The chat surface of the plugins' commands (docs/bot-os-api.md §2, P11) on a Telegram bot: the
  * commands the graph's commands edges from this bot serve (`core.served(node)`, bot-os.md D109),
- * each registered in the menus of the chats its edge names and answered there alone: in the group
- * and in the author's private chat, the switchboard's two topics, and in the other chats it names
- * (every private chat, with `privateChats`), which the switchboard passes on to a grammY handler
- * after it. A command no edge serves in a chat is neither listed nor answered there; the core's own,
+ * each registered in the menus of the chats its edge names and answered there alone: in the
+ * author's private chat, the switchboard's one topic, and in the other chats it names (every
+ * private chat, with `privateChats`), groups included, which the switchboard passes on to a grammY
+ * handler after it. A command no edge serves in a chat is neither listed nor answered there; the core's own,
  * the owner's controls, are answered in the author's chat. Each command has one handler, which
  * answers in reply to the command whatever the chat, with the text typed after it and the chat's
  * id. The switchboard delivers a command as `/ping` or `/ping@ExampleBot`, never one addressed to
@@ -15,24 +15,24 @@
  * refuses a whole menu over a name longer than 32 characters; so the switchboard passes them on too,
  * and the handler after it answers them in every chat. A command left out of a chat's menu is
  * passed on and answered the same way: a command with no
- * `menu` for the players, is in the author's menu only, and answered in the group all the same.
+ * `menu` for the players, is in the author's menu only, and answered in a group all the same.
  *
  * A command may be answered only to some (`allow`): to the senders its check lets through, by their
  * Telegram id or username, in every chat; anyone else is ignored without a word, and not counted by
  * the throttles. The author is the instance's owner (`Asker.owner`).
  *
- * Throttles keep a chat from filling with answers, each command its own: in the group, one answer
- * per user a minute and one every 10 s; in another user's private chat, one per user a minute; the
- * author's chat has none. The rest are ignored without a word. The throttles keep the senders' ids
+ * Throttles keep a chat from filling with answers, each command its own: in a group, one answer
+ * per user a minute and one every 10 s, each group its own; in another user's private chat, one
+ * per user a minute; the author's chat has none. The rest are ignored without a word. The throttles keep the senders' ids
  * in memory only, never on disk or in a log line.
  *
- * A handler may ask for its answer to be deleted from the group after a while
+ * A handler may ask for its answer to be deleted from a group after a while
  * (`deleteInGroupAfterMs`); a private chat, the author's included, keeps it. The timer is in memory
  * only, so an answer pending deletion when the bot stops stays.
  *
  * An answer may carry buttons, each the command to run again (`/report 8`, any of its names): a tap
  * runs it, with the same check (`allow`) on whoever tapped but no throttle, and redraws the answer in
- * place, its deletion from the group counted again from the tap. The buttons of an answer sent
+ * place, its deletion from a group counted again from the tap. The buttons of an answer sent
  * through the switchboard are its own (`button` events, which the remote leaves alone: they start
  * with `/`); those sent through the Bot API carry the command as their callback data, which the
  * switchboard passes on.
@@ -49,7 +49,7 @@ import {
 } from '@megabottron1999/core';
 import { type Api, type Bot, InputFile } from 'grammy';
 import { type Command, markdownToTelegramHtml, type Switchboard } from 'grammy-switchboard';
-import { AUTHOR_TOPIC, GROUP_TOPIC } from './telegram-switchboard.ts';
+import { AUTHOR_TOPIC, type ChatMenu } from './telegram-switchboard.ts';
 
 export const PER_USER_MS = 60_000;
 export const PER_CHAT_MS = 10_000;
@@ -89,8 +89,6 @@ export interface Surface {
   aliases: Readonly<Record<string, string>>;
   /** The owner's commands: answered in the author's chat only. */
   owner: ReadonlySet<string>;
-  /** The group's menu: those served there, in the players' words. */
-  publicMenu: readonly Command[];
   /** Every private chat's menu but the author's: those served in every private chat. */
   privateMenu: readonly Command[];
   /** The author's menu: every command served there but the hidden ones, in the owner's words. */
@@ -107,12 +105,12 @@ const namesOf = (chat: ChatRef): string[] => [
 
 /**
  * The switchboard's view of the commands served, in their order, with the author's private chat
- * (`author`) and the group (`group`) where they are known: each command answered where its edge
- * says (`where`), the core's own (none) in the author's chat alone.
+ * (`author`) where it is known: each command answered where its edge says (`where`), the core's own
+ * (none) in the author's chat alone.
  */
 export function surfaceOf(
   commands: readonly ChatCommand[],
-  chats: { author?: number; group?: number } = {}
+  chats: { author?: number } = {}
 ): Surface {
   const handlers: Record<string, Handlers[string]> = {};
   const allow: Record<string, (asker: Asker) => boolean> = {};
@@ -133,8 +131,7 @@ export function surfaceOf(
   const menu = (list: readonly ChatCommand[]): Command[] =>
     list.map((c) => ({ command: c.name, description: c.menu ?? c.help }));
   const author = chats.author === undefined ? undefined : { id: chats.author, type: 'private' };
-  const group = chats.group === undefined ? undefined : { id: chats.group, type: 'supergroup' };
-  const known = new Set([chats.author, chats.group].map(String));
+  const known = new Set([String(chats.author)]);
   const chatMenus = new Map<string, Command[]>();
   for (const c of commands)
     for (const chat of c.where?.chats ?? [])
@@ -146,7 +143,6 @@ export function surfaceOf(
     allow,
     aliases,
     owner: new Set(commands.filter((c) => c.owner).map((c) => c.name)),
-    publicMenu: group === undefined ? [] : menu(commands.filter((c) => players(c) && at(group)(c))),
     privateMenu: menu(commands.filter((c) => players(c) && c.where?.privateChats === true)),
     authorMenu:
       author === undefined
@@ -166,15 +162,13 @@ export interface PublicCommandsOptions {
   handlers: Handlers;
   /** Other names of the commands, each with the command it stands for. */
   aliases?: Readonly<Record<string, string>>;
-  /** The game's group, if any: where an alias is answered with the group's throttles. */
-  groupId?: number;
   /** The commands answered only to some, each with who may ask it; the rest, to anyone. */
   allow?: Readonly<Record<string, (asker: Asker) => boolean>>;
   /** The owner's commands: answered in the author's chat only, never in reply. */
   owner?: ReadonlySet<string>;
   /**
-   * Where each command is answered (bot-os.md D109): a command it does not name, in the group, the
-   * author's chat and every private chat, as before the edges.
+   * Where each command is answered (bot-os.md D109): a command it does not name, in every group,
+   * the author's chat and every private chat, as before the edges.
    */
   served?: Served;
   /** The author's private chat: no throttle there. */
@@ -227,9 +221,9 @@ export function installPublicCommands(
   // The latest deletion scheduled of each answer, so that a tap counts it again.
   const pending = new Map<string, object>();
   const expire =
-    (command: string, inTheGroup: boolean): Expire =>
+    (command: string, inAGroup: boolean): Expire =>
     (options, key, remove) => {
-      if (!inTheGroup || options?.deleteInGroupAfterMs === undefined) return;
+      if (!inAGroup || options?.deleteInGroupAfterMs === undefined) return;
       const token = {};
       pending.set(key, token);
       schedule(options.deleteInGroupAfterMs, () => {
@@ -245,26 +239,27 @@ export function installPublicCommands(
   const servedIn = (command: string, chat: ChatRef): boolean => {
     const check = o.served?.[command];
     return check === undefined
-      ? chat.id === o.groupId || chat.id === o.authorId || chat.type === 'private'
+      ? isGroup(chat) || chat.id === o.authorId || chat.type === 'private'
       : check(chat);
   };
-  /** The chat of one of the switchboard's topics: the author's, or the group. */
-  const topicChat = (topic: string, chat: Partial<ChatRef> | undefined): ChatRef => ({
-    id: topic === AUTHOR_TOPIC ? o.authorId : (o.groupId ?? 0),
-    type: topic === AUTHOR_TOPIC ? 'private' : (chat?.type ?? 'supergroup'),
-    ...(chat?.username === undefined ? {} : { username: chat.username }),
-  });
+  /** The chat of the switchboard's topic: the author's. */
+  const authorChat: ChatRef = { id: o.authorId, type: 'private' };
   const run = (command: string, answer: Answer, args: string, chat: number): void => {
     o.handlers[command]?.(answer, { args: args.trim(), chat: String(chat) }).catch((err: unknown) =>
       warn(`${command}: answer failed: ${String(err)}`)
     );
   };
-  const inGroup = new Map<string, Throttle>();
+  // Each group's throttles its own, by group and command, made as they are first needed.
+  const inGroups = new Map<string, Throttle>();
+  const inGroup = (chat: number, command: string): Throttle => {
+    const key = `${chat} ${command}`;
+    const t = inGroups.get(key) ?? new Throttle();
+    inGroups.set(key, t);
+    return t;
+  };
   const inPrivate = new Map<string, Throttle>();
-  for (const command of Object.keys(o.handlers)) {
-    inGroup.set(command, new Throttle());
+  for (const command of Object.keys(o.handlers))
     inPrivate.set(command, new Throttle(PER_USER_MS, 0));
-  }
   // Every name of every command: its own, and its aliases.
   const names: Record<string, string> = {};
   for (const command of Object.keys(o.handlers)) names[command] = command;
@@ -281,9 +276,10 @@ export function installPublicCommands(
     return command === undefined ? undefined : { command, args: t?.args ?? '' };
   };
 
-  /** Answers in one of the switchboard's topics, in reply to `replyTo` if given. */
+  /** Answers in the switchboard's topic (the author's chat), in reply to `replyTo` if given. */
   const inTopic = (topic: string, replyTo: number | undefined, command: string): Answer => {
-    const remove = expire(command, topic === GROUP_TOPIC);
+    // The author's chat keeps its answers.
+    const remove = expire(command, false);
     return {
       text: async (text, format, options) => {
         const sent = await switchboard.send({
@@ -307,22 +303,18 @@ export function installPublicCommands(
     };
   };
 
-  // The commands in the menus of the switchboard's topics.
+  // The commands in the menu of the switchboard's topic, the author's chat.
   switchboard.on('command', (e, ctx) => {
     if (!Object.hasOwn(o.handlers, e.command)) return;
-    if (e.topic !== GROUP_TOPIC && e.topic !== AUTHOR_TOPIC) return;
-    // The owner's, in the author's chat only, even from the author.
-    if (isOwner(e.command) && e.topic !== AUTHOR_TOPIC) return;
+    if (e.topic !== AUTHOR_TOPIC) return;
     // Served there by an edge (D109), or not answered.
-    const chat = topicChat(e.topic, (ctx as { chat?: Partial<ChatRef> }).chat);
+    const chat = authorChat;
     if (!servedIn(e.command, chat)) return;
     if (!allowed(e.command, askerOf(ctx.from, o.authorId))) {
       if (isOwner(e.command))
         warn(`owner: ${e.from?.name ?? 'someone unknown'} may not ${e.command}`);
       return;
     }
-    if (e.topic === GROUP_TOPIC && inGroup.get(e.command)?.allow(e.from?.id, o.now()) !== true)
-      return;
     // The owner's are answered as notices are, not in reply.
     run(
       e.command,
@@ -337,16 +329,15 @@ export function installPublicCommands(
     const t = tapped(e.action);
     const { topic, messageId } = e;
     if (t === undefined || messageId === undefined) return;
-    if (topic !== GROUP_TOPIC && topic !== AUTHOR_TOPIC) return;
-    if (isOwner(t.command) && topic !== AUTHOR_TOPIC) return;
-    const chat = topicChat(topic, (ctx as { chat?: Partial<ChatRef> }).chat);
+    if (topic !== AUTHOR_TOPIC) return;
+    const chat = authorChat;
     if (!servedIn(t.command, chat)) return;
     if (!allowed(t.command, askerOf(ctx.from, o.authorId))) {
       if (isOwner(t.command))
         warn(`owner: ${e.from?.name ?? 'someone unknown'} may not ${e.action}`);
       return;
     }
-    const remove = expire(t.command, topic === GROUP_TOPIC);
+    const remove = expire(t.command, false);
     run(
       t.command,
       redraw(async (text, format, options) => {
@@ -382,11 +373,12 @@ export function installPublicCommands(
     bot.command(name, (ctx) => {
       const chat = ctx.chat.id;
       const asker = askerOf(ctx.from, o.authorId);
+      const group = isGroup(ctx.chat);
       if (!servedIn(command, ctx.chat as ChatRef)) return;
       if (isOwner(command) && chat !== o.authorId) return;
       if (!allowed(command, asker)) return;
-      if (chat === o.groupId) {
-        if (inGroup.get(command)?.allow(asker?.id, o.now()) !== true) return;
+      if (group) {
+        if (!inGroup(chat, command).allow(asker?.id, o.now())) return;
       } else if (chat !== o.authorId) {
         if (inPrivate.get(command)?.allow(asker?.id, o.now()) !== true) return;
       }
@@ -396,7 +388,7 @@ export function installPublicCommands(
         // through the switchboard, whose buttons come back to it.
         isOwner(command)
           ? inTopic(AUTHOR_TOPIC, undefined, command)
-          : inChat(ctx.api, chat, ctx.msg.message_id, expire(command, chat === o.groupId)),
+          : inChat(ctx.api, chat, ctx.msg.message_id, expire(command, group)),
         ctx.match,
         chat
       );
@@ -417,7 +409,7 @@ export function installPublicCommands(
     )
       return;
     const chat = message.chat.id;
-    const remove = expire(t.command, chat === o.groupId);
+    const remove = expire(t.command, isGroup(message.chat));
     run(
       t.command,
       redraw(async (text, format, options) => {
@@ -442,6 +434,10 @@ export function installPublicCommands(
     );
   });
 }
+
+/** Whether a chat is a group's (a basic group or a supergroup). */
+export const isGroup = (chat: { type: string }): boolean =>
+  chat.type === 'group' || chat.type === 'supergroup';
 
 /** An answer to a tap: its text redraws the message tapped; a photo is not redrawn. */
 function redraw(text: Answer['text']): Answer {
@@ -501,25 +497,28 @@ export async function registerPrivateMenu(
 }
 
 /**
- * Sets the `/` menu of each other chat an edge serves commands in (D109), beside the author's and
- * the group's (the switchboard's): Telegram's `chat` scope, by the chat as the edge names it (an
- * id, or a group's `@username`). Each refusal is reported (a person's chat by `@username`, which the
- * Bot API takes only for groups and channels), its commands answered all the same.
+ * The `/` menu of each other chat an edge serves commands in (D109), beside the author's (the
+ * switchboard's), its groups' included (D128): Telegram's `chat` scope, by the chat as the edge
+ * names it (an id, or a group's `@username`), set by `CommandMenus`, which retries a refusal (the
+ * bot not yet in the group) and sets it again when the bot joins; its commands are answered all
+ * the same.
  */
-export async function registerChatMenus(
+export function chatMenus(
   api: Pick<Api, 'setMyCommands'>,
-  menus: ReadonlyMap<string, readonly Command[]>,
-  log: (line: string) => void
-): Promise<void> {
-  for (const [chat, menu] of menus) {
-    const id = /^-?\d+$/u.test(chat) ? Number(chat) : chat;
-    try {
-      await api.setMyCommands([...menu], { scope: { type: 'chat', chat_id: id } });
-      log(`telegram: command menu of ${chat} set`);
-    } catch (e) {
-      log(`telegram: command menu of ${chat} failed: ${String(e)}`);
-    }
-  }
+  menus: ReadonlyMap<string, readonly Command[]>
+): Record<string, ChatMenu> {
+  return Object.fromEntries(
+    [...menus].map(([chat, menu]): [string, ChatMenu] => {
+      const id = /^-?\d+$/u.test(chat) ? Number(chat) : chat;
+      return [
+        chat,
+        {
+          chat: id,
+          set: () => api.setMyCommands([...menu], { scope: { type: 'chat', chat_id: id } }),
+        },
+      ];
+    })
+  );
 }
 
 /** Answers in a chat outside the switchboard's topics, through the Bot API. */

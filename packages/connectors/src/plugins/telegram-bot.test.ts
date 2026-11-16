@@ -11,12 +11,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { readWarnings } from '#test/monitors.ts';
 import { BOT_INFO, stubBot } from '#test/telegram.ts';
 import { telegramBotConfig, telegramBotPlugin } from './telegram-bot.ts';
 
 const AUTHOR = 4242;
 const GROUP = -100123;
+const OTHER = -100456;
 
 /** The default graph with a commands edge from the bot to the pinger (D109), as `edge` says. */
 const served =
@@ -112,7 +114,7 @@ describe('the telegram-bot plugin', () => {
     expect(typeof core.connector('telegram-bot')?.isAdmin).toBe('function');
   });
 
-  it('is a chat surface without a group, with the sleep it is given', async () => {
+  it('is a chat surface with the sleep it is given', async () => {
     const stub = stubBot();
     stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
     stub.bot.start = () => new Promise<void>(() => {});
@@ -136,7 +138,7 @@ describe('the telegram-bot plugin', () => {
     const core = new Core({
       clock: new VirtualClock(),
       documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
-      config: { 'telegram-bot': { owner: AUTHOR, group: GROUP, unansweredAtBy: { '/turn': 2 } } },
+      config: { 'telegram-bot': { owner: AUTHOR, unansweredAtBy: { '/turn': 2 } } },
       graph: served(),
     });
     core.register(
@@ -168,13 +170,20 @@ describe('the telegram-bot plugin', () => {
         .filter((c) => c.method === 'sendMessage')
         .map((c) => `${String(c.payload['chat_id'])} ${String(c.payload['text'])}`);
     expect(sent()).toEqual([]);
-    // The menus, once connected: the owner's (every command but the hidden), the group's and the
-    // other private chats' (the players').
+    // The menus, once connected: the owner's (every command but the hidden), the group's an edge
+    // names and the other private chats' (the players').
     const menus = stub.calls
       .filter((c) => c.method === 'setMyCommands')
-      .map((c) => (c.payload['commands'] as { command: string }[]).map((x) => x.command).join(','));
+      .map(
+        (c) =>
+          `${JSON.stringify(c.payload['scope'])} ${(c.payload['commands'] as { command: string }[]).map((x) => x.command).join(',')}`
+      );
     expect(menus).toEqual(
-      expect.arrayContaining(['ping,plugins,kill,settings,set', 'ping', 'ping'])
+      expect.arrayContaining([
+        `{"type":"chat","chat_id":${AUTHOR}} ping,plugins,kill,settings,set`,
+        `{"type":"chat","chat_id":${GROUP}} ping`,
+        '{"type":"all_private_chats"} ping',
+      ])
     );
     await stub.bot.handleUpdate(stub.command(GROUP, 7, '/ping'));
     await stub.bot.handleUpdate(stub.command(AUTHOR, AUTHOR, '/plugins'));
@@ -215,49 +224,95 @@ describe('the telegram-bot plugin', () => {
     await core.stop();
   });
 
-  it('drops the group commands of those it denies, records and counts each (D100)', async () => {
-    const stub = stubBot();
-    stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
-    stub.bot.start = () => new Promise<void>(() => {});
-    stub.bot.stop = () => Promise.resolve();
-    const records: { type: string }[] = [];
-    const core = new Core({
-      clock: new VirtualClock(),
-      documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
-      record: (r) => void records.push(r as { type: string }),
-      config: { 'telegram-bot': { owner: AUTHOR, group: GROUP, deny: ['66'] } },
-      graph: served(),
-    });
-    core.register(telegramBotPlugin({ bot: () => stub.bot }), pinger());
-    await core.start();
-    await new Promise((r) => setTimeout(r, 20));
-    expect(core.controls.view('telegram-bot')).toMatchObject({ value: { state: { count: 0 } } });
-    expect(core.controls.status().plugins.find((p) => p.id === 'telegram-bot')?.summary).toBe(
-      undefined
-    );
-    await stub.bot.handleUpdate(stub.command(GROUP, 66, '/ping'));
-    await stub.bot.handleUpdate(stub.command(66, 66, '/ping'));
-    await new Promise((r) => setTimeout(r, 20));
-    const sent = stub.calls
-      .filter((c) => c.method === 'sendMessage')
-      .map((c) => `${String(c.payload['chat_id'])} ${String(c.payload['text'])}`);
-    expect(sent).toEqual(['66 pong']);
-    expect(records.filter((r) => r.type === 'telegram-bot.denied')).toEqual([
+  it('drops the commands of those it does not work for, records and counts each (D128)', async () => {
+    const run = async (config: Record<string, unknown>) => {
+      const stub = stubBot();
+      stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
+      stub.bot.start = () => new Promise<void>(() => {});
+      stub.bot.stop = () => Promise.resolve();
+      const records: { type: string }[] = [];
+      const clock = new VirtualClock();
+      const core = new Core({
+        clock,
+        documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
+        record: (r) => void records.push(r as { type: string }),
+        config: { 'telegram-bot': { owner: AUTHOR, ...config } },
+        graph: served({ chats: [String(AUTHOR), String(GROUP), String(OTHER)] }),
+      });
+      core.register(telegramBotPlugin({ bot: () => stub.bot }), pinger());
+      await core.start();
+      await new Promise((r) => setTimeout(r, 20));
+      const before = {
+        view: core.controls.view('telegram-bot'),
+        summary: core.controls.status().plugins.find((p) => p.id === 'telegram-bot')?.summary,
+      };
+      for (const [chat, from] of [
+        [GROUP, 66],
+        [66, 66],
+        [OTHER, 7],
+        [GROUP, AUTHOR],
+      ] as const) {
+        await stub.bot.handleUpdate(stub.command(chat, from, '/ping'));
+        // Past the group's throttles.
+        clock.advance(60_000);
+      }
+      await new Promise((r) => setTimeout(r, 20));
+      const sent = stub.calls
+        .filter((c) => c.method === 'sendMessage')
+        .map((c) => `${String(c.payload['chat_id'])} ${String(c.payload['text'])}`);
+      const menus = stub.calls
+        .filter((c) => c.method === 'setMyCommands')
+        .map((c) => JSON.stringify(c.payload['scope']));
+      const after = {
+        view: core.controls.view('telegram-bot'),
+        summary: core.controls.status().plugins.find((p) => p.id === 'telegram-bot')?.summary,
+      };
+      await core.stop();
+      return {
+        before,
+        after,
+        sent,
+        menus,
+        denied: records.filter((r) => r.type === 'telegram-bot.denied'),
+      };
+    };
+    // Anyone, anywhere: no gate, no view.
+    const open = await run({});
+    expect(open.sent).toEqual([`${GROUP} pong`, '66 pong', `${OTHER} pong`, `${GROUP} pong`]);
+    expect(open.before.view).toBeUndefined();
+    // A person blocked, in a group and in a private chat; the owner, never.
+    const blocked = await run({ blockPeople: ['66'] });
+    expect(blocked.before.view).toMatchObject({ value: { state: { count: 0 } } });
+    expect(blocked.before.summary).toBeUndefined();
+    expect(blocked.sent).toEqual([`${OTHER} pong`, `${GROUP} pong`]);
+    expect(blocked.denied).toEqual([
       expect.objectContaining({
         type: 'telegram-bot.denied',
         chat: String(GROUP),
         sender: '66',
+        by: 'person',
         command: '/ping',
         replied: false,
       }),
+      expect.objectContaining({ chat: '66', sender: '66', by: 'person' }),
     ]);
-    expect(core.controls.view('telegram-bot')).toMatchObject({
-      value: { state: { count: 1, last: { sender: '66' } } },
+    expect(blocked.after.view).toMatchObject({
+      value: { state: { count: 2, last: { chat: '66' } } },
     });
-    expect(core.controls.status().plugins.find((p) => p.id === 'telegram-bot')?.summary).toBe(
-      '1 command denied'
-    );
-    await core.stop();
+    expect(blocked.after.summary).toBe('2 commands denied');
+    // Only one group: the other hears nothing, and has no menu.
+    const one = await run({ groups: 'only', onlyGroups: [String(GROUP)] });
+    expect(one.sent).toEqual([`${GROUP} pong`, '66 pong', `${GROUP} pong`]);
+    expect(one.denied).toEqual([
+      expect.objectContaining({ chat: String(OTHER), sender: '7', by: 'group' }),
+    ]);
+    expect(one.after.summary).toBe('1 command denied');
+    expect(one.menus).toContain(`{"type":"chat","chat_id":${GROUP}}`);
+    expect(one.menus).not.toContain(`{"type":"chat","chat_id":${OTHER}}`);
+    // A group blocked, and only some people: the owner always.
+    const few = await run({ blockGroups: [String(OTHER)], people: 'only', onlyPeople: ['66'] });
+    expect(few.sent).toEqual([`${GROUP} pong`, '66 pong', `${GROUP} pong`]);
+    expect(few.menus).not.toContain(`{"type":"chat","chat_id":${OTHER}}`);
   });
 
   it('answers a plugin’s command only where and to whom an edge serves it (D109)', async () => {
@@ -271,7 +326,7 @@ describe('the telegram-bot plugin', () => {
         clock: new VirtualClock(),
         documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
         record: (r) => void records.push(r as (typeof records)[number]),
-        config: { 'telegram-bot': { owner: AUTHOR, group: GROUP } },
+        config: { 'telegram-bot': { owner: AUTHOR } },
         ...(graph === undefined ? {} : { graph }),
       });
       core.register(telegramBotPlugin({ bot: () => stub.bot }), pinger());
@@ -348,12 +403,61 @@ describe('the telegram-bot plugin', () => {
     expect(parse({ homeLabel: '' }).success).toBe(false);
   });
 
-  it('never denies its owner, and replies in one line (D100)', () => {
+  it('takes the list of its choice alone, never blocks its owner, and replies in one line (D128)', () => {
+    const issues = (c: Record<string, unknown>) =>
+      telegramBotConfig.safeParse(c).error?.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
+    expect(telegramBotConfig.parse({})).toMatchObject({ groups: 'any', people: 'anyone' });
+    expect(issues({ owner: AUTHOR, blockPeople: [String(AUTHOR)] })).toEqual([
+      'blockPeople: its owner cannot be blocked: it always works for them',
+    ]);
+    expect(issues({ blockPeople: [String(AUTHOR)] })).toBeUndefined();
+    // Not on its own list of people: allowed all the same, no error.
+    expect(issues({ owner: AUTHOR, people: 'only', onlyPeople: ['66'] })).toBeUndefined();
+    expect(issues({ groups: 'only' })).toBeUndefined();
+    // A list of the choice not made: refused, so that no list holds unseen (D127).
     expect(
-      telegramBotConfig.safeParse({ owner: AUTHOR, deny: [String(AUTHOR)] }).error?.issues
-    ).toEqual([expect.objectContaining({ path: ['deny'], message: 'its owner cannot be denied' })]);
-    expect(telegramBotConfig.safeParse({ deny: [String(AUTHOR)] }).success).toBe(true);
-    expect(telegramBotConfig.safeParse({ denyReply: 'one\ntwo' }).success).toBe(false);
+      issues({
+        onlyGroups: [String(GROUP)],
+        groups: 'only',
+        blockGroups: [String(GROUP)],
+        onlyPeople: ['66'],
+        people: 'anyone',
+        blockPeople: ['66'],
+      })
+    ).toEqual(['blockGroups: set only with groups: any', 'onlyPeople: set only with people: only']);
+    expect(issues({ blockGroups: ['-1'], people: 'only', blockPeople: ['5'] })).toEqual([
+      'blockPeople: set only with people: anyone',
+    ]);
+    expect(issues({ onlyGroups: ['-1'] })).toEqual(['onlyGroups: set only with groups: only']);
+    expect(issues({ groups: 'some' })?.[0]).toMatch(/^groups: /u);
+    expect(issues({ denyReply: 'one\ntwo' })).toHaveLength(1);
+  });
+
+  it('labels its choices and shows each list for its choice in its form (D127), its chats picked (D96)', () => {
+    const view = telegramBotPlugin().manifest;
+    expect(view.configChats?.map((c) => c.key)).toEqual([
+      'owner',
+      'onlyGroups',
+      'blockGroups',
+      'onlyPeople',
+      'blockPeople',
+    ]);
+    const schema = z.toJSONSchema(telegramBotConfig, { io: 'input' }) as {
+      properties: Record<string, Record<string, unknown>>;
+    };
+    expect(schema.properties['groups']).toMatchObject({
+      default: 'any',
+      choices: { any: 'Any group it is added to', only: 'Only these groups' },
+    });
+    expect(schema.properties['people']?.['choices']).toEqual({
+      anyone: 'Anyone',
+      only: 'Only these people',
+    });
+    expect(schema.properties['onlyGroups']?.['shownWhen']).toEqual({ groups: 'only' });
+    expect(schema.properties['blockGroups']?.['shownWhen']).toEqual({ groups: 'any' });
+    expect(schema.properties['onlyPeople']?.['shownWhen']).toEqual({ people: 'only' });
+    expect(schema.properties['blockPeople']?.['shownWhen']).toEqual({ people: 'anyone' });
+    expect(schema.properties['group']).toBeUndefined();
   });
 });
 

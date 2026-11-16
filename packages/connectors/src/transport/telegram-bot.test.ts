@@ -14,7 +14,7 @@ import {
   SURFACES_DOC,
   TelegramBotConnector,
 } from './telegram-bot.ts';
-import { type Denied, DenyList } from './telegram-deny.ts';
+import { type Denied, Gate, type GateOptions } from './telegram-gate.ts';
 
 describe('createBot', () => {
   it('reports an update a handler fails on, and goes on polling', async () => {
@@ -125,12 +125,12 @@ describe('TelegramBotConnector', () => {
     o: {
       listen?: Promise<unknown>;
       chats?: string[];
-      known?: { id: number; role: 'owner' | 'group' }[];
+      ownerId?: number;
       docs?: Record<string, unknown>;
       download?: (fileId: string) => Promise<Uint8Array>;
       /** The time, in ms: what came before its connection was missed. */
       now?: number;
-      deny?: DenyList;
+      gate?: Gate;
     } = {}
   ) {
     const stub = stubBot();
@@ -156,7 +156,7 @@ describe('TelegramBotConnector', () => {
       log: (l) => logs.push(l),
       ...(o.listen === undefined ? {} : { listen: o.listen }),
       ...(o.chats === undefined ? {} : { chats: o.chats }),
-      ...(o.known === undefined ? {} : { known: o.known }),
+      ...(o.ownerId === undefined ? {} : { ownerId: o.ownerId }),
       store: {
         read: <T>(name: string) => docs[name] as T | undefined,
         write: (name, value) => {
@@ -166,7 +166,7 @@ describe('TelegramBotConnector', () => {
       now: () => o.now ?? 10_000,
       sleep: () => Promise.resolve(),
       ...(o.download === undefined ? {} : { download: o.download }),
-      ...(o.deny === undefined ? {} : { deny: o.deny, onDenied: (d) => denied.push(d) }),
+      ...(o.gate === undefined ? {} : { gate: o.gate, onDenied: (d) => denied.push(d) }),
     });
     c.onStatus((s) => states.push(`${s.state} ${s.phase}`));
     return { c, stub, logs, states, docs, denied, polls: () => polls };
@@ -406,22 +406,14 @@ describe('TelegramBotConnector', () => {
     expect(await c.surfaces({ search: '@nowhere_chat' })).toEqual([]);
   });
 
-  it('lists its owner and group before it has seen them, or why it cannot reach them (D96)', async () => {
-    const { c, stub } = connector({
-      known: [
-        { id: 7, role: 'owner' },
-        { id: -100999, role: 'group' },
-      ],
-    });
+  it('lists its owner before it has seen them, or why it cannot reach them (D96)', async () => {
+    const { c, stub } = connector({ ownerId: 7 });
     const asked: number[] = [];
     stub.bot.api.getChat = ((id: number) => {
       asked.push(id);
-      return id === -100999
-        ? Promise.resolve({ id, type: 'supergroup', title: 'Guild Hall' })
-        : Promise.reject(new Error('400: Bad Request: chat not found'));
+      return Promise.reject(new Error('400: Bad Request: chat not found'));
     }) as never;
     expect(await c.surfaces()).toEqual([
-      { id: '-100999', title: 'Guild Hall', kind: 'group' },
       {
         id: '7',
         title: 'its owner',
@@ -431,14 +423,18 @@ describe('TelegramBotConnector', () => {
     ]);
     // Not asked again soon; once the owner writes, it is seen, and reachable.
     await c.surfaces();
-    expect(asked).toEqual([7, -100999]);
+    expect(asked).toEqual([7]);
     await stub.bot.handleUpdate(stub.command(7, 7, '/map', 'ada_x'));
     expect((await c.surfaces({ search: '@ada_x' })).map((x) => [x.id, x.unreachable])).toEqual([
       ['7', undefined],
     ]);
     expect(c.chatTitle('@ADA_X')).toBe('Ada');
-    expect(c.chatTitle('-100999')).toBe('Guild Hall');
     expect(c.chatTitle('-1')).toBeUndefined();
+    // An owner Telegram gives at once is listed as any chat seen.
+    const given = connector({ ownerId: 8 });
+    given.stub.bot.api.getChat = ((id: number) =>
+      Promise.resolve({ id, type: 'private', first_name: 'Bea' })) as never;
+    expect(await given.c.surfaces()).toEqual([{ id: '8', title: 'Bea', kind: 'private' }]);
   });
 
   it('sends to a person by the @username it saw, through their id, after a restart too', async () => {
@@ -543,21 +539,21 @@ describe('TelegramBotConnector', () => {
     await expect(c.deliver('1', 'x')).rejects.toBeInstanceOf(GrammyError);
   });
 
-  describe('a deny list (D100)', () => {
+  describe('a gate (D128)', () => {
     const OWNER = 4242;
     const LOBBY = -100123;
-    const list = (o: { reply?: string; now?: () => number } = {}) =>
-      new DenyList({
-        deny: ['66', '@Spam_Bot', String(OWNER)],
+    const gate = (o: Partial<GateOptions> = {}) =>
+      new Gate({
+        people: { block: ['66', '@Spam_Bot', String(OWNER)] },
         owner: OWNER,
-        reply: o.reply,
-        now: o.now ?? (() => 0),
+        now: () => 0,
+        ...o,
       });
     const sent = (stub: ReturnType<typeof stubBot>) =>
       stub.calls.filter((x) => x.method === 'sendMessage').map((x) => x.payload['text']);
 
-    it('drops the group commands of those it denies, before any reader or the app', async () => {
-      const { c, stub, logs, denied } = connector({ deny: list() });
+    it('drops the commands of those it blocks, before any reader or the app', async () => {
+      const { c, stub, logs, denied } = connector({ gate: gate() });
       const heard: string[] = [];
       c.onMessage((m) => heard.push(`${m.chat} ${m.text}`));
       stub.bot.on('message', (ctx) => void heard.push(`app ${ctx.message.text ?? ''}`));
@@ -566,35 +562,26 @@ describe('TelegramBotConnector', () => {
       // Delivered again (an unconfirmed poll): neither heard nor counted twice.
       await stub.bot.handleUpdate(update);
       await stub.bot.handleUpdate(stub.command(LOBBY, 77, '/roll@ExampleBot', 'spam_bot'));
+      // In a private chat too.
+      await stub.bot.handleUpdate(stub.command(66, 66, '/roll'));
       expect(heard).toEqual([]);
+      const lobby = { chat: String(LOBBY), chatTitle: 'The Lobby', by: 'person', replied: false };
       expect(denied).toEqual([
-        {
-          chat: String(LOBBY),
-          chatTitle: 'The Lobby',
-          sender: '66',
-          command: '/roll',
-          replied: false,
-        },
-        {
-          chat: String(LOBBY),
-          chatTitle: 'The Lobby',
-          sender: '@Spam_Bot',
-          command: '/roll',
-          replied: false,
-        },
+        { ...lobby, sender: '66', command: '/roll' },
+        { ...lobby, sender: '@Spam_Bot', command: '/roll' },
+        { chat: '66', sender: '66', by: 'person', command: '/roll', replied: false },
       ]);
       expect(logs).toContain('denied /roll of 66 in The Lobby');
-      expect(c.denied()).toMatchObject({ count: 2, last: { sender: '@Spam_Bot', t: 0 } });
+      expect(c.denied()).toMatchObject({ count: 3, last: { sender: '66', t: 0 } });
       expect(sent(stub)).toEqual([]);
     });
 
-    it('leaves private chats, the owner, other bots’ commands and plain text alone', async () => {
-      const { c, stub, denied } = connector({ deny: list() });
+    it('leaves the owner, other bots’ commands and what they say alone', async () => {
+      const { c, stub, denied } = connector({ gate: gate() });
       const heard: string[] = [];
       c.onMessage((m) => heard.push(`${m.chat} ${m.text}`));
       c.start();
       await flush();
-      await stub.bot.handleUpdate(stub.command(66, 66, '/roll'));
       await stub.bot.handleUpdate(stub.command(LOBBY, OWNER, '/roll'));
       await stub.bot.handleUpdate(stub.command(LOBBY, 66, '/roll@OtherBot'));
       const plain = stub.command(LOBBY, 66, 'hello') as unknown as {
@@ -602,21 +589,71 @@ describe('TelegramBotConnector', () => {
       };
       delete plain.message.entities;
       await stub.bot.handleUpdate(plain as never);
-      expect(heard).toEqual([
-        '66 /roll',
-        `${LOBBY} /roll`,
-        `${LOBBY} /roll@OtherBot`,
-        `${LOBBY} hello`,
-      ]);
+      expect(heard).toEqual([`${LOBBY} /roll`, `${LOBBY} /roll@OtherBot`, `${LOBBY} hello`]);
       expect(denied).toEqual([]);
       expect(c.denied()).toEqual({ count: 0 });
       await c.stop();
     });
 
+    it('works only for the people it lists, and its owner', async () => {
+      const { c, stub, denied } = connector({
+        gate: gate({ people: { only: ['@ada_x'] } }),
+      });
+      const heard: string[] = [];
+      c.onMessage((m) => heard.push(`${m.chat} ${m.text}`));
+      await stub.bot.handleUpdate(stub.command(LOBBY, 5, '/roll', 'ada_x'));
+      await stub.bot.handleUpdate(stub.command(LOBBY, OWNER, '/roll'));
+      await stub.bot.handleUpdate(stub.command(LOBBY, 77, '/roll', 'mallory_x'));
+      await stub.bot.handleUpdate(stub.command(77, 77, '/roll', 'mallory_x'));
+      expect(heard).toEqual([`${LOBBY} /roll`, `${LOBBY} /roll`]);
+      expect(denied.map((d) => `${d.chat} ${d.sender} ${d.by}`)).toEqual([
+        `${LOBBY} @mallory_x person`,
+        '77 @mallory_x person',
+      ]);
+    });
+
+    it('hears nothing in a group it does not work in, and records the commands there', async () => {
+      const { c, stub, denied } = connector({
+        gate: gate({ groups: { only: ['-100999'] }, reply: 'Not for you.' }),
+      });
+      const heard: string[] = [];
+      c.onMessage((m) => heard.push(`${m.chat} ${m.text}`));
+      await stub.bot.handleUpdate(stub.command(LOBBY, OWNER, '/roll'));
+      const plain = stub.command(LOBBY, 5, 'hello') as unknown as {
+        message: { entities?: unknown };
+      };
+      delete plain.message.entities;
+      await stub.bot.handleUpdate(plain as never);
+      await stub.bot.handleUpdate(stub.tap(LOBBY, 5, '/report 8'));
+      // A private chat is no group: the owner's, heard.
+      await stub.bot.handleUpdate(stub.command(OWNER, OWNER, '/roll'));
+      expect(heard).toEqual([`${OWNER} /roll`]);
+      // Seen all the same, so that the owner can pick it.
+      expect((await c.surfaces()).map((x) => x.id)).toContain(String(LOBBY));
+      // Its owner's command too, and silently: the reply line is for people.
+      expect(denied.map((d) => `${d.sender} ${d.by} ${d.command} ${d.replied}`)).toEqual([
+        `${OWNER} group /roll false`,
+        '5 group /report false',
+      ]);
+      expect(sent(stub)).toEqual([]);
+    });
+
+    it('blocks a group, any other heard', async () => {
+      const { c, stub, denied } = connector({
+        gate: new Gate({ groups: { block: [String(LOBBY)] }, now: () => 0 }),
+      });
+      const heard: string[] = [];
+      c.onMessage((m) => heard.push(`${m.chat} ${m.text}`));
+      await stub.bot.handleUpdate(stub.command(LOBBY, 5, '/roll'));
+      await stub.bot.handleUpdate(stub.command(-100999, 5, '/roll'));
+      expect(heard).toEqual(['-100999 /roll']);
+      expect(denied.map((d) => d.chat)).toEqual([String(LOBBY)]);
+    });
+
     it('answers with its reply line, at most once in 10 minutes per person', async () => {
       let now = 0;
       const { stub, denied, logs } = connector({
-        deny: list({ reply: 'Not for you.', now: () => now }),
+        gate: gate({ reply: 'Not for you.', now: () => now }),
       });
       await stub.bot.handleUpdate(stub.command(LOBBY, 66, '/roll'));
       await stub.bot.handleUpdate(stub.command(LOBBY, 66, '/roll'));
@@ -629,15 +666,15 @@ describe('TelegramBotConnector', () => {
       expect(logs).toContain('deny reply failed: Error: no right to post');
     });
 
-    it('drops their taps on buttons in a group, not in a private chat', async () => {
-      const { stub, denied } = connector({ deny: list() });
+    it('drops their taps on buttons, in any chat', async () => {
+      const { stub, denied } = connector({ gate: gate() });
       const taps: string[] = [];
       stub.bot.on('callback_query:data', (ctx) => void taps.push(ctx.callbackQuery.data));
       await stub.bot.handleUpdate(stub.tap(LOBBY, 66, '/report 8'));
       await stub.bot.handleUpdate(stub.tap(66, 66, '/report 9'));
       await stub.bot.handleUpdate(stub.tap(LOBBY, 77, '/report 7'));
-      expect(taps).toEqual(['/report 9', '/report 7']);
-      expect(denied.map((d) => `${d.sender} ${d.command}`)).toEqual(['66 /report']);
+      expect(taps).toEqual(['/report 7']);
+      expect(denied.map((d) => `${d.sender} ${d.command}`)).toEqual(['66 /report', '66 /report']);
       expect(stub.calls.map((x) => x.method)).toContain('answerCallbackQuery');
     });
 

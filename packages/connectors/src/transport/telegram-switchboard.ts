@@ -5,12 +5,11 @@
  * `Switchboard` (grammy-switchboard) is installed on it, with no store (every button carries itself
  * inline) and commands only (no plain messages).
  *
- * Its topics: `author`, the private chat with the author, whose chat id is the author's Telegram
- * user id. Notifications, the remote's buttons and its commands go there only. `group`, a
- * Telegram group when one is configured (the group has no forum topics, so no thread id), with its
- * public commands only (packages/connectors/src/transport/telegram-commands.ts); the remote
- * acts only on the author's topic (the core's owner's controls,
- * packages/core/src/controls.ts), and no button is ever sent to the group.
+ * Its one topic: `author`, the private chat with the author, whose chat id is the author's Telegram
+ * user id. Notifications, the remote's buttons and its commands go there only (the core's owner's
+ * controls, packages/core/src/controls.ts). Every other chat, its groups included (bot-os.md
+ * D128), the switchboard passes on to the handlers after it
+ * (packages/connectors/src/transport/telegram-commands.ts).
  */
 import { type Api, type Bot } from 'grammy';
 import { type Command, type Logger, Switchboard, type Topic } from 'grammy-switchboard';
@@ -18,15 +17,9 @@ import { type Command, type Logger, Switchboard, type Topic } from 'grammy-switc
 /** The author's private chat with the bot. */
 export const AUTHOR_TOPIC = 'author';
 
-/** The game's group, for its public commands. */
-export const GROUP_TOPIC = 'group';
-
-/** The bot's topics: the author's private chat, and the game's group if any; neither has a thread. */
-export function telegramTopics(authorId: number, groupId?: number): Record<string, Topic> {
-  return {
-    [AUTHOR_TOPIC]: { chatId: authorId },
-    ...(groupId === undefined ? {} : { [GROUP_TOPIC]: { chatId: groupId } }),
-  };
+/** The bot's topics: the author's private chat, which has no thread. */
+export function telegramTopics(authorId: number): Record<string, Topic> {
+  return { [AUTHOR_TOPIC]: { chatId: authorId } };
 }
 
 /**
@@ -43,9 +36,6 @@ export interface SwitchboardOptions {
   authorId: number;
   /** The author's `/` commands: the remote's. */
   authorCommands: readonly Command[];
-  /** The game's group, and its public commands. */
-  groupId?: number;
-  groupCommands?: readonly Command[];
   logger?: Logger;
 }
 
@@ -53,11 +43,8 @@ export interface SwitchboardOptions {
 export function createSwitchboard(o: SwitchboardOptions): Switchboard {
   return new Switchboard({
     api: o.api,
-    topics: telegramTopics(o.authorId, o.groupId),
-    commands: {
-      [AUTHOR_TOPIC]: o.authorCommands,
-      ...(o.groupId === undefined ? {} : { [GROUP_TOPIC]: o.groupCommands ?? [] }),
-    },
+    topics: telegramTopics(o.authorId),
+    commands: { [AUTHOR_TOPIC]: o.authorCommands },
     ...(o.logger === undefined ? {} : { logger: o.logger }),
   });
 }
@@ -65,16 +52,22 @@ export function createSwitchboard(o: SwitchboardOptions): Switchboard {
 const FIRST_MENU_RETRY_MS = 60_000;
 const MAX_MENU_RETRY_MS = 3_600_000;
 
+/** A chat's `/` menu: the chat (an id, or a group's `@username`), and the way to set it. */
+export interface ChatMenu {
+  chat: number | string;
+  set: () => Promise<unknown>;
+}
+
 /**
- * Keeps each topic's `/` menu registered. A chat's menu can only be set once the bot is in the chat
+ * Keeps each chat's `/` menu registered, by name (the author's topic, `author`, and each other
+ * chat as its commands edge names it). A chat's menu can only be set once the bot is in the chat
  * (Telegram answers "chat not found" before), so a failure is retried after a minute, doubling up
  * to an hour, until it succeeds; and when the bot is added to a chat (`joined`, from its
  * `my_chat_member` update), that chat's menus are set at once.
  */
 export class CommandMenus {
   private readonly o: {
-    switchboard: Pick<Switchboard, 'registerCommandMenu'>;
-    topics: Readonly<Record<string, Topic>>;
+    menus: Readonly<Record<string, ChatMenu>>;
     log: (line: string) => void;
   };
   private readonly retries = new Map<
@@ -86,15 +79,17 @@ export class CommandMenus {
     this.o = o;
   }
 
-  /** Sets every topic's menu, once the bot is connected. */
+  /** Sets every chat's menu, once the bot is connected. */
   registerAll(): void {
-    for (const topic of Object.keys(this.o.topics)) void this.register(topic);
+    for (const name of Object.keys(this.o.menus)) void this.register(name);
   }
 
-  /** The bot was added to `chatId`: its topics' menus, now. */
-  joined(chatId: number): void {
-    for (const [topic, t] of Object.entries(this.o.topics))
-      if (t.chatId === chatId) void this.register(topic);
+  /** The bot was added to `chat`: its menus, by its id or its `@username`, now. */
+  joined(chat: { id: number; username?: string }): void {
+    const handle = chat.username === undefined ? undefined : `@${chat.username}`.toLowerCase();
+    for (const [name, m] of Object.entries(this.o.menus))
+      if (m.chat === chat.id || (typeof m.chat === 'string' && m.chat.toLowerCase() === handle))
+        void this.register(name);
   }
 
   /** Stops the retries. */
@@ -107,7 +102,7 @@ export class CommandMenus {
     const pending = this.retries.get(topic);
     if (pending !== undefined) clearTimeout(pending.timer);
     try {
-      await this.o.switchboard.registerCommandMenu(topic);
+      await this.o.menus[topic]?.set();
       this.retries.delete(topic);
       this.o.log(`telegram: command menu of ${topic} set`);
     } catch (e) {
@@ -130,7 +125,13 @@ export class CommandMenus {
 export function watchMembership(bot: Pick<Bot, 'on'>, menus: Pick<CommandMenus, 'joined'>): void {
   bot.on('my_chat_member', async (ctx, next) => {
     const status = ctx.myChatMember.new_chat_member.status;
-    if (status === 'member' || status === 'administrator') menus.joined(ctx.chat.id);
+    if (status === 'member' || status === 'administrator')
+      menus.joined({
+        id: ctx.chat.id,
+        ...('username' in ctx.chat && ctx.chat.username !== undefined
+          ? { username: ctx.chat.username }
+          : {}),
+      });
     await next();
   });
 }

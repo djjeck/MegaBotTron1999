@@ -1084,19 +1084,19 @@ no chat to monitor or pick; a basic group upgraded to a supergroup is left out (
 listed), by the connector: GramJS's `ignoreMigrated` keeps those alone, and dropped every user, bot,
 channel and supergroup; `telegram-bot` the chats it has seen in updates, kept in its store
 (`surfaces`), each by its id (the one name the Bot API reaches a person by), its `@username` an
-alias; its config's `owner` and `group`, asked of Telegram (`getChat`) before it has seen them, and
-listed `unreachable` with why when Telegram does not give them (the owner never started the bot; it
-is not in the group), asked again at most every 10 minutes; and one searched by an id or a
-`@username` no chat seen has, asked of Telegram and kept, since the Bot API cannot list a bot's
-chats and gives it only a chat it can reach; and the people it has seen in its groups (the latest
-200, in memory only), each `unreachable` until they open the bot, for its deny list (bot-os.md
-D100); `irc` its channel. A chat a `telegram-bot` config or edge names by the `@username` of a
-person it has seen goes to their id, so a config saved so keeps working. A connector's `chats`
-config (the two Telegram ones) is what it **monitors**: unset, every chat it has; each chat-in edge
-reads a subset (`reads`, `"*"` for all of them). Its manifest says where its config names them
-(`monitors`, §2: `chats` for the two Telegram ones, `channel` for `irc`), so that the check warns of
-an edge reading a chat its connector does not monitor (§2.3, bot-os.md D89), a chat matched by any
-of its names (D90). A connector not running lists nothing.
+alias; its config's `owner`, asked of Telegram (`getChat`) before it has seen them, and listed
+`unreachable` with why when Telegram does not give them (the owner never started the bot), asked
+again at most every 10 minutes; and one searched by an id or a `@username` no chat seen has, asked
+of Telegram and kept, since the Bot API cannot list a bot's chats and gives it only a chat it can
+reach; and the people it has seen in its groups (the latest 200, in memory only), each `unreachable`
+until they open the bot, for its lists of people (bot-os.md D100, D128); `irc` its channel. A chat a
+`telegram-bot` config or edge names by the `@username` of a person it has seen goes to their id, so
+a config saved so keeps working. A connector's `chats` config (the two Telegram ones) is what it
+**monitors**: unset, every chat it has; each chat-in edge reads a subset (`reads`, `"*"` for all of
+them). Its manifest says where its config names them (`monitors`, §2: `chats` for the two Telegram
+ones, `channel` for `irc`), so that the check warns of an edge reading a chat its connector does not
+monitor (§2.3, bot-os.md D89), a chat matched by any of its names (D90). A connector not running
+lists nothing.
 
 **Missed messages** (bot-os.md D62): what was said while the instance was down is the connector's to
 deliver once, marked `playback` (so nothing acts on it: the reactor skips it, and the replies'
@@ -2150,28 +2150,37 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   its config is its queue's default interval between two sends of a command (D73), and
   `unansweredAt`, `unansweredAtBy` its watchdog's threshold (§4.6, D93). With `chats` in its config
   (picked among its chats, D96) it monitors only those for the plugins; its surfaces are the chats
-  it has seen, its owner and its group (§4.5), and the updates Telegram kept while it was down come
-  marked `missed` (and `playback` once older than its config's `liveGraceS`, 120 s by default, D83).
-  Configured with its owner and optionally a group (`owner`, `group`, in its node's config, each
-  picked among its chats and kept by id, D96), it is the instance's chat surface, the owner's
-  interactive control (§4.8, bot-os.md D56) (`telegram-surface.ts`): the switchboard on its bot
-  (`telegram-switchboard.ts`, on grammy-switchboard), the owner's controls answered in the owner's
-  chat, and the plugins' commands that the commands edges from its `commands` output serve (D109),
-  each answered only in the chats its edge names (the group, the owner's chat, every private chat
-  with `privateChats`, another chat it is in) and listed in those chats' menus alone (the
-  switchboard's two, every private chat's, and Telegram's `chat` scope for another chat)
-  (`telegram-commands.ts`), the menus kept registered. Without an `owner` it is no surface, and its
-  commands edges answer nothing. It tells the owner nothing on its own (D94): a send with buttons
-  (`SendOptions.buttons`, an `owner-notice` telling a `told` notice) to the owner's chat goes
-  through the surface's switchboard, whose taps run the owner's commands as a card's do; to any
-  other chat, the text alone. Nothing hands its bot out (P9). Its `deny` (D100: people and bots
-  picked among its chats, never its owner) drops their commands in a group, and their taps on
-  buttons there, before any edge or its surface sees them; each drop is recorded
-  (`telegram-bot.denied`, on the Events page) and counted in its node's view and on its card; silent
-  unless `denyReply` sets one line to answer, at most once in 10 minutes per person. Its `home`
-  (D105) is the command of the owner's main card, as typed (`/menu`, `/menu main`) or short (`menu`,
-  `menu:main`), at most 64 bytes: the core's own cards on its surface (`/plugins`, `/settings`) end
-  with a button that runs it, labelled `homeLabel` (`🏠 Home` by default); unset, they have none.
+  it has seen and its owner (§4.5), and the updates Telegram kept while it was down come marked
+  `missed` (and `playback` once older than its config's `liveGraceS`, 120 s by default, D83).
+  Configured with its owner (`owner`, in its node's config, picked among its chats and kept by id,
+  D96), it is the instance's chat surface, the owner's interactive control (§4.8, bot-os.md D56)
+  (`telegram-surface.ts`): the switchboard on its bot (`telegram-switchboard.ts`, on
+  grammy-switchboard), the owner's controls answered in the owner's chat, and the plugins' commands
+  that the commands edges from its `commands` output serve (D109), each answered only in the chats
+  its edge names (a group, the owner's chat, every private chat with `privateChats`) and listed in
+  those chats' menus alone (the switchboard's, the owner's chat; every private chat's; Telegram's
+  `chat` scope for each other chat, a group's included, but a group its gate refuses)
+  (`telegram-commands.ts`), the menus kept registered, a refused one retried and one set again when
+  the bot joins its chat; in any group, one answer per user a minute and one every 10 s, each group
+  its own throttles, and an answer deleted when its handler asks (`deleteInGroupAfterMs`). Without
+  an `owner` it is no surface, and its commands edges answer nothing. It tells the owner nothing on
+  its own (D94): a send with buttons (`SendOptions.buttons`, an `owner-notice` telling a `told`
+  notice) to the owner's chat goes through the surface's switchboard, whose taps run the owner's
+  commands as a card's do; to any other chat, the text alone. Nothing hands its bot out (P9). Its
+  gate (D128, `telegram-gate.ts`), each list picked among its chats: `groups`, `any` group it is
+  added to (default; `blockGroups` the ones it ignores even so) or `only` the groups in
+  `onlyGroups`; `people`, `anyone` (default; `blockPeople`, never its owner) or `only` the people
+  and bots in `onlyPeople`, its owner always allowed, listed or not; a list of the choice not made
+  is refused by its check. In a group it does not work in, nothing goes further: no message reaches
+  a reader, no command an edge or its surface. A command (or a tap on a button) of a person it does
+  not work for, in any chat, goes no further either, what they say still reaching the readers. Each
+  command dropped is recorded (`telegram-bot.denied`: `chat`, `chatTitle`, `sender`, `by` `group` or
+  `person`, `command`, `replied`; on the Events page) and counted in its node's view and on its
+  card; silent unless `denyReply` sets one line to answer a person with, at most once in 10 minutes
+  per person. Its `home` (D105) is the command of the owner's main card, as typed (`/menu`,
+  `/menu main`) or short (`menu`, `menu:main`), at most 64 bytes: the core's own cards on its
+  surface (`/plugins`, `/settings`) end with a button that runs it, labelled `homeLabel` (`🏠 Home`
+  by default); unset, they have none.
 - **`telegram-user`** (`packages/connectors/src/plugins/telegram-user.ts`, on GramJS in
   `packages/connectors/src/transport/telegram-user.ts`): the owner's own account, from a login in
   its node's panel (§4.5, D116: `user-login.ts`, the API pair once, then a QR code or the phone,

@@ -44,145 +44,148 @@ the server that guards them.
   `commands` output to a plugin's `commands` input, the plugin's chat commands it answers
   (checkboxes, every one by default; not a chat-out's `commands`, the words a plugin sends), the
   `chats` it answers them in (in the chat picker) and every private chat, who may ask (anyone, or a
-  list with _the owner_) and its dry run, which a new one starts (its chats the connector's
-  owner's); a plugin's panel says, for each of its commands, which connector serves it, in which
-  chats by name and to whom, or that no edge does, a connector's which plugins' commands it serves,
-  and a plugin's `commands` port says so on its card; and where **Remove edge** removes it alone; a
-  connector's own `chats`, what it monitors, are every chat or those picked. **Every chat is picked
-  in one chat picker** (`ChatPicker.tsx`, D96), never typed: an edge's `reads` and `sends`, a
-  connector's `chats`, and each config key a plugin's manifest names (`configChats`:
-  `telegram-bot`'s `owner`, `group` and `deny`, the reactor's `chat` and `in`), from the chats of
-  its connector (its own node, or the one along the node's chat edge; until that edge is drawn, it
-  says to draw it); a key of one chat that is optional offers **None** first, which unsets it. **A
-  chat named once** (D97): a chat a config key picks for its chat edge is written on that edge too
-  (`draft.ts`'s `syncEdgeChats`: its `sends` or `reads`), replaced there when the pick changes, the
-  chats added to the edge by hand kept; a new edge starts with the chats its node's config names
-  (`edgeOf`), and one from an output that sends to the owner (`owner-notice`'s) with its connector's
-  owner's chat, its panel saying so of one left with none. `owner-notice` and the turn actor have no
-  chat key: their edges are their only chat setting, the turn actor's naming its bot's one chat (its
-  panel says so, and the check). Each chat shows by its name, its kind by an icon in a colour of its
-  own (a person, a bot, a group, a channel), a person's or a bot's `@username` beside it, and when
-  it was last active (`3 days ago`); the chats picked come first; a search finds a chat by its name,
-  its `@username` or its id, and an id is never shown for a chat that has a name. What is kept is
-  the name its connector sends to (`Surface.id`; a number for a key whose schema is one). A chat
-  saved otherwise (an id, a `@username`) is found by any of its names, from the lists or a search
-  for it (`useLookups`), so after a reload too, and shown as saved only when no search finds it,
-  with why. A chat its connector says it cannot reach shows why (`unreachable`), and so do the chats
-  only another connector of its network lists (`peers`: the owner's account knows people and groups
-  a bot never saw); picked, one is first asked of the connector, which lists it if it can reach it,
-  else it is picked by its id with why it cannot. A key of people to recognise rather than chats to
-  send to (`sender`, `telegram-bot`'s `deny`, D100) says nothing of reaching them, picks a peer's
-  person at once by id, and is written on no edge. A connector that cannot list its chats at all is
-  the one place a chat is typed. Once the draft changes a connector's chats, a reminder beside them
-  says that the edges which should read a chat need it ticked too (P6: the edges filter again),
-  naming the chat-in edges with a `reads` list that miss a chat added or still read one removed,
-  each a link that opens its panel. A connector not running yet says to apply first. A new node
-  starts **disabled** and a new chat-out edge a **dry run**: its rhombus hollow and its part from
-  the rhombus to the connector greyed and dashed; its panel's **Dry-run / Send for real** switch,
-  and a node's **Enabled** switch, are changes of the draft, applied with Apply. A node's config and
-  settings are forms made from its schemas (a connector's account is nothing to type: its node's id,
-  read-only under **Advanced**, docs/bot-os.md D119), each field's description as its help, a
-  connector's shared tuning (`commandIntervalS`, `unansweredAt`, `unansweredAtBy`, `liveGraceS`)
-  folded under **Tuning**, and a connector not yet logged in told to log in first (D122); a new
-  node's config starts filled with its schema's defaults, and an opened node shows its unset ones
-  filled in, written with its first change (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), an
-  enum whose schema labels its values (`choices`, docs/bot-os.md D127) as radio buttons by those
-  labels, a field shown only while a sibling has the value its `shownWhen` names, and taken away
-  when a change makes it not apply, a config key that names a secret a choice of the secrets' names,
-  a sensitive one (docs/bot-os.md D124) said set or not, replaced typed unseen or cleared, never
-  shown (`SensitiveField.tsx`), a connector's secrets listed under its config, each by name, whether
-  it is provided (`GET /secrets`) and where it comes from (a Docker secret), never its value, a list
-  of strings or numbers as rows of plain fields with add (+) and remove buttons, and a record of
-  plain values (the reactor's `when`) as rows of a key and a value, its type picked where several
-  are allowed (`ListFields.tsx`); JSON is typed only for what none of these draws. An events edge
-  says what it carries (`Payloads.tsx`, #3): each event type and its payload's fields by dotted path
-  and type, in its panel, in the title of its rhombus (a line per type), and in the panel of the
-  node it enters, under the input (narrowed to the type the reactor's `on` names), for a reaction's
-  `when` and `send` paths. Its outputs say what they carry (docs/bot-os.md D71): an events output
-  its event types, each with its description; an interface output its members, folded, each with its
-  signature (`signature.ts`) and help when opened. A node up that keeps a state (docs/bot-os.md D72)
-  has a **State** section, drawn from its schema alone (`StateViewer.tsx`): its pinned paths first,
-  then each section with its freshness; a list of objects as a sortable, searchable table, a map as
-  a table of keys and values, an object folded, a value as a labelled line; its card shows a line of
-  it. A running connector's panel lists its **Queue** (`Queue.tsx`, D73): each send waiting, until
-  when, and the nodes that asked for it with what cancels them, a send several share marked so, and
-  the sends coalesced since the start with the pairs of nodes that shared them; a chat-out edge's
-  panel sets each command's spacing (`minIntervalS`, empty for the connector's default). Every
-  change is checked by the core, and each refusal shown on its edge, port, node or field
-  (`draft.ts`, the draft's pure changes); each warning (docs/bot-os.md D89: a chat-in edge reading a
-  chat its connector does not monitor), which refuses nothing, in amber and dashed on its edge, its
-  port and its node, listed in their panels and the review, and counted in the map's bar
-  (`N warnings`), Apply offered all the same; typing in a panel keeps its field focused, and the
-  cards and edges that draw as before are kept as drawn (`stable.ts`), so the map does not redraw at
-  each keystroke. **Review changes** opens a dialog with the diff and two actions (`Review.tsx`):
-  **Apply** saves the graph (`PUT /graph/file`) and restarts the instance on it, waiting for it and
-  coming back to the page, still logged in (`src/ui/Restart.tsx`), with a note that says so and goes
-  by itself after 30 seconds (or at its **dismiss**), or says why the core refused it and restarts
-  nothing; **Revert** drops the draft, back to the graph saved, once confirmed. Its × (or Escape)
-  only closes it, the draft kept. When the saved graph is not what runs (changed through the API,
-  rolled back, or a restart that did not happen), a banner offers **Apply (restart)**; a saved graph
-  refused at the last start is shown first. A **script** node (docs/bot-os.md D76, D78,
-  `src/ui/graph/script/`) has its ports in a form in its panel (`ScriptPorts.tsx`), a port renamed
-  once its name is typed (left, or Enter; a name empty or taken refused), its edges moved with it in
-  the same change, and removed with its row's **Remove**, its edges with it in the same change,
-  after a confirmation naming them (docs/bot-os.md D84: several ports of a kind, each its own name),
-  and **Edit script** opens its code in Monaco (`ScriptEditor.tsx`, `ScriptCode.tsx`:
-  `monaco-editor`, bundled, its chunk loaded only then), typed by a `.d.ts` made from its ports
-  (`types.ts`), beside a panel of its API; every key typed there is the editor's (the dialog is out
-  of the reach of the map's keys, Space to pan among them), and Escape closes it only when Monaco
-  has no use for it, asking first once the code changed; **Keep** is refused while the code does not
-  parse; **Export as plugin** (`ExportDialog.tsx`, `export.ts`, docs/bot-os.md D79) downloads it as
-  a module's plugin file and its `module.json`. The **Text** tab, on the page's right edge, opens a
-  side sheet from the right (sliding, unless the browser asks for reduced motion) with the draft
-  printed (`graphText`), read-only, with a copy button (`GraphText.tsx`); the tab rides on the
-  sheet's edge and closes it; the rollback is the History page's. Under it, the **Costs** tab opens
-  the nodes by cost (`Costs.tsx`, docs/bot-os.md D77: since the start, the CPU a script's worker
-  spent running its code or else the time in its handlers, sortable by any column, the top three
-  marked; and a model connector's money over the last 24 hours, docs/bot-os.md D117), each node's
-  name selecting it. **A model connector** (its manifest's `model`, D117) has a `$` on its card, so
-  that the owner watches it; what it spent shows on its card through its widget, and in its panel's
-  Cost line. **What belongs to a node is on it** (docs/bot-os.md D111): a connector's cards show its
-  connection (`connected`, `connecting`, `closed`, its step on hover) and whom it is logged in as
-  (`@ExampleBot`, docs/bot-os.md D120), and its panel as whom it runs and its connection
-  (`GET /accounts`); every node's panel says what it costs, its share and whether it is among the
-  top three, and, while it runs, its status (read there, so its reads offer no **Read** of it), its
-  settings in force (each set at once with its **Set**, as `/set` does in chat, above the form of
-  the settings a fresh instance starts with) and its reads and actions, each called with **Read** or
-  **Run**, its input in a form made from its schema, its answer under it (`NodeControls.tsx`). **A
-  connector's login** (docs/bot-os.md D116): one that logs in from its node (a Telegram one) says
-  `needs login` on its card until it has credentials, and its panel, while it runs or is stopped
-  (D125), shows its **Login** as its connector says it (`ConnectorLogin.tsx`, `GET` and
-  `POST /plugins/<id>/login`): a step's title, how-to and link, a QR code drawn from its link
-  (`qrcode-generator`, renewed as the login asks again every 2 s while under way), its fields (a
-  secret one typed unseen, cleared once sent) and its buttons (a logout asking first); once its
-  credentials changed, **Restart now** restarts the instance as Apply does. Its Docker secrets show
-  as its fallback, not required. **Widgets and pages** (docs/bot-os.md D112): a node whose plugin
-  declares a widget shows it in one line on its card while it runs (`Widget.tsx`'s `WidgetLine`,
-  `widget-text.ts`: its fields, a count, a list's first items, a table's rows counted, an amount out
-  of its total with a bar, or how long until a time, moving with the clock), from `GET /status`'s
-  `widget`, its card a line taller for it; one that declares a page has **Open its page** in its
-  panel while it runs, which leads to `#/node/<id>` (`NodePage.tsx`, in no menu): the page's
-  sections drawn in full (`WidgetSection`), each read asked every five seconds. The map's bar heads
-  with the instance's switches: `instance on` or `off`, **Turn off** (asking first) or **Turn on**,
-  and **Kill all** (every plugin's safety stop, asking first). Select one node or several (Shift,
-  Ctrl or Cmd with a click; Shift and drag for a box) and **Kill selected** kills each: its plugin's
-  own safety stop, then stopped, kept across restarts; a stopped node's panel has **Clear stop**, a
-  change of the draft that Review lists and Apply makes (`clear-stop`, then the restart), and its
-  forms stay editable. Nodes start in columns (`layout.ts`) and can be moved. **Swimlanes**
-  (docs/bot-os.md D69): a node's panel sets its **Group** (none, one of the draft's, or **new
-  group…**, named and set), a change of the draft like any other; a draft with groups is drawn in
-  lanes (`layout.ts`'s `swimlanes`, `lanes.ts`, `LaneNode.tsx`): the same global columns, each group
-  a tinted band with its name at its top left, in the order of its first node, the ungrouped nodes
-  in an unlabelled band last, and the connectors' in and out cards outside every band, at the left
-  and the right (a connector's group is ignored, which its panel says). A card is its lane's child
-  in React Flow, and stays in its lane when dragged. A lane's label zooms to fit it; resting on a
-  node dims what it does not reach, and on a lane's label everything outside the lane but its edges
-  and the connectors they reach; the minimap tints each lane. Its colour comes from a fixed palette,
-  by a hash of its name, the next free one when an earlier lane has it. **Modules** (`#/modules`,
-  `ModulesPage.tsx`, docs/bot-os.md D67, D102) lists the modules installed, each with its version,
-  its source (a folder upload, a tarball, or a repository on GitHub or a self-hosted Git server,
-  linked at its commit) and when it was installed. It installs modules from a folder, chosen
-  (**Choose folder**) or dropped on the page, or from a repository's link: a public GitHub one
+  list with _the owner_), all within whom and where its connector works for (a `telegram-bot`'s
+  groups and people, docs/bot-os.md D128, as the panel says), and its dry run, which a new one
+  starts (its chats the connector's owner's); a plugin's panel says, for each of its commands, which
+  connector serves it, in which chats by name and to whom, or that no edge does, a connector's which
+  plugins' commands it serves, and a plugin's `commands` port says so on its card; and where
+  **Remove edge** removes it alone; a connector's own `chats`, what it monitors, are every chat or
+  those picked. **Every chat is picked in one chat picker** (`ChatPicker.tsx`, D96), never typed: an
+  edge's `reads` and `sends`, a connector's `chats`, and each config key a plugin's manifest names
+  (`configChats`: `telegram-bot`'s `owner`, `onlyGroups`, `blockGroups`, `onlyPeople` and
+  `blockPeople`, the reactor's `chat` and `in`), from the chats of its connector (its own node, or
+  the one along the node's chat edge; until that edge is drawn, it says to draw it); a key of one
+  chat that is optional offers **None** first, which unsets it. **A chat named once** (D97): a chat
+  a config key picks for its chat edge is written on that edge too (`draft.ts`'s `syncEdgeChats`:
+  its `sends` or `reads`), replaced there when the pick changes, the chats added to the edge by hand
+  kept; a new edge starts with the chats its node's config names (`edgeOf`), and one from an output
+  that sends to the owner (`owner-notice`'s) with its connector's owner's chat, its panel saying so
+  of one left with none. `owner-notice` and the turn actor have no chat key: their edges are their
+  only chat setting, the turn actor's naming its bot's one chat (its panel says so, and the check).
+  Each chat shows by its name, its kind by an icon in a colour of its own (a person, a bot, a group,
+  a channel), a person's or a bot's `@username` beside it, and when it was last active
+  (`3 days ago`); the chats picked come first; a search finds a chat by its name, its `@username` or
+  its id, and an id is never shown for a chat that has a name. What is kept is the name its
+  connector sends to (`Surface.id`; a number for a key whose schema is one). A chat saved otherwise
+  (an id, a `@username`) is found by any of its names, from the lists or a search for it
+  (`useLookups`), so after a reload too, and shown as saved only when no search finds it, with why.
+  A chat its connector says it cannot reach shows why (`unreachable`), and so do the chats only
+  another connector of its network lists (`peers`: the owner's account knows people and groups a bot
+  never saw); picked, one is first asked of the connector, which lists it if it can reach it, else
+  it is picked by its id with why it cannot. A key of people to recognise rather than chats to send
+  to (`sender`, `telegram-bot`'s `onlyPeople` and `blockPeople`, D128) says nothing of reaching
+  them, picks a peer's person at once by id, and is written on no edge. A connector that cannot list
+  its chats at all is the one place a chat is typed. Once the draft changes a connector's chats, a
+  reminder beside them says that the edges which should read a chat need it ticked too (P6: the
+  edges filter again), naming the chat-in edges with a `reads` list that miss a chat added or still
+  read one removed, each a link that opens its panel. A connector not running yet says to apply
+  first. A new node starts **disabled** and a new chat-out edge a **dry run**: its rhombus hollow
+  and its part from the rhombus to the connector greyed and dashed; its panel's **Dry-run / Send for
+  real** switch, and a node's **Enabled** switch, are changes of the draft, applied with Apply. A
+  node's config and settings are forms made from its schemas (a connector's account is nothing to
+  type: its node's id, read-only under **Advanced**, docs/bot-os.md D119), each field's description
+  as its help, a connector's shared tuning (`commandIntervalS`, `unansweredAt`, `unansweredAtBy`,
+  `liveGraceS`) folded under **Tuning**, and a connector not yet logged in told to log in first
+  (D122); a new node's config starts filled with its schema's defaults, and an opened node shows its
+  unset ones filled in, written with its first change (`defaults.ts`) (`SchemaForm.tsx`,
+  `NodeDetails.tsx`), an enum whose schema labels its values (`choices`, docs/bot-os.md D127) as
+  radio buttons by those labels, a field shown only while a sibling has the value its `shownWhen`
+  names, and taken away when a change makes it not apply, a config key that names a secret a choice
+  of the secrets' names, a sensitive one (docs/bot-os.md D124) said set or not, replaced typed
+  unseen or cleared, never shown (`SensitiveField.tsx`), a connector's secrets listed under its
+  config, each by name, whether it is provided (`GET /secrets`) and where it comes from (a Docker
+  secret), never its value, a list of strings or numbers as rows of plain fields with add (+) and
+  remove buttons, and a record of plain values (the reactor's `when`) as rows of a key and a value,
+  its type picked where several are allowed (`ListFields.tsx`); JSON is typed only for what none of
+  these draws. An events edge says what it carries (`Payloads.tsx`, #3): each event type and its
+  payload's fields by dotted path and type, in its panel, in the title of its rhombus (a line per
+  type), and in the panel of the node it enters, under the input (narrowed to the type the reactor's
+  `on` names), for a reaction's `when` and `send` paths. Its outputs say what they carry
+  (docs/bot-os.md D71): an events output its event types, each with its description; an interface
+  output its members, folded, each with its signature (`signature.ts`) and help when opened. A node
+  up that keeps a state (docs/bot-os.md D72) has a **State** section, drawn from its schema alone
+  (`StateViewer.tsx`): its pinned paths first, then each section with its freshness; a list of
+  objects as a sortable, searchable table, a map as a table of keys and values, an object folded, a
+  value as a labelled line; its card shows a line of it. A running connector's panel lists its
+  **Queue** (`Queue.tsx`, D73): each send waiting, until when, and the nodes that asked for it with
+  what cancels them, a send several share marked so, and the sends coalesced since the start with
+  the pairs of nodes that shared them; a chat-out edge's panel sets each command's spacing
+  (`minIntervalS`, empty for the connector's default). Every change is checked by the core, and each
+  refusal shown on its edge, port, node or field (`draft.ts`, the draft's pure changes); each
+  warning (docs/bot-os.md D89: a chat-in edge reading a chat its connector does not monitor), which
+  refuses nothing, in amber and dashed on its edge, its port and its node, listed in their panels
+  and the review, and counted in the map's bar (`N warnings`), Apply offered all the same; typing in
+  a panel keeps its field focused, and the cards and edges that draw as before are kept as drawn
+  (`stable.ts`), so the map does not redraw at each keystroke. **Review changes** opens a dialog
+  with the diff and two actions (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`) and
+  restarts the instance on it, waiting for it and coming back to the page, still logged in
+  (`src/ui/Restart.tsx`), with a note that says so and goes by itself after 30 seconds (or at its
+  **dismiss**), or says why the core refused it and restarts nothing; **Revert** drops the draft,
+  back to the graph saved, once confirmed. Its × (or Escape) only closes it, the draft kept. When
+  the saved graph is not what runs (changed through the API, rolled back, or a restart that did not
+  happen), a banner offers **Apply (restart)**; a saved graph refused at the last start is shown
+  first. A **script** node (docs/bot-os.md D76, D78, `src/ui/graph/script/`) has its ports in a form
+  in its panel (`ScriptPorts.tsx`), a port renamed once its name is typed (left, or Enter; a name
+  empty or taken refused), its edges moved with it in the same change, and removed with its row's
+  **Remove**, its edges with it in the same change, after a confirmation naming them (docs/bot-os.md
+  D84: several ports of a kind, each its own name), and **Edit script** opens its code in Monaco
+  (`ScriptEditor.tsx`, `ScriptCode.tsx`: `monaco-editor`, bundled, its chunk loaded only then),
+  typed by a `.d.ts` made from its ports (`types.ts`), beside a panel of its API; every key typed
+  there is the editor's (the dialog is out of the reach of the map's keys, Space to pan among them),
+  and Escape closes it only when Monaco has no use for it, asking first once the code changed;
+  **Keep** is refused while the code does not parse; **Export as plugin** (`ExportDialog.tsx`,
+  `export.ts`, docs/bot-os.md D79) downloads it as a module's plugin file and its `module.json`. The
+  **Text** tab, on the page's right edge, opens a side sheet from the right (sliding, unless the
+  browser asks for reduced motion) with the draft printed (`graphText`), read-only, with a copy
+  button (`GraphText.tsx`); the tab rides on the sheet's edge and closes it; the rollback is the
+  History page's. Under it, the **Costs** tab opens the nodes by cost (`Costs.tsx`, docs/bot-os.md
+  D77: since the start, the CPU a script's worker spent running its code or else the time in its
+  handlers, sortable by any column, the top three marked; and a model connector's money over the
+  last 24 hours, docs/bot-os.md D117), each node's name selecting it. **A model connector** (its
+  manifest's `model`, D117) has a `$` on its card, so that the owner watches it; what it spent shows
+  on its card through its widget, and in its panel's Cost line. **What belongs to a node is on it**
+  (docs/bot-os.md D111): a connector's cards show its connection (`connected`, `connecting`,
+  `closed`, its step on hover) and whom it is logged in as (`@ExampleBot`, docs/bot-os.md D120), and
+  its panel as whom it runs and its connection (`GET /accounts`); every node's panel says what it
+  costs, its share and whether it is among the top three, and, while it runs, its status (read
+  there, so its reads offer no **Read** of it), its settings in force (each set at once with its
+  **Set**, as `/set` does in chat, above the form of the settings a fresh instance starts with) and
+  its reads and actions, each called with **Read** or **Run**, its input in a form made from its
+  schema, its answer under it (`NodeControls.tsx`). **A connector's login** (docs/bot-os.md D116):
+  one that logs in from its node (a Telegram one) says `needs login` on its card until it has
+  credentials, and its panel, while it runs or is stopped (D125), shows its **Login** as its
+  connector says it (`ConnectorLogin.tsx`, `GET` and `POST /plugins/<id>/login`): a step's title,
+  how-to and link, a QR code drawn from its link (`qrcode-generator`, renewed as the login asks
+  again every 2 s while under way), its fields (a secret one typed unseen, cleared once sent) and
+  its buttons (a logout asking first); once its credentials changed, **Restart now** restarts the
+  instance as Apply does. Its Docker secrets show as its fallback, not required. **Widgets and
+  pages** (docs/bot-os.md D112): a node whose plugin declares a widget shows it in one line on its
+  card while it runs (`Widget.tsx`'s `WidgetLine`, `widget-text.ts`: its fields, a count, a list's
+  first items, a table's rows counted, an amount out of its total with a bar, or how long until a
+  time, moving with the clock), from `GET /status`'s `widget`, its card a line taller for it; one
+  that declares a page has **Open its page** in its panel while it runs, which leads to
+  `#/node/<id>` (`NodePage.tsx`, in no menu): the page's sections drawn in full (`WidgetSection`),
+  each read asked every five seconds. The map's bar heads with the instance's switches:
+  `instance on` or `off`, **Turn off** (asking first) or **Turn on**, and **Kill all** (every
+  plugin's safety stop, asking first). Select one node or several (Shift, Ctrl or Cmd with a click;
+  Shift and drag for a box) and **Kill selected** kills each: its plugin's own safety stop, then
+  stopped, kept across restarts; a stopped node's panel has **Clear stop**, a change of the draft
+  that Review lists and Apply makes (`clear-stop`, then the restart), and its forms stay editable.
+  Nodes start in columns (`layout.ts`) and can be moved. **Swimlanes** (docs/bot-os.md D69): a
+  node's panel sets its **Group** (none, one of the draft's, or **new group…**, named and set), a
+  change of the draft like any other; a draft with groups is drawn in lanes (`layout.ts`'s
+  `swimlanes`, `lanes.ts`, `LaneNode.tsx`): the same global columns, each group a tinted band with
+  its name at its top left, in the order of its first node, the ungrouped nodes in an unlabelled
+  band last, and the connectors' in and out cards outside every band, at the left and the right (a
+  connector's group is ignored, which its panel says). A card is its lane's child in React Flow, and
+  stays in its lane when dragged. A lane's label zooms to fit it; resting on a node dims what it
+  does not reach, and on a lane's label everything outside the lane but its edges and the connectors
+  they reach; the minimap tints each lane. Its colour comes from a fixed palette, by a hash of its
+  name, the next free one when an earlier lane has it. **Modules** (`#/modules`, `ModulesPage.tsx`,
+  docs/bot-os.md D67, D102) lists the modules installed, each with its version, its source (a folder
+  upload, a tarball, or a repository on GitHub or a self-hosted Git server, linked at its commit)
+  and when it was installed. It installs modules from a folder, chosen (**Choose folder**) or
+  dropped on the page, or from a repository's link: a public GitHub one
   (`https://github.com/<owner>/<repo>` or `…/tree/<ref>/<path>`), or one on a Git server added under
   **Git servers** (`GitServers.tsx`: each server with its token's Docker secret, picked from
   `GET /modules/hosts`'s names, added with `POST /modules/hosts`, removed with

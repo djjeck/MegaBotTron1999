@@ -331,4 +331,69 @@ describe('a config key that names a chat (D96)', () => {
     fireEvent.change(within(node).getByLabelText('to template'), { target: { value: '' } });
     await waitFor(() => expect(core.checked.at(-1)?.nodes[2]?.config?.['to']).toBeUndefined());
   }, 15_000);
+
+  it('shows a bot’s groups as a choice, then the list of that choice alone, and clears its owner with None (D127, D128)', async () => {
+    const graph = structuredClone(VIEW);
+    const chat = graph.nodes[0];
+    if (chat === undefined) throw new Error('no fixture');
+    const list = { type: 'array', items: { type: 'string' } };
+    chat.configSchema = {
+      type: 'object',
+      properties: {
+        owner: { type: 'integer', description: 'its owner' },
+        groups: {
+          type: 'string',
+          enum: ['any', 'only'],
+          default: 'any',
+          choices: { any: 'Any group it is added to', only: 'Only these groups' },
+        },
+        onlyGroups: { ...list, shownWhen: { groups: 'only' } },
+        blockGroups: { ...list, shownWhen: { groups: 'any' } },
+      },
+    };
+    chat.config = { owner: 5, groups: 'any', blockGroups: ['-1001'] };
+    const saved = graph.graph.nodes[0];
+    if (saved !== undefined) saved.config = { ...chat.config };
+    chat.configChats = [
+      { key: 'owner', kinds: ['private'] },
+      { key: 'onlyGroups', kinds: ['group'] },
+      { key: 'blockGroups', kinds: ['group'] },
+    ];
+    const core = fakeCore({
+      file: graph.graph,
+      available: graph.nodes.map(({ id: _, config: __, ...p }) => ({ ...p, id: p.plugin })),
+      routes: {
+        'GET /graph/view': [200, graph],
+        'GET /accounts/chat/surfaces?peers=1': [...view([ADA, HALL])],
+      },
+    });
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    fireEvent.click(await screen.findByLabelText('node chat · in', {}, { timeout: 5000 }));
+    const details = await screen.findByLabelText('details of chat');
+    const config = () => core.checked.at(-1)?.nodes[0]?.config;
+    // Any group, its block list shown; no list of only.
+    const choice = within(details).getByRole('radiogroup', { name: 'groups' });
+    expect(
+      (within(choice).getByLabelText('Any group it is added to') as HTMLInputElement).checked
+    ).toBe(true);
+    const block = within(details).getByRole('group', { name: 'blockGroups' });
+    expect(((await within(block).findByLabelText('Guild Hall')) as HTMLInputElement).checked).toBe(
+      true
+    );
+    expect(within(details).queryByRole('group', { name: 'onlyGroups' })).toBeNull();
+    // Only these groups: the block list goes, and the list of only is picked.
+    fireEvent.click(within(choice).getByLabelText('Only these groups'));
+    await waitFor(() => expect(config()).toMatchObject({ groups: 'only' }));
+    expect(config()?.['blockGroups']).toBeUndefined();
+    expect(within(details).queryByRole('group', { name: 'blockGroups' })).toBeNull();
+    const only = within(details).getByRole('group', { name: 'onlyGroups' });
+    fireEvent.click(await within(only).findByLabelText('Guild Hall'));
+    await waitFor(() => expect(config()).toMatchObject({ groups: 'only', onlyGroups: ['-1001'] }));
+    // Its owner, optional: None clears it.
+    const owner = within(details).getByRole('group', { name: 'owner' });
+    expect(((await within(owner).findByLabelText('Ada')) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(within(owner).getByLabelText('no owner'));
+    await waitFor(() => expect(config()?.['owner']).toBeUndefined());
+    expect(config()).toMatchObject({ groups: 'only', onlyGroups: ['-1001'] });
+  }, 15_000);
 });

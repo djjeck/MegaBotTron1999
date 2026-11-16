@@ -3,7 +3,6 @@ import { BOT_INFO, stubBot } from '#test/telegram.ts';
 import {
   AUTHOR_TOPIC,
   CommandMenus,
-  GROUP_TOPIC,
   maxActionBytes,
   telegramTopics,
   watchMembership,
@@ -12,13 +11,6 @@ import {
 describe('telegramTopics', () => {
   it("is the author's private chat, whose chat id is the author's user id", () => {
     expect(telegramTopics(4242)).toEqual({ [AUTHOR_TOPIC]: { chatId: 4242 } });
-  });
-
-  it("adds the game's group, which has no forum topics, when there is one", () => {
-    expect(telegramTopics(4242, -100123)).toEqual({
-      [AUTHOR_TOPIC]: { chatId: 4242 },
-      [GROUP_TOPIC]: { chatId: -100123 },
-    });
   });
 });
 
@@ -33,20 +25,27 @@ describe('maxActionBytes', () => {
 describe('CommandMenus', () => {
   afterEach(() => vi.useRealTimers());
 
-  /** Menus over a switchboard that refuses the group's chat while `outside` is true. */
+  /**
+   * Menus of the author's chat, a group by id and one by `@username`; Telegram refuses the groups'
+   * while `outside` is true.
+   */
   function menus() {
     const state = { outside: true };
     const set: string[] = [];
     const log: string[] = [];
-    const m = new CommandMenus({
-      switchboard: {
-        registerCommandMenu: async (topic) => {
-          if (topic === 'group' && state.outside)
-            throw new Error('400: Bad Request: chat not found');
-          set.push(topic);
-        },
+    const menu = (name: string, chat: number | string, group = true) => ({
+      chat,
+      set: async () => {
+        if (group && state.outside) throw new Error('400: Bad Request: chat not found');
+        set.push(name);
       },
-      topics: telegramTopics(4242, -100123),
+    });
+    const m = new CommandMenus({
+      menus: {
+        author: menu('author', 4242, false),
+        group: menu('group', -100123),
+        '@guild_hall': menu('@guild_hall', '@Guild_Hall'),
+      },
       log: (l) => log.push(l),
     });
     return { m, state, set, log };
@@ -58,18 +57,18 @@ describe('CommandMenus', () => {
     m.registerAll();
     await vi.advanceTimersByTimeAsync(0);
     expect(set).toEqual(['author']);
-    expect(log.at(-1)).toBe(
+    expect(log).toContain(
       'telegram: command menu of group failed, retrying in 1 min: Error: 400: Bad Request: chat not found'
     );
     await vi.advanceTimersByTimeAsync(60_000);
     expect(log.at(-1)).toMatch(/retrying in 2 min/u);
     state.outside = false;
     await vi.advanceTimersByTimeAsync(120_000);
-    expect(set).toEqual(['author', 'group']);
-    expect(log.at(-1)).toBe('telegram: command menu of group set');
+    expect(set).toEqual(['author', 'group', '@guild_hall']);
+    expect(log.at(-1)).toBe('telegram: command menu of @guild_hall set');
     // Set: no more tries.
     await vi.advanceTimersByTimeAsync(3_600_000);
-    expect(set).toEqual(['author', 'group']);
+    expect(set).toEqual(['author', 'group', '@guild_hall']);
     m.stop();
   });
 
@@ -79,25 +78,30 @@ describe('CommandMenus', () => {
     m.registerAll();
     await vi.advanceTimersByTimeAsync(0);
     state.outside = false;
-    m.joined(-100123);
-    m.joined(-999);
+    m.joined({ id: -100123 });
+    m.joined({ id: -999 });
     await vi.advanceTimersByTimeAsync(0);
     expect(set).toEqual(['author', 'group']);
+    // A group named by its @username, found by it.
+    m.joined({ id: -100456, username: 'guild_hall' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(set).toEqual(['author', 'group', '@guild_hall']);
     await vi.advanceTimersByTimeAsync(3_600_000);
-    expect(set).toEqual(['author', 'group']);
+    expect(set).toEqual(['author', 'group', '@guild_hall']);
+    m.stop();
   });
 });
 
 describe('watchMembership', () => {
   it('tells the menus when the bot is added to a chat, and nothing else', async () => {
     const { bot } = stubBot();
-    const joined: number[] = [];
-    watchMembership(bot, { joined: (id) => void joined.push(id) });
+    const joined: unknown[] = [];
+    watchMembership(bot, { joined: (chat) => void joined.push(chat) });
     const update = (status: string, id: number) =>
       bot.handleUpdate({
         update_id: id,
         my_chat_member: {
-          chat: { id: -100123, type: 'supergroup', title: 'The Lobby' },
+          chat: { id: -100123, type: 'supergroup', title: 'The Lobby', username: 'lobby' },
           from: { id: 4242, is_bot: false, first_name: 'Ada' },
           date: 0,
           old_chat_member: { status: 'left', user: BOT_INFO },
@@ -107,6 +111,7 @@ describe('watchMembership', () => {
     await update('member', 1);
     await update('kicked', 2);
     await update('administrator', 3);
-    expect(joined).toEqual([-100123, -100123]);
+    const lobby = { id: -100123, username: 'lobby' };
+    expect(joined).toEqual([lobby, lobby]);
   });
 });

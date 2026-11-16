@@ -945,8 +945,8 @@ export function NodeDetails(props: {
         <h3>Config</h3>
         {view.login === true && (!running || account?.connection?.phase === NEEDS_LOGIN_PHASE) ? (
           <p className="note small" role="note">
-            Log in first, above: its chats (its owner, its group, those it monitors) are picked from
-            the ones it sees once it is logged in and connected.
+            Log in first, above: its chats (its owner, its groups and people, those it monitors) are
+            picked from the ones it sees once it is logged in and connected.
           </p>
         ) : null}
         {view.configSchema === undefined ? (
