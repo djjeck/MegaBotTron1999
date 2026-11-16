@@ -86,12 +86,14 @@ with its own authentication, rather than publishing the port.
   `restart: unless-stopped`): the owner applies a saved graph or an installed module by
   `POST /restart`, which stops the instance, its state kept, and exits for Docker to start it again.
 - **Secrets** are files under `/run/secrets`, never environment variables: `web_ui_password` (the
-  web UI's login; without it there is no UI at all), `bot_os_key` (to encrypt the secrets the core
-  stores), and each connector's own (`znc_password`, `anthropic_api_key`; the Telegram connectors
-  take none: they log in from their node, below). Optional, `github_token` (a GitHub token, to raise
-  the API's limit of 60 requests an hour for installing and updating modules from GitHub links;
-  `GITHUB_TOKEN` in the environment is read too, though the secret is the safer place), and a token
-  for each self-hosted Git server (below).
+  web UI's login; without it there is no UI at all), `bot_os_key` (to encrypt what the instance
+  keeps at rest: the core's own secrets and the connectors' logins, docs/bot-os.md D123; without it,
+  a Telegram login is kept in clear and its node says so; keep it, as a changed key makes them
+  unreadable and each connector then needs a login again), and each connector's own (`znc_password`,
+  `anthropic_api_key`; the Telegram connectors take none: they log in from their node, below).
+  Optional, `github_token` (a GitHub token, to raise the API's limit of 60 requests an hour for
+  installing and updating modules from GitHub links; `GITHUB_TOKEN` in the environment is read too,
+  though the secret is the safer place), and a token for each self-hosted Git server (below).
 - **Telegram, logged in from the editor** ([docs/bot-os.md](docs/bot-os.md) D116, D118): a
   `telegram-bot` or `telegram-user` node takes no Docker secret. Add it, **Apply**, and its card
   says `needs login`; open its panel, and under **Login**: for a bot, paste the token @BotFather
@@ -101,10 +103,11 @@ with its own authentication, rather than publishing the port.
   Devices → Link Desktop Device (or log in with your phone number, the code and your 2FA password).
   Then **Restart now**, and tick its chats. A bot, or an account, is one node's: the login refuses
   one another node holds, naming it. The credentials are kept in the connector's store in `/data`,
-  so in its backups. **Log out** (an account's) ends the session on Telegram too; it also shows in
-  Telegram's Devices, where it can be ended from the phone. The `telegram_bot_token` and
-  `telegram_user_*` secrets of earlier releases are read no more: remove them from the deployment,
-  and log in from the node instead.
+  so in its backups, sealed under `bot_os_key` (in clear without it, which the panel warns of).
+  **Log out** (an account's) ends the session on Telegram too; it also shows in Telegram's Devices,
+  where it can be ended from the phone. The `telegram_bot_token` and `telegram_user_*` secrets of
+  earlier releases are read no more: remove them from the deployment, and log in from the node
+  instead.
 
 - **Self-hosted Git servers** (private module repositories, [docs/bot-os.md](docs/bot-os.md) D102):
   the shell fetches modules only from GitHub and the servers you add. Put the server's token (one

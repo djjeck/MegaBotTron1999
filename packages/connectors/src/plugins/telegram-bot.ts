@@ -178,11 +178,13 @@ export function telegramBotPlugin(
     create: (ctx) => {
       const log = (line: string): void => ctx.log.info(line);
       const config = ctx.config as TelegramBotConfig;
-      const token = ctx.store.read<BotLoginDoc>(BOT_LOGIN_DOC)?.token;
+      // Its credentials, sealed at rest under bot_os_key (D123).
+      const kept = ctx.secrets?.store ?? ctx.store;
+      const token = kept.read<BotLoginDoc>(BOT_LOGIN_DOC)?.token;
       if (token !== undefined) held.set(ctx.id, botOf(token));
       const ref: { connector?: TelegramBotConnector } = {};
       const login = new BotLogin({
-        store: ctx.store,
+        store: kept,
         clock: ctx.clock,
         source: token === undefined ? undefined : 'store',
         self: () => ref.connector?.self(),

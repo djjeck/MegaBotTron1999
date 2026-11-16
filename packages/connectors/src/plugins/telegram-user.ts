@@ -90,7 +90,9 @@ export function telegramUserPlugin(
       login: true,
     },
     create: (ctx) => {
-      const kept = ctx.store.read<LoginDoc>(LOGIN_DOC);
+      // Its credentials, sealed at rest under bot_os_key (D123).
+      const store = ctx.secrets?.store ?? ctx.store;
+      const kept = store.read<LoginDoc>(LOGIN_DOC);
       const credentials: UserCredentials | undefined =
         kept?.session === undefined
           ? undefined
@@ -99,7 +101,7 @@ export function telegramUserPlugin(
       const log = (line: string): void => ctx.log.info(line);
       const loginOf = (c?: TelegramUserConnector): UserLogin =>
         new UserLogin({
-          store: ctx.store,
+          store,
           clock: ctx.clock,
           source: credentials === undefined ? undefined : 'store',
           self: () => c?.self(),

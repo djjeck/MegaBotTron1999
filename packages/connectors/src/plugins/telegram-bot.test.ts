@@ -6,6 +6,7 @@ import {
   NEEDS_LOGIN,
   VirtualClock,
 } from '@megabottron1999/core';
+import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -413,6 +414,36 @@ describe('the telegram-bot plugin’s login (D116)', () => {
       value: { error: expect.stringContaining('the node new-bot') as unknown },
     });
     await core.stop();
+  });
+
+  it('keeps its token sealed under bot_os_key, and reads it back at the next start (D123)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-bot-'));
+    const secrets = secretsWith({ bot_os_key: 'a-key-made-up-for-the-tests-only' });
+    const stub = stubBot();
+    stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
+    stub.bot.start = () => new Promise<void>(() => {});
+    stub.bot.stop = () => Promise.resolve();
+    const tokens: string[] = [];
+    const make = () => {
+      const core = new Core({ clock: new VirtualClock(), dataDir: dir, secrets });
+      core.register(
+        telegramBotPlugin({ listen: new Promise(() => {}), bot: (t) => (tokens.push(t), stub.bot) })
+      );
+      return core;
+    };
+    const first = make();
+    await first.start();
+    expect(await first.controls.loginAct('telegram-bot', 'token', { token: TOKEN })).toMatchObject({
+      value: { status: 'done', atRest: 'sealed' },
+    });
+    await first.stop();
+    const file = fs.readFileSync(path.join(dir, 'instances', 'telegram-bot', 'login.json'), 'utf8');
+    expect(file).not.toContain(TOKEN.slice(7));
+    expect(file).toContain('$sealed');
+    const second = make();
+    await second.start();
+    expect(tokens.at(-1)).toBe(TOKEN);
+    await second.stop();
   });
 
   it('loads a node whose config still names the Docker secrets it once read (D118)', () => {

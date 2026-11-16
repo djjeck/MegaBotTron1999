@@ -94,7 +94,8 @@ import { type InputPort, OWNER } from './ports.ts';
 import { holds } from './react.ts';
 import { type Render, resvgRender } from './render.ts';
 import { type KeptTimer, PluginScheduler } from './scheduler.ts';
-import { type Secrets, SecretStore } from './secrets.ts';
+import { SealedStore } from './sealed-store.ts';
+import { Sealer, type Secrets, SecretStore } from './secrets.ts';
 import { PluginSettings, SETTINGS_DOC, SettingsRegistry } from './settings.ts';
 import { CORE_STORE, type Migration, Stores } from './store.ts';
 import { Summaries, type SummarySection, type SummaryWindow } from './summary.ts';
@@ -319,6 +320,10 @@ export class Core {
   private readonly driftMonitor: DriftMonitor;
   /** The secrets the core stores itself, encrypted at rest (§4.9); none without a data volume. */
   readonly secretStore?: SecretStore;
+  /** What seals the connectors' kept credentials at rest (D123), with the Docker secrets. */
+  private readonly sealer: Sealer | undefined;
+  /** Each connector's sealed view of its store (`ctx.secrets.store`), by node. */
+  private readonly sealedStores = new Map<string, SealedStore>();
   /** The owner's controls (§4.11), from which every control surface is made. */
   readonly controls: Controls;
   /** The instances, apart from the nodes (§2.2). */
@@ -376,6 +381,7 @@ export class Core {
         const store = this.stores.open(id);
         for (const [name, value] of Object.entries(docs)) store.write(name, value);
       }
+    this.sealer = secrets === undefined ? undefined : new Sealer(secrets);
     const dir = this.stores.dirOf(CORE);
     if (secrets !== undefined && dir !== undefined)
       this.secretStore = new SecretStore(path.join(dir, 'secrets'), secrets);
@@ -422,6 +428,7 @@ export class Core {
       cost: (id) => this.cost(id),
       backoffs: (id) => this.backoffs(id),
       redact: (text) => this.o.secrets?.redact(text) ?? text,
+      sealed: (id) => this.sealedStores.get(id)?.state(),
       recordLogin: (fields) =>
         this.o.record?.({ type: 'core.login', t: this.o.clock.now(), ...fields }),
     });
@@ -1961,7 +1968,22 @@ export class Core {
         return m?.secrets.includes(name) === true && this.o.secrets?.has(name) === true;
       },
       remember: (value) => this.o.secrets?.remember(value),
+      store: this.sealedStore(id),
     };
+  }
+
+  /** A connector's sealed view of its instance's store (D123), made at its context. */
+  private sealedStore(id: string): SealedStore {
+    const entry = this.entries.get(id);
+    const instance = entry?.node.instance ?? id;
+    const store = new SealedStore({
+      base: this.stores.open(instance),
+      sealer: this.sealer,
+      scope: instance,
+      warn: (line) => this.logger(id).warn(line),
+    });
+    this.sealedStores.set(id, store);
+    return store;
   }
 
   /**

@@ -174,3 +174,111 @@ export class SecretStore {
     );
   }
 }
+
+/** The mark of a sealed value (D123): `{ "$sealed": 1, iv, tag, data }`, its JSON encrypted. */
+export const SEALED = '$sealed';
+export interface Sealed {
+  $sealed: 1;
+  iv: string;
+  tag: string;
+  data: string;
+}
+
+/** Whether a value is a sealed one, as `Sealer.seal` writes it. */
+export const isSealed = (v: unknown): v is Sealed =>
+  typeof v === 'object' &&
+  v !== null &&
+  (v as Record<string, unknown>)[SEALED] === 1 &&
+  typeof (v as Record<string, unknown>)['iv'] === 'string' &&
+  typeof (v as Record<string, unknown>)['tag'] === 'string' &&
+  typeof (v as Record<string, unknown>)['data'] === 'string';
+
+/** A sealed value that cannot be opened: no key, or not the key it was sealed with. */
+export class SealError extends Error {}
+
+/**
+ * Values sealed at rest (bot-os.md D123): a connector's kept credentials, a sensitive config field
+ * in the graph's file. AES-256-GCM under keys derived (HKDF-SHA256) from the `bot_os_key` Docker
+ * secret, with what the value is (`context`: its store and document, its node's config key) as
+ * additional data, so that a sealed value moved elsewhere does not open. The IV is derived from the
+ * context and the value (an HMAC, as SIV does), so one value seals the same each time: a graph
+ * sealed twice is the same graph, and only equal values are seen equal.
+ */
+export class Sealer {
+  private readonly secrets: Secrets;
+
+  constructor(secrets: Secrets) {
+    this.secrets = secrets;
+  }
+
+  /** Whether values can be sealed and opened: the key is provided. */
+  get available(): boolean {
+    return this.secrets.has(KEY_SECRET);
+  }
+
+  /** `value` (any JSON) sealed; throws without the key. */
+  seal(value: unknown, context: string): Sealed {
+    const { enc, iv: ivKey } = this.keys();
+    const json = JSON.stringify(value);
+    const iv = crypto
+      .createHmac('sha256', ivKey)
+      .update(`${context}\u0000${json}`)
+      .digest()
+      .subarray(0, 12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', enc, iv);
+    cipher.setAAD(Buffer.from(context));
+    const data = Buffer.concat([cipher.update(json, 'utf8'), cipher.final()]);
+    return {
+      $sealed: 1,
+      iv: iv.toString('base64'),
+      tag: cipher.getAuthTag().toString('base64'),
+      data: data.toString('base64'),
+    };
+  }
+
+  /** A sealed value opened, its strings remembered as secrets; a SealError if it cannot be. */
+  open(sealed: Sealed, context: string): unknown {
+    if (!this.available)
+      throw new SealError(
+        `it is sealed and there is no ${KEY_SECRET} secret to open it: provide the key it was sealed with, or set it again`
+      );
+    let value: unknown;
+    try {
+      const decipher = crypto.createDecipheriv(
+        'aes-256-gcm',
+        this.keys().enc,
+        Buffer.from(sealed.iv, 'base64')
+      );
+      decipher.setAAD(Buffer.from(context));
+      decipher.setAuthTag(Buffer.from(sealed.tag, 'base64'));
+      const json = Buffer.concat([
+        decipher.update(Buffer.from(sealed.data, 'base64')),
+        decipher.final(),
+      ]).toString('utf8');
+      value = JSON.parse(json) as unknown;
+    } catch {
+      throw new SealError(
+        `it does not open with this ${KEY_SECRET}: the key changed since it was sealed (or it was moved); provide that key, or set it again`
+      );
+    }
+    this.rememberAll(value);
+    return value;
+  }
+
+  /** Every string in a value remembered as a secret, to be redacted. */
+  rememberAll(value: unknown): void {
+    if (typeof value === 'string') this.secrets.remember(value);
+    else if (Array.isArray(value)) for (const v of value) this.rememberAll(v);
+    else if (typeof value === 'object' && value !== null)
+      for (const v of Object.values(value)) this.rememberAll(v);
+  }
+
+  private keys(): { enc: Buffer; iv: Buffer } {
+    const material = this.secrets.read(KEY_SECRET);
+    if (material === undefined)
+      throw new Error(`no ${KEY_SECRET} secret: nothing is sealed without its key`);
+    const derive = (info: string): Buffer =>
+      Buffer.from(crypto.hkdfSync('sha256', material, Buffer.alloc(0), info, 32));
+    return { enc: derive('bot-os sealed v1'), iv: derive('bot-os sealed v1 iv') };
+  }
+}

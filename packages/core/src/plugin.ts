@@ -50,6 +50,12 @@ export interface PluginContext {
     get(name: string): string;
     has(name: string): boolean;
     remember(value: string): void;
+    /**
+     * Its store's documents that hold credentials, sealed at rest (D123): the same documents as
+     * `ctx.store`'s, written sealed under `bot_os_key` (in clear without it), read opened; one that
+     * does not open (no key, another key) reads as none. A login keeps what it gets here.
+     */
+    store: Store;
   };
   /**
    * A connector's readers (§4.5, bot-os.md D62, D66): what each chat-in edge leaving its node reads,

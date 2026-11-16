@@ -828,8 +828,9 @@ interface PluginContext<Config, Settings> {
 A plugin's safety stop is `ctx.stop(reason)`; how it sends, its outbox handle's `mode()` (§4.6).
 
 A connector's context also has `secrets.get(name)`, for the secrets it declared or its config names
-(§4.9), `secrets.has(name)`, whether one it declared is provided, and `secrets.remember(value)`, a
-value it holds marked secret (bot-os.md D116), `account`, its node's account (§4.5), on which it
+(§4.9), `secrets.has(name)`, whether one it declared is provided, `secrets.remember(value)`, a value
+it holds marked secret (bot-os.md D116), `secrets.store`, its store's documents sealed at rest for
+the credentials it keeps (§4.9, bot-os.md D123), `account`, its node's account (§4.5), on which it
 makes its connector, and `readers()`, what each chat-in edge leaving its node reads
 (`{ reads, senders? }`, §2.1), as the graph says, of the nodes that read now: about to start,
 starting or running, not disabled, stopped, inactive or failed (bot-os.md D66). Asked again, it says
@@ -1481,13 +1482,26 @@ each in `/data/core/secrets/<name>.json` of mode 600: AES-256-GCM with a random 
 name as additional data, under a key derived (HKDF-SHA256) from the `bot_os_key` Docker secret;
 without that secret it stores nothing.
 
+**Credentials sealed at rest** (bot-os.md D123, `Sealer`, `SealedStore`): a connector keeps what a
+login gives it through `ctx.secrets.store`, a view of its own store whose documents are written
+sealed: `{ "$sealed": 1, "iv", "tag", "data" }`, the document's JSON under AES-256-GCM, its key
+derived (HKDF-SHA256) from `bot_os_key`, the instance and document's name (`tg/login`) its
+additional data, its IV derived from that and the value (an HMAC, as SIV does: the same value seals
+the same way). Every string opened is remembered as a secret, for redaction. **Without
+`bot_os_key`** they are written in clear (mode 600), so that a fresh install still logs in, and the
+login's state says so (`atRest: "clear"`, a warning in the node's panel: provide the key); with it,
+`atRest: "sealed"`, and a document kept in clear is sealed as soon as it is read (the next start).
+**A changed or missing key:** a sealed document that does not open reads as none, so the connector
+runs needing a login, its login's `error` saying why (`its kept login does not open: …`) until it
+logs in again; nothing crashes.
+
 **Backups and secrets.** The Docker secrets are not in the data volume: back them up where the
 deployment keeps them. The credentials a connector keeps from a login in its node (bot-os.md D116: a
-bot's token, an account's API pair and session) are in its store, in the volume, in clear (mode
-600): a backup of the volume holds them, as a copy of the secrets' directory would. The secrets the
-core stores itself are in the volume, encrypted: a backup of the volume holds them only as
-ciphertext, readable with `bot_os_key`, which is not in it. Restoring the volume elsewhere therefore
-needs the same `bot_os_key`; with another key, those secrets are lost and must be stored again.
+bot's token, an account's API pair and session) are in its store, in the volume, sealed under
+`bot_os_key` (D123; in clear, mode 600, without the key). The secrets the core stores itself are in
+the volume, encrypted too: a backup of the volume holds them only as ciphertext, readable with
+`bot_os_key`, which is not in it. Restoring the volume elsewhere therefore needs the same
+`bot_os_key`; with another key, those secrets are lost and must be stored again.
 
 ### 4.10 The dev kit
 

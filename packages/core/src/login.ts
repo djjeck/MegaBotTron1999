@@ -56,6 +56,11 @@ export interface LoginState {
   status: 'needed' | 'pending' | 'done';
   /** Where its credentials come from: its store (a login from its node, D118: never a secret). */
   source?: 'store';
+  /**
+   * Where its credentials sit at rest, given by the core (D123): `sealed` under `bot_os_key`, or
+   * `clear` without the key.
+   */
+  atRest?: 'sealed' | 'clear';
   /** Whom it is logged in as, where it knows (`@ExampleBot`). */
   as?: string;
   /**

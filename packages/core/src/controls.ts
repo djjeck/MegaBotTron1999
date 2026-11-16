@@ -30,6 +30,7 @@ import { type Manifest } from './manifest.ts';
 import { type CoalescedView, type QueueEntryView } from './outbox.ts';
 import { type ActionCall, type Instance } from './plugin.ts';
 import { type InputPort } from './ports.ts';
+import { type SealedState } from './sealed-store.ts';
 import { type SettingsRegistry, type SettingValue } from './settings.ts';
 import { type StateView } from './state-view.ts';
 
@@ -102,6 +103,8 @@ export interface ControlsHost {
   backoffs?(id: string): BackoffView[];
   /** Takes the secrets out of a text (§4.9): a login's error. */
   redact?(text: string): string;
+  /** Where a connector's kept credentials stand at rest (D123): sealed, and why one did not open. */
+  sealed?(id: string): SealedState | undefined;
   /** Logs a login's step in the event log (`core.login`, D116): never what was typed. */
   recordLogin?(fields: Record<string, unknown>): void;
 }
@@ -542,10 +545,26 @@ export class Controls {
     const login = this.host.instance(id)?.login;
     if (login === undefined) return { error: `${id} is not running` };
     try {
-      return { value: this.redacted(login.state()) };
+      return { value: this.atRest(id, this.redacted(login.state())) };
     } catch (e) {
       return { error: this.redact(message(e)) };
     }
+  }
+
+  /**
+   * A login's state with where its credentials stand at rest (D123): `atRest`, sealed or in clear,
+   * once it holds some; and, while it needs a login because its kept one did not open, why.
+   */
+  private atRest(id: string, state: LoginState): LoginState {
+    const rest = this.host.sealed?.(id);
+    if (rest === undefined) return state;
+    return {
+      ...state,
+      ...(state.status === 'done' ? { atRest: rest.sealed ? 'sealed' : 'clear' } : {}),
+      ...(state.status === 'needed' && state.error === undefined && rest.unreadable !== undefined
+        ? { error: `its kept login does not open: ${rest.unreadable}` }
+        : {}),
+    };
   }
 
   /**
@@ -563,7 +582,7 @@ export class Controls {
     const login = this.host.instance(id)?.login;
     if (login === undefined) return { error: `${id} is not running` };
     try {
-      const state = this.redacted(await login.act(action, values));
+      const state = this.atRest(id, this.redacted(await login.act(action, values)));
       this.host.recordLogin?.({
         node: id,
         action,

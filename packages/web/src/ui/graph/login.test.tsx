@@ -119,6 +119,17 @@ describe('a connector’s login in its panel (D116)', () => {
     expect(screen.getByText('(kept in its store)')).toBeTruthy();
   });
 
+  it('says where its credentials sit at rest: sealed, or in clear with a warning (D123)', async () => {
+    stubLogin([{ status: 'done', source: 'store', atRest: 'clear', actions: [] }]);
+    const { unmount } = render(<ConnectorLogin node="me" />);
+    expect((await screen.findByRole('note')).textContent).toContain('kept in clear');
+    unmount();
+    stubLogin([{ status: 'done', source: 'store', atRest: 'sealed', actions: [] }]);
+    render(<ConnectorLogin node="me" />);
+    expect(await screen.findByText('(kept in its store, sealed)')).toBeDefined();
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
   it('says why its login cannot be read', async () => {
     stubLogin([{ status: 409, error: 'me is not running' }]);
     render(<ConnectorLogin node="me" />);

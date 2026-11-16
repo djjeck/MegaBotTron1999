@@ -5,7 +5,8 @@
  * shown back) and the buttons it offers, each sent with the fields it submits
  * (`POST /plugins/<id>/login`). While a login is under way it is asked again every two seconds, for
  * a QR code renewed or a step that moved on. Once its credentials changed, a restart puts them in
- * force: its button restarts the instance as Apply does.
+ * force: its button restarts the instance as Apply does. Where they sit at rest is said (D123):
+ * sealed, or in clear, with a warning, while the `bot_os_key` secret is missing.
  */
 import qrcode from 'qrcode-generator';
 import type { FormEvent } from 'react';
@@ -122,8 +123,19 @@ export function ConnectorLogin(props: {
               : 'needs login'}
         </span>
         {state.as === undefined ? null : <> as {state.as}</>}
-        {state.source === undefined ? null : <span className="muted"> (kept in its store)</span>}
+        {state.source === undefined ? null : (
+          <span className="muted">
+            {' '}
+            (kept in its store{state.atRest === 'sealed' ? ', sealed' : ''})
+          </span>
+        )}
       </p>
+      {state.atRest === 'clear' ? (
+        <p className="warning small" role="note">
+          Its credentials are kept in clear: provide the <code>bot_os_key</code> Docker secret, and
+          they are sealed at the next start.
+        </p>
+      ) : null}
       {state.note === undefined ? null : <p className="muted">{state.note}</p>}
       {state.error === undefined ? null : (
         <p className="error" role="alert">

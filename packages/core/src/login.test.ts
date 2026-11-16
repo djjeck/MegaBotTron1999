@@ -115,7 +115,10 @@ describe('a connector that logs in from its node (D116)', () => {
     ).toMatchObject([200, { status: 'needed', error: 'refused [redacted]' }]);
     expect(
       await call('/plugins/tg/login', { action: 'token', values: { token: 'good-token-456' } })
-    ).toEqual([200, { status: 'done', source: 'store', as: '@Me', restart: true, actions: [] }]);
+    ).toEqual([
+      200,
+      { status: 'done', source: 'store', as: '@Me', restart: true, atRest: 'clear', actions: [] },
+    ]);
     // Whom it is logged in as, on its account too (D120).
     expect(core.controls.accounts().find((x) => x.id === 'tg')?.as).toBe('@Me');
     // An action it does not offer: 409, redacted too.
