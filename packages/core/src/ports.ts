@@ -270,21 +270,6 @@ export const outputSchema = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('commands'),
     help: z.string().min(1).optional(),
-    /**
-     * What it served before commands needed an edge (D109), for the migration of a graph saved by an
-     * older release (`Core`, once): from a node whose config sets `when`, an edge to each node with
-     * commands, answering in the chats its config keys `chats` name and, with `privateChats`, in
-     * every private chat.
-     */
-    servedBefore: z
-      .strictObject({
-        when: z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key'),
-        chats: z
-          .array(z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key'))
-          .default([]),
-        privateChats: z.boolean().default(false),
-      })
-      .optional(),
   }),
 ]);
 export type DeclaredOutput = z.output<typeof outputSchema>;

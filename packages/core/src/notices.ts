@@ -4,7 +4,7 @@
  * rather than for the owner to find in the log. One feed per instance:
  *
  * - **raised** by the core (`failed`, `cascade`, `drift`, `coalesced`, `warning`, `stalled`,
- *   `graph-refused`, `backoff`, `unanswered`, `graph-migrated`) at the point where it acts, by a plugin through
+ *   `graph-refused`, `backoff`, `unanswered`) at the point where it acts, by a plugin through
  *   `ctx.notice` (a state node's `refused`, D72) and through `ctx.notify` (`told`, with its buttons, D94), each with the node it
  *   is about, and one owner-facing line naming nodes by id;
  * - **recorded** in the event log as it is raised (`core.notice`), so that the editor's events
@@ -33,7 +33,6 @@ export const NOTICE_KINDS = [
   'graph-refused',
   'backoff',
   'unanswered',
-  'graph-migrated',
 ] as const;
 export type CoreNoticeKind = (typeof NOTICE_KINDS)[number];
 
@@ -53,8 +52,7 @@ export interface Notice {
    * message for the owner (`told`, `ctx.notify`, D94), the saved graph refused at the load, no node
    * running (`graph-refused`, D94), a send the network refused (`unreachable`, D95), a node the
    * retry-loop guard holds back (`backoff`, D98), a command no answer came for (`unanswered`,
-   * D107), the saved graph migrated at the start, edges added (`graph-migrated`, D109), or a
-   * plugin's own kind.
+   * D107), or a plugin's own kind.
    */
   kind: string;
   /** When, in ms. */

@@ -10,9 +10,7 @@
  * controls in the owner's chat, and the plugins' commands that a commands edge from its `commands`
  * output serves (bot-os.md D109), in the chats that edge names, polling only once the core has
  * served it the commands. Without an `owner` it is no surface, and its commands edges answer
- * nothing. A graph saved before D109 gets an edge to each plugin with commands, answering where it
- * answered then (its owner's chat, its group, every private chat: `servedBefore`). It
- * reports nothing on its own (bot-os.md D94): an `owner-notice` node sends the owner's notices
+ * nothing. It reports nothing on its own (bot-os.md D94): an `owner-notice` node sends the owner's notices
  * through it, those with buttons to the owner's chat through its surface, whose taps run them. The token stays in the connector's secrets, and nothing hands it out:
  * no plugin, and not the wiring, gets the bot (P9).
  *
@@ -169,7 +167,6 @@ export function telegramBotPlugin(
         commands: {
           type: 'commands',
           help: 'The plugins’ chat commands it answers (with an owner set): each edge says which, in which chats, to whom',
-          servedBefore: { when: 'owner', chats: ['owner', 'group'], privateChats: true },
         },
       },
     },

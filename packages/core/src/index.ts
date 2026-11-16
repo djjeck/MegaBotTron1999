@@ -124,7 +124,6 @@ export {
 } from './event-log.ts';
 export {
   type Binding,
-  commandEdges,
   type CommandsBinding,
   defaultGraph,
   downText,

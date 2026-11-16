@@ -230,12 +230,10 @@ account too (an edge with neither answers nowhere: the check warns of it); `send
 by `@username` (without case) or id, `owner` for the connector's owner (none: anyone), before the
 plugin's own `allow`; and `dryRun`, which logs each answer as sent and sends nothing (a new edge
 drawn in the editor starts one, P10). A connector serves commands by declaring the output
-(`{ type: 'commands', help?, servedBefore? }`, only a connector may) and offering a chat surface
-(§4.5); `servedBefore` says where it answered every command before D109, for the first start's
-migration (§2.3). One edge per connector and plugin; a plugin served by two bots has two. These
-fields belong to it alone (`only a commands edge carries serves, chats and privateChats`), as
-`senders` belongs to it and to a chat-in. Its `serves` is not a chat-out's `commands`, the first
-words a plugin may send.
+(`{ type: 'commands', help? }`, only a connector may) and offering a chat surface (§4.5). One edge
+per connector and plugin; a plugin served by two bots has two. These fields belong to it alone
+(`only a commands edge carries serves, chats and privateChats`), as `senders` belongs to it and to a
+chat-in. Its `serves` is not a chat-out's `commands`, the first words a plugin may send.
 
 A chat-in or an events input may say `when: { config: key }`, a key of its plugin's `config` schema:
 the node has the port only while its config sets that key (the reactor reads a chat only with a
@@ -503,18 +501,6 @@ it (without case), and the key dropped, so the owner picks nothing again
 (`{ "from": "owner-notice.chat", "to": "telegram-bot.chat", "sends": ["1000000002"] }` and the
 node's `"chat": "1000000002"` become the same edge and a node without `chat`). The file is rewritten
 by the next save.
-
-**Chat commands, first served by an edge** (bot-os.md D109): the first start of the release that
-made commands need an edge gives a saved graph (`commandEdges`), from each connector node whose
-`commands` output says what it served before (`servedBefore`) and whose config sets its `when` key
-(a `telegram-bot` with its `owner`), an edge to each node with commands not joined to it already:
-every command, in the chats its `chats` keys name (its `owner`'s and its `group`) and every private
-chat, to anyone, live, as they were answered:
-`{ "from": "bot.commands", "to": "map.commands", "type": "commands", "chats": ["1000000002", "-1001000000001"], "privateChats": true }`.
-The file is written as a version of the history (`migrated`), the write recorded (`core.graph`,
-`event: "migrated"`, `commandEdges`), and the owner told which edges were added (a `graph-migrated`
-notice, §4.16). It is done once per instance (`command-edges` in the core's store), so that an edge
-the owner removes afterwards stays removed; a fresh instance, with no file, adds none.
 
 **An input a plugin no longer has** (bot-os.md D99): a node whose plugin declares `droppedInputs`
 (the turn actor's chat-in `chat`, gone in 0.1.21) loads with its edges to those inputs dropped
@@ -1862,20 +1848,18 @@ node the retry-loop guard holds back, its command refused for the same reason th
 once until that node's command is answered in that chat, §4.6, D107, about that node; `detail`:
 `account`, `chat`, `command`, `withinS`; told among the `other` kinds), `graph-refused` (the saved
 graph refused at the load, so that no node runs, D94; `detail.problems`; no node hears it, the
-events panel shows it) and `graph-migrated` (the saved graph rewritten at the first start of a
-release, the commands edges added so that every command is answered as before, D109; `detail.edges`,
-each `from → to`; told among the `other` kinds). **A plugin raises** its own through
-`ctx.notice(kind, text, detail?)`, about its node: a state node raises `refused` for each event it
-refuses (D72; `detail`: `event`, `at`, `reason`); and `told` through `ctx.notify(text, buttons?)`
-(§4.8, D94; `detail.buttons`, which `buttonsOf(notice)` reads). A kind is lower-case words and
-dashes; raising one sends nothing. **A plugin whose manifest declares `notices: true`** gets
-`ctx.notices`: `subscribe(handler)` hears the notices raised since the instance started first (the
-newest `NOTICES_KEPT`, 200), so that the load's warnings and a node failed at its start reach a node
-started after them, then each as it is raised, while its node is up; the time its handler takes is
-its node's (D77). The notices live in memory (`core.notices()` lists them), and **each is recorded**
-as it is raised (`core.notice`: `kind`, `node?`, `text`, `detail?`), so that the editor's events
-panel shows every notice whether a node tells it or not (D94), beside the records it was raised with
-(`core.plugin`, `core.drift`, `core.queue`, `<id>.refused`).
+events panel shows it). **A plugin raises** its own through `ctx.notice(kind, text, detail?)`, about
+its node: a state node raises `refused` for each event it refuses (D72; `detail`: `event`, `at`,
+`reason`); and `told` through `ctx.notify(text, buttons?)` (§4.8, D94; `detail.buttons`, which
+`buttonsOf(notice)` reads). A kind is lower-case words and dashes; raising one sends nothing. **A
+plugin whose manifest declares `notices: true`** gets `ctx.notices`: `subscribe(handler)` hears the
+notices raised since the instance started first (the newest `NOTICES_KEPT`, 200), so that the load's
+warnings and a node failed at its start reach a node started after them, then each as it is raised,
+while its node is up; the time its handler takes is its node's (D77). The notices live in memory
+(`core.notices()` lists them), and **each is recorded** as it is raised (`core.notice`: `kind`,
+`node?`, `text`, `detail?`), so that the editor's events panel shows every notice whether a node
+tells it or not (D94), beside the records it was raised with (`core.plugin`, `core.drift`,
+`core.queue`, `<id>.refused`).
 
 `owner-notice` (§5) tells a kind it does not name as `other`. Its view (`GET /plugins/<id>/view`,
 D72) shows the notices waiting by kind with when each is due, when each kind was last told, whether
@@ -1983,19 +1967,18 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   its edge names (the group, the owner's chat, every private chat with `privateChats`, another chat
   it is in) and listed in those chats' menus alone (the switchboard's two, every private chat's, and
   Telegram's `chat` scope for another chat) (`telegram-commands.ts`), the menus kept registered.
-  Without an `owner` it is no surface, and its commands edges answer nothing. Its `servedBefore`
-  (`{ when: 'owner', chats: ['owner', 'group'], privateChats: true }`) is where it answered every
-  command before D109, for the migration (§2.3). It tells the owner nothing on its own (D94): a send
-  with buttons (`SendOptions.buttons`, an `owner-notice` telling a `told` notice) to the owner's
-  chat goes through the surface's switchboard, whose taps run the owner's commands as a card's do;
-  to any other chat, the text alone. Nothing hands its bot out (P9). Its `deny` (D100: people and
-  bots picked among its chats, never its owner) drops their commands in a group, and their taps on
-  buttons there, before any edge or its surface sees them; each drop is recorded
-  (`telegram-bot.denied`, on the Events page) and counted in its node's view and on its card; silent
-  unless `denyReply` sets one line to answer, at most once in 10 minutes per person. Its `home`
-  (D105) is the command of the owner's main card, as typed (`/menu`, `/menu main`) or short (`menu`,
-  `menu:main`), at most 64 bytes: the core's own cards on its surface (`/plugins`, `/settings`) end
-  with a button that runs it, labelled `homeLabel` (`🏠 Home` by default); unset, they have none.
+  Without an `owner` it is no surface, and its commands edges answer nothing. It tells the owner
+  nothing on its own (D94): a send with buttons (`SendOptions.buttons`, an `owner-notice` telling a
+  `told` notice) to the owner's chat goes through the surface's switchboard, whose taps run the
+  owner's commands as a card's do; to any other chat, the text alone. Nothing hands its bot out
+  (P9). Its `deny` (D100: people and bots picked among its chats, never its owner) drops their
+  commands in a group, and their taps on buttons there, before any edge or its surface sees them;
+  each drop is recorded (`telegram-bot.denied`, on the Events page) and counted in its node's view
+  and on its card; silent unless `denyReply` sets one line to answer, at most once in 10 minutes per
+  person. Its `home` (D105) is the command of the owner's main card, as typed (`/menu`,
+  `/menu main`) or short (`menu`, `menu:main`), at most 64 bytes: the core's own cards on its
+  surface (`/plugins`, `/settings`) end with a button that runs it, labelled `homeLabel` (`🏠 Home`
+  by default); unset, they have none.
 - **`telegram-user`** (`packages/connectors/src/plugins/telegram-user.ts`, on GramJS in
   `packages/connectors/src/transport/telegram-user.ts`): the owner's own account, from three secrets
   (`telegram_user_api_id`, `telegram_user_api_hash`, `telegram_user_session`). It monitors the chats

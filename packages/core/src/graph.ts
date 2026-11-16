@@ -40,7 +40,6 @@ import { ACCOUNT_ID, type Manifest, parseManifest, PLUGIN_ID } from './manifest.
 import { isMode } from './outbox.ts';
 import {
   type ChatBinding,
-  COMMANDS_PORT,
   describePort,
   type InputPort,
   mismatch,
@@ -531,66 +530,6 @@ export function moveChats(raw: unknown, plugins: ReadonlyMap<string, Manifest>):
     return Object.keys(rest).length === 0 ? node : { ...node, config: rest };
   });
   return moved ? { ...raw, nodes, edges } : raw;
-}
-
-/**
- * A graph with the commands edges that keep its chat commands answered as they were before they
- * needed one (bot-os.md D109), and the edges added (`from → to`). From each connector node whose
- * commands output declares what it served before (`servedBefore`) and whose config sets its `when`
- * key (a `telegram-bot` with its `owner`: its chat surface), to each node whose manifest declares
- * commands, unless an edge joins them already: every command, answered in the chats its config
- * keys name (its owner's chat, its group) and, as before, in every private chat, to anyone (a
- * plugin's own `allow` still applies), live. Run once per instance, by the core, on the saved graph
- * of an older release; nothing is checked.
- */
-export function commandEdges(
-  raw: unknown,
-  plugins: ReadonlyMap<string, Manifest>
-): { graph: unknown; added: string[] } {
-  if (!isRecord(raw) || !Array.isArray(raw['nodes'])) return { graph: raw, added: [] };
-  const edges = Array.isArray(raw['edges']) ? [...(raw['edges'] as unknown[])] : [];
-  const nodes: { id: string; manifest: Manifest; config: Record<string, unknown> }[] = [];
-  for (const n of raw['nodes'] as unknown[]) {
-    if (!isRecord(n) || typeof n['id'] !== 'string' || typeof n['plugin'] !== 'string') continue;
-    const base = plugins.get(n['plugin']);
-    if (base === undefined) continue;
-    const config = isRecord(n['config']) ? n['config'] : {};
-    nodes.push({ id: n['id'], manifest: nodeManifest(base, n['id'], config).manifest, config });
-  }
-  const set = (v: unknown): boolean => v !== undefined && v !== null;
-  const joined = (from: string, to: string): boolean =>
-    edges.some(
-      (e) =>
-        isRecord(e) && e['to'] === to && (e['from'] === from || e['from'] === from.split('.')[0])
-    );
-  const added: string[] = [];
-  for (const c of nodes)
-    for (const [port, out] of Object.entries(c.manifest.outputs)) {
-      if (out.type !== 'commands' || out.servedBefore === undefined) continue;
-      const before = out.servedBefore;
-      if (!set(c.config[before.when])) continue;
-      const chats = before.chats.flatMap((key) => {
-        const v = c.config[key];
-        return (Array.isArray(v) ? (v as unknown[]) : [v]).flatMap((x) =>
-          typeof x === 'string' || typeof x === 'number' ? [String(x)] : []
-        );
-      });
-      for (const t of nodes) {
-        if (t.id === c.id || t.manifest.inputs[COMMANDS_PORT]?.type !== 'commands') continue;
-        const from = `${c.id}.${port}`;
-        const to = `${t.id}.${COMMANDS_PORT}`;
-        if (joined(from, to)) continue;
-        edges.push({
-          from,
-          to,
-          type: 'commands',
-          chats: [...new Set(chats)],
-          ...(before.privateChats ? { privateChats: true } : {}),
-        });
-        added.push(`${from} → ${to}`);
-      }
-    }
-  return added.length === 0 ? { graph: raw, added } : { graph: { ...raw, edges }, added };
 }
 
 /**

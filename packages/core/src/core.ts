@@ -36,7 +36,6 @@ import { DEFAULT_DRIFT, type DriftCounts, DriftMonitor, type DriftRecord } from 
 import { type EventReader, type LogCursor, type LogEntry, type LogTail } from './event-log.ts';
 import {
   type Binding,
-  commandEdges,
   type CommandsBinding,
   defaultGraph,
   downText,
@@ -278,8 +277,6 @@ export const STOP_DOC = '_stop';
 export const MODE_DOC = '_mode';
 /** The core's document of the first start's migration of the modes into states (D64). */
 export const STATES_DOC = 'node-states';
-/** The core's document of the first start's commands edges (D109: no edge, no chat command). */
-export const COMMANDS_DOC = 'command-edges';
 /** How often the orphaned instances are looked for: daily. */
 const SWEEP_MS = 86_400_000;
 
@@ -1243,20 +1240,13 @@ export class Core {
     const file = this.o.graphFile;
     if (given === undefined && file !== undefined) {
       const r = file.read();
-      // No graph yet: nothing to migrate, ever (D64, D109).
-      if (!r.exists)
-        return {
-          raw: this.migrateCommands(file, this.migrateModes(file, undefined), false),
-          fromFile: true,
-        };
+      // No graph yet: nothing to migrate, ever (D64).
+      if (!r.exists) return { raw: this.migrateModes(file, undefined), fromFile: true };
       if ('error' in r) {
         this.refused = [{ text: r.error }];
         return { raw: EMPTY_GRAPH, fromFile: true };
       }
-      return {
-        raw: this.migrateCommands(file, this.migrateModes(file, r.raw), true),
-        fromFile: true,
-      };
+      return { raw: this.migrateModes(file, r.raw), fromFile: true };
     }
     if (typeof given === 'function' || given === undefined) {
       const manifests = this.plugins.flatMap((p) => {
@@ -1324,46 +1314,6 @@ export class Core {
       modes: Object.fromEntries(modes),
     });
     return migrated;
-  }
-
-  /**
-   * The first start since chat commands need an edge (bot-os.md D109): the saved graph (`saved`,
-   * one an older release wrote) gets the commands edges that keep each plugin's commands answered
-   * where and to whom its connectors answered them (`commandEdges`), live; the file is written (a
-   * version of the history, `migrated`), recorded (`core.graph`, `commandEdges`) and the owner told
-   * which edges were added (a `graph-migrated` notice). Done once (`command-edges` in the core's
-   * store), so an edge the owner removes later stays removed; a fresh instance has nothing to add.
-   */
-  private migrateCommands(file: GraphFile, raw: unknown, saved: boolean): unknown {
-    const core = this.stores.internal(CORE);
-    if (core.get(COMMANDS_DOC) !== undefined) return raw;
-    const manifests = new Map<string, Manifest>();
-    for (const p of this.plugins)
-      try {
-        const m = parseManifest(p.manifest);
-        if (!manifests.has(m.id)) manifests.set(m.id, m);
-      } catch {
-        // The check says why.
-      }
-    const upgraded = saved ? this.upgrade(raw) : raw;
-    const { graph, added } = saved ? commandEdges(upgraded, manifests) : { graph: raw, added: [] };
-    if (added.length > 0) {
-      file.adopt((g) => this.upgrade(g));
-      file.save(graph as Graph, { source: 'migrated', upgrade: (g) => this.upgrade(g) });
-      this.o.record?.({
-        type: 'core.graph',
-        t: this.o.clock.now(),
-        event: 'migrated',
-        commandEdges: added,
-      });
-      this.notice({
-        kind: 'graph-migrated',
-        text: `Chat commands now need an edge from the connector that answers them: ${added.length} added, live, so each is answered where and to whom it was (${added.join('; ')}); remove or narrow them in the editor`,
-        detail: { edges: added },
-      });
-    }
-    core.put(COMMANDS_DOC, { migrated: new Date(this.o.clock.now()).toISOString(), added });
-    return added.length > 0 ? graph : raw;
   }
 
   /**

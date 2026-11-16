@@ -1,20 +1,15 @@
 /**
  * Chat commands served through the graph (bot-os.md D109): a plugin's derived commands input, a
  * connector's commands output, the check of the edge between them, what the core serves each chat
- * surface (where, to whom, and its answers held as sends are), and the first start's migration of a
- * graph saved before commands needed an edge.
+ * surface (where, to whom, and its answers held as sends are).
  */
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { VirtualClock } from './clock.ts';
 import { type Answer, type Asker, type ChatCommand } from './commands.ts';
-import { COMMANDS_DOC, Core, STATES_DOC } from './core.ts';
+import { Core } from './core.ts';
 import { FakeConnector } from './devkit.ts';
-import { commandEdges, type GraphInput, resolveGraph } from './graph.ts';
-import { GraphFile } from './graph-file.ts';
+import { type GraphInput, resolveGraph } from './graph.ts';
 import { type Manifest, parseManifest } from './manifest.ts';
 import { definePlugin, type Plugin } from './plugin.ts';
 
@@ -35,10 +30,7 @@ function bot(id = 'bot', served: ChatCommand[][] = []): Plugin {
       account: `chat:${id}`,
       config: z.object({ owner: z.number().optional(), group: z.number().optional() }),
       outputs: {
-        commands: {
-          type: 'commands',
-          servedBefore: { when: 'owner', chats: ['owner', 'group'], privateChats: true },
-        },
+        commands: { type: 'commands' },
       },
     },
     create: () => ({
@@ -311,96 +303,5 @@ describe('what the core serves a chat surface (D109)', () => {
     await down.start();
     expect(surfaced[0]?.some((c) => c.plugin === 'mapper')).toBe(false);
     await down.stop();
-  });
-});
-
-describe('the first start since commands need an edge (D109)', () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'command-edges-'));
-    fs.mkdirSync(path.join(dir, 'core'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'core', `${STATES_DOC}.json`), '{"migrated":"before"}\n');
-  });
-  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
-
-  const saved = {
-    version: 2,
-    nodes: [...nodes, { id: 'quiet', plugin: 'other' }, { id: 'plain', plugin: 'plain' }],
-    edges: [],
-  };
-  const plain = definePlugin({
-    manifest: { id: 'plain', version: '0.1.0', kinds: ['stats'], description: 'no commands' },
-    create: () => ({}),
-  });
-
-  it('adds an edge from each surface to each plugin with commands, where it answered before', () => {
-    const { graph, added } = commandEdges(saved, manifests(bot(), bot('other'), mapper, plain));
-    // The bot without an owner was no surface: nothing from it.
-    expect(added).toEqual(['bot.commands → mapper.commands']);
-    expect((graph as { edges: unknown[] }).edges).toEqual([
-      {
-        from: 'bot.commands',
-        to: 'mapper.commands',
-        type: 'commands',
-        chats: [OWNER, GROUP],
-        privateChats: true,
-      },
-    ]);
-    // Joined already, by its node alone too: nothing added.
-    const joined = { ...saved, edges: [{ from: 'bot', to: 'mapper.commands', chats: [] }] };
-    expect(commandEdges(joined, manifests(bot(), mapper)).added).toEqual([]);
-    expect(commandEdges('not a graph', manifests(bot())).added).toEqual([]);
-  });
-
-  it('writes it once, as a version of the history, recorded and told; never again', async () => {
-    fs.writeFileSync(path.join(dir, 'graph.json'), JSON.stringify(saved));
-    const run = async () => {
-      const records: CoreRecord[] = [];
-      const file = new GraphFile(dir, () => Date.now());
-      const core = new Core({
-        clock: new VirtualClock(Date.UTC(2026, 10, 15)),
-        dataDir: dir,
-        graphFile: file,
-        record: (r) => void records.push(r as CoreRecord),
-      });
-      core.register(bot(), bot('other'), mapper, plain);
-      await core.start();
-      await core.stop();
-      return { core, records, file };
-    };
-    const first = await run();
-    expect(first.core.graph()?.edges).toEqual([
-      {
-        from: 'bot.commands',
-        to: 'mapper.commands',
-        type: 'commands',
-        chats: [OWNER, GROUP],
-        privateChats: true,
-      },
-    ]);
-    expect(first.file.current()?.source).toBe('migrated');
-    expect(first.records.find((r) => r.type === 'core.graph')).toMatchObject({
-      event: 'migrated',
-      commandEdges: ['bot.commands → mapper.commands'],
-    });
-    expect(first.core.notices().find((n) => n.kind === 'graph-migrated')?.detail).toEqual({
-      edges: ['bot.commands → mapper.commands'],
-    });
-    expect(fs.existsSync(path.join(dir, 'core', `${COMMANDS_DOC}.json`))).toBe(true);
-    // The owner removes the edge: it stays removed.
-    fs.writeFileSync(path.join(dir, 'graph.json'), JSON.stringify(saved));
-    const second = await run();
-    expect(second.core.graph()?.edges).toEqual([]);
-    expect(second.core.notices().some((n) => n.kind === 'graph-migrated')).toBe(false);
-  });
-
-  it('has nothing to add on a fresh instance, and marks it done', async () => {
-    const file = new GraphFile(dir, () => 0);
-    const core = new Core({ clock: new VirtualClock(), dataDir: dir, graphFile: file });
-    core.register(bot(), mapper);
-    await core.start();
-    await core.stop();
-    expect(fs.existsSync(path.join(dir, 'core', `${COMMANDS_DOC}.json`))).toBe(true);
-    expect(file.read().exists).toBe(false);
   });
 });
