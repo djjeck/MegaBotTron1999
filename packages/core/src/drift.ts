@@ -4,7 +4,8 @@
  *
  * - The parser contract: each message a parser sees is `not-mine` (not its bot's), `read`, or
  *   `unread` (its bot's, in a form it does not know).
- * - Each unread message is logged (`core.drift`, with its text), counted per parser, and raised as
+ * - Each unread message is logged (`core.drift`, with its text and the version of the parser's
+ *   module, so that an upgrade leaves the older reports behind), counted per parser, and raised as
  *   a notice for the owner (`drift`, bot-os.md D91, D94): the first at once, then at most once an
  *   hour, with how many came meanwhile.
  * - Unrecoverable (bot-os.md D21): more than `unreadAt` (5) unread messages from one parser within
@@ -62,6 +63,8 @@ export interface DriftOptions {
    * hour per parser, the ones since counted. Its pause is the core's notice, raised by `pause`.
    */
   notice?: (parser: string, text: string, detail: Readonly<Record<string, unknown>>) => void;
+  /** The version a parser runs (its module's), recorded with each report. */
+  version?: (parser: string) => string | undefined;
   /** The threshold of a parser: its manifest's, or the default. */
   threshold?: (parser: string) => DriftThreshold;
   /** Stops what acts on the parser (bot-os.md D64); returns the plugins stopped. */
@@ -145,10 +148,13 @@ export class DriftMonitor {
     const now = this.o.clock.now();
     c.unread++;
     c.times.push(t);
+    const version = this.o.version?.(parser);
+    const of = version === undefined ? {} : { version };
     this.o.record?.({
       type: 'core.drift',
       t,
       plugin: parser,
+      ...of,
       event: 'unread',
       text,
       ...(lines.length === 0 ? {} : { lines: [...lines] }),
@@ -176,6 +182,14 @@ export class DriftMonitor {
     c.tripped = true;
     const reason = `drift: ${parser} could not read ${recent} messages in ${windowMin} minutes`;
     const paused = this.o.pause(parser, reason);
-    this.o.record?.({ type: 'core.drift', t: now, plugin: parser, event: 'pause', reason, paused });
+    this.o.record?.({
+      type: 'core.drift',
+      t: now,
+      plugin: parser,
+      ...of,
+      event: 'pause',
+      reason,
+      paused,
+    });
   }
 }

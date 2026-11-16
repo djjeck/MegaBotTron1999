@@ -69,7 +69,12 @@ export interface ControlsHost {
   /** The core's own documents. */
   store: { read<T>(name: string): T | undefined; write(name: string, value: unknown): void };
   /** The plugin instances, in load order: each one's id and its plugin's manifest. */
-  nodes(): { id: string; manifest: Manifest; ports?: Record<string, InputPort> }[];
+  nodes(): {
+    id: string;
+    manifest: Manifest;
+    ports?: Record<string, InputPort>;
+    version?: string;
+  }[];
   /** A plugin's state, with why, and its stop if it is stopped. */
   status(id: string): { state: string; reason?: string; stop?: StopRecord } | undefined;
   /** An up plugin's instance (running, or stopped since it started). */
@@ -142,6 +147,8 @@ export interface PluginControl {
   plugin: string;
   description: string;
   kinds: readonly string[];
+  /** The version it runs: its module's, or the release's for one of the image's own. */
+  version?: string;
   /**
    * Its state (D64): `running`, `disabled`, `stopped`, `inactive`, `failed`, or on its way
    * (`starting`, `stopping`).
@@ -211,7 +218,7 @@ export class Controls {
     const current = this.host.settings.current();
     return {
       off: this.offNow,
-      plugins: this.host.nodes().map(({ id, manifest: m }) => {
+      plugins: this.host.nodes().map(({ id, manifest: m, version }) => {
         const s = this.host.status(id);
         const settings: Record<string, SettingValue | undefined> = {};
         for (const key of this.host.settings.of(id)?.keys() ?? []) {
@@ -236,6 +243,7 @@ export class Controls {
           plugin: m.id,
           description: m.description,
           kinds: [...m.kinds],
+          ...(version === undefined ? {} : { version }),
           state: s?.state ?? 'unknown',
           ...(s?.reason === undefined ? {} : { reason: s.reason }),
           ...(s?.stop === undefined ? {} : { stop: { ...s.stop } }),

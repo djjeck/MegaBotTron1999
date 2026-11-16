@@ -1358,7 +1358,10 @@ the text and the lines it did not know); the contract's type is `Reading`. Each 
 logged (`event: "unread"`) and raised as a `drift` notice (`detail`: `unread`, the text, and `more`,
 those since the last), the first at once and then at most once an hour. Past the threshold the core
 stops the actors once until the rate falls back, logs it (`event: "pause"`, with the plugins
-stopped) and raises a `drift` notice (§4.16, `detail.paused`); `core.drift()` gives the counts.
+stopped) and raises a `drift` notice (§4.16, `detail.paused`); `core.drift()` gives the counts. Each
+record carries the `version` the parser runs (`GET /status`'s, §4.11), so that the web UI's Drift
+page shows a parser's reports of the version it runs now, and folds those an upgrade left behind
+under one line (bot-os.md D113); records written before had none, and are shown as current.
 
 ### 4.8 The owner
 
@@ -1442,14 +1445,15 @@ nothing else, so that every surface offers the same: the chat surface's owner co
 control API, the web UI and later the agents, whose grants will be subsets of it. As built
 (`packages/core/src/controls.ts`, `core.controls`):
 
-- **Each plugin:** its state (bot-os.md D64, §2.1: `running`; `disabled`; `stopped`, with its
-  `stop`, `{ reason, time, source }`; `inactive`, its `reason` the node it needs,
-  `needs tg (disabled)`; `failed` with why), its settings with the values in force, the names of the
-  reads and actions its `interface` declares, its own account of itself if it declares a read named
-  `status`, the output of the read its widget names (`widget`, bot-os.md D112), for its card, and,
-  if it keeps a state (its instance's `view`, bot-os.md D72), one line of it (`summary`), for its
-  card; a connector whose queue coalesced sends since the start says so there too
-  (`2 sends coalesced: a + b (2)`, D73).
+- **Each plugin:** the `version` it runs (its module's, as loaded, `GET /modules`; the release's,
+  `GET /instance`, for one of the image's own; bot-os.md D113), its state (bot-os.md D64, §2.1:
+  `running`; `disabled`; `stopped`, with its `stop`, `{ reason, time, source }`; `inactive`, its
+  `reason` the node it needs, `needs tg (disabled)`; `failed` with why), its settings with the
+  values in force, the names of the reads and actions its `interface` declares, its own account of
+  itself if it declares a read named `status`, the output of the read its widget names (`widget`,
+  bot-os.md D112), for its card, and, if it keeps a state (its instance's `view`, bot-os.md D72),
+  one line of it (`summary`), for its card; a connector whose queue coalesced sends since the start
+  says so there too (`2 sends coalesced: a + b (2)`, D73).
 - **What holds a node back** (bot-os.md D98), its `backoff` in `GET /status`, while there is any:
   each command the retry-loop guard holds back (§4.6, Command answers),
   `{ account, chat, command, reason, count, until }`.

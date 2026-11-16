@@ -280,8 +280,8 @@ const message = (e: unknown): string => (e instanceof Error ? e.message : String
 export class Core {
   private readonly o: CoreOptions;
   private readonly plugins: Plugin[] = [];
-  /** The module each plugin registered from a module came from. */
-  private readonly origins = new Map<Plugin, string>();
+  /** The module each plugin registered from a module came from, and its version. */
+  private readonly origins = new Map<Plugin, { module: string; version?: string }>();
   /** By id, in load order once started. */
   private entries = new Map<string, Entry>();
   /** The graph as loaded, every edge written out (§2.1). */
@@ -406,6 +406,10 @@ export class Core {
       ...(options.record === undefined ? {} : { record: options.record }),
       notice: (parser, text, detail) => this.notice({ kind: 'drift', node: parser, text, detail }),
       threshold: (parser) => this.entries.get(parser)?.manifest.drift ?? DEFAULT_DRIFT,
+      version: (parser) => {
+        const e = this.entries.get(parser);
+        return e === undefined ? undefined : this.versionOf(e);
+      },
       pause: (parser, reason) => {
         const paused = this.stopActorsOf(parser, reason);
         this.notice({
@@ -438,10 +442,23 @@ export class Core {
     this.plugins.push(...plugins);
   }
 
-  /** Adds the plugins a module offers (§7), as `register` does, remembering their module. */
-  registerModule(module: string, plugins: readonly Plugin[]): void {
+  /**
+   * Adds the plugins a module offers (§7), as `register` does, remembering their module and the
+   * version of it loaded.
+   */
+  registerModule(module: string, plugins: readonly Plugin[], version?: string): void {
     this.register(...plugins);
-    for (const p of plugins) this.origins.set(p, module);
+    for (const p of plugins)
+      this.origins.set(p, { module, ...(version === undefined ? {} : { version }) });
+  }
+
+  /**
+   * The version a node runs: its module's, as loaded (`GET /modules`); the release's for one of
+   * the image's own (`GET /instance`); its manifest's when neither is known (a test).
+   */
+  private versionOf(e: Entry): string {
+    const origin = this.origins.get(e.plugin);
+    return (origin === undefined ? this.o.build?.version : origin.version) ?? e.manifest.version;
   }
 
   /**
@@ -453,7 +470,7 @@ export class Core {
     return this.plugins.flatMap((p) => {
       try {
         const m = parseManifest(p.manifest);
-        const module = this.origins.get(p);
+        const module = this.origins.get(p)?.module;
         return [{ id: m.id, ...describePlugin(m), ...(module === undefined ? {} : { module }) }];
       } catch {
         return [];
@@ -885,11 +902,12 @@ export class Core {
    * The plugin instances, in load order: each one's id, its plugin's manifest, and its input ports
    * as its node's config resolves them (§2.1).
    */
-  nodes(): { id: string; manifest: Manifest; ports: Record<string, InputPort> }[] {
+  nodes(): { id: string; manifest: Manifest; ports: Record<string, InputPort>; version: string }[] {
     return [...this.entries.values()].map((e) => ({
       id: e.id,
       manifest: e.manifest,
       ports: e.node.ports,
+      version: this.versionOf(e),
     }));
   }
 

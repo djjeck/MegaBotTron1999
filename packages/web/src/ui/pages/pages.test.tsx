@@ -79,6 +79,74 @@ describe('DriftPage', () => {
     expect(screen.getAllByText(': 6 unread')).toHaveLength(2);
   });
 
+  it('folds a parser’s reports of its earlier versions under one line', async () => {
+    fakeApi({
+      'GET /drift': [200, []],
+      'GET /status': [
+        200,
+        {
+          off: false,
+          plugins: [
+            { id: 'p', version: '1.1.0' },
+            { id: 'q', version: '2.0.0' },
+          ],
+        },
+      ],
+      'GET /events?type=core.drift&limit=50&hours=168': [
+        200,
+        [
+          {
+            type: 'core.drift',
+            t: 400,
+            plugin: 'p',
+            version: '1.1.0',
+            event: 'unread',
+            text: 'new',
+          },
+          {
+            type: 'core.drift',
+            t: 300,
+            plugin: 'p',
+            version: '1.0.0',
+            event: 'unread',
+            text: 'old',
+          },
+          {
+            type: 'core.drift',
+            t: 250,
+            plugin: 'p',
+            version: '1.0.0',
+            event: 'unread',
+            text: 'older',
+          },
+          // Written before the reports had a version: shown as current.
+          { type: 'core.drift', t: 200, plugin: 'p', event: 'unread', text: 'unversioned' },
+          {
+            type: 'core.drift',
+            t: 100,
+            plugin: 'q',
+            version: '1.9.0',
+            event: 'unread',
+            text: 'q old',
+          },
+        ],
+      ],
+    });
+    render(<DriftPage loggedOut={loggedOut} />);
+    expect(await screen.findByText('2 from earlier versions')).toBeDefined();
+    expect(screen.getByText('1 from earlier versions')).toBeDefined();
+    const shown = (text: string) => screen.getByText(text).closest('details') === null;
+    expect(shown('new')).toBe(true);
+    expect(shown('unversioned')).toBe(true);
+    expect(shown('old')).toBe(false);
+    expect(shown('older')).toBe(false);
+    expect(shown('q old')).toBe(false);
+    expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual([
+      'p 1.1.0',
+      'q 2.0.0',
+    ]);
+  });
+
   it('says when there is nothing, or why not', async () => {
     fakeApi({
       'GET /drift': [200, []],

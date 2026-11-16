@@ -170,6 +170,7 @@ describe('Controls', () => {
           plugin: 'actor',
           description: 'acts',
           kinds: ['actor'],
+          version: '0.1.0',
           state: 'running',
           settings: { loud: false, level: 1 },
           reads: ['status', 'broken', 'absent'],

@@ -197,12 +197,13 @@ the server that guards them.
   and **Roll back to this** asks, repeating the diff, then restarts on it; a version the check
   refuses now says why, and has no rollback, D110). Its old sections' routes lead to the editor:
   `#/instance`, `#/accounts` and `#/plugins` to the map, `#/resources` and `#/graph-text` with the
-  Costs or the Text sheet open. Beside it, **Drift** (each parser's counts and the latest reports)
-  and **Events** (the event log's latest records, filtered by type). Every page reads the control
-  API only; the app imports the core's types and nothing else of it, so its bundle holds none of the
-  shell's code. All the pages are in one menu, with no admin part apart: the whole app is the
-  owner's console. A page is a line of `PAGES` in `src/ui/App.tsx`; a node's own page (`NODE_PAGE`)
-  is in no menu.
+  Costs or the Text sheet open. Beside it, **Drift** (each parser's counts and the latest reports,
+  by parser: those of the version it runs, and those of earlier versions folded under one line,
+  D113) and **Events** (the event log's latest records, filtered by type). Every page reads the
+  control API only; the app imports the core's types and nothing else of it, so its bundle holds
+  none of the shell's code. All the pages are in one menu, with no admin part apart: the whole app
+  is the owner's console. A page is a line of `PAGES` in `src/ui/App.tsx`; a node's own page
+  (`NODE_PAGE`) is in no menu.
 - `src/server/web-server.ts`: the UI's own listener. It serves the built app, and the core's control
   API (`controlHandler` of `@megabottron1999/core`) under `/api/`, only to a logged-in owner.
   `startWebUi` starts it only when the `web_ui_password` Docker secret is provided (12 characters at

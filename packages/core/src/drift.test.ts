@@ -147,4 +147,40 @@ describe('drift in the core', () => {
       { parser: 'parser', read: 0, unread: 2, recent: 2, tripped: true },
     ]);
   });
+
+  it('records the version each parser runs: its module’s, or the release’s for the image’s', async () => {
+    const records: DriftRecord[] = [];
+    const got: Record<string, PluginContext> = {};
+    const core = new Core({
+      clock: new VirtualClock(),
+      build: { version: '0.1.28' },
+      record: (r) => {
+        if (r.type === 'core.drift') records.push(r as DriftRecord);
+      },
+    });
+    core.registerModule(
+      'quest',
+      [plugin('quest-parser', ['parser'], [], got, [], { unreadAt: 0, windowMin: 5 })],
+      '2.3.0'
+    );
+    core.register(plugin('own-parser', ['parser'], [], got, []));
+    await core.start();
+    got['quest-parser']?.drift.unread({ text: 'a' });
+    got['own-parser']?.drift.unread({ text: 'b' });
+    expect(records.map((r) => [r.plugin, r.event, r['version']])).toEqual([
+      ['quest-parser', 'unread', '2.3.0'],
+      ['quest-parser', 'pause', '2.3.0'],
+      ['own-parser', 'unread', '0.1.28'],
+    ]);
+    // And GET /status says it of each node.
+    expect(core.controls.status().plugins.map((p) => [p.id, p.version])).toEqual([
+      ['quest-parser', '2.3.0'],
+      ['own-parser', '0.1.28'],
+    ]);
+    // A module registered with no version, and no release known: its manifest's.
+    const bare = new Core({ clock: new VirtualClock() });
+    bare.registerModule('quest', [plugin('quest-parser', ['parser'], [], got, [])]);
+    await bare.start();
+    expect(bare.controls.status().plugins[0]?.version).toBe('0.1.0');
+  });
 });

@@ -122,7 +122,8 @@ for (const f of loaded.failures)
 for (const m of loaded.modules)
   core.registerModule(
     m.id,
-    loaded.plugins.filter((p) => p.module === m.id).map((p) => p.plugin)
+    loaded.plugins.filter((p) => p.module === m.id).map((p) => p.plugin),
+    m.version
   );
 try {
   core.load();
