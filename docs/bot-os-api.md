@@ -1555,38 +1555,39 @@ plugin's commands input and no other port (`bindProblem`). A running connector's
 queue. **What the Admin page showed of a node is on it** (bot-os.md D111): a connector's panel says
 its account as it runs, as whom, and its connection's state and step (`GET /accounts`), and its
 cards its connection's state; a node's panel, what it costs (its `cost`, its share of the whole, the
-top three marked), and while it runs its status (its `status`), its settings in force, each set at
-once (`POST /settings`), and its reads and actions, called from forms made from their input schemas
-(`GET /plugins/<id>/state/<name>?<field>=<value>`, `POST /plugins/<id>/actions/<name>`), each answer
-or refusal under it. The map's bar heads with the instance's switches: on or off (`POST /off`,
-asking first, and `POST /on`) and **Kill all** (`POST /kill`, asking first); the bottom bar says the
-instance's release, how long it has run and its memory (`GET /instance`). **States and dry runs**
-(bot-os.md D64, §2.1): a node is drawn greyed while disabled in the draft (its panel's **Enabled**
-switch), in red tones with a warning icon and its reason while stopped, greyed with the node it
-needs while inactive (from `GET /status`); a stopped node's panel says why, when and by what, with
-**Clear stop**. A node added starts disabled, and a chat-out or a commands edge drawn starts a dry
-run: its rhombus hollow and its part from the rhombus to the connector greyed and dashed, its
-panel's **Dry-run / Send for real** switch setting `dryRun`. All of these are changes of the draft,
-listed in the review (a stop cleared as "Stops cleared") and made by Apply. A connector is drawn as
-two cards (`cards.ts`, bot-os.md D60), one node in the graph all the same: its **in** card
-(`telegram-user · in`) at the left, with its chat-in output and its other ports, and its **out**
-card (`telegram-user · out`) in a column of its own at the right, with its chat-out input, where the
-senders' edges end. Each card is placed on its own; selecting either selects the node and opens its
-panel (the other card shows itself selected too); removing it removes both, after a confirmation
-that names them. The split lives in the editor's view alone: the graph file holds one node. Each
-edge has a rhombus at its midpoint in its port type's colour (`PortEdge.tsx`, React Flow's
-`EdgeLabelRenderer`), a button named after the edge (`edge irc.chat → dice.channel`) that selects it
-and opens its panel, by a click or the keyboard. Its review shows the diff and two actions: Apply,
-`PUT /graph/file`, then `POST /plugins/<id>/clear-stop` for each stop cleared, then `POST /restart`
-(none if the core refuses the graph, which the review says, nor if the saved graph is what runs
-already and no stop was cleared), and Revert, the draft back to the saved graph; a banner offers
-Apply (`POST /restart`) when the saved file differs from what runs (`differs`). After a restart the
-page waits on `GET /session` for the new process (another `boot` id), and comes back to the page,
-still logged in. One or several running nodes selected can be killed, each by
-`POST /plugins/<id>/kill`: stopped, until their stops are cleared. Its **Text** tab shows the draft
-printed (the check's `text`), read-only, with a copy button (`#/graph-text` opens it), and its
-**Costs** tab the nodes by cost. The rollback is not the editor's: it is the admin page's **Graph
-history** (`#/graph-history`), the one thing the admin page keeps, having no node (bot-os.md D111),
+top three marked), and while it runs its status (its `status`, not offered again among the reads),
+its settings in force, each set at once (`POST /settings`), and its reads and actions, called from
+forms made from their input schemas (`GET /plugins/<id>/state/<name>?<field>=<value>`,
+`POST /plugins/<id>/actions/<name>`), each answer or refusal under it. The map's bar heads with the
+instance's switches: on or off (`POST /off`, asking first, and `POST /on`) and **Kill all**
+(`POST /kill`, asking first); the bottom bar says the instance's release, how long it has run and
+its memory (`GET /instance`). **States and dry runs** (bot-os.md D64, §2.1): a node is drawn greyed
+while disabled in the draft (its panel's **Enabled** switch), in red tones with a warning icon and
+its reason while stopped, greyed with the node it needs while inactive (from `GET /status`); a
+stopped node's panel says why, when and by what, with **Clear stop**. A node added starts disabled,
+and a chat-out or a commands edge drawn starts a dry run: its rhombus hollow and its part from the
+rhombus to the connector greyed and dashed, its panel's **Dry-run / Send for real** switch setting
+`dryRun`. All of these are changes of the draft, listed in the review (a stop cleared as "Stops
+cleared") and made by Apply. A connector is drawn as two cards (`cards.ts`, bot-os.md D60), one node
+in the graph all the same: its **in** card (`telegram-user · in`) at the left, with its chat-in
+output and its other ports, and its **out** card (`telegram-user · out`) in a column of its own at
+the right, with its chat-out input, where the senders' edges end. Each card is placed on its own;
+selecting either selects the node and opens its panel (the other card shows itself selected too);
+removing it removes both, after a confirmation that names them. The split lives in the editor's view
+alone: the graph file holds one node. Each edge has a rhombus at its midpoint in its port type's
+colour (`PortEdge.tsx`, React Flow's `EdgeLabelRenderer`), a button named after the edge
+(`edge irc.chat → dice.channel`) that selects it and opens its panel, by a click or the keyboard.
+Its review shows the diff and two actions: Apply, `PUT /graph/file`, then
+`POST /plugins/<id>/clear-stop` for each stop cleared, then `POST /restart` (none if the core
+refuses the graph, which the review says, nor if the saved graph is what runs already and no stop
+was cleared), and Revert, the draft back to the saved graph; a banner offers Apply (`POST /restart`)
+when the saved file differs from what runs (`differs`). After a restart the page waits on
+`GET /session` for the new process (another `boot` id), and comes back to the page, still logged in.
+One or several running nodes selected can be killed, each by `POST /plugins/<id>/kill`: stopped,
+until their stops are cleared. Its **Text** tab shows the draft printed (the check's `text`),
+read-only, with a copy button (`#/graph-text` opens it), and its **Costs** tab the nodes by cost.
+The rollback is not the editor's: it is the **History** page's (`#/admin`, once Admin;
+`#/graph-history` leads there too), the one thing that page keeps, having no node (bot-os.md D111),
 which lists the versions newest first (time, summary, start, the last that ran marked "last good"),
 shows one opened in two tabs, **Changes** (the review's diff from the saved graph to it) and **As
 text** (the line diff), and rolls back to it after a confirmation repeating the diff, then restarts

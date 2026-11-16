@@ -21,7 +21,7 @@ describe('AdminPage', () => {
     const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
     render(<AdminPage loggedOut={loggedOut} />);
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
-      'Graph history',
+      'History',
     ]);
     expect(await screen.findByText('No graph has been applied yet.')).toBeDefined();
     expect(scrolled).not.toHaveBeenCalled();

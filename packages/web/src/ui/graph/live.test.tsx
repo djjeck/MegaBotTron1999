@@ -141,6 +141,9 @@ describe('a node’s panel, while it runs', () => {
     const cost = (await within(details).findByText('Cost')).nextElementSibling as HTMLElement;
     expect(cost.textContent).toContain('30.0 ms in its handlers (60% of all)');
     expect(within(details).getByLabelText('its status').textContent).toBe('{\n  "count": 0\n}');
+    // Its status shown, no button reads it again; its reads are still listed.
+    expect(within(details).queryByRole('button', { name: 'Read status' })).toBeNull();
+    expect(within(details).getByText('how it is')).toBeDefined();
 
     const inForce = within(details).getByRole('group', { name: 'settings in force' });
     const level = within(inForce).getByLabelText('level');
@@ -159,7 +162,8 @@ describe('a node’s panel, while it runs', () => {
   it('calls its reads and its actions, with their input from their forms', async () => {
     const { api } = fakeCore({
       routes: {
-        'GET /status': [200, live()],
+        // Its status not given (its read failed): its button reads it.
+        'GET /status': [200, live(false, { status: undefined })],
         'GET /plugins/actor-a/state/status': [200, { count: 3 }],
         'POST /plugins/actor-a/actions/bump': (b) =>
           (b as { by?: number }).by === undefined ? [400, { error: 'by: required' }] : [200, 4],

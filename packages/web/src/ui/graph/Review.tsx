@@ -11,7 +11,7 @@
  *
  * Its close button (×), or Escape, only closes it: the draft is kept.
  *
- * The diff's lists (`DiffView`) are the graph history's too (Admin → Graph history, D61).
+ * The diff's lists (`DiffView`) are the graph history's too (the History page, D61).
  */
 import { useEffect, useRef } from 'react';
 import type { GraphCheckView, GraphDiff, GraphProblem } from '#src/ui/api.ts';

@@ -1,8 +1,9 @@
 /**
  * The web UI (docs/bot-os.md P16, D43, D55): the owner's login, then the graph editor, the home
  * page and the main UI, where what belongs to a node is shown on it and the instance's switches
- * are on the map's bar (D111), beside the modules, the admin page (D59, D111: the graph's history,
- * which has no node), drift and events. The whole app is the owner's console, in one menu.
+ * are on the map's bar (D111), beside the modules, the History page (`#/admin`, D59, D111: the
+ * graph's history, which has no node), drift and events. The whole app is the owner's console,
+ * in one menu.
  *
  * Its shell: a top bar whose tabs are the pages (the tab selected is the page's title), the page
  * between, which alone scrolls, and a bottom bar for small print, such as diagnostics: the release
@@ -56,7 +57,7 @@ export const NOTICE_MS = 30_000;
 export const PAGES: Page[] = [
   { route: 'graph', title: 'Graph', wide: true, fill: true, page: (p) => <GraphPage {...p} /> },
   { route: 'modules', title: 'Modules', wide: true, page: (p) => <ModulesPage {...p} /> },
-  { route: 'admin', title: 'Admin', wide: false, page: (p) => <AdminPage {...p} /> },
+  { route: 'admin', title: 'History', wide: false, page: (p) => <AdminPage {...p} /> },
   { route: 'drift', title: 'Drift', wide: false, page: (p) => <DriftPage {...p} /> },
   { route: 'events', title: 'Events', wide: false, page: (p) => <EventsPage {...p} /> },
 ];

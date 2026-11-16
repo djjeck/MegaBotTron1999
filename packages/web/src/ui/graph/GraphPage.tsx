@@ -20,8 +20,8 @@
  * - **Review and apply**: the diff from the saved file and the stops cleared, then Apply
  *   (`PUT /graph/file`, each stop cleared, then a restart, which the UI waits through) or Revert (the draft back to the saved graph). A saved
  *   graph that differs from what runs (changed through the API, a rollback, or its restart failed)
- *   has its own banner with Apply. The versions before, and their rollback, are on the admin page
- *   (Admin → Graph history, D61).
+ *   has its own banner with Apply. The versions before, and their rollback, are on the History page
+ *   (`#/admin`, D61, D111).
  * - **Read it as text**: the Text tab, on the page's right edge, opens a side sheet with the draft
  *   printed (`POST /graph/check`'s `text`), read-only, with a copy button.
  * - **See what each node costs** (D77): the Costs tab, under it, opens a side sheet with the nodes
@@ -926,7 +926,7 @@ export function GraphPage({
           <div role="alert" className="banner bad">
             <strong>The saved graph was refused at the last start: no node runs.</strong> Fix it
             here, then review and apply it; or roll back to a version that ran, in{' '}
-            <a href="#/graph-history">Admin → Graph history</a>.
+            <a href="#/graph-history">History</a>.
             <ul>
               {refused.map((p) => (
                 <li key={p.text}>{p.text}</li>

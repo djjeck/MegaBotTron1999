@@ -93,7 +93,7 @@ describe('App', () => {
       within(screen.getByRole('navigation', { name: 'main' }))
         .getAllByRole('link')
         .map((l) => l.textContent)
-    ).toEqual(['Graph', 'Modules', 'Admin', 'Drift', 'Events']);
+    ).toEqual(['Graph', 'Modules', 'History', 'Drift', 'Events']);
     // The bottom bar, for small print, stays on every page: the release the instance runs, how
     // long it has run and its memory (D111).
     const bar = screen.getByRole('contentinfo');
@@ -116,7 +116,7 @@ describe('App', () => {
     await waitFor(() =>
       expect(scrolled.mock.contexts.at(-1)).toBe(document.getElementById('graph-history'))
     );
-    expect(screen.getByRole('heading', { name: 'Admin', level: 1 })).toBeDefined();
+    expect(screen.getByRole('heading', { name: 'History', level: 1 })).toBeDefined();
     scrolled.mockRestore();
     // The old routes of what moved into the editor (D111) lead to it, the side sheet they name
     // open.

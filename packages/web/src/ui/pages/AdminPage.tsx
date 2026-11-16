@@ -1,6 +1,6 @@
 /**
- * The admin page (docs/bot-os.md D59, D111): what has no node, and so no place in the graph
- * editor: the graph's history (D61). Its section's id is a route (`#/graph-history`), which leads
+ * The History page (docs/bot-os.md D59, D111), still at `#/admin`: what has no node, and so no
+ * place in the graph editor: the graph's history (D61), whose name it takes. Its section's id is a route (`#/graph-history`), which leads
  * here, scrolled to it. What it held before moved into the editor (D111): the instance's switches
  * to the map's bar, its health to the bottom bar, each account, plugin and cost to its node's panel
  * and card, the costs' table and the graph as text to the editor's side sheets.
@@ -15,7 +15,7 @@ export const ADMIN_SECTIONS: { id: string; title: string; content: (p: PageProps
   [
     {
       id: 'graph-history',
-      title: 'Graph history',
+      title: 'History',
       content: (p) => <GraphHistoryPage {...p} />,
     },
   ];

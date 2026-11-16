@@ -943,7 +943,16 @@ export function NodeDetails(props: {
         <Members
           title="Reads"
           members={i.reads}
-          call={running ? { node: view.id, kind: 'read', names: live.reads } : undefined}
+          call={
+            running
+              ? {
+                  node: view.id,
+                  kind: 'read',
+                  // Its status is read already, in its Status section: no button to read it again.
+                  names: live.reads.filter((r) => r !== 'status' || live.status === undefined),
+                }
+              : undefined
+          }
         />
         <Members
           title="Actions"
