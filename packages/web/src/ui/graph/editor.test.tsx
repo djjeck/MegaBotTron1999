@@ -278,9 +278,8 @@ describe('the graph editor', () => {
     fireEvent.click(screen.getByLabelText('node chat · in'));
     const chat = await screen.findByLabelText('details of chat');
     expect(within(chat).getByText('plugin chat: config host: too short')).toBeDefined();
-    // Its config, a secret among the names provided, and its account.
+    // Its config, a secret among the names provided; its account is nothing to type (D119).
     fireEvent.change(within(chat).getByLabelText('token'), { target: { value: 'token_b' } });
-    fireEvent.change(within(chat).getByLabelText('account'), { target: { value: 'chat:alice' } });
     await waitFor(() =>
       expect(core.checked.at(-1)?.nodes[0]).toEqual({
         id: 'chat',
@@ -292,7 +291,6 @@ describe('the graph editor', () => {
           tls: true,
           channels: ['#a'],
         },
-        account: 'chat:alice',
       })
     );
     // A node disabled and enabled again (D64), and its settings.

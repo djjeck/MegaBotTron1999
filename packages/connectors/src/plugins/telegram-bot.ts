@@ -133,8 +133,6 @@ const VIEW_SCHEMA = z.toJSONSchema(
 
 export function telegramBotPlugin(
   o: {
-    /** The bot's username: the account is `telegram-bot:<name>`. */
-    name?: string;
     /** Polling waits for this too (tests); with an owner, it waits for the commands. */
     listen?: Promise<unknown>;
     /** Makes the bot from its token (tests pass a stub). */
@@ -142,7 +140,8 @@ export function telegramBotPlugin(
     sleep?: (ms: number) => Promise<void>;
   } = {}
 ): Plugin {
-  const account = `telegram-bot:${o.name ?? 'bot'}`;
+  // Its network's; a node's account is `telegram-bot:<node id>` (D119).
+  const account = 'telegram-bot:bot';
   const make = o.bot ?? createBot;
   return definePlugin({
     manifest: {

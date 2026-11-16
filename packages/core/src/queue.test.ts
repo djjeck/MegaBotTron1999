@@ -75,7 +75,7 @@ async function kit(
   const graph: GraphInput = {
     version: 2,
     nodes: [
-      { id: 'chat', plugin: 'chat' },
+      { id: 'chat', plugin: 'chat', account: 'chat:me' },
       { id: 'game', plugin: 'game' },
       { id: 'a', plugin: 'actor' },
       { id: 'b', plugin: 'actor' },

@@ -75,7 +75,7 @@ const graph = (over: Partial<Record<string, object>> = {}, edges: object[] = [])
   ({
     version: 2,
     nodes: [
-      { id: 'tg', plugin: 'tg', ...over['tg'] },
+      { id: 'tg', plugin: 'tg', account: 'tg:me', ...over['tg'] },
       { id: 'parser', plugin: 'parser', ...over['parser'] },
       { id: 'helper', plugin: 'parser', ...over['helper'] },
       { id: 'actor', plugin: 'actor', ...over['actor'] },
@@ -158,7 +158,7 @@ describe('a disabled node (D64)', () => {
       {
         version: 2,
         nodes: [
-          { id: 'tg', plugin: 'tg', disabled: true },
+          { id: 'tg', plugin: 'tg', account: 'tg:me', disabled: true },
           { id: 'actor', plugin: 'actor' },
           { id: 'parser', plugin: 'parser', config: {} },
         ],
@@ -355,7 +355,7 @@ describe('a runtime stop’s cascade (#29)', () => {
     const g = {
       version: 2,
       nodes: [
-        { id: 'tg', plugin: 'tg' },
+        { id: 'tg', plugin: 'tg', account: 'tg:me' },
         { id: 'parser', plugin: 'parser' },
         { id: 'actor', plugin: 'actor' },
         { id: 'near', plugin: 'near' },

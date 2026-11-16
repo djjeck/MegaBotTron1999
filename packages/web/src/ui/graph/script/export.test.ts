@@ -167,7 +167,7 @@ describe('a script node exported as a plugin (D79)', () => {
       graph: {
         version: 2,
         nodes: [
-          { id: 'tg', plugin: 'tg' },
+          { id: 'tg', plugin: 'tg', account: 'telegram:alice' },
           { id: 'quest', plugin: 'quest' },
           { id: 'examine', plugin: 'examine' },
         ],

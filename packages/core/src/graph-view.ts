@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { type Graph, type GraphEdge, nodeInputs } from './graph.ts';
+import { type Graph, type GraphEdge, networkOf, nodeAccount, nodeInputs } from './graph.ts';
 import { type Manifest } from './manifest.ts';
 import {
   describePort,
@@ -282,7 +282,13 @@ export interface PluginView {
   version: string;
   description: string;
   kinds: string[];
+  /**
+   * A connector's account: its manifest's on a plugin (the programmatic wiring's), its node's on a
+   * node (`nodeAccount`: the one the graph names, else `<network>:<node id>`, D119).
+   */
   account?: string;
+  /** A connector's network, the part of its accounts before the colon. */
+  network?: string;
   configSchema?: JsonSchema;
   /** Its settings' schema; their values in force are the controls' (`GET /status`). */
   settingsSchema?: JsonSchema;
@@ -435,7 +441,7 @@ export function describePlugin(m: Manifest): PluginView {
     version: m.version,
     description: m.description,
     kinds: [...m.kinds],
-    ...(m.account === undefined ? {} : { account: m.account }),
+    ...(m.account === undefined ? {} : { account: m.account, network: networkOf(m.account) }),
     ...(m.config === undefined ? {} : { configSchema: jsonSchema(m.config) }),
     ...(m.settings === undefined ? {} : { settingsSchema: jsonSchema(m.settings) }),
     inputs: Object.fromEntries(Object.entries(m.inputs).map(([k, p]) => [k, inputView(p)])),
@@ -503,7 +509,7 @@ export function describeNodes(
   return nodes.map(({ id, manifest: m, ports }) => {
     const node = graph.nodes.find((n) => n.id === id);
     const { account: _, ...plugin } = describePlugin(m);
-    const account = node?.account ?? m.account;
+    const account = nodeAccount(id, m, node?.account);
     const resolved = ports ?? nodeInputs(m, node?.config).ports;
     return {
       id,

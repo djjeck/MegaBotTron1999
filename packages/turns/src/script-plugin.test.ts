@@ -110,7 +110,7 @@ const examineConfig = (code = EXAMINE) => ({
 const graph = (config: object = examineConfig(), more: GraphInput['nodes'] = []): GraphInput => ({
   version: 2,
   nodes: [
-    { id: 'tg', plugin: 'tg' },
+    { id: 'tg', plugin: 'tg', account: 'telegram:alice' },
     { id: 'quest', plugin: 'quest' },
     { id: 'quest-state', plugin: 'quest-state' },
     { id: 'examine', plugin: 'script', config: config as Record<string, unknown> },
@@ -327,7 +327,7 @@ for (const isolation of ['in-process', 'worker'] as const)
         graph: {
           version: 2,
           nodes: [
-            { id: 'tg', plugin: 'tg' },
+            { id: 'tg', plugin: 'tg', account: 'telegram:alice' },
             { id: 'quest', plugin: 'quest' },
             { id: 'quest-state', plugin: 'quest-state' },
             {

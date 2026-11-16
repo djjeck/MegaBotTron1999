@@ -224,7 +224,9 @@ describe('the nodes as the graph view shows them', () => {
       id: 'irc',
       plugin: 'irc',
       version: '1.0.0',
-      account: 'irc:me',
+      // Its node names no account: `<network>:<its id>` (D119).
+      account: 'irc:irc',
+      network: 'irc',
       config: { host: 'znc', nick: 'me' },
       configSchema: {
         type: 'object',

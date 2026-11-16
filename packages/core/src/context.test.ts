@@ -308,8 +308,8 @@ describe('the context’s ways out of an output of many edges (D97)', () => {
       graph: {
         version: 2,
         nodes: [
-          { id: 'bot', plugin: 'bot' },
-          { id: 'irc', plugin: 'irc' },
+          { id: 'bot', plugin: 'bot', account: 'telegram-bot:ExampleBot' },
+          { id: 'irc', plugin: 'irc', account: 'irc:alice' },
           { id: 'teller', plugin: 'teller' },
         ],
         edges: [

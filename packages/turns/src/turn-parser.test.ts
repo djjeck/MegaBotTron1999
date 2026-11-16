@@ -285,7 +285,7 @@ describe('its turn commands, its game’s (bot-os.md D70)', () => {
       const graph = {
         version: 2,
         nodes: [
-          { id: TELEGRAM_USER, plugin: TELEGRAM_USER },
+          { id: TELEGRAM_USER, plugin: TELEGRAM_USER, account: 'telegram:alice' },
           { id: QUEST, plugin: QUEST, config: { commands: ['/play'] } },
         ],
         edges: [

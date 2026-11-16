@@ -433,7 +433,8 @@ describe('the draft', () => {
       account: 'chat:other',
       config: { host: 'h' },
     });
-    expect(viewOf({ id: 'c', plugin: 'chat' }, plugins.get('chat')).account).toBe('chat:me');
+    // No account named: its node's id on its plugin's network (D119).
+    expect(viewOf({ id: 'c', plugin: 'chat' }, plugins.get('chat')).account).toBe('chat:c');
     const gone = viewOf({ id: 'g', plugin: 'gone' }, undefined);
     expect(gone).toMatchObject({
       id: 'g',

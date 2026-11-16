@@ -45,7 +45,8 @@ export const VIEW: GraphViewData = {
       version: '1.0.0',
       description: 'a chat network',
       kinds: ['connector'],
-      account: 'chat:me',
+      account: 'chat:chat',
+      network: 'chat',
       config: { host: 'example.test' },
       configSchema: {
         type: 'object',

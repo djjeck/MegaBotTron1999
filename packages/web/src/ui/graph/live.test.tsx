@@ -10,6 +10,7 @@ import { status } from '#test/graph-view.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
 import { GraphPage } from './GraphPage.tsx';
 import { query } from './NodeControls.tsx';
+import { AccountFold } from './NodeDetails.tsx';
 
 let restore: () => void;
 beforeEach(() => {
@@ -111,17 +112,17 @@ describe('a connector’s account, on its cards and in its panel', () => {
     fireEvent.click(card);
     const details = await screen.findByLabelText('details of chat');
     const account = (await within(details).findByText('Connection')).nextElementSibling;
-    expect(account?.textContent).toBe('chat:me as ExampleBot closed closed: refused');
+    expect(account?.textContent).toBe('as ExampleBot closed closed: refused');
   });
 
-  it('says when a running connector names no account and is not connecting', async () => {
+  it('says when a running connector is not connecting', async () => {
     fakeCore({
       routes: { 'GET /accounts': [200, [{ id: 'chat', plugin: 'chat', state: 'failed' }]] },
     });
     render(<GraphPage loggedOut={loggedOut} checkAfterMs={0} />);
     fireEvent.click(await screen.findByLabelText('node chat · in', {}, slow));
     const details = await screen.findByLabelText('details of chat');
-    expect(await within(details).findByText('none named')).toBeDefined();
+    expect(await within(details).findByText('not connected')).toBeDefined();
   });
 });
 
@@ -243,5 +244,39 @@ describe('a read’s input', () => {
   it('goes as the query’s fields, a string as it is and anything else as JSON', () => {
     expect(query({})).toBe('');
     expect(query({ who: 'alice', n: 2 })).toBe('?who=alice&n=2');
+  });
+});
+
+describe('a connector’s account, under Advanced (D119)', () => {
+  it('is its node’s id without its network, or the one its graph names, which can go', () => {
+    const clear = vi.fn();
+    const { rerender } = render(
+      <AccountFold
+        account="telegram-bot:quest"
+        network="telegram-bot"
+        named={undefined}
+        clear={clear}
+      />
+    );
+    expect(screen.getByLabelText('account').textContent).toBe('quest');
+    expect(screen.queryByRole('button')).toBeNull();
+    rerender(
+      <AccountFold
+        account="telegram-bot:old"
+        network="telegram-bot"
+        named="telegram-bot:old"
+        clear={clear}
+      />
+    );
+    expect(screen.getByText('(named in its graph on telegram-bot)')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Use its node’s id' }));
+    expect(clear).toHaveBeenCalled();
+    rerender(<AccountFold account="odd:x" network={undefined} named="odd:x" clear={clear} />);
+    expect(screen.getByLabelText('account').textContent).toBe('odd:x');
+    expect(screen.getByText('(named in its graph)')).toBeDefined();
+    rerender(
+      <AccountFold account={undefined} network={undefined} named={undefined} clear={clear} />
+    );
+    expect(screen.queryByLabelText('account')).toBeNull();
   });
 });

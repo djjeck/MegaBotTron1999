@@ -69,11 +69,11 @@ describe('the telegram-user plugin', () => {
       },
       documents: loggedIn('telegram-user'),
     });
-    core.register(telegramUserPlugin({ self: 'alice', client: (c) => (made.push(c), client()) }));
+    core.register(telegramUserPlugin({ client: (c) => (made.push(c), client()) }));
     await core.start();
     expect(made).toEqual([LOGIN]);
     const connector = core.connector('telegram-user');
-    expect(connector?.account).toBe('telegram:alice');
+    expect(connector?.account).toBe('telegram:owner');
     expect(connector?.limits).toEqual({
       commandIntervalMs: 0,
       unansweredAt: 4,
@@ -85,10 +85,10 @@ describe('the telegram-user plugin', () => {
     expect(connector?.status().state).toBe('closed');
   });
 
-  it('runs on its node’s account, from its config alone', async () => {
+  it('runs on its node’s account, by its id unless it names one (D119), from its config alone', async () => {
     const core = new Core({
       clock: new VirtualClock(),
-      documents: loggedIn('me'),
+      documents: { ...loggedIn('me'), ...loggedIn('mine') },
       graph: {
         version: 2,
         nodes: [
@@ -98,6 +98,7 @@ describe('the telegram-user plugin', () => {
             account: 'telegram:bob',
             config: { chats: ['@quiz_bot'] },
           },
+          { id: 'mine', plugin: 'telegram-user' },
         ],
         edges: [],
       },
@@ -105,12 +106,13 @@ describe('the telegram-user plugin', () => {
     core.register(telegramUserPlugin({ client }));
     await core.start();
     expect(core.connector('me')?.account).toBe('telegram:bob');
+    expect(core.connector('mine')?.account).toBe('telegram:mine');
     expect(telegramUserPlugin().manifest.account).toBe('telegram:owner');
     await core.stop();
   });
 
   it('monitors the chats of its config, or every chat: the check warns of one read beside (D89, D90)', () => {
-    const plugin = telegramUserPlugin({ self: 'alice', client });
+    const plugin = telegramUserPlugin({ client });
     expect(readWarnings(plugin, undefined, ['@QuestBot'])).toEqual([]);
     // Its connector not running, a chat named otherwise cannot be told: not warned of.
     expect(

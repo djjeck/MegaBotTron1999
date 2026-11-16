@@ -79,9 +79,10 @@ the server that guards them.
   connector not running yet says to apply first. A new node starts **disabled** and a new chat-out
   edge a **dry run**: its rhombus hollow and its part from the rhombus to the connector greyed and
   dashed; its panel's **Dry-run / Send for real** switch, and a node's **Enabled** switch, are
-  changes of the draft, applied with Apply. A node's config, settings and account are forms made
-  from its schemas, each field's description as its help; a new node's config starts filled with its
-  schema's defaults, and an opened node shows its unset ones filled in, written with its first
+  changes of the draft, applied with Apply. A node's config and settings are forms made from its
+  schemas (a connector's account is nothing to type: its node's id, read-only under **Advanced**,
+  docs/bot-os.md D119), each field's description as its help; a new node's config starts filled with
+  its schema's defaults, and an opened node shows its unset ones filled in, written with its first
   change (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), a config key that names a secret a
   choice of the secrets' names, a connector's secrets listed under its config, each by name, whether
   it is provided (`GET /secrets`) and where it comes from (a Docker secret), never its value, a list
@@ -135,16 +136,16 @@ the server that guards them.
   name selecting it. **A model connector** (its manifest's `model`, D117) has a `$` on its card, so
   that the owner watches it; what it spent shows on its card through its widget, and in its panel's
   Cost line. **What belongs to a node is on it** (docs/bot-os.md D111): a connector's cards show its
-  connection (`connected`, `connecting`, `closed`, its step on hover) and its panel its account as
-  it runs, as whom, and its connection (`GET /accounts`); every node's panel says what it costs, its
-  share and whether it is among the top three, and, while it runs, its status (read there, so its
-  reads offer no **Read** of it), its settings in force (each set at once with its **Set**, as
-  `/set` does in chat, above the form of the settings a fresh instance starts with) and its reads
-  and actions, each called with **Read** or **Run**, its input in a form made from its schema, its
-  answer under it (`NodeControls.tsx`). **A connector's login** (docs/bot-os.md D116): one that logs
-  in from its node (a Telegram one) says `needs login` on its card until it has credentials, and its
-  panel, while it runs, shows its **Login** as its connector says it (`ConnectorLogin.tsx`, `GET`
-  and `POST /plugins/<id>/login`): a step's title, how-to and link, a QR code drawn from its link
+  connection (`connected`, `connecting`, `closed`, its step on hover) and its panel as whom it runs
+  and its connection (`GET /accounts`); every node's panel says what it costs, its share and whether
+  it is among the top three, and, while it runs, its status (read there, so its reads offer no
+  **Read** of it), its settings in force (each set at once with its **Set**, as `/set` does in chat,
+  above the form of the settings a fresh instance starts with) and its reads and actions, each
+  called with **Read** or **Run**, its input in a form made from its schema, its answer under it
+  (`NodeControls.tsx`). **A connector's login** (docs/bot-os.md D116): one that logs in from its
+  node (a Telegram one) says `needs login` on its card until it has credentials, and its panel,
+  while it runs, shows its **Login** as its connector says it (`ConnectorLogin.tsx`, `GET` and
+  `POST /plugins/<id>/login`): a step's title, how-to and link, a QR code drawn from its link
   (`qrcode-generator`, renewed as the login asks again every 2 s while under way), its fields (a
   secret one typed unseen, cleared once sent) and its buttons (a logout asking first); once its
   credentials changed, **Restart now** restarts the instance as Apply does. Its Docker secrets show

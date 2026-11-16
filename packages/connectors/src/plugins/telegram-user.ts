@@ -53,13 +53,12 @@ export const telegramUserConfig = z.object({
 export type TelegramUserConfig = z.infer<typeof telegramUserConfig>;
 
 /**
- * The `telegram-user` plugin, on its node's account (`telegram:<name>`; `telegram:owner`, or
- * `telegram:<self>`, until a node names one); `client` makes the GramJS client from the
+ * The `telegram-user` plugin, on its node's account (`telegram:<node id>`, D119; its manifest's
+ * `telegram:owner` only in the programmatic wiring); `client` makes the GramJS client from the
  * credentials (tests pass a fake).
  */
 export function telegramUserPlugin(
   o: {
-    self?: string;
     client?: (credentials: UserCredentials) => GramClient;
     /** Makes the client a login from its node uses (tests pass a fake). */
     loginClient?: (
@@ -68,7 +67,7 @@ export function telegramUserPlugin(
     ) => UserLoginClient;
   } = {}
 ): Plugin {
-  const account = `telegram:${o.self ?? 'owner'}`;
+  const account = 'telegram:owner';
   const make = o.client ?? ((c: UserCredentials): GramClient => createTelegramClient(c));
   const makeLogin =
     o.loginClient ??

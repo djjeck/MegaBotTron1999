@@ -135,6 +135,8 @@ export {
   type InstanceInput,
   loadOrder,
   monitoredChats,
+  networkOf,
+  nodeAccount,
   type NodeDown,
   nodeInputs,
   nodeManifest,

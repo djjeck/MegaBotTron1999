@@ -105,9 +105,9 @@ describe('the telegram-bot plugin', () => {
       clock: new VirtualClock(),
       documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
     });
-    core.register(telegramBotPlugin({ name: 'OtherBot', listen: new Promise(() => {}) }));
+    core.register(telegramBotPlugin({ listen: new Promise(() => {}) }));
     await core.start();
-    expect(core.connector('telegram-bot')?.account).toBe('telegram-bot:OtherBot');
+    expect(core.connector('telegram-bot')?.account).toBe('telegram-bot:bot');
     expect(typeof core.connector('telegram-bot')?.isAdmin).toBe('function');
   });
 

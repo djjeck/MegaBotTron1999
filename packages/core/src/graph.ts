@@ -322,7 +322,8 @@ const fitting = (input: InputPort, manifest: Manifest, loose = false): [string, 
  * (`config`, by id), and each port bound as its manifest's `bind` says (an events input, by
  * default, to every other node registering its namespace; an interface input to the node of its
  * plugin's id; a chat-in input from its connector, a chat-out output to it). A port whose default
- * other end is not there is left unbound.
+ * other end is not there is left unbound. A connector's node names its manifest's account, which a
+ * test or the dev kit gives its connector; a node of a graph file names none (`nodeAccount`).
  */
 export function defaultGraph(
   manifests: readonly Manifest[],
@@ -388,6 +389,8 @@ export function defaultGraph(
       return {
         id: m.id,
         plugin: m.id,
+        // The programmatic wiring runs a connector on its manifest's account (a test's, a kit's).
+        ...(m.account === undefined ? {} : { account: m.account }),
         ...(c === undefined ? {} : { config: c as Record<string, unknown> }),
       };
     }),
@@ -434,7 +437,21 @@ export function withInstances(
 }
 
 /** An account's network: the part before its colon. */
-const networkOf = (account: string): string => account.slice(0, account.indexOf(':'));
+export const networkOf = (account: string): string => account.slice(0, account.indexOf(':'));
+
+/**
+ * A connector node's account (§4.5, bot-os.md D119): the one its graph node names, else
+ * `<network>:<node id>`, its network its plugin's (its manifest's `account`'s). Node ids are unique,
+ * so accounts are. Undefined for a node that is not a connector's.
+ */
+export function nodeAccount(
+  id: string,
+  manifest: { account?: string | undefined },
+  named?: string
+): string | undefined {
+  if (named !== undefined) return named;
+  return manifest.account === undefined ? undefined : `${networkOf(manifest.account)}:${id}`;
+}
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -499,7 +516,7 @@ export function resolveGraph(
       problems.push(
         `node ${n.id}: its instance ${instance} is of the plugin ${kept}, not ${n.plugin}`
       );
-    const account = n.account ?? manifest.account;
+    const account = nodeAccount(n.id, manifest, n.account);
     if (n.account !== undefined) {
       if (manifest.account === undefined)
         problems.push(`node ${n.id}: only a connector has an account`);

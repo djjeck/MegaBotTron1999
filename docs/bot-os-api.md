@@ -70,7 +70,9 @@ instance does not start.
 | `configChats`   | Optional: the keys of its `config` that name a chat (bot-os.md D96), `[{ key, output?, input?, kinds?, template?, owner?, sender? }]`, so that the editor picks each in its chat picker from its connector's chats instead of having the owner type an id: the connector is its own node (a connector's, no port named), or the one at the other end of the edge from its chat-out `output` or to its chat-in `input`; a string or a list holds the chats as the connector names them (`Surface.id`), a number a chat by its numeric id; `kinds` the kinds it takes (`private`, `group`, `channel`, `bot`); `template`, a `{path}` template may stand for the chat instead; `owner`, a connector's key naming its account's owner's chat (`owner()`, §4.5); `sender`, a key naming people it recognises, not chats it sends to (bot-os.md D100): its picker says nothing of reaching them, and the editor writes them on no edge. A chat picked for a key with an `output` or an `input` (not a template) is **written on that edge too** (its `sends`, or its `reads` unless `"*"`), and replaced there when the pick changes, the chats added by hand kept (bot-os.md D97): the edge is what lets it send. `telegram-bot` declares its `owner` (a person, `owner: true`), `group` and `deny` (people and bots, `sender: true`), the reactor its `chat` (or a template) and `in` |
 | `audit`         | Optional: keys of its `config` whose every change a save or rollback of the graph records in the event log (`core.config`: who, when, the value's SHA-256, never the value; §2.3, bot-os.md D75)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
-A connector's manifest also names its **account** (§4.5): the network and the identity it holds.
+A connector's manifest also names its **account** (§4.5): its network, and the account it holds in
+the programmatic wiring's default graph (a test's, the dev kit's); in a graph file each node is on
+`<network>:<node id>` unless it names one (bot-os.md D119).
 
 **A node's own manifest** (bot-os.md D74): a plugin whose ports its node's config declares (a script
 node, §5) gives `node(config, id)`, which makes each node's manifest from its config (as the schema
@@ -405,18 +407,21 @@ manifest: {
 
 A node is a plugin instance: its id (a plugin id's form), the plugin it instantiates (one the image
 or a module offers, registered with `core.register`), the `instance` whose kept state it runs on
-(§2.2; the node's id when it names none), its configuration, and, for a connector, its own `account`
-in place of the manifest's (of the same network). It may also give the `settings` (checked against
-its plugin's `settings`) its instance starts with: they are put in force only while the instance
-keeps none of its own, so the owner's later changes win. A node may be `"disabled": true` (absent:
-enabled), and a chat-out edge `"dryRun": true` (absent: live): see **Node states** below. A node may
-name the `group` it is drawn in, a swimlane of the editor (bot-os.md D69, §4.12): any name, not
-empty and without spaces at its ends (`"group": "Quest"`; absent: none); the check accepts it, and
-nothing that runs reads it. An edge goes from `node.port` (or `node`, when one of its outputs fits)
-to `node.port`, with its type and, for a chat, what it carries: a chat-in its `reads` and `senders`,
-a chat-out its `sends` and `commands` (each carries only its own). The core checks it with zod and
-against the manifests at load, and fails the start naming the node and the port: a plugin not in the
-image, a node twice, an instance named by two nodes or kept by another plugin
+(§2.2; the node's id when it names none), its configuration, and, for a connector, its `account`:
+`<network>:<node id>` when it names none (bot-os.md D119; node ids are unique, so accounts are), or
+the one it names, of its plugin's network (a graph saved before D119 keeps its own; the editor
+writes none). The programmatic wiring's default graph names the manifest's on each connector's node.
+It may also give the `settings` (checked against its plugin's `settings`) its instance starts with:
+they are put in force only while the instance keeps none of its own, so the owner's later changes
+win. A node may be `"disabled": true` (absent: enabled), and a chat-out edge `"dryRun": true`
+(absent: live): see **Node states** below. A node may name the `group` it is drawn in, a swimlane of
+the editor (bot-os.md D69, §4.12): any name, not empty and without spaces at its ends
+(`"group": "Quest"`; absent: none); the check accepts it, and nothing that runs reads it. An edge
+goes from `node.port` (or `node`, when one of its outputs fits) to `node.port`, with its type and,
+for a chat, what it carries: a chat-in its `reads` and `senders`, a chat-out its `sends` and
+`commands` (each carries only its own). The core checks it with zod and against the manifests at
+load, and fails the start naming the node and the port: a plugin not in the image, a node twice, an
+instance named by two nodes or kept by another plugin
 (`node b: its instance tally is of the plugin other, not counter`), a setting the plugin does not
 have or refuses, an edge between ports of two types or to a port that is not there, an interface
 member not declared, a single input (or a chat-out output) bound twice, a connector account held
@@ -974,7 +979,11 @@ logged and the others still get the event.
 
 An **account** is one identity on one network, with an id of the form `<network>:<name>`:
 `irc:alice`, `telegram:alice` (a user), `telegram-bot:ExampleBot`. Each connector is bound to one
-account, and holds its credentials; the plugins get a handle.
+account, and holds its credentials; the plugins get a handle. A connector node's account is its own
+id on its plugin's network (`telegram-bot:quest-bot` for the node `quest-bot`, bot-os.md D119;
+`nodeAccount`), unless its graph node names another: nothing for the owner to type, unique as node
+ids are. It is what the outbox, the event log and the errors name it by; whom it is logged in as is
+the login's `as`, not the account.
 
 ```ts
 interface Inbound {
@@ -1163,14 +1172,15 @@ show in the account's Devices as the app registered at my.telegram.org on the de
 `MegaBotTron1999`.
 
 As built (`packages/core/src/connector.ts`): a connector plugin's instance offers its `connector`,
-whose account must be the manifest's (or its node's); `ConnectorBase` keeps the listeners and the
-status for the implementations. `ctx.connector(port)` gives a handle only on a connector a chat-in
-input of the plugin is bound to, and the handle hears only the chats that edge `reads` (compared
-without case; any, for `"*"`) and the `senders` it names (anyone without; `me`, the account's own,
-`own` or its own name), as `hears(filter, message, self)` matches them. A connector's node has a
-chat-in output, `chat`, which the readers' edges leave, and a chat-out input, `chat`, which the
-senders' edges reach (§2.1, bot-os.md D60). The wiring reaches the full connector with
-`core.connector(id)`. The shell's connectors are in §5.
+whose account must be its node's (`ctx.account`; a test's fake connector, given an account of its
+own, sits on a node that names it, as the dev kit's default graph does); `ConnectorBase` keeps the
+listeners and the status for the implementations. `ctx.connector(port)` gives a handle only on a
+connector a chat-in input of the plugin is bound to, and the handle hears only the chats that edge
+`reads` (compared without case; any, for `"*"`) and the `senders` it names (anyone without; `me`,
+the account's own, `own` or its own name), as `hears(filter, message, self)` matches them. A
+connector's node has a chat-in output, `chat`, which the readers' edges leave, and a chat-out input,
+`chat`, which the senders' edges reach (§2.1, bot-os.md D60). The wiring reaches the full connector
+with `core.connector(id)`. The shell's connectors are in §5.
 
 **A model connector** (bot-os.md D117): a connector whose manifest says `model: true` spends money
 on each call, so the editor marks its node with a `$`, and it accounts for its calls itself, since
@@ -1482,13 +1492,15 @@ public API (`packages/core/src/devkit.ts`):
   it administers (`admins`). The plugins read it through their handles and send through their
   outboxes, as they do live.
 - **`DevKit`**: a core on a `VirtualClock` (§4.1) whose stores are in memory, with the plugins of
-  the run, the run's graph (`graph`; by default one instance of each, bound as the manifests say)
-  and, set before it starts, keyed by plugin instance: their configuration (`config`), the owner's
-  kept settings (`settings`) and the documents their stores start with (`documents`), and the event
-  log before the run (`history`), which the plugins read with `ctx.events`; `kit.log` is that log in
-  memory, every record of the run added (`MemoryEventLog`). An archived plugin runs on a kit only
-  when the run says so (`allowArchived`). `start` refuses a setting refused and a run with a plugin
-  failed; `runUntil(t)` runs the clock. The core is the instance's own, unchanged.
+  the run, the run's graph (`graph`; by default one instance of each, bound as the manifests say,
+  each connector's node on its manifest's account: a graph given names a fake connector's account on
+  its node, which is otherwise `<network>:<node id>`) and, set before it starts, keyed by plugin
+  instance: their configuration (`config`), the owner's kept settings (`settings`) and the documents
+  their stores start with (`documents`), and the event log before the run (`history`), which the
+  plugins read with `ctx.events`; `kit.log` is that log in memory, every record of the run added
+  (`MemoryEventLog`). An archived plugin runs on a kit only when the run says so (`allowArchived`).
+  `start` refuses a setting refused and a run with a plugin failed; `runUntil(t)` runs the clock.
+  The core is the instance's own, unchanged.
 - **Script nodes** (§5, bot-os.md D76) run on a kit in the main thread
   (`scriptPlugin({ isolation: 'in-process' })`), on its virtual clock, so that a test of one stays
   deterministic.
@@ -1661,29 +1673,29 @@ writes a graph to `<dir>/graph.json` atomically (the versions before it are the 
 drawn with React Flow. It edits a draft of the saved graph (`GET /graph/file`), each node drawn from
 its plugin as `GET /available` describes it (a node whose ports its config declares, as the last
 check's `views` describe it, bot-os.md D74) (`describePlugin`: its version, description, kinds and
-account, its input and output ports, the reads, actions and commands its `interface` declares, and
-the JSON Schemas of its `config`, its `settings` and its actions' inputs and outputs and reads'
-outputs, zod's `toJSONSchema`), with the node's own id, account and config; the port types' looks
-come from `GET /graph/view` (`PORT_TYPE_INFO`). It polls `GET /status`, `GET /drift` and
-`GET /accounts` for each node's live state, drift and connection. An edge dragged over a port that
-cannot take it (another type, network or namespace, or an interface missing a member) is drawn
-refused and its drop refused, the status saying why (bot-os.md D101). Each change of the draft is
-checked (`POST /graph/check`) and every problem shown where it is located (§2.3); every warning too
-(bot-os.md D89), in amber, dashed, on its edge, its port and its node, listed in their panels and in
-the review, and counted in the map's bar beside the problems (`N warnings`), without keeping Apply
-from the draft. A node's config starts filled with its schema's defaults (nested objects within),
-written to the draft as if typed; a node opened shows the defaults of the fields its config leaves
-unset filled in, unmarked, and writes them with its first change, so that merely opening a node
-changes nothing. A field's description is its help. A node selected shows its forms, editable, a key
-of `configSecrets` as a choice of `GET /secrets`, a list of strings or numbers as rows of plain
-fields (add, remove; an empty row written nowhere), a record of plain values as rows of a key and a
-value (its type picked where the schema allows several), JSON only for what these do not draw, and
-what each of its outputs carries, not its type, which the graph draws (bot-os.md D71): an events
-output, the event types its plugin registers in that namespace (`types` of its port in
-`GET /available`), each with its schema's description (§4.4) and its payload's JSON Schema
-(`schema`); a chat-out output that declares its commands, each with its spacing (bot-os.md D74); an
-interface output, its members' names, folded, opening on each one's signature (from its schemas:
-`actions.sent({ chat: string, id?: string, t: number })`,
+account and network, its input and output ports, the reads, actions and commands its `interface`
+declares, and the JSON Schemas of its `config`, its `settings` and its actions' inputs and outputs
+and reads' outputs, zod's `toJSONSchema`), with the node's own id, account (`nodeAccount`, D119) and
+config; the port types' looks come from `GET /graph/view` (`PORT_TYPE_INFO`). It polls
+`GET /status`, `GET /drift` and `GET /accounts` for each node's live state, drift and connection. An
+edge dragged over a port that cannot take it (another type, network or namespace, or an interface
+missing a member) is drawn refused and its drop refused, the status saying why (bot-os.md D101).
+Each change of the draft is checked (`POST /graph/check`) and every problem shown where it is
+located (§2.3); every warning too (bot-os.md D89), in amber, dashed, on its edge, its port and its
+node, listed in their panels and in the review, and counted in the map's bar beside the problems
+(`N warnings`), without keeping Apply from the draft. A node's config starts filled with its
+schema's defaults (nested objects within), written to the draft as if typed; a node opened shows the
+defaults of the fields its config leaves unset filled in, unmarked, and writes them with its first
+change, so that merely opening a node changes nothing. A field's description is its help. A node
+selected shows its forms, editable, a key of `configSecrets` as a choice of `GET /secrets`, a list
+of strings or numbers as rows of plain fields (add, remove; an empty row written nowhere), a record
+of plain values as rows of a key and a value (its type picked where the schema allows several), JSON
+only for what these do not draw, and what each of its outputs carries, not its type, which the graph
+draws (bot-os.md D71): an events output, the event types its plugin registers in that namespace
+(`types` of its port in `GET /available`), each with its schema's description (§4.4) and its
+payload's JSON Schema (`schema`); a chat-out output that declares its commands, each with its
+spacing (bot-os.md D74); an interface output, its members' names, folded, opening on each one's
+signature (from its schemas: `actions.sent({ chat: string, id?: string, t: number })`,
 `state.rest() → { until: number, why: string }`) and help; another output, its port in words. An
 events edge, and the events input of the node it enters, show what it carries (#3): each event type
 with its payload's fields by dotted path and type (`outcome.item?: string`), from its schema
@@ -1704,8 +1716,10 @@ declares a widget shows it in a line on its card while it runs (`WidgetLine`, `w
 from `GET /status`'s `widget`; one that declares a page has, in its panel while it runs, **Open its
 page**, which leads to `#/node/<id>` (`NodePage.tsx`, in no menu): the page's sections drawn in full
 (`WidgetSection`) from its reads, asked every five seconds. **What the Admin page showed of a node
-is on it** (bot-os.md D111): a connector's panel says its account as it runs, as whom, and its
-connection's state and step (`GET /accounts`), and its cards its connection's state; a node's panel,
+is on it** (bot-os.md D111): a connector's panel says as whom it runs, and its connection's state
+and step (`GET /accounts`), and its cards its connection's state; its account is nothing to type,
+shown read-only under **Advanced** at the panel's foot without the network its plugin implies
+(bot-os.md D119), with **Use its node's id** for a node whose graph names another; a node's panel,
 what it costs (its `cost`, its share of the whole, the top three marked), and while it runs its
 status (its `status`, not offered again among the reads), its settings in force, each set at once
 (`POST /settings`), and its reads and actions, called from forms made from their input schemas

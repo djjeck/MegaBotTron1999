@@ -213,7 +213,7 @@ describe('connectors', () => {
       graph: {
         version: 2,
         nodes: [
-          { id: 'test', plugin: 'test' },
+          { id: 'test', plugin: 'test', account: 'test:me' },
           { id: 'a', plugin: 'a' },
           { id: 'b', plugin: 'b' },
         ],
@@ -272,7 +272,7 @@ describe('connectors', () => {
       graph: {
         version: 2,
         nodes: [
-          { id: 'test', plugin: 'test' },
+          { id: 'test', plugin: 'test', account: 'test:me' },
           { id: 'a', plugin: 'a' },
           { id: 'b', plugin: 'b', disabled: true },
         ],

@@ -173,7 +173,7 @@ describe('a chat-out output that declares its commands', () => {
   const graph = (commands?: string[]): GraphInput => ({
     version: 2,
     nodes: [
-      { id: 'tg', plugin: 'tg' },
+      { id: 'tg', plugin: 'tg', account: 'telegram:alice' },
       { id: 'look', plugin: 'declared', config: { sends: ['/look', '/inv'] } },
     ],
     edges: [
@@ -214,7 +214,7 @@ describe('a chat-out output that declares its commands', () => {
       graph: {
         version: 2,
         nodes: [
-          { id: 'tg', plugin: 'tg' },
+          { id: 'tg', plugin: 'tg', account: 'telegram:alice' },
           { id: 'look', plugin: 'declared', config: { sends: ['/look'], spacing: 60 } },
         ],
         edges: [{ from: 'look.chat', to: 'tg.chat', sends: ['@QuestBot'], commands: ['/look'] }],

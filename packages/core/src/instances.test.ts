@@ -70,7 +70,7 @@ const helper = definePlugin({
 const twoBots = (): GraphInput => ({
   version: 2,
   nodes: [
-    { id: 'tg', plugin: 'tg' },
+    { id: 'tg', plugin: 'tg', account: 'tg:me' },
     { id: 'game-a', plugin: 'game', config: { level: 2 } },
     { id: 'game-b', plugin: 'game' },
     { id: 'actor-a', plugin: 'actor' },

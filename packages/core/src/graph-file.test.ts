@@ -45,7 +45,7 @@ const actor = definePlugin({
 const good: GraphInput = {
   version: 2,
   nodes: [
-    { id: 'chat', plugin: 'chat' },
+    { id: 'chat', plugin: 'chat', account: 'chat:me' },
     { id: 'scorer', plugin: 'scorer' },
     { id: 'actor', plugin: 'actor', instance: 'actor-1', config: { every: 2 } },
   ],
@@ -74,7 +74,7 @@ const watcher = definePlugin({
 const warned: GraphInput = {
   version: 2,
   nodes: [
-    { id: 'watch', plugin: 'watcher', config: { chats: ['#lobby'] } },
+    { id: 'watch', plugin: 'watcher', account: 'chat:watcher', config: { chats: ['#lobby'] } },
     { id: 'scorer', plugin: 'scorer' },
     { id: 'actor', plugin: 'actor', config: { every: 2 } },
   ],
@@ -99,7 +99,7 @@ const versionOne = {
 const bad = {
   ...good,
   nodes: [
-    { id: 'chat', plugin: 'chat' },
+    { id: 'chat', plugin: 'chat', account: 'chat:me' },
     { id: 'scorer', plugin: 'scorer' },
     { id: 'actor', plugin: 'actor', config: { every: 0 } },
   ],
@@ -474,7 +474,7 @@ describe('the graph API', () => {
         edges: { added: [{}, {}, {}], removed: [], changed: [] },
       },
       text: expect.stringContaining('actor (actor), instance actor-1'),
-      currentText: 'nodes:\n  chat (chat)\n  scorer (scorer)\nedges:',
+      currentText: 'nodes:\n  chat (chat), account chat:me\n  scorer (scorer)\nedges:',
     });
     expect(one).not.toHaveProperty('problems');
     expect((one as { lines: { op: string }[] }).lines.map((l) => l.op).join('')).toBe(' ++   +++');

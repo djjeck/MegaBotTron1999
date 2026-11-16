@@ -239,9 +239,10 @@ describe('GraphPage', () => {
       expect(screen.getByLabelText('node chat · in').className).toContain('selected')
     );
     expect(within(chat).getByText('(kept; last referenced 2026-11-01 00:00)')).toBeDefined();
-    expect((within(chat).getByLabelText('account') as HTMLInputElement).placeholder).toBe(
-      'chat:me'
-    );
+    // Its account, read-only under Advanced: its node's id, its network left out (D119).
+    expect(within(chat).getByLabelText('account').textContent).toBe('chat');
+    expect(within(chat).getByText('(its node’s id)')).toBeDefined();
+    expect(within(chat).queryByRole('textbox', { name: 'account' })).toBeNull();
     expect(within(chat).getByText('no settings')).toBeDefined();
     expect(within(chat).getByRole('region', { name: 'its secrets' }).textContent).toContain(
       'chat_password'

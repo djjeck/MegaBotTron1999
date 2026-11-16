@@ -169,14 +169,16 @@ describe('the graph', () => {
         chat: { reads: [], sends: ['#a'], commands: ['!go'] },
       },
     ]);
-    expect(nodes.find((n) => n.id === 'irc')?.account).toBe('irc:me');
+    // A node naming no account is on `<network>:<its id>` (D119).
+    expect(nodes.find((n) => n.id === 'irc')?.account).toBe('irc:irc');
   });
 
   it('is made from the manifests by default, as the programmatic wiring binds them', () => {
     const manifests = [...image().values()];
     const g: Graph = defaultGraph(manifests, { actor: { x: 1 } });
+    // A connector's node names its manifest's account: the one a test gives its connector.
     expect(g.nodes).toEqual([
-      { id: 'irc', plugin: 'irc' },
+      { id: 'irc', plugin: 'irc', account: 'irc:me' },
       { id: 'game', plugin: 'game' },
       { id: 'actor', plugin: 'actor', config: { x: 1 } },
     ]);
@@ -206,7 +208,7 @@ describe('the graph', () => {
             { id: 'game', plugin: 'game' },
             { id: 'ghost', plugin: 'nowhere' },
             { id: 'actor', plugin: 'actor' },
-            { id: 'irc2', plugin: 'irc' },
+            { id: 'irc2', plugin: 'irc', account: 'irc:irc' },
           ],
           edges: [
             { from: 'irc', to: 'game.channel' },
@@ -228,7 +230,7 @@ describe('the graph', () => {
     ).toEqual([
       'node irc: in the graph twice',
       'node ghost: its plugin nowhere is not in the image',
-      "node irc2: the account irc:me is irc's",
+      "node irc2: the account irc:irc is irc's",
       'node game: input port channel is bound twice',
       'node actor: input port channel: events of game cannot bind chat-in of irc (edge game.events → actor.channel)',
       'edge game → game.channel: a node cannot feed itself',
@@ -273,7 +275,7 @@ describe('the graph', () => {
     ]);
   });
 
-  it('gives a connector instance its own account, of its plugin’s network', () => {
+  it('gives a connector instance its own account, of its plugin’s network, by its id unless named (D119)', () => {
     const two = graph({
       nodes: [
         { id: 'irc', plugin: 'irc' },
@@ -283,7 +285,7 @@ describe('the graph', () => {
       ],
     });
     const { nodes } = resolveGraph(two, image());
-    expect(nodes.map((n) => n.account)).toEqual(['irc:me', 'irc:other', undefined, undefined]);
+    expect(nodes.map((n) => n.account)).toEqual(['irc:irc', 'irc:other', undefined, undefined]);
     expect(
       problems(
         graph({

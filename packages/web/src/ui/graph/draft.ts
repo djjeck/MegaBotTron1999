@@ -516,7 +516,9 @@ export function viewOf(
     configSecrets: [],
     events: [],
   };
-  const account = node.account ?? base.account;
+  // Its own account, else `<network>:<its id>`, as the core gives it (D119).
+  const account =
+    node.account ?? (base.network === undefined ? undefined : `${base.network}:${node.id}`);
   const { account: _, ...rest } = base;
   return {
     ...rest,

@@ -1,6 +1,6 @@
 /**
  * The node selected in the graph editor (D55): what it is, its instance and its live state, and,
- * editable for the draft, whether it is enabled (D64), its account (a connector's), its config
+ * editable for the draft, whether it is enabled (D64), its config
  * and the settings its instance starts with, in forms made from their schemas, each field with the
  * check's errors; a config key that names a secret (`configSecrets`) is a choice of the secrets'
  * names, and its secrets say whether each is provided and where from, never their values; a key
@@ -16,8 +16,8 @@
  * chat commands say where the commands edges serve them (D109), each chat by name, or that no edge
  * does; a connector's, which commands of which plugins it serves.
  *
- * What the Admin page showed of a node is here (D111): a connector's account as it runs, as whom,
- * and its connection; what the node costs (D77), its share of the whole and whether it is among the
+ * What the Admin page showed of a node is here (D111): a connector's connection, as whom it runs;
+ * its account, read-only under Advanced (D119: its node's id, nothing to type); what the node costs (D77), its share of the whole and whether it is among the
  * top three; and, while it runs, its own status, its settings in force, set at once, and its reads
  * and actions, called from the panel (`NodeControls.tsx`). A node whose plugin declares a page
  * (D112) has a link to it, while it runs.
@@ -466,6 +466,54 @@ function SecretSources(props: {
   );
 }
 
+/**
+ * A connector's account (D119), folded under Advanced: nothing to type. It is its node's id on its
+ * plugin's network (`<network>:<node id>`), shown without the network, which its plugin implies; a
+ * node whose graph names another keeps it, and may go back to its id.
+ */
+export function AccountFold(props: {
+  account: string | undefined;
+  network: string | undefined;
+  /** The account its graph node names, if any. */
+  named: string | undefined;
+  clear: () => void;
+}) {
+  const { account, network } = props;
+  if (account === undefined) return null;
+  const name =
+    network !== undefined && account.startsWith(`${network}:`)
+      ? account.slice(network.length + 1)
+      : account;
+  return (
+    <details className="advanced" aria-label="advanced">
+      <summary>Advanced</summary>
+      <dl>
+        <dt>Account</dt>
+        <dd>
+          <code aria-label="account">{name}</code>{' '}
+          <span className="muted">
+            {props.named === undefined
+              ? '(its node’s id)'
+              : `(named in its graph${network === undefined ? '' : ` on ${network}`})`}
+          </span>
+          {props.named === undefined ? null : (
+            <>
+              {' '}
+              <button type="button" onClick={props.clear}>
+                Use its node’s id
+              </button>
+            </>
+          )}
+        </dd>
+      </dl>
+      <small className="muted">
+        What the instance knows this connection by, in its outbox, its event log and its errors.
+        Nothing to set: it follows the node’s id, which no other node has.
+      </small>
+    </details>
+  );
+}
+
 /** The script plugin's id (D76): its nodes' config is edited as ports and code. */
 const SCRIPT = 'script';
 
@@ -739,11 +787,11 @@ export function NodeDetails(props: {
           <>
             <dt>Connection</dt>
             <dd>
-              {account.account ?? <span className="muted">none named</span>}
-              {account.self === undefined ? null : <> as {account.self}</>}
-              {account.connection === undefined ? null : (
+              {account.self === undefined ? null : <>as {account.self} </>}
+              {account.connection === undefined ? (
+                <span className="muted">not connected</span>
+              ) : (
                 <>
-                  {' '}
                   <span className={`badge ${account.connection.state}`}>
                     {account.connection.state}
                   </span>{' '}
@@ -856,25 +904,6 @@ export function NodeDetails(props: {
       ) : null}
       {running || live?.state === 'stopped' ? <NodeState id={view.id} /> : null}
       {connector && running ? <ConnectorQueue id={view.id} /> : null}
-      {!connector ? null : (
-        <section>
-          <h3>Account</h3>
-          <div className="field">
-            <label>
-              <code>account</code>
-              <input
-                aria-label="account"
-                value={node.account ?? ''}
-                placeholder={view.account}
-                onChange={(e) => props.change({ account: e.target.value })}
-              />
-            </label>
-            <small className="muted">
-              {'<network>:<name>'}; the plugin’s own ({view.account ?? 'none'}) when empty
-            </small>
-          </div>
-        </section>
-      )}
       {!scripted || props.script === undefined ? null : (
         <ScriptSection
           node={node}
@@ -983,6 +1012,14 @@ export function NodeDetails(props: {
         <ChatCommands node={view.id} members={i.commands} edges={props.edges ?? []} />
         <Served node={view.id} edges={props.edges ?? []} />
       </section>
+      {!connector ? null : (
+        <AccountFold
+          account={view.account}
+          network={view.network}
+          named={node.account}
+          clear={() => props.change({ account: '' })}
+        />
+      )}
       <p>
         <button type="button" className="danger" onClick={props.remove}>
           Remove {view.id}
