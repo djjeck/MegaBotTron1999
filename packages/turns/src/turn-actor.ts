@@ -28,7 +28,8 @@
  *   send, two minutes later.
  *
  * It declares no chat command (two instances would clash on its name): the owner's `/plugins <id>`
- * gives each its state, and its read `status` its last and next send. It keeps nothing in
+ * gives each its state, and its read `status` its last and next send, which its node's widget
+ * (its next turn, on its card) and page (Turns) show in the web UI (D112). It keeps nothing in
  * its factory's closure: everything hangs off its instance (§2.1). Each step is published as
  * `turn-actor.step`, with the instance's id, and printed.
  */
@@ -203,13 +204,24 @@ export function turnActorPlugin(): Plugin {
           status: {
             help: 'Its chat and command, and its last and next turn',
             output: z.object({
-              chat: z.string(),
-              command: z.string(),
-              last: z.number().optional(),
-              next: z.number().optional(),
+              chat: z.string().describe('Chat'),
+              command: z.string().describe('Command'),
+              last: z.number().optional().describe('Last turn'),
+              next: z.number().optional().describe('Next turn'),
             }),
           },
         },
+      },
+      // Its node's widget and page (bot-os.md D112): its next turn on its card, its chat, its
+      // command and its last and next turns on its page, each node its own.
+      widget: { show: 'until', read: 'status', path: 'next' },
+      page: {
+        title: 'Turns',
+        sections: [
+          { show: 'keyValue', read: 'status', label: 'Plays', fields: ['chat', 'command'] },
+          { show: 'until', read: 'status', path: 'last' },
+          { show: 'until', read: 'status', path: 'next' },
+        ],
       },
     },
     create: (ctx) => new TurnActor(ctx).instance(),

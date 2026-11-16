@@ -190,8 +190,10 @@ progress of no number, an `until` of a list):
 a `.describe()`: it is their label. The core reads the widget's read for each running node with
 `GET /status` (its `widget`, the read's output; none while its read throws), which the editor asks
 every five seconds; the page asks each of its reads (once, however many sections show it) every five
-seconds while it is open. A script node declares neither: it offers no reads (§5), its code running
-in a worker thread that a synchronous read could not ask.
+seconds while it is open. The turn actor's, for one (§5):
+`widget: { show: 'until', read: 'status', path: 'next' }`, and a page **Turns** with its chat and
+command, its last turn and its next. A script node declares neither: it offers no reads (§5), its
+code running in a worker thread that a synchronous read could not ask.
 
 **Chat commands (P11).** A command of `interface.commands` has its `help` (the owner's words: the
 owner's menu, the UI, the agents), its `args`, its `aliases` (other names it answers to, in no menu)
@@ -2101,7 +2103,9 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   any other failed send two minutes later. It plays while its node runs and the instance is on; its
   safety stop (`kill`) stops its node (`ctx.stop`), which drops its plan until the owner clears the
   stop in the editor. It declares no chat command, since two instances would clash: the owner
-  reaches each with `/plugins <id>` and its read `status`. Each step is published as
+  reaches each with `/plugins <id>` and its read `status`, which its node's widget and page show in
+  the web UI (bot-os.md D112): its next turn on its card (`Next turn: in 12m 5s`), and a page,
+  **Turns**, with its chat and command, its last turn and its next. Each step is published as
   `turn-actor.step`; its turns (sent, in a dry run, by hand, failed) go in the owner's summary
   (§4.17, D92). The image offers it (`src/main.ts`): the editor adds one node per bot, each on its
   own instance, its `chat` edges from and to the owner's `telegram-user` node and its `parser` edge

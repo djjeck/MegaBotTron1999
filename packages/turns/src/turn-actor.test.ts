@@ -212,6 +212,17 @@ describe('turnSummary', () => {
 });
 
 describe('the turn-actor', () => {
+  it('shows its next turn on its card and its turns on its page (D112), each node its own', async () => {
+    const a = await run({ clock: new VirtualClock(T0 - MIN) });
+    const m = parseManifest(turnActorPlugin().manifest);
+    expect(m.widget).toEqual({ show: 'until', read: 'status', path: 'next' });
+    expect(m.page?.sections.map((s) => s.show)).toEqual(['keyValue', 'until', 'until']);
+    const node = a.core.controls.status().plugins.find((p) => p.id === 'quest-turns');
+    expect(node?.widget).toEqual(a.status());
+    expect((node?.widget as TurnStatus).next).toBeDefined();
+    await a.core.stop();
+  });
+
   it('plays nothing once its node is stopped, nor after a restart, until the stop is cleared', async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'turn-actor-'));
     try {

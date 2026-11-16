@@ -14,12 +14,14 @@ a game's player state, the script node, and the node that tells the owner what n
 - `turnActorPlugin` (`src/turn-actor.ts`): an actor that sends one bot's turn command in the private
   chat with it, at a person's pace (`src/schedule.ts`: intervals drawn from a range, skipped turns,
   nights off), waiting out the rest its parser reads and the cooldown its outbox holds its command
-  for (D98). One plugin, run as one instance per bot. It only sends (docs/bot-os.md D99): the turns
-  the owner sends by hand come from its parser (`state.lastTurn`), and it reads no chat. Its bot's
-  chat is its edge's alone (D97): its chat-out edge names that one chat, the bot's `@username`; its
-  config names none. Through a dry-run chat-out edge it logs each turn and sends nothing; through a
-  live one it waits for the account to be connected. Its safety stop (the kill switch) stops its
-  node (`ctx.stop`, docs/bot-os.md D64), until the owner clears the stop in the editor.
+  for (D98). One plugin, run as one instance per bot; each node's card shows its next turn, and its
+  page (**Turns**) its chat, command, last and next turn (docs/bot-os.md D112). It only sends
+  (docs/bot-os.md D99): the turns the owner sends by hand come from its parser (`state.lastTurn`),
+  and it reads no chat. Its bot's chat is its edge's alone (D97): its chat-out edge names that one
+  chat, the bot's `@username`; its config names none. Through a dry-run chat-out edge it logs each
+  turn and sends nothing; through a live one it waits for the account to be connected. Its safety
+  stop (the kill switch) stops its node (`ctx.stop`, docs/bot-os.md D64), until the owner clears the
+  stop in the editor.
 - `reactorPlugin` (`src/reactor.ts`): the `reactor`, one reaction (`react()` of the core) from its
   node's config: when an event of its `on` type is heard (on its events input, there only with `on`
   and then required: the check refuses a reactor on events that no edge binds), or a message on its
