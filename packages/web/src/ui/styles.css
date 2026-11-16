@@ -383,6 +383,29 @@ main.wide > .page {
 }
 
 /* What the draft needs, at the map's top left, clear of the minimap at its top right. */
+/* The instance's switches, at the head of the map's bar (D111). */
+.instance-switches {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+/* A running node's read or action, called from its panel, and its settings in force. */
+.member-call {
+  margin: 0.3rem 0 0.6rem;
+}
+
+.member-call pre.said,
+.in-force pre.said {
+  max-height: 16rem;
+  overflow: auto;
+}
+
+.in-force {
+  margin-bottom: 0.75rem;
+}
+
 .react-flow__panel.map-bar {
   display: flex;
   flex-wrap: wrap;
@@ -512,6 +535,15 @@ main.wide > .page {
 .sheet-tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -3px;
+}
+
+/* A second sheet's tab rides under the first's; the open sheet lies over the closed ones' tabs. */
+.side-sheet.second > .sheet-tab {
+  top: calc(var(--sheet-tab-top) + 5rem);
+}
+
+.side-sheet.open {
+  z-index: 21;
 }
 
 .side-sheet.open > .sheet-tab {

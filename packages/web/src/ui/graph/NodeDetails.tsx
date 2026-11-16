@@ -15,9 +15,15 @@
  * keeps a state (D72) shows it, drawn from its schema; a running connector, its queue (D73). Its
  * chat commands say where the commands edges serve them (D109), each chat by name, or that no edge
  * does; a connector's, which commands of which plugins it serves.
+ *
+ * What the Admin page showed of a node is here (D111): a connector's account as it runs, as whom,
+ * and its connection; what the node costs (D77), its share of the whole and whether it is among the
+ * top three; and, while it runs, its own status, its settings in force, set at once, and its reads
+ * and actions, called from the panel (`NodeControls.tsx`).
  */
 import { useState } from 'react';
 import type {
+  AccountControl,
   ConfigChatView,
   DriftCounts,
   EventTypeView,
@@ -33,9 +39,12 @@ import type {
 } from '#src/ui/api.ts';
 import { isSplit } from './cards.ts';
 import { ChatPicker, named, useSurfaces } from './ChatPicker.tsx';
+import type { Ranked } from './Costs.tsx';
+import { CostLine } from './Costs.tsx';
 import { withDefaults } from './defaults.ts';
 import type { PortChange } from './draft.ts';
 import { edgeKey, endOf, instanceOf } from './draft.ts';
+import { MemberCall, NodeStatus, SettingsInForce } from './NodeControls.tsx';
 import { heardTypes, Payloads } from './Payloads.tsx';
 import { ConnectorQueue } from './Queue.tsx';
 import type { CustomControl } from './SchemaForm.tsx';
@@ -272,8 +281,14 @@ function InterfaceMembers(props: { names: readonly string[]; members: Map<string
   );
 }
 
-function Members(props: { title: string; members: MemberView[] }) {
+function Members(props: {
+  title: string;
+  members: MemberView[];
+  /** The running node's, called from here: its id, and the names its instance offers. */
+  call?: { node: string; kind: 'read' | 'action'; names: readonly string[] } | undefined;
+}) {
   if (props.members.length === 0) return null;
+  const call = props.call;
   return (
     <>
       <h4>{props.title}</h4>
@@ -286,7 +301,9 @@ function Members(props: { title: string; members: MemberView[] }) {
             </code>{' '}
             {m.help}
             {m.owner === true ? <span className="muted"> (owner’s)</span> : null}
-            {m.input === undefined || m.input['properties'] === undefined ? null : (
+            {call?.names.includes(m.name) === true ? (
+              <MemberCall node={call.node} kind={call.kind} member={m} />
+            ) : m.input === undefined || m.input['properties'] === undefined ? null : (
               <SchemaForm legend={`${m.name} input`} schema={m.input} />
             )}
           </li>
@@ -619,6 +636,12 @@ export function NodeDetails(props: {
   view: NodeView;
   live?: PluginControl | undefined;
   drift?: DriftCounts | undefined;
+  /** A connector's account, as it runs (`GET /accounts`): as whom, and its connection. */
+  account?: AccountControl | undefined;
+  /** What it costs (D77), among the others. */
+  cost?: Ranked | undefined;
+  /** Reads its live state again, after a setting is set. */
+  reloadLive?: () => void;
   /** The instance it names, if it is kept already. */
   instance?: InstanceInfo | undefined;
   problems: string[];
@@ -657,7 +680,8 @@ export function NodeDetails(props: {
     available: readonly PluginView[];
   };
 }) {
-  const { node, view, live, drift } = props;
+  const { node, view, live, drift, account } = props;
+  const running = live?.state === 'running';
   const enabled = node.disabled !== true;
   const stop = live?.state === 'stopped' ? live.stop : undefined;
   const connector = view.kinds.includes('connector');
@@ -707,6 +731,33 @@ export function NodeDetails(props: {
           {live === undefined ? 'not running' : live.state}
           {live?.reason === undefined ? null : <span className="muted"> {live.reason}</span>}
         </dd>
+        {account === undefined ? null : (
+          <>
+            <dt>Connection</dt>
+            <dd>
+              {account.account ?? <span className="muted">none named</span>}
+              {account.self === undefined ? null : <> as {account.self}</>}
+              {account.connection === undefined ? null : (
+                <>
+                  {' '}
+                  <span className={`badge ${account.connection.state}`}>
+                    {account.connection.state}
+                  </span>{' '}
+                  {account.connection.phase}
+                  {account.connection.detail === undefined ? '' : `: ${account.connection.detail}`}
+                </>
+              )}
+            </dd>
+          </>
+        )}
+        {props.cost === undefined ? null : (
+          <>
+            <dt>Cost</dt>
+            <dd>
+              <CostLine cost={props.cost} />
+            </dd>
+          </>
+        )}
         {drift === undefined ? null : (
           <>
             <dt>Drift</dt>
@@ -774,15 +825,16 @@ export function NodeDetails(props: {
           )}
         </div>
       )}
-      {live?.state !== 'running' ? null : (
+      {!running ? null : (
         <p>
           <button type="button" className="danger" onClick={() => props.kill([view.id])}>
             Kill {view.id}
           </button>
         </p>
       )}
-      {live?.state === 'running' || live?.state === 'stopped' ? <NodeState id={view.id} /> : null}
-      {connector && live?.state === 'running' ? <ConnectorQueue id={view.id} /> : null}
+      {running && live.status !== undefined ? <NodeStatus status={live.status} /> : null}
+      {running || live?.state === 'stopped' ? <NodeState id={view.id} /> : null}
+      {connector && running ? <ConnectorQueue id={view.id} /> : null}
       {!connector ? null : (
         <section>
           <h3>Account</h3>
@@ -858,13 +910,16 @@ export function NodeDetails(props: {
       </section>
       <section>
         <h3>Settings</h3>
+        {live === undefined ? null : (
+          <SettingsInForce settings={live.settings} reload={() => props.reloadLive?.()} />
+        )}
         {view.settingsSchema === undefined ? (
           <p className="muted">no settings</p>
         ) : (
           <>
             <p className="muted small">
-              What its instance starts with, while it keeps none of its own; the owner’s later
-              changes (Admin: Plugins) win.
+              What its instance starts with, while it keeps none of its own; a value set in force,
+              above, wins. Applied with Apply.
             </p>
             <SchemaForm
               legend="settings"
@@ -885,8 +940,16 @@ export function NodeDetails(props: {
           config={withDefaults(view.configSchema, node.config)}
         />
         <Outputs ports={view.outputs} view={view} />
-        <Members title="Reads" members={i.reads} />
-        <Members title="Actions" members={i.actions} />
+        <Members
+          title="Reads"
+          members={i.reads}
+          call={running ? { node: view.id, kind: 'read', names: live.reads } : undefined}
+        />
+        <Members
+          title="Actions"
+          members={i.actions}
+          call={running ? { node: view.id, kind: 'action', names: live.actions } : undefined}
+        />
         <ChatCommands node={view.id} members={i.commands} edges={props.edges ?? []} />
         <Served node={view.id} edges={props.edges ?? []} />
       </section>

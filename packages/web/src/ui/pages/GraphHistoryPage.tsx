@@ -1,6 +1,5 @@
 /**
- * The graph's history and the graph as text, two sections of the admin page (bot-os.md D61,
- * bot-os-api.md §2.3):
+ * The graph's history, the admin page's section (bot-os.md D61, D111, bot-os-api.md §2.3):
  *
  * - **Graph history** (`GET /graph/history`): every version of the saved graph kept, newest first,
  *   with its time, what changed from the one before, and how the instance started on it (it ran,
@@ -11,15 +10,9 @@
  *   writes it as the current graph (`POST /graph/history/<id>/rollback`, itself a new version, so
  *   it can be undone) and restarts the instance on it, with the reconnect overlay; a version the
  *   check refuses now says why, and has no rollback (bot-os.md D110).
- * - **Graph as text**: the saved graph printed (`GET /graph/file`'s `text`), with a copy button.
  */
 import { useEffect, useState } from 'react';
-import type {
-  GraphFileView,
-  GraphHistoryView,
-  GraphVersionMeta,
-  GraphVersionView,
-} from '#src/ui/api.ts';
+import type { GraphHistoryView, GraphVersionMeta, GraphVersionView } from '#src/ui/api.ts';
 import { api, seg } from '#src/ui/api.ts';
 import type { PageProps } from '#src/ui/App.tsx';
 import { LineDiffView, TextView } from '#src/ui/graph/GraphText.tsx';
@@ -345,14 +338,4 @@ export function GraphHistoryPage({ loggedOut, restarted }: PageProps) {
       ) : null}
     </>
   );
-}
-
-/** The saved graph printed, to read or to copy. */
-export function GraphTextPage({ loggedOut }: PageProps) {
-  const file = useLoad(() => api<GraphFileView>('/graph/file'), loggedOut, 60_000);
-  const f = file.data;
-  if (f === undefined) return <p className="muted">{file.error ?? 'Loading…'}</p>;
-  if (!f.exists) return <p className="muted">No graph is saved yet.</p>;
-  if (f.error !== undefined) return <p role="alert">{f.error}</p>;
-  return <TextView text={f.text} label="the saved graph as text" />;
 }

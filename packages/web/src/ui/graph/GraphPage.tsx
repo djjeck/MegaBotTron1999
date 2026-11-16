@@ -24,11 +24,19 @@
  *   (Admin → Graph history, D61).
  * - **Read it as text**: the Text tab, on the page's right edge, opens a side sheet with the draft
  *   printed (`POST /graph/check`'s `text`), read-only, with a copy button.
+ * - **See what each node costs** (D77): the Costs tab, under it, opens a side sheet with the nodes
+ *   by cost (`Costs.tsx`), a node's name selecting it.
+ * - **Run the instance** (D111): the map's bar has the instance's off switch (§4.11), Turn off
+ *   asking first, and its kill switch, Kill all, every plugin's safety stop (D30, D44), asking
+ *   first; a node's panel has what the Admin page showed of it: a connector's account and its
+ *   connection (`GET /accounts`, also on its cards), its cost, and while it runs its status, its
+ *   settings in force and its reads and actions.
  *
- * The page is the map, filling the area between the app's bars: its minimap at the top right, what
- * the draft needs (its review, its problems and warnings, the selection and its kill) at the top left, the zoom
- * controls and the legend at the bottom left, and Add a node, a floating button, at the bottom
- * right. The panel of what is selected opens beside it (below it on a phone).
+ * The page is the map, filling the area between the app's bars: its minimap at the top right, the
+ * map's bar at the top left (the instance's switches, then what the draft needs: its review, its
+ * problems and warnings, the selection and its kill), the zoom controls and the legend at the
+ * bottom left, and Add a node, a floating button, at the bottom right. The panel of what is
+ * selected opens beside it (below it on a phone).
  *
  * A saved graph refused at the last start (`GET /status`, `graph.refused`) runs no node: it is
  * shown first, for the owner to fix. One or several running nodes selected can be killed (D44):
@@ -54,6 +62,7 @@ import {
 } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  AccountControl,
   AvailablePlugin,
   DriftCounts,
   EventTypeView,
@@ -75,6 +84,7 @@ import { Restart } from '#src/ui/Restart.tsx';
 import type { NewNode } from './AddNode.tsx';
 import { AddNode } from './AddNode.tsx';
 import { cardsOf, cardTitle, isSplit, nodeOfCard, nodesOfCards, targetCard } from './cards.ts';
+import { CostTable, ranking } from './Costs.tsx';
 import { withDefaults } from './defaults.ts';
 import {
   addNode,
@@ -161,15 +171,21 @@ const message = (e: unknown): string => (e instanceof Error ? e.message : String
 /** How long the draft rests before it is checked. */
 const CHECK_AFTER_MS = 300;
 
+/** The side sheets, each opened by its tab on the map's right edge; a route may open one. */
+export const SHEETS = ['text', 'costs'] as const;
+export type Sheet = (typeof SHEETS)[number];
+
 export function GraphPage({
   loggedOut,
   restarted,
+  section,
   checkAfterMs = CHECK_AFTER_MS,
 }: PageProps & { checkAfterMs?: number }) {
   const file = useLoad(() => api<GraphFileView>('/graph/file'), loggedOut, 60_000);
   const available = useLoad(() => api<AvailablePlugin[]>('/available'), loggedOut, 600_000);
   const status = useLoad(() => api<Status>('/status'), loggedOut, 5_000);
   const drift = useLoad(() => api<DriftCounts[]>('/drift'), loggedOut, 10_000);
+  const accounts = useLoad(() => api<AccountControl[]>('/accounts'), loggedOut, 10_000);
   const instances = useLoad(() => api<InstanceInfo[]>('/instances'), loggedOut, 60_000);
   const secrets = useLoad(() => api<{ names: string[] }>('/secrets'), loggedOut, 600_000);
   // The port types' looks (bot-os-api.md §2.1), as the core gives them with the running graph.
@@ -185,7 +201,14 @@ export function GraphPage({
   /** The nodes whose stop the draft clears, at the next Apply (D64). */
   const [clears, setClears] = useState<ReadonlySet<string>>(new Set());
   const [check, setCheck] = useState<GraphCheckView>();
-  const [panel, setPanel] = useState<'palette' | 'review' | 'text' | AvailablePlugin>();
+  const [panel, setPanel] = useState<'palette' | 'review' | Sheet | AvailablePlugin | undefined>(
+    SHEETS.find((x) => x === section)
+  );
+  // A route that names a sheet (an old Admin section's, D111) opens it, here already or not.
+  useEffect(() => {
+    const sheet = SHEETS.find((x) => x === section);
+    if (sheet !== undefined) setPanel(sheet);
+  }, [section]);
   const [busy, setBusy] = useState(false);
   /** Why the last Apply was refused. */
   const [refusedApply, setRefusedApply] = useState<{ error: string; problems: GraphProblem[] }>();
@@ -247,6 +270,11 @@ export function GraphPage({
     [status.data]
   );
   const drifts = useMemo(() => new Map((drift.data ?? []).map((d) => [d.parser, d])), [drift.data]);
+  const accountOf = useMemo(
+    () => new Map((accounts.data ?? []).map((a) => [a.id, a])),
+    [accounts.data]
+  );
+  const costs = useMemo(() => ranking(status.data?.plugins ?? []), [status.data]);
   const placed = useMemo(() => placeProblems(check?.problems ?? []), [check]);
   // The warnings (D89) refuse nothing: drawn in their own colour, beside the problems.
   const warned = useMemo(() => placeWarnings(check?.warnings ?? []), [check]);
@@ -275,6 +303,18 @@ export function GraphPage({
       setSaid(results.join('; '));
       status.reload();
     })();
+  };
+
+  /** The instance's own switches (§4.11, D30): off and on, and every plugin's safety stop. */
+  const instanceSwitch = (route: '/on' | '/off' | '/kill', ask?: string): void => {
+    if (ask !== undefined && !window.confirm(ask)) return;
+    api<{ result: string }>(route, {}).then(
+      (r) => {
+        setSaid(r.result);
+        status.reload();
+      },
+      (e: unknown) => setSaid(`${route.slice(1)}: ${message(e)}`)
+    );
   };
 
   // The nodes as React Flow draws them, kept where they were moved and as they were selected.
@@ -386,6 +426,7 @@ export function GraphPage({
             view,
             live: live.get(c.node),
             drift: drifts.get(c.node),
+            connection: accountOf.get(c.node)?.connection,
             portTypes,
             disabled: draftNodes.get(c.node)?.disabled === true,
             cleared: clears.has(c.node),
@@ -412,6 +453,7 @@ export function GraphPage({
     viewsById,
     live,
     drifts,
+    accountOf,
     placed,
     warned,
     portTypes,
@@ -690,6 +732,16 @@ export function GraphPage({
   const closeReview = useCallback(() => setPanel(undefined), []);
 
   /** Selects one edge alone, as a click on it does, so that its panel opens. */
+  /** Selects a node, opening its panel (from the costs' table). */
+  const selectNode = (id: string): void => {
+    setNodes((ns) =>
+      ns.map((n) => (n.selected === (n.id === id) ? n : { ...n, selected: n.id === id }))
+    );
+    setEdges((es) => es.map((e) => (e.selected === true ? { ...e, selected: false } : e)));
+    setSelected({ nodes: [id], edges: [] });
+    setPanel(undefined);
+  };
+
   const openEdge = (key: string): void => {
     setNodes((ns) => ns.map((n) => (n.selected === true ? { ...n, selected: false } : n)));
     setEdges((es) => es.map((e) => ({ ...e, selected: e.id === key })));
@@ -725,9 +777,10 @@ export function GraphPage({
   const connectors = (available.data ?? []).filter((p) => p.kinds.includes('connector'));
 
   const textOpen = panel === 'text';
+  const costsOpen = panel === 'costs';
   let side = null;
-  // The draft as text is a side sheet of its own, below.
-  if (restarting || textOpen) side = null;
+  // The draft as text and the costs are side sheets of their own, below.
+  if (restarting || textOpen || costsOpen) side = null;
   else if (panel === 'palette')
     side = (
       <Palette
@@ -770,6 +823,9 @@ export function GraphPage({
         view={view}
         live={live.get(shownNode.id)}
         drift={drifts.get(shownNode.id)}
+        account={accountOf.get(shownNode.id)}
+        cost={costs.get(shownNode.id)}
+        reloadLive={status.reload}
         instance={kept.get(instanceOf(shownNode))}
         problems={[
           ...(placed.nodes.get(shownNode.id) ?? []),
@@ -855,11 +911,12 @@ export function GraphPage({
   }
 
   const selection = [...selected.nodes, ...selected.edges];
+  const off = status.data?.off;
   const needs =
+    off !== undefined ||
     dirty ||
     (check !== undefined && !check.ok) ||
     warningCount > 0 ||
-    status.data?.off === true ||
     selection.length > 0;
 
   return (
@@ -946,8 +1003,43 @@ export function GraphPage({
                 n.type === 'lane' ? `rgb(${(n.data as { colour: string }).colour} / 35%)` : ''
               }
             />
+            {/* The map's bar: the instance's switches, then what the draft and the selection need. */}
             {needs ? (
               <Panel position="top-left" className="map-bar">
+                {off === undefined ? null : (
+                  <span className="instance-switches" role="group" aria-label="the instance">
+                    <span className={`badge ${off ? 'off' : 'running'}`}>
+                      instance {off ? 'off' : 'on'}
+                    </span>
+                    {off ? (
+                      <button type="button" onClick={() => instanceSwitch('/on')}>
+                        Turn on
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          instanceSwitch(
+                            '/off',
+                            'Turn the instance off? Every running plugin stops what it does, until it is on again.'
+                          )
+                        }
+                      >
+                        Turn off
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="danger"
+                      title="Run every plugin’s safety stop"
+                      onClick={() =>
+                        instanceSwitch('/kill', "Kill: run every plugin's safety stop?")
+                      }
+                    >
+                      Kill all
+                    </button>
+                  </span>
+                )}
                 {dirty ? (
                   <>
                     <strong className="warn">Changes not applied</strong>
@@ -969,7 +1061,6 @@ export function GraphPage({
                     {warningCount} warning{warningCount === 1 ? '' : 's'}
                   </span>
                 )}
-                {status.data?.off === true ? <span className="badge off">instance off</span> : null}
                 {selection.length === 0 ? null : (
                   <span className="muted">Selected: {selection.join(', ')}</span>
                 )}
@@ -1076,6 +1167,34 @@ export function GraphPage({
             a line per value of its config, then an edge per line.
           </p>
           <TextView text={check?.text} label="the draft as text" />
+        </aside>
+      </div>
+      {/* What each node costs (D77): a side sheet too, its tab under the text's. */}
+      <div className={costsOpen ? 'side-sheet second open' : 'side-sheet second'}>
+        <button
+          type="button"
+          className="sheet-tab"
+          aria-expanded={costsOpen}
+          aria-controls="graph-costs-sheet"
+          title={costsOpen ? 'Close the costs' : 'What each node costs'}
+          onClick={() => setPanel(costsOpen ? undefined : 'costs')}
+        >
+          Costs
+        </button>
+        <aside
+          id="graph-costs-sheet"
+          className="details"
+          aria-label="what each node costs"
+          aria-hidden={!costsOpen}
+          inert={!costsOpen}
+        >
+          <h2>
+            Costs{' '}
+            <button type="button" className="link" onClick={() => setPanel(undefined)}>
+              close
+            </button>
+          </h2>
+          <CostTable plugins={status.data?.plugins ?? []} select={selectNode} />
         </aside>
       </div>
       {restarting ? (

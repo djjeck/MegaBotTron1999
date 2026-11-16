@@ -61,7 +61,7 @@ export const STOPPED = 'stopped by the owner';
 
 /** The text of a change refused while the instance is off. */
 export const OFF_REFUSAL =
-  "the bot is off: turn it on first (the web UI's switch, on the Admin page, or the owner's /on)";
+  "the bot is off: turn it on first (the web UI's switch, on the graph's bar, or the owner's /on)";
 
 /** What the controls need of the core. */
 export interface ControlsHost {

@@ -2,8 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PluginControl } from '#src/ui/api.ts';
-import { fakeApi } from '#test/fake-api.ts';
-import { costRows, ResourcesPage } from './ResourcesPage.tsx';
+import { CostLine, costRows, CostTable, ranking } from './Costs.tsx';
 
 afterEach(() => {
   cleanup();
@@ -58,10 +57,10 @@ describe('the nodes by cost (D77)', () => {
     expect(rows.find((r) => r.id === 'quiet')).toMatchObject({ costMs: 0, calls: 0, avgMs: 0 });
   });
 
-  it('lists them most costly first, the top three marked, sorted by any column', async () => {
-    fakeApi({ 'GET /status': [200, { off: false, plugins: PLUGINS }] });
-    render(<ResourcesPage loggedOut={vi.fn()} />);
-    const table = await screen.findByRole('table', { name: 'nodes by cost' });
+  it('lists them most costly first, the top three marked, sorted by any column', () => {
+    const select = vi.fn();
+    render(<CostTable plugins={PLUGINS} select={select} />);
+    const table = screen.getByRole('table', { name: 'nodes by cost' });
     const ids = () =>
       within(table)
         .getAllByRole('row')
@@ -79,21 +78,40 @@ describe('the nodes by cost (D77)', () => {
     expect(ids()).toEqual(['examine', 'quest', 'quiet', 'slow', 'tg']);
     fireEvent.click(within(table).getByRole('button', { name: 'Heap' }));
     expect(ids()[0]).toBe('examine');
+    // A node's name selects it, on the map.
+    fireEvent.click(within(table).getByRole('button', { name: 'quest' }));
+    expect(select).toHaveBeenCalledWith('quest');
   });
 
-  it('says so when no node runs, or what failed', async () => {
-    fakeApi({ 'GET /status': [200, { off: false, plugins: [] }] });
-    render(<ResourcesPage loggedOut={vi.fn()} />);
-    expect(await screen.findByText('No node runs.')).toBeDefined();
+  it('says a node’s cost in a line: its share, its rank and its calls', () => {
+    const ranked = ranking(PLUGINS);
+    render(<CostLine cost={ranked.get('examine')!} />);
+    expect(screen.getByText('top')).toBeDefined();
+    expect(document.body.textContent).toContain('1.50 s of its worker’s CPU');
+    expect(document.body.textContent).toContain('(37% of all)');
+    expect(document.body.textContent).toContain('10 calls, 5.0 ms on average, at most 9.0 ms');
+    expect(document.body.textContent).toContain('8.0 MB heap');
     cleanup();
-    fakeApi({
-      'GET /status': [
-        200,
-        { off: false, plugins: [node('a', { dispatch: { calls: 0, ms: 0, maxMs: 0 } })] },
-      ],
-    });
-    render(<ResourcesPage loggedOut={vi.fn()} />);
-    const table = await screen.findByRole('table', { name: 'nodes by cost' });
+    render(<CostLine cost={ranked.get('quiet')!} />);
+    expect(screen.queryByText('top')).toBeNull();
+    expect(document.body.textContent).toContain('0 in its handlers');
+    expect(document.body.textContent).not.toContain('% of all');
+    cleanup();
+    render(<CostLine cost={ranked.get('slow')!} />);
+    expect(document.body.textContent).toContain('1 call,');
+  });
+
+  it('says so when no node runs, and marks none when none costs', () => {
+    render(<CostTable plugins={[]} select={vi.fn()} />);
+    expect(screen.getByText('No node runs.')).toBeDefined();
+    cleanup();
+    render(
+      <CostTable
+        plugins={[node('a', { dispatch: { calls: 0, ms: 0, maxMs: 0 } })]}
+        select={vi.fn()}
+      />
+    );
+    const table = screen.getByRole('table', { name: 'nodes by cost' });
     expect(within(table).queryByText('top')).toBeNull();
   });
 });

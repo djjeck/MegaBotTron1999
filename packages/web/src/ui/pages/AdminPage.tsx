@@ -1,30 +1,23 @@
 /**
- * The admin page (docs/bot-os.md D59): the instance, the graph's history and the graph as text
- * (D61), its accounts, its plugins and what each node costs (D77), one section each, in this order. A section's id is a route
- * (`#/plugins`, the page it once was; `#/graph-history`), which leads here, scrolled to it.
+ * The admin page (docs/bot-os.md D59, D111): what has no node, and so no place in the graph
+ * editor: the graph's history (D61). Its section's id is a route (`#/graph-history`), which leads
+ * here, scrolled to it. What it held before moved into the editor (D111): the instance's switches
+ * to the map's bar, its health to the bottom bar, each account, plugin and cost to its node's panel
+ * and card, the costs' table and the graph as text to the editor's side sheets.
  */
 import type { ReactNode } from 'react';
 import { useEffect } from 'react';
 import type { PageProps } from '#src/ui/App.tsx';
-import { AccountsPage } from '#src/ui/pages/AccountsPage.tsx';
-import { GraphHistoryPage, GraphTextPage } from '#src/ui/pages/GraphHistoryPage.tsx';
-import { InstancePage } from '#src/ui/pages/InstancePage.tsx';
-import { PluginsPage } from '#src/ui/pages/PluginsPage.tsx';
-import { ResourcesPage } from '#src/ui/pages/ResourcesPage.tsx';
+import { GraphHistoryPage } from '#src/ui/pages/GraphHistoryPage.tsx';
 
-/** The sections, in the page's order: each one's id (its old route), title and content. */
+/** The sections, in the page's order: each one's id (its route), title and content. */
 export const ADMIN_SECTIONS: { id: string; title: string; content: (p: PageProps) => ReactNode }[] =
   [
-    { id: 'instance', title: 'Instance', content: (p) => <InstancePage {...p} /> },
     {
       id: 'graph-history',
       title: 'Graph history',
       content: (p) => <GraphHistoryPage {...p} />,
     },
-    { id: 'graph-text', title: 'Graph as text', content: (p) => <GraphTextPage {...p} /> },
-    { id: 'accounts', title: 'Accounts', content: (p) => <AccountsPage {...p} /> },
-    { id: 'plugins', title: 'Plugins', content: (p) => <PluginsPage {...p} /> },
-    { id: 'resources', title: 'Resources', content: (p) => <ResourcesPage {...p} /> },
   ];
 
 export function AdminPage(props: PageProps) {

@@ -8,11 +8,19 @@
  * port the check refuses is marked, with why; one it warns of (D89), in the warning's own colour,
  * with what. A connector is drawn as two cards, its in card and
  * its out card (`cards.ts`, D60): each is titled with its side, and shows itself selected while
- * its twin is. A node that keeps a state (D72) shows a line of it, from its pins.
+ * its twin is. A node that keeps a state (D72) shows a line of it, from its pins. A connector's
+ * cards show its account's connection (D111): connected, connecting or closed, with its step.
  */
 import type { Node, NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
-import type { DriftCounts, NodeView, PluginControl, PortTypeInfo, PortView } from '#src/ui/api.ts';
+import type {
+  AccountControl,
+  DriftCounts,
+  NodeView,
+  PluginControl,
+  PortTypeInfo,
+  PortView,
+} from '#src/ui/api.ts';
 import type { CardSide } from './cards.ts';
 import { cardTitle } from './cards.ts';
 
@@ -20,6 +28,8 @@ export interface PluginNodeData extends Record<string, unknown> {
   view: NodeView;
   live?: PluginControl | undefined;
   drift?: DriftCounts | undefined;
+  /** A connector's connection, as its account runs (`GET /accounts`). */
+  connection?: AccountControl['connection'];
   portTypes: Record<string, PortTypeInfo>;
   /** Disabled in the draft (D64). */
   disabled?: boolean;
@@ -128,6 +138,7 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
     view,
     live,
     drift,
+    connection,
     portTypes,
     problems = [],
     portProblems = {},
@@ -168,6 +179,14 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
           {drift === undefined ? null : (
             <span className={`badge ${drift.tripped ? 'failed' : 'drift'}`} title="drift (P5)">
               drift {drift.recent}/{drift.unread}
+            </span>
+          )}
+          {connection === undefined ? null : (
+            <span
+              className={`badge ${connection.state}`}
+              title={`its connection: ${connection.phase}${connection.detail === undefined ? '' : `: ${connection.detail}`}`}
+            >
+              {connection.state}
             </span>
           )}
         </div>

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GraphHistoryView, GraphVersionView } from '#src/ui/api.ts';
 import { fakeApi } from '#test/fake-api.ts';
-import { GraphHistoryPage, GraphTextPage } from './GraphHistoryPage.tsx';
+import { GraphHistoryPage } from './GraphHistoryPage.tsx';
 
 afterEach(() => {
   cleanup();
@@ -255,26 +255,6 @@ describe('the graph history', () => {
     cleanup();
     fakeApi({ 'GET /graph/history': [500, { error: 'the disk is gone' }] });
     render(<GraphHistoryPage loggedOut={loggedOut} />);
-    expect(await screen.findByText('the disk is gone')).toBeDefined();
-  });
-});
-
-describe('the graph as text', () => {
-  it('shows the saved graph printed, or why not', async () => {
-    fakeApi({ 'GET /graph/file': [200, { exists: true, differs: false, text: 'nodes:\nedges:' }] });
-    render(<GraphTextPage loggedOut={loggedOut} />);
-    expect((await screen.findByLabelText('the saved graph as text')).textContent).toBe(
-      'nodes:\nedges:'
-    );
-    cleanup();
-    fakeApi({
-      'GET /graph/file': [200, { exists: true, differs: true, error: 'graph.json is not JSON' }],
-    });
-    render(<GraphTextPage loggedOut={loggedOut} />);
-    expect(await screen.findByText('graph.json is not JSON')).toBeDefined();
-    cleanup();
-    fakeApi({ 'GET /graph/file': [500, { error: 'the disk is gone' }] });
-    render(<GraphTextPage loggedOut={loggedOut} />);
     expect(await screen.findByText('the disk is gone')).toBeDefined();
   });
 });

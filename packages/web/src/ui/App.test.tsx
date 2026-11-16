@@ -5,7 +5,7 @@ import type { Answer } from '#test/fake-api.ts';
 import { fakeApi } from '#test/fake-api.ts';
 import { fakeCore } from '#test/fake-core.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
-import { App, NOTICE_MS, PAGES, release } from './App.tsx';
+import { App, health, NOTICE_MS, PAGES, release } from './App.tsx';
 
 const HEALTH = {
   off: false,
@@ -38,6 +38,10 @@ describe('release', () => {
     expect(release(HEALTH)).toBe('v1.2.3 (abcdef0)');
     expect(release({ ...older, version })).toBe('v1.2.3');
     expect(release({ ...older, commit })).toBeUndefined();
+  });
+
+  it('says how long the instance has run, and its memory', () => {
+    expect(health(HEALTH)).toBe('up 1d 1h · 80 MB');
   });
 });
 
@@ -90,9 +94,13 @@ describe('App', () => {
         .getAllByRole('link')
         .map((l) => l.textContent)
     ).toEqual(['Graph', 'Modules', 'Admin', 'Drift', 'Events']);
-    // The bottom bar, for small print, stays on every page: the release the instance runs.
+    // The bottom bar, for small print, stays on every page: the release the instance runs, how
+    // long it has run and its memory (D111).
     const bar = screen.getByRole('contentinfo');
     expect(await within(bar).findByText('v1.2.3 (abcdef0)')).toBeDefined();
+    expect(within(bar).getByText('up 1d 1h · 80 MB').getAttribute('title')).toBe(
+      'Node v24.0.0; 30 MB of JavaScript heap, of 80 MB in all'
+    );
     for (const page of PAGES) {
       window.location.hash = `#/${page.route}`;
       window.dispatchEvent(new HashChangeEvent('hashchange'));
@@ -101,16 +109,37 @@ describe('App', () => {
         'page'
       );
     }
-    // The admin page's sections keep their old routes, which lead to it, scrolled to the section.
+    // The admin page's section keeps its route, which leads to it, scrolled to the section.
     const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+    window.location.hash = '#/graph-history';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await waitFor(() =>
+      expect(scrolled.mock.contexts.at(-1)).toBe(document.getElementById('graph-history'))
+    );
+    expect(screen.getByRole('heading', { name: 'Admin', level: 1 })).toBeDefined();
+    scrolled.mockRestore();
+    // The old routes of what moved into the editor (D111) lead to it, the side sheet they name
+    // open.
     for (const old of ['instance', 'accounts', 'plugins']) {
       window.location.hash = `#/${old}`;
       window.dispatchEvent(new HashChangeEvent('hashchange'));
-      await waitFor(() => expect(scrolled.mock.contexts.at(-1)).toBe(document.getElementById(old)));
-      expect(screen.getByRole('heading', { name: 'Admin', level: 1 })).toBeDefined();
-      expect(screen.getByRole('link', { name: 'Admin' }).getAttribute('aria-current')).toBe('page');
+      expect(await screen.findByRole('heading', { name: 'Graph', level: 1 })).toBeDefined();
+      expect(screen.getByRole('link', { name: 'Graph' }).getAttribute('aria-current')).toBe('page');
     }
-    scrolled.mockRestore();
+    for (const [old, sheet] of [
+      ['resources', 'Costs'],
+      ['graph-text', 'Text'],
+    ] as const) {
+      window.location.hash = `#/${old}`;
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      await waitFor(
+        () =>
+          expect(screen.getByRole('button', { name: sheet }).getAttribute('aria-expanded')).toBe(
+            'true'
+          ),
+        { timeout: 5000 }
+      );
+    }
     window.location.hash = '#/nowhere';
     window.dispatchEvent(new HashChangeEvent('hashchange'));
     expect(await screen.findByRole('heading', { name: 'Graph' })).toBeDefined();

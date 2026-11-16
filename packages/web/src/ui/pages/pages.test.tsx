@@ -2,12 +2,9 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeApi } from '#test/fake-api.ts';
-import { AccountsPage } from './AccountsPage.tsx';
 import { AdminPage } from './AdminPage.tsx';
 import { DriftPage } from './DriftPage.tsx';
 import { EventsPage } from './EventsPage.tsx';
-import { InstancePage } from './InstancePage.tsx';
-import { PluginsPage } from './PluginsPage.tsx';
 
 afterEach(() => {
   cleanup();
@@ -16,41 +13,17 @@ afterEach(() => {
 
 const loggedOut = vi.fn();
 
-const HEALTH = {
-  off: false,
-  uptimeS: 42,
-  node: 'v24.0.0',
-  memoryMb: { rss: 80, heap: 30 },
-  plugins: { running: 2 },
-  accounts: {},
-};
-
 describe('AdminPage', () => {
-  it('shows the instance, the graph history and text, the accounts and the plugins, in order', async () => {
+  it('shows what has no node: the graph history (D111)', async () => {
     fakeApi({
-      'GET /instance': [200, HEALTH],
-      'GET /accounts': [200, []],
-      'GET /status': [200, { off: false, plugins: [] }],
       'GET /graph/history': [200, { versions: [], keep: { days: 7, latest: 5 } }],
-      'GET /graph/file': [200, { exists: false, differs: false }],
     });
     const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
     render(<AdminPage loggedOut={loggedOut} />);
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
-      'Instance',
       'Graph history',
-      'Graph as text',
-      'Accounts',
-      'Plugins',
-      'Resources',
     ]);
     expect(await screen.findByText('No graph has been applied yet.')).toBeDefined();
-    expect(await screen.findByText('No graph is saved yet.')).toBeDefined();
-    expect(
-      await within(screen.getByRole('region', { name: 'Accounts' })).findByText(
-        'No connector runs.'
-      )
-    ).toBeDefined();
     expect(scrolled).not.toHaveBeenCalled();
     scrolled.mockRestore();
   });
@@ -58,234 +31,10 @@ describe('AdminPage', () => {
   it('scrolls to the section that the route names', () => {
     fakeApi({});
     const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
-    render(<AdminPage loggedOut={loggedOut} section="plugins" />);
+    render(<AdminPage loggedOut={loggedOut} section="graph-history" />);
     expect(scrolled).toHaveBeenCalledOnce();
-    expect(scrolled.mock.contexts[0]).toBe(document.getElementById('plugins'));
+    expect(scrolled.mock.contexts[0]).toBe(document.getElementById('graph-history'));
     scrolled.mockRestore();
-  });
-});
-
-describe('InstancePage', () => {
-  it('shows the release it runs, with its commit when known', async () => {
-    fakeApi({
-      'GET /instance': [200, { ...HEALTH, version: '1.2.3', commit: 'abcdef0123456789' }],
-    });
-    render(<InstancePage loggedOut={loggedOut} />);
-    expect(await screen.findByText('Release')).toBeDefined();
-    expect(screen.getByText('abcdef012345')).toBeDefined();
-    cleanup();
-    fakeApi({ 'GET /instance': [200, { ...HEALTH, version: '1.2.3' }] });
-    render(<InstancePage loggedOut={loggedOut} />);
-    expect(await screen.findByText('1.2.3')).toBeDefined();
-  });
-
-  it('shows the health, and turns the instance off and on, and kills it once confirmed', async () => {
-    let off = false;
-    const api = fakeApi({
-      'GET /instance': () => [200, { ...HEALTH, off }],
-      'POST /off': () => {
-        off = true;
-        return [200, { off: true, result: 'off' }];
-      },
-      'POST /on': () => {
-        off = false;
-        return [200, { off: false, result: 'actor back' }];
-      },
-      'POST /kill': [200, { result: 'Killed: actor stopped' }],
-    });
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal('confirm', confirm);
-    render(<InstancePage loggedOut={loggedOut} />);
-    expect(await screen.findByText('42s')).toBeDefined();
-    expect(screen.getByText('2 running')).toBeDefined();
-    expect(screen.getByText('none')).toBeDefined();
-    expect(screen.getByText('80 MB (30 MB heap)')).toBeDefined();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Turn off' }));
-    expect(api.calls).not.toContain('POST /off {}');
-    confirm.mockReturnValue(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Turn off' }));
-    expect(await screen.findByRole('status')).toHaveProperty('textContent', 'off');
-    fireEvent.click(await screen.findByRole('button', { name: 'Turn on' }));
-    await waitFor(() =>
-      expect(screen.getByRole('status')).toHaveProperty('textContent', 'actor back')
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Kill' }));
-    await waitFor(() =>
-      expect(screen.getByRole('status')).toHaveProperty('textContent', 'Killed: actor stopped')
-    );
-    expect(confirm).toHaveBeenCalledTimes(3);
-  });
-
-  it('says why when the instance cannot be read or a switch is refused', async () => {
-    fakeApi({ 'GET /instance': [500, { error: 'broken' }] });
-    render(<InstancePage loggedOut={loggedOut} />);
-    expect(await screen.findByText('broken')).toBeDefined();
-    cleanup();
-    fakeApi({ 'GET /instance': [200, { ...HEALTH, off: true }], 'POST /on': [500, undefined] });
-    render(<InstancePage loggedOut={loggedOut} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Turn on' }));
-    expect(await screen.findByRole('status')).toHaveProperty('textContent', 'HTTP 500');
-  });
-});
-
-describe('AccountsPage', () => {
-  it('lists each account with its connection, and says when none runs', async () => {
-    fakeApi({
-      'GET /accounts': [
-        200,
-        [
-          {
-            id: 'irc',
-            plugin: 'irc',
-            account: 'irc:me',
-            state: 'running',
-            network: 'irc',
-            self: 'me_',
-            connection: { state: 'connected', phase: 'joined' },
-          },
-          {
-            id: 'second',
-            plugin: 'irc',
-            state: 'running',
-            connection: { state: 'closed', phase: 'closed', detail: 'refused' },
-          },
-          { id: 'key', plugin: 'key', state: 'failed', reason: 'no secret' },
-        ],
-      ],
-    });
-    render(<AccountsPage loggedOut={loggedOut} />);
-    expect(await screen.findByText('irc:me')).toBeDefined();
-    expect(screen.getByText('me_')).toBeDefined();
-    expect(screen.getByText('second (irc)')).toBeDefined();
-    expect(screen.getByText(/closed: refused/u)).toBeDefined();
-    expect(screen.getByText(/no secret/u)).toBeDefined();
-    cleanup();
-    fakeApi({ 'GET /accounts': [200, []] });
-    render(<AccountsPage loggedOut={loggedOut} />);
-    expect(await screen.findByText('No connector runs.')).toBeDefined();
-    cleanup();
-    fakeApi({});
-    render(<AccountsPage loggedOut={loggedOut} />);
-    expect(await screen.findByText('not found')).toBeDefined();
-  });
-});
-
-const ACTOR = {
-  id: 'actor-a',
-  plugin: 'actor',
-  description: 'acts',
-  kinds: ['actor'],
-  state: 'running',
-  settings: { level: 1, name: 'x' },
-  reads: ['status'],
-  actions: ['bump'],
-  status: { count: 0 },
-};
-const PARSER = {
-  id: 'parser',
-  plugin: 'parser',
-  description: 'reads',
-  kinds: ['parser'],
-  state: 'stopped',
-  reason: 'drift on parser',
-  stop: { reason: 'drift on parser', time: '2026-11-12T10:00:00.000Z', source: 'drift' },
-  settings: {},
-  reads: [],
-  actions: [],
-};
-
-describe('PluginsPage', () => {
-  it('lists the plugins with their states, read-only: they change in the graph', async () => {
-    const INACTIVE = {
-      ...ACTOR,
-      id: 'actor-b',
-      state: 'inactive',
-      reason: 'needs parser (stopped)',
-    };
-    fakeApi({
-      'GET /status': () => [200, { off: false, plugins: [ACTOR, PARSER, INACTIVE] }],
-    });
-    render(<PluginsPage loggedOut={loggedOut} />);
-    expect(await screen.findByText('running')).toBeDefined();
-    expect(screen.getAllByText('(actor)')).toHaveLength(2);
-    expect(screen.getByText('drift on parser')).toBeDefined();
-    expect(screen.getByText(/\(drift, 2026-11-12 10:00 UTC\)/u)).toBeDefined();
-    expect(screen.getByRole('img', { name: 'warning' })).toBeDefined();
-    expect(screen.getByText('needs parser (stopped)')).toBeDefined();
-    expect(screen.queryByRole('combobox')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
-    expect(screen.getByRole('link', { name: 'graph' }).getAttribute('href')).toBe('#/graph');
-  });
-
-  it('opens a plugin: its status, settings, reads and actions', async () => {
-    const api = fakeApi({
-      'GET /status': [200, { off: false, plugins: [ACTOR] }],
-      'POST /settings': (b) =>
-        (b as { key: string }).key === 'level' ? [200, {}] : [400, { error: 'no such setting' }],
-      'GET /plugins/actor-a/state/status': [200, { count: 3 }],
-      'POST /plugins/actor-a/actions/bump': (b) =>
-        (b as { by?: number }).by === undefined ? [400, { error: 'by: required' }] : [200, 4],
-    });
-    render(<PluginsPage loggedOut={loggedOut} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'actor-a' }));
-    expect(screen.getByText('acts')).toBeDefined();
-
-    const level = screen.getByLabelText('level');
-    fireEvent.change(level, { target: { value: '5' } });
-    fireEvent.submit(level);
-    expect(await screen.findByText('level set')).toBeDefined();
-    expect(api.calls).toContain('POST /settings {"key":"level","value":5}');
-    const name = screen.getByLabelText('name');
-    expect((name as HTMLInputElement).value).toBe('x');
-    fireEvent.change(name, { target: { value: 'plain words' } });
-    fireEvent.submit(name);
-    expect(await screen.findByText('no such setting')).toBeDefined();
-    expect(api.calls).toContain('POST /settings {"key":"name","value":"plain words"}');
-
-    fireEvent.click(screen.getByRole('button', { name: 'status' }));
-    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('"count": 3'));
-
-    const input = screen.getByLabelText('bump input');
-    fireEvent.submit(input);
-    expect(await screen.findByText('bump: by: required')).toBeDefined();
-    fireEvent.change(input, { target: { value: 'not json' } });
-    fireEvent.submit(input);
-    expect(await screen.findByText('bump: the input is not JSON')).toBeDefined();
-    fireEvent.change(input, { target: { value: '{"by": 1}' } });
-    fireEvent.submit(input);
-    expect(await screen.findByText('bump: 4')).toBeDefined();
-
-    fireEvent.click(screen.getByRole('button', { name: 'actor-a' }));
-    expect(screen.queryByText('acts')).toBeNull();
-  });
-
-  it('says a read refused', async () => {
-    fakeApi({ 'GET /status': [200, { off: false, plugins: [{ ...ACTOR, status: undefined }] }] });
-    render(<PluginsPage loggedOut={loggedOut} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'actor-a' }));
-    fireEvent.click(screen.getByRole('button', { name: 'status' }));
-    expect(await screen.findByText('status: not found')).toBeDefined();
-  });
-
-  it('turns the instance on', async () => {
-    let off = true;
-    fakeApi({
-      'GET /status': () => [200, { off, plugins: [ACTOR] }],
-      'POST /on': () => {
-        off = false;
-        return [200, { off: false, result: 'on' }];
-      },
-    });
-    render(<PluginsPage loggedOut={loggedOut} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Turn on' }));
-    expect(await screen.findByRole('button', { name: 'Turn off' })).toBeDefined();
-  });
-
-  it('says why the plugins cannot be read', async () => {
-    fakeApi({ 'GET /status': [500, { error: 'broken' }] });
-    render(<PluginsPage loggedOut={loggedOut} />);
-    expect(await screen.findByText('broken')).toBeDefined();
   });
 });
 

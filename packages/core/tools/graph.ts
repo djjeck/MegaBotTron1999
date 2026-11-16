@@ -2,7 +2,7 @@
  * Prints a graph file (docs/bot-os-api.md §2.1, §4.12): the plugin instances and the edges between
  * their ports, as text, or as a Mermaid flowchart with `--mermaid`. The instance writes the graph it
  * runs to `graph.json` in its data volume at each start; the control API's `GET /graph` gives the
- * running one, and the web UI's Admin page shows it as text.
+ * running one, and the web UI's graph editor shows it as text (its Text tab).
  *
  * Usage: node packages/core/tools/graph.ts [/data/graph.json] [--mermaid]
  */

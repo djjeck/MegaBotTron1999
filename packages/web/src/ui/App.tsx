@@ -1,23 +1,25 @@
 /**
  * The web UI (docs/bot-os.md P16, D43, D55): the owner's login, then the graph editor, the home
- * page and the main UI, beside the modules, the admin page (D59: the instance, its accounts and its
- * plugins), drift and events; the other pages' features move into the editor over time. The whole
- * app is the owner's console, in one menu.
+ * page and the main UI, where what belongs to a node is shown on it and the instance's switches
+ * are on the map's bar (D111), beside the modules, the admin page (D59, D111: the graph's history,
+ * which has no node), drift and events. The whole app is the owner's console, in one menu.
  *
  * Its shell: a top bar whose tabs are the pages (the tab selected is the page's title), the page
  * between, which alone scrolls, and a bottom bar for small print, such as diagnostics: the release
- * the instance runs and its commit (`GET /instance`), read again after a restart. The bars stay
- * where they are.
+ * the instance runs and its commit, how long it has run and its memory (`GET /instance`, read every
+ * minute and after a restart). The bars stay where they are.
  * Every page is reached by the URL's hash (`#/admin`); a page added here is a line of `PAGES`, as
- * the widgets will be. The admin page's sections keep their old routes (`#/plugins`), which lead to
- * it, scrolled to the section.
+ * the widgets will be. Old routes keep leading somewhere: an admin section's (`#/graph-history`) to
+ * it, scrolled to the section; one whose features moved into the editor (`#/plugins`,
+ * `#/resources`) to the editor, the side sheet it names open.
  */
 import type { ReactNode } from 'react';
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import type { InstanceHealth } from './api.ts';
 import { api } from './api.ts';
+import type { Sheet } from './graph/GraphPage.tsx';
 import { GraphPage } from './graph/GraphPage.tsx';
-import { useRoute } from './hooks.ts';
+import { duration, useRoute } from './hooks.ts';
 import { Login } from './Login.tsx';
 import { ADMIN_SECTIONS, AdminPage } from './pages/AdminPage.tsx';
 import { DriftPage } from './pages/DriftPage.tsx';
@@ -31,7 +33,7 @@ import { ModulesPage } from './pages/ModulesPage.tsx';
 export interface PageProps {
   loggedOut: (note?: string) => void;
   restarted?: (note: string) => void;
-  /** The section of the page that the route names, to scroll to (the admin page's). */
+  /** The section of the page that the route names: the admin page's, or an editor's side sheet. */
   section?: string | undefined;
 }
 
@@ -59,13 +61,38 @@ export const PAGES: Page[] = [
   { route: 'events', title: 'Events', wide: false, page: (p) => <EventsPage {...p} /> },
 ];
 
-/** The page a route leads to, and its section: an admin section's old route leads to it. */
+/**
+ * The old routes of what moved into the editor (D111), and the side sheet each opens, if one: the
+ * instance's switches are on the map's bar, an account and a plugin on its node.
+ */
+export const MOVED: Readonly<Record<string, Sheet | undefined>> = {
+  instance: undefined,
+  accounts: undefined,
+  plugins: undefined,
+  resources: 'costs',
+  'graph-text': 'text',
+};
+
+/**
+ * The page a route leads to, and its section: an admin section's old route leads to it, and one
+ * whose features moved into the editor to the editor.
+ */
 export function resolve(route: string): { page: Page; section?: string } {
   const page = PAGES.find((p) => p.route === route);
   if (page !== undefined) return { page };
   if (ADMIN_SECTIONS.some((s) => s.id === route))
     return { page: PAGES.find((p) => p.route === 'admin') as Page, section: route };
-  return { page: PAGES[0] as Page };
+  const home = PAGES[0] as Page;
+  if (route in MOVED) {
+    const sheet = MOVED[route];
+    return sheet === undefined ? { page: home } : { page: home, section: sheet };
+  }
+  return { page: home };
+}
+
+/** How the instance is, in the bottom bar: how long it has run and its memory. */
+export function health(h: InstanceHealth): string {
+  return `up ${duration(h.uptimeS)} · ${h.memoryMb.rss} MB`;
 }
 
 /** The release an instance runs, and its commit's start when known; undefined from an older one. */
@@ -96,15 +123,18 @@ export function App() {
     setNote(why);
     setSession('out');
   }, []);
-  // The release the instance runs, for the bottom bar: read once logged in, and after a restart.
-  const [build, setBuild] = useState<string>();
+  // The instance as the bottom bar says it: read once logged in, after a restart, and every minute.
+  const [instance, setInstance] = useState<InstanceHealth>();
   useEffect(() => {
-    if (session !== 'in') return;
-    api<InstanceHealth>('/instance').then(
-      (h) => setBuild(release(h)),
-      () => setBuild(undefined)
-    );
+    if (session !== 'in') return undefined;
+    const read = (): void => {
+      api<InstanceHealth>('/instance').then(setInstance, () => setInstance(undefined));
+    };
+    read();
+    const timer = setInterval(read, 60_000);
+    return () => clearInterval(timer);
   }, [session, generation]);
+  const build = instance === undefined ? undefined : release(instance);
   useEffect(() => {
     api<{ authenticated: boolean }>('/session').then(
       (s) => setSession(s.authenticated ? 'in' : 'out'),
@@ -165,6 +195,13 @@ export function App() {
       <footer className="status-bar">
         <div className="status-bar-slot">
           {build === undefined ? null : <span title="the release the instance runs">{build}</span>}
+          {instance === undefined ? null : (
+            <span
+              title={`Node ${instance.node}; ${instance.memoryMb.heap} MB of JavaScript heap, of ${instance.memoryMb.rss} MB in all`}
+            >
+              {health(instance)}
+            </span>
+          )}
         </div>
       </footer>
     </div>
