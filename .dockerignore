@@ -8,6 +8,8 @@ data/
 secrets/
 **/test/
 **/tools/
+# But the one the image runs for its owner: a telegram-user session string (bot-os.md D115).
+!packages/connectors/tools/telegram-login.ts
 **/*.test.ts
 **/*.test.tsx
 **/dist/

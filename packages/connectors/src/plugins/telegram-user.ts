@@ -48,6 +48,24 @@ export const telegramUserConfig = z.object({
 });
 export type TelegramUserConfig = z.infer<typeof telegramUserConfig>;
 
+/**
+ * What is wrong with an API id and hash (my.telegram.org's `api_id` and `api_hash`), each named as
+ * `names` says; none for a pair that looks right.
+ */
+export function apiProblems(
+  apiId: string,
+  apiHash: string,
+  names: { id: string; hash: string } = {
+    id: 'telegram_user_api_id',
+    hash: 'telegram_user_api_hash',
+  }
+): string[] {
+  return [
+    ...(/^[1-9]\d{0,9}$/u.test(apiId) ? [] : [`${names.id} is not an API id`]),
+    ...(/^[0-9a-f]{32}$/u.test(apiHash) ? [] : [`${names.hash} is not 32 hex digits`]),
+  ];
+}
+
 /** the owner's credentials from the three secrets, or why they are not credentials. */
 export function userCredentials(
   get: (name: (typeof USER_SECRETS)[number]) => string
@@ -56,8 +74,7 @@ export function userCredentials(
   const apiHash = get('telegram_user_api_hash');
   const session = get('telegram_user_session');
   const problems = [
-    ...(/^[1-9]\d{0,9}$/u.test(apiId) ? [] : ['telegram_user_api_id is not an API id']),
-    ...(/^[0-9a-f]{32}$/u.test(apiHash) ? [] : ['telegram_user_api_hash is not 32 hex digits']),
+    ...apiProblems(apiId, apiHash),
     ...(session === '' ? ['telegram_user_session is empty'] : []),
   ];
   if (problems.length > 0) throw new Error(problems.join('; '));

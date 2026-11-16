@@ -2037,18 +2037,20 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   by default); unset, they have none.
 - **`telegram-user`** (`packages/connectors/src/plugins/telegram-user.ts`, on GramJS in
   `packages/connectors/src/transport/telegram-user.ts`): the owner's own account, from three secrets
-  (`telegram_user_api_id`, `telegram_user_api_hash`, `telegram_user_session`). It monitors the chats
-  of its configuration (`chats`, picked among its chats, D96: a group by its id, a private chat by
-  the other's `@username`, or their id when they have none), or every chat of the account when
-  `chats` is unset (a new connection), each edge reading a subset (§2.1); it lists its dialogs,
-  monitored or not, as its surfaces (§4.5: those active this week by default, any by a search), and
-  catches up at each connection on what its readers' chats said while it was down, each message once
-  (§4.5, D62, D66), marked `missed`, and `playback` too once older than its config's `liveGraceS`
-  (120 s by default, from the message's time to its delivery, D83): a message missed by a quick
-  restart is news. It starts without waiting, retries every minute, and raises a `told` notice of
-  the first failure (`ctx.notify`, §4.8); a message carries its id, the one it replies to, and `own`
-  for the owner's own from any device. It sends only through the account's outbox (`deliver`, with
-  the message's id), its queue's default interval between two sends of a command its config's
+  (`telegram_user_api_id`, `telegram_user_api_hash`, `telegram_user_session`); the image's
+  `packages/connectors/tools/telegram-login.ts` logs in (the API id and hash, the phone, the code,
+  the 2FA password) and prints the session string (bot-os.md D115). It monitors the chats of its
+  configuration (`chats`, picked among its chats, D96: a group by its id, a private chat by the
+  other's `@username`, or their id when they have none), or every chat of the account when `chats`
+  is unset (a new connection), each edge reading a subset (§2.1); it lists its dialogs, monitored or
+  not, as its surfaces (§4.5: those active this week by default, any by a search), and catches up at
+  each connection on what its readers' chats said while it was down, each message once (§4.5, D62,
+  D66), marked `missed`, and `playback` too once older than its config's `liveGraceS` (120 s by
+  default, from the message's time to its delivery, D83): a message missed by a quick restart is
+  news. It starts without waiting, retries every minute, and raises a `told` notice of the first
+  failure (`ctx.notify`, §4.8); a message carries its id, the one it replies to, and `own` for the
+  owner's own from any device. It sends only through the account's outbox (`deliver`, with the
+  message's id), its queue's default interval between two sends of a command its config's
   `commandIntervalS` (D73), its watchdog's threshold `unansweredAt` and `unansweredAtBy` (§4.6,
   D93); GramJS's flood waits become `FloodWait`.
 - **`ServiceConnector`** (`packages/connectors/src/plugins/service.ts`): for a connector plugin that

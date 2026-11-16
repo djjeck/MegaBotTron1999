@@ -92,6 +92,22 @@ with its own authentication, rather than publishing the port.
   (a GitHub token, to raise the API's limit of 60 requests an hour for installing and updating
   modules from GitHub links; `GITHUB_TOKEN` in the environment is read too, though the secret is the
   safer place), and a token for each self-hosted Git server (below).
+- **A Telegram account's session** (`telegram-user`): its three secrets come from
+  [my.telegram.org](https://my.telegram.org) (**API development tools**: the API id and hash; each
+  deployment registers its own app) and from a login, which the image runs for you
+  ([docs/bot-os.md](docs/bot-os.md) D115):
+
+  ```sh
+  docker run -it --rm ghcr.io/djjeck/megabottron1999:latest \
+    node packages/connectors/tools/telegram-login.ts
+  ```
+
+  It asks for the API id and hash, the phone number, the code Telegram sends and the 2FA password if
+  the account has one, then prints the session string: save it as `telegram_user_session`, the id as
+  `telegram_user_api_id` and the hash as `telegram_user_api_hash`. The session string gives full
+  access to the account: keep it as you keep the other secrets, and end it from Telegram's
+  **Settings → Devices** when it is no longer needed.
+
 - **Self-hosted Git servers** (private module repositories, [docs/bot-os.md](docs/bot-os.md) D102):
   the shell fetches modules only from GitHub and the servers you add. Put the server's token (one
   that can read its repositories) in a Docker secret of any name, say `git_example_token`, mounted

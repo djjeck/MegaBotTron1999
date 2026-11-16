@@ -50,4 +50,7 @@ restart costs nothing.
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
   structured output by a zod schema.
 
-Their secrets come from Docker secrets, never from variables.
+Their secrets come from Docker secrets, never from variables. `tools/telegram-login.ts`, shipped in
+the image (docs/bot-os.md D115), creates a `telegram-user` session string:
+`docker run -it --rm <image> node packages/connectors/tools/telegram-login.ts` asks for the API id
+and hash, the phone number, the code and the 2FA password, and prints it.
