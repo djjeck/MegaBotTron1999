@@ -8,7 +8,10 @@
  *
  * GramJS drives a login through callbacks that it awaits (`signInUser`, `signInUserWithQrCode`);
  * here each callback is a question left open (`Attempt`) until the owner's answer comes through
- * the control API. One login at a time, dropped after `LOGIN_TIMEOUT_MS` without an answer. Nothing
+ * the control API. At the code step the owner may have the code resent (D126): the question is
+ * refused with `RESTART_AUTH`, which makes GramJS start `signInUser` again; its new run is given
+ * the same number at once, with `forceSMS` set, so that GramJS asks for a new code
+ * (`auth.SendCode`) and then for the next way Telegram offers (`auth.ResendCode`: an SMS, a call). One login at a time, dropped after `LOGIN_TIMEOUT_MS` without an answer. Nothing
  * typed is logged or kept but the session and the API pair; every value typed is marked secret
  * (`remember`), so that the core redacts it from whatever it prints, records or answers.
  */
@@ -61,7 +64,9 @@ export interface UserLoginClient {
 type Asked =
   | { kind: 'working' }
   | { kind: 'number' }
-  | { kind: 'code'; viaApp: boolean }
+  /** A resend refused (its error kept): the owner may ask again, or cancel. */
+  | { kind: 'resend' }
+  | { kind: 'code'; viaApp: boolean; resent: boolean }
   | { kind: 'password'; hint?: string }
   | { kind: 'qr'; url: string; expires: number };
 
@@ -89,20 +94,34 @@ export function refusal(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** Where the code went, as far as GramJS tells: the app (`SentCodeTypeApp`) or not. */
+function codeText(asked: { viaApp: boolean; resent: boolean }): string {
+  const chat =
+    'in the chat with Telegram, its official account (a blue check), which may sit in the archived chats';
+  if (!asked.resent)
+    return asked.viaApp
+      ? `Telegram sent a code to your Telegram app, on the devices already logged in, ${chat}. Not there? Resend the code: Telegram may then send it by SMS or a call.`
+      : 'Telegram sent a code by SMS or a call, as it chose.';
+  return asked.viaApp
+    ? `Telegram sent the new code to your Telegram app again, ${chat}: it offers no other way for this account now. Not there? Cancel and log in with a QR code instead.`
+    : 'Telegram sent a new code by SMS or a call, as it chose.';
+}
+
 /** One login under way: GramJS's questions, each left open until answered. */
 class Attempt {
   asked: Asked = { kind: 'working' };
   error: string | undefined;
   /** Over: logged in, failed or dropped. */
   over = false;
-  private open: { kind: Asked['kind']; resolve(v: string): void } | undefined;
+  private open:
+    { kind: Asked['kind']; resolve(v: string): void; reject(e: unknown): void } | undefined;
   private waiters: (() => void)[] = [];
 
   /** GramJS asks: the question stays open until `answer`. */
   ask(asked: Asked): Promise<string> {
     if (this.over) return Promise.reject(new Error('AUTH_USER_CANCEL'));
-    return new Promise((resolve) => {
-      this.open = { kind: asked.kind, resolve };
+    return new Promise((resolve, reject) => {
+      this.open = { kind: asked.kind, resolve, reject };
       this.set(asked);
     });
   }
@@ -115,6 +134,17 @@ class Attempt {
     this.error = undefined;
     this.set({ kind: 'working' });
     resolve(value);
+    return true;
+  }
+
+  /** The open question of that kind refused with this error; false if none is open. */
+  refuse(kind: Asked['kind'], error: unknown): boolean {
+    if (this.open?.kind !== kind) return false;
+    const { reject } = this.open;
+    this.open = undefined;
+    this.error = undefined;
+    this.set({ kind: 'working' });
+    reject(error);
     return true;
   }
 
@@ -172,6 +202,9 @@ export interface UserLoginOptions {
 
 const MY_TELEGRAM = { href: 'https://my.telegram.org', label: 'my.telegram.org' };
 const CANCEL: LoginAction = { name: 'cancel', label: 'Cancel' };
+const RESEND: LoginAction = { name: 'resend', label: 'Resend the code' };
+/** The error that makes GramJS's `signInUser` start again, from its phone-code callback. */
+const RESTART_AUTH = 'RESTART_AUTH';
 
 /** The login of a `telegram-user` connector (`Instance.login`). */
 export class UserLogin implements Login {
@@ -307,16 +340,23 @@ export class UserLogin implements Login {
           },
           actions: submit('number', 'Send me the code'),
         };
+      case 'resend':
+        return {
+          step: {
+            title: 'The code was not resent',
+            text: 'Telegram did not send a new code (the error says why). Ask again, later if it says to wait, or cancel and log in with a QR code.',
+            fields: [],
+          },
+          actions: [{ ...RESEND, primary: true }],
+        };
       case 'code':
         return {
           step: {
             title: 'The code',
-            text: asked.viaApp
-              ? 'Telegram sent a code to your Telegram app, in the chat with Telegram.'
-              : 'Telegram sent a code by SMS.',
+            text: codeText(asked),
             fields: [{ name: 'code', label: 'Code', placeholder: '12345' }],
           },
-          actions: submit('code', 'Log in'),
+          actions: [...submit('code', 'Log in'), RESEND],
         };
       case 'password':
         return {
@@ -341,8 +381,15 @@ export class UserLogin implements Login {
         return this.state();
       }
       const kind = action as Asked['kind'];
-      if (!['number', 'code', 'password'].includes(action) || !attempt.answer(kind, value(action)))
-        throw new Error(`the login does not ask for ${action} now`);
+      const done =
+        action === 'resend'
+          ? // At the code step: GramJS starts again (D126); after a refused resend: once more.
+            attempt.refuse(
+              'code',
+              Object.assign(new Error(RESTART_AUTH), { errorMessage: RESTART_AUTH })
+            ) || attempt.answer('resend', '')
+          : ['number', 'code', 'password'].includes(action) && attempt.answer(kind, value(action));
+      if (!done) throw new Error(`the login does not ask for ${action} now`);
       this.arm();
       await attempt.next(this.o.clock, SETTLE_MS);
       return this.state();
@@ -406,6 +453,39 @@ export class UserLogin implements Login {
     };
     const password = (hint?: string): Promise<string> =>
       attempt.ask({ kind: 'password', ...(hint === undefined ? {} : { hint }) });
+    // The phone login's parameters: GramJS restarts with this same object, `forceSMS` set (D126).
+    let number = '';
+    let resending = false;
+    const phone: UserAuthParams = {
+      phoneNumber: async () => {
+        if (resending) {
+          // The restarted run, after a resend asked: the same number, at once.
+          resending = false;
+          return number;
+        }
+        // A resend refused: tried again with the same number when the owner asks.
+        if (phone.forceSMS === true) await attempt.ask({ kind: 'resend' });
+        else number = await attempt.ask({ kind: 'number' });
+        if (attempt.over) throw new Error('AUTH_USER_CANCEL');
+        return number;
+      },
+      phoneCode: async (viaApp) => {
+        try {
+          return await attempt.ask({
+            kind: 'code',
+            viaApp: viaApp === true,
+            resent: phone.forceSMS === true,
+          });
+        } catch (e) {
+          // The owner asked for the code again: GramJS restarts, sending it again.
+          resending = true;
+          phone.forceSMS = true;
+          throw e;
+        }
+      },
+      password,
+      onError,
+    };
     const run = async (): Promise<unknown> => {
       await client.connect();
       return method === 'qr'
@@ -421,12 +501,7 @@ export class UserLogin implements Login {
             password,
             onError,
           })
-        : client.signInUser(api, {
-            phoneNumber: () => attempt.ask({ kind: 'number' }),
-            phoneCode: (viaApp) => attempt.ask({ kind: 'code', viaApp: viaApp === true }),
-            password,
-            onError,
-          });
+        : client.signInUser(api, phone);
     };
     run().then(
       (user) => {

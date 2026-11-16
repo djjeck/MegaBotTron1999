@@ -57,6 +57,7 @@ restart costs nothing.
 Their secrets come from Docker secrets, never from variables. The two Telegram connectors take none:
 they log in from their node's panel (docs/bot-os.md D116, D118): `bot-login.ts` takes a bot's token
 (checked with `getMe`), `user-login.ts` an account's API id and hash, then a QR code or the phone,
-the code and the 2FA password; each keeps what it gets in its store (`login`), its only place, and
-without it runs needing a login (`LoginNeeded`). A bot or an account is one node's: the login
-refuses a bot token or an account another node of the plugin holds, naming it (docs/bot-os.md D121).
+the code (which it can have resent, docs/bot-os.md D126) and the 2FA password; each keeps what it
+gets in its store (`login`), its only place, and without it runs needing a login (`LoginNeeded`). A
+bot or an account is one node's: the login refuses a bot token or an account another node of the
+plugin holds, naming it (docs/bot-os.md D121).

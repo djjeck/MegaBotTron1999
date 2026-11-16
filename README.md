@@ -101,14 +101,17 @@ with its own authentication, rather than publishing the port.
   gives (`/newbot`, or `/token` for one you have), which is checked with Telegram; for your account,
   type your app's API id and hash once (my.telegram.org → API development tools; each deployment
   registers its own app), then **Log in with a QR code** and scan it in Telegram's Settings →
-  Devices → Link Desktop Device (or log in with your phone number, the code and your 2FA password).
-  Then **Restart now**, and tick its chats. A bot, or an account, is one node's: the login refuses
-  one another node holds, naming it. The credentials are kept in the connector's store in `/data`,
-  so in its backups, sealed under `bot_os_key` (in clear without it, which the panel warns of).
-  **Log out** (an account's) ends the session on Telegram too; it also shows in Telegram's Devices,
-  where it can be ended from the phone. The `telegram_bot_token` and `telegram_user_*` secrets of
-  earlier releases are read no more: remove them from the deployment, and log in from the node
-  instead.
+  Devices → Link Desktop Device (or log in with your phone number, the code and your 2FA password;
+  Telegram often sends the code to the app on a device already logged in, in the chat with its
+  official "Telegram" account, perhaps in the archived chats; not there, **Resend the code** asks
+  Telegram for another way, an SMS or a call, though it may send it to the app again, and the QR
+  code is then the way). Then **Restart now**, and tick its chats. A bot, or an account, is one
+  node's: the login refuses one another node holds, naming it. The credentials are kept in the
+  connector's store in `/data`, so in its backups, sealed under `bot_os_key` (in clear without it,
+  which the panel warns of). **Log out** (an account's) ends the session on Telegram too; it also
+  shows in Telegram's Devices, where it can be ended from the phone. The `telegram_bot_token` and
+  `telegram_user_*` secrets of earlier releases are read no more: remove them from the deployment,
+  and log in from the node instead.
 
 - **Self-hosted Git servers** (private module repositories, [docs/bot-os.md](docs/bot-os.md) D102):
   the shell fetches modules only from GitHub and the servers you add. Put the server's token (one

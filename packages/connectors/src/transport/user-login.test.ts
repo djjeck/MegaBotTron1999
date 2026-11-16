@@ -120,7 +120,9 @@ describe('a telegram-user login (D116)', () => {
     expect(await login.act('number', { number: ' +15550100 ' })).toMatchObject({
       step: {
         title: 'The code',
-        text: 'Telegram sent a code to your Telegram app, in the chat with Telegram.',
+        text: expect.stringContaining(
+          'Telegram sent a code to your Telegram app, on the devices already logged in, in the chat with Telegram, its official account'
+        ) as unknown,
       },
     });
     expect(await login.act('code', { code: '11111' })).toMatchObject({
@@ -155,6 +157,137 @@ describe('a telegram-user login (D116)', () => {
     expect(remembered).toEqual([HASH, '+15550100', 'hunter22', SESSION]);
     expect(logged.join('\n')).not.toMatch(/hunter22|15550100|1BQ/u);
     expect(logged).toEqual(['logged in as @alice; a restart connects it']);
+  });
+
+  /**
+   * GramJS's `signInUser`, as far as a resend goes: the number asked (again after a refusal), the
+   * code sent (`send`, told whether `forceSMS` is set: via the app, or an error), the code asked,
+   * and a new run of it all on `RESTART_AUTH` from the code's question.
+   */
+  async function signInUser(
+    p: UserAuthParams,
+    send: (number: string, forceSMS: boolean) => boolean | Error,
+    code: (entered: string) => unknown
+  ): Promise<unknown> {
+    let viaApp: boolean;
+    for (;;) {
+      const number = typeof p.phoneNumber === 'function' ? await p.phoneNumber() : p.phoneNumber;
+      const sent = send(number, p.forceSMS === true);
+      if (!(sent instanceof Error)) {
+        viaApp = sent;
+        break;
+      }
+      if (await p.onError(sent)) throw new Error('AUTH_USER_CANCEL');
+    }
+    let entered: string;
+    try {
+      entered = await p.phoneCode(viaApp);
+    } catch (e) {
+      if ((e as { errorMessage?: unknown }).errorMessage === 'RESTART_AUTH')
+        return signInUser(p, send, code);
+      throw e;
+    }
+    return code(entered);
+  }
+
+  it('resends the code (D126): GramJS starts again on the same number, with forceSMS', async () => {
+    const store = memoryStore();
+    store.write(LOGIN_DOC, API);
+    const sends: [string, boolean][] = [];
+    // The app first; then an SMS; then the app again; then refused, and refused once more.
+    const answers: (boolean | Error)[] = [
+      true,
+      false,
+      true,
+      rpc('FLOOD_WAIT_60'),
+      rpc('SEND_CODE_UNAVAILABLE'),
+      false,
+    ];
+    const { client } = fakeClient({
+      phone: (p) =>
+        signInUser(
+          p,
+          (number, forceSMS) => (sends.push([number, forceSMS]), answers.shift() ?? false),
+          (entered) => {
+            expect(entered).toBe('33333');
+            return { username: 'alice', id: 5000001 };
+          }
+        ),
+    });
+    const { login, logged } = setUp({ client, store });
+    await login.act('phone', {});
+    const viaApp = await login.act('number', { number: '+15550100' });
+    expect(viaApp.step?.text).toContain('Not there? Resend the code');
+    expect(viaApp.actions.map((a) => a.name)).toEqual(['code', 'resend', 'cancel']);
+    // Resent: by SMS or a call.
+    const bySms = await login.act('resend', {});
+    expect(bySms).toMatchObject({
+      status: 'pending',
+      step: { title: 'The code', text: 'Telegram sent a new code by SMS or a call, as it chose.' },
+    });
+    expect(bySms.error).toBeUndefined();
+    // Resent again, to the app: said plainly, the QR login suggested.
+    const again = await login.act('resend', {});
+    expect(again.step?.text).toMatch(/^Telegram sent the new code to your Telegram app again/u);
+    expect(again.step?.text).toContain('log in with a QR code instead');
+    // Refused: the error shown, the resend offered again, and the cancel.
+    const refused = await login.act('resend', {});
+    expect(refused).toMatchObject({
+      status: 'pending',
+      step: { title: 'The code was not resent' },
+      error: 'Telegram refused it: FLOOD_WAIT_60',
+    });
+    expect(refused.actions.map((a) => a.name)).toEqual(['resend', 'cancel']);
+    await expect(login.act('code', { code: '1' })).rejects.toThrow(
+      'the login does not ask for code now'
+    );
+    expect(await login.act('resend', {})).toMatchObject({
+      step: { title: 'The code was not resent' },
+      error: 'Telegram refused it: SEND_CODE_UNAVAILABLE',
+    });
+    const later = await login.act('resend', {});
+    expect(later.step?.text).toBe('Telegram sent a new code by SMS or a call, as it chose.');
+    expect(later.error).toBeUndefined();
+    expect(sends).toEqual([
+      ['+15550100', false],
+      ['+15550100', true],
+      ['+15550100', true],
+      ['+15550100', true],
+      ['+15550100', true],
+      ['+15550100', true],
+    ]);
+    await login.act('code', { code: '33333' });
+    await tick();
+    expect(login.state()).toMatchObject({ status: 'done', as: '@alice' });
+    expect(logged.join('\n')).not.toContain('15550100');
+  });
+
+  it('says a code sent by SMS first so, and offers no resend before a code is asked', async () => {
+    const store = memoryStore();
+    store.write(LOGIN_DOC, API);
+    let sent = 0;
+    const { client } = fakeClient({
+      phone: (p) =>
+        signInUser(
+          p,
+          () => (++sent === 1 ? false : rpc('SEND_CODE_UNAVAILABLE')),
+          () => ({ id: 5000001 })
+        ),
+    });
+    const { login } = setUp({ client, store });
+    await login.act('phone', {});
+    await expect(login.act('resend', {})).rejects.toThrow('the login does not ask for resend now');
+    expect((await login.act('number', { number: '+15550100' })).step?.text).toBe(
+      'Telegram sent a code by SMS or a call, as it chose.'
+    );
+    expect(await login.act('resend', {})).toMatchObject({
+      step: { title: 'The code was not resent' },
+      error: 'Telegram refused it: SEND_CODE_UNAVAILABLE',
+    });
+    // Cancelled while a refused resend waits: nothing is sent again.
+    expect((await login.act('cancel', {})).status).toBe('needed');
+    await tick();
+    expect(sent).toBe(2);
   });
 
   it('logs in by QR code, which renews itself, then asks for the 2FA password', async () => {
