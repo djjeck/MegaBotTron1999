@@ -96,6 +96,7 @@ import { type Render, resvgRender } from './render.ts';
 import { type KeptTimer, PluginScheduler } from './scheduler.ts';
 import { SealedStore } from './sealed-store.ts';
 import { Sealer, type Secrets, SecretStore } from './secrets.ts';
+import { hideSensitive, openSensitive, sealSensitive } from './sensitive.ts';
 import { PluginSettings, SETTINGS_DOC, SettingsRegistry } from './settings.ts';
 import { CORE_STORE, type Migration, Stores } from './store.ts';
 import { Summaries, type SummarySection, type SummaryWindow } from './summary.ts';
@@ -1484,6 +1485,36 @@ export class Core {
     }
   }
 
+  /** The saved file's graph as it reads, unchecked; none without a file. */
+  private savedGraph(): unknown {
+    const r = this.o.graphFile?.read();
+    return r !== undefined && r.exists && 'raw' in r ? r.raw : undefined;
+  }
+
+  /** The sensitive config keys of a plugin's nodes (D124), by its id. */
+  private sensitiveKeys = (plugin: string): readonly string[] => {
+    const p = this.plugins.find((x) => x.manifest.id === plugin);
+    if (p === undefined) return [];
+    try {
+      return parseManifest(p.manifest).configSensitive;
+    } catch {
+      return [];
+    }
+  };
+
+  /**
+   * A graph as it may leave the core (D124): every sensitive config value shown as set
+   * (`hideSensitive`), whatever its form. Every view of a graph goes through it.
+   */
+  hideSensitive<T>(raw: T): T {
+    return hideSensitive(raw, this.sensitiveKeys);
+  }
+
+  /** A graph to write to the file: its sensitive values sealed under bot_os_key (D124). */
+  sealSensitive<T>(raw: T): T {
+    return sealSensitive(raw, this.sensitiveKeys, this.sealer);
+  }
+
   /** Why the saved graph was not run at this start (§2.3); none when it was. */
   graphProblems(): GraphProblem[] {
     return structuredClone(this.refused);
@@ -1512,6 +1543,15 @@ export class Core {
       plugins.set(manifest.id, { plugin, manifest });
     }
     const manifests = new Map([...plugins].map(([id, p]) => [id, p.manifest]));
+    // Its sensitive values opened (D124): sealed ones with the key, the editor's HIDDEN ones from
+    // the saved file; one that cannot be is left out, with a warning.
+    const opened = openSensitive(
+      raw,
+      (plugin) => manifests.get(plugin)?.configSensitive ?? [],
+      this.sealer,
+      this.savedGraph()
+    );
+    raw = opened.raw;
     let resolved: ReturnType<typeof resolveGraph> | undefined;
     let ordered: ResolvedNode[];
     try {
@@ -1528,10 +1568,10 @@ export class Core {
       ordered = loadOrder(resolved.nodes);
     } catch (e) {
       if (e instanceof GraphError)
-        throw new StartError(
-          [...problems, ...e.problems].join('\n'),
-          e.warnings.length > 0 ? e.warnings : (resolved?.warnings ?? [])
-        );
+        throw new StartError([...problems, ...e.problems].join('\n'), [
+          ...opened.warnings,
+          ...(e.warnings.length > 0 ? e.warnings : (resolved?.warnings ?? [])),
+        ]);
       throw e;
     }
     if (this.o.allowArchived !== true)
@@ -1585,8 +1625,9 @@ export class Core {
       });
     }
     problems.push(...commandProblems([...entries.values()]));
-    if (problems.length > 0) throw new StartError(problems.join('\n'), resolved.warnings);
-    return { entries, graph: resolved.graph, bus, warnings: resolved.warnings };
+    const warnings = [...opened.warnings, ...resolved.warnings];
+    if (problems.length > 0) throw new StartError(problems.join('\n'), warnings);
+    return { entries, graph: resolved.graph, bus, warnings };
   }
 
   private async startOne(entry: Entry): Promise<void> {

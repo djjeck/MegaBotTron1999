@@ -17,7 +17,8 @@ event types, and its config's and settings' JSON Schemas), with the names of the
 never their values, and a connector's login from its node (`src/login.ts`, docs/bot-os.md D116: what
 it asks next, the owner's answers, `LoginNeeded` for a connector without credentials), whose
 credentials are sealed at rest under `bot_os_key` (`src/sealed-store.ts` and `Sealer` in
-`src/secrets.ts`, D123).
+`src/secrets.ts`, D123); a config key a plugin marks sensitive is sealed in the graph's file and
+hidden from every view of it (`src/sensitive.ts`, `hideSensitive`, D124).
 
 - `src/index.ts` is the public API (`@megabottron1999/core`); plugins import nothing else.
 - `src/devkit.ts`: a core on a virtual clock with fake connectors, for tests and simulators.

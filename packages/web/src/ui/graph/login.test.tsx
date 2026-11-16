@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LoginState, NodeView } from '#src/ui/api.ts';
 import { ConnectorLogin, QrCode } from './ConnectorLogin.tsx';
 import { NodeDetails } from './NodeDetails.tsx';
+import { SensitiveField } from './SensitiveField.tsx';
 
 afterEach(() => {
   cleanup();
@@ -222,5 +223,73 @@ describe('a Telegram-like connector’s panel, as a first setup sees it (D122)',
     cleanup();
     panel({ state: 'closed', phase: 'closed' });
     expect(screen.queryByRole('note')).toBeNull();
+  });
+});
+
+describe('a sensitive config field (D124)', () => {
+  it('says whether it is set, never shows it, and replaces or clears it', () => {
+    const set = vi.fn();
+    const { rerender } = render(
+      <SensitiveField name="token" value={{ $sensitive: 'set' }} set={set} />
+    );
+    expect(screen.getByLabelText('token state').textContent).toBe('set');
+    expect(screen.queryByLabelText('token')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Replace' }));
+    const input = screen.getByLabelText('token') as HTMLInputElement;
+    expect(input.type).toBe('password');
+    expect(input.value).toBe('');
+    fireEvent.change(input, { target: { value: 'typed-anew' } });
+    expect(set).toHaveBeenLastCalledWith('typed-anew');
+    rerender(<SensitiveField name="token" value="typed-anew" set={set} />);
+    expect(screen.getByLabelText('token state').textContent).toBe('set anew, saved with Apply');
+    fireEvent.change(screen.getByLabelText('token'), { target: { value: '' } });
+    expect(set).toHaveBeenLastCalledWith(undefined);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(set).toHaveBeenLastCalledWith(undefined);
+    rerender(<SensitiveField name="token" value={undefined} set={set} />);
+    expect(screen.getByLabelText('token state').textContent).toBe('not set');
+    expect(screen.getByRole('button', { name: 'Set' })).toBeDefined();
+  });
+
+  it('is drawn in a node’s config for each key its plugin marks', () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => {}))
+    );
+    const change = vi.fn();
+    render(
+      <NodeDetails
+        node={{ id: 'k', plugin: 'keeper', config: { token: { $sensitive: 'set' } } }}
+        view={{
+          id: 'k',
+          plugin: 'keeper',
+          version: '0.1.0',
+          description: 'keeps a token',
+          kinds: ['stats'],
+          configSchema: { type: 'object', properties: { token: { type: 'string' } } },
+          configSensitive: ['token'],
+          inputs: {},
+          outputs: {},
+          interface: { reads: [], actions: [], commands: [] },
+          secrets: [],
+          configSecrets: [],
+          events: [],
+        }}
+        problems={[]}
+        configErrors={{}}
+        settingErrors={{}}
+        secretNames={[]}
+        groups={[]}
+        change={change}
+        remove={() => {}}
+        kill={() => {}}
+        cleared={false}
+        clearStop={() => {}}
+      />
+    );
+    expect(screen.getByLabelText('token state').textContent).toBe('set');
+    expect(document.body.textContent).not.toContain('$sensitive');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(change).toHaveBeenCalledWith({ config: {} });
   });
 });

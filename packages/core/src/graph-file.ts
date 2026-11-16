@@ -85,6 +85,10 @@ export interface GraphChecker {
    * config keys it changed are recorded, with who wrote it (bot-os.md D75).
    */
   written?(before: unknown, after: Graph, o: SaveBy & { source: string; version?: string }): void;
+  /** A graph as it may be shown: its sensitive config values hidden (bot-os.md D124). */
+  hideSensitive?<T>(raw: T): T;
+  /** A graph as it is written to the file: its sensitive config values sealed (D124). */
+  sealSensitive?<T>(raw: T): T;
 }
 
 /** Who writes the graph: the web UI's session, or the loopback's control API (bot-os.md D75). */
@@ -467,7 +471,11 @@ export function graphFileControls(
     const r = file.read();
     return r.exists && 'raw' in r ? r.raw : undefined;
   };
-  const textOf = (raw: unknown): string => graphText(printable(raw));
+  // Every graph shown goes through the core's one redaction of sensitive values (D124), and every
+  // graph written is sealed by it.
+  const hide = <T>(raw: T): T => (core.hideSensitive === undefined ? raw : core.hideSensitive(raw));
+  const seal = <T>(raw: T): T => (core.sealSensitive === undefined ? raw : core.sealSensitive(raw));
+  const textOf = (raw: unknown): string => graphText(printable(hide(raw)));
   const version = (id: string): GraphVersion => {
     const v = file.history.get(id);
     if (v === undefined) throw new GraphFileError(`there is no version ${id}`, [], 404);
@@ -476,7 +484,7 @@ export function graphFileControls(
   /** Who wrote it, and what it changed of the audited keys (D75), recorded once written. */
   const written = (before: unknown, after: Graph, source: string, by: string | undefined): void => {
     const version = file.history.latest()?.id;
-    core.written?.(before, after, {
+    core.written?.(hide(before), hide(after), {
       source,
       ...(by === undefined ? {} : { by }),
       ...(version === undefined ? {} : { version }),
@@ -490,9 +498,9 @@ export function graphFileControls(
       throw new GraphFileError(`version ${id} is refused by the check`, checked.problems, 409);
     const graph = checked.graph;
     const now = saved();
-    if (now !== undefined && sameGraph(now, graph))
+    if (now !== undefined && sameGraph(now, seal(graph)))
       throw new GraphFileError(`version ${id} is the current graph already`, [], 409);
-    file.save(graph, { source: 'rollback', restores: id });
+    file.save(seal(graph), { source: 'rollback', restores: id });
     written(now ?? EMPTY, graph, 'rollback', by);
     return redact({
       rolledBack: true,
@@ -511,7 +519,7 @@ export function graphFileControls(
         : checked === undefined || !checked.ok || !sameGraph(checked.graph, running);
       return redact({
         exists: r.exists,
-        ...(r.exists && 'raw' in r ? { graph: r.raw, text: textOf(r.raw) } : {}),
+        ...(r.exists && 'raw' in r ? { graph: hide(r.raw), text: textOf(r.raw) } : {}),
         ...(r.exists && 'error' in r ? { error: r.error } : {}),
         ...(checked !== undefined && !checked.ok ? { problems: checked.problems } : {}),
         ...((checked?.warnings?.length ?? 0) > 0 ? { warnings: checked?.warnings } : {}),
@@ -524,8 +532,8 @@ export function graphFileControls(
         ok: checked.ok,
         problems: checked.ok ? [] : checked.problems,
         warnings: checked.warnings ?? [],
-        diff: graphDiff(saved() ?? EMPTY, raw),
-        text: checked.ok ? graphText(checked.graph) : textOf(raw),
+        diff: graphDiff(hide(saved() ?? EMPTY), hide(raw)),
+        text: checked.ok ? graphText(hide(checked.graph)) : textOf(raw),
         // The nodes whose ports their config declares (D74), drawn as the draft declares them.
         ...(core.nodeViews === undefined ? {} : { views: core.nodeViews(raw) }),
         // Each node's inputs as the core resolves them from its config, defaults included (#6).
@@ -536,7 +544,7 @@ export function graphFileControls(
       const checked = core.check(raw);
       if (!checked.ok) throw new GraphFileError('the graph is refused', checked.problems);
       const before = saved() ?? EMPTY;
-      const changed = file.save(checked.graph);
+      const changed = file.save(seal(checked.graph));
       if (changed) written(before, checked.graph, 'save', by);
       return {
         saved: changed,
@@ -574,9 +582,9 @@ export function graphFileControls(
       const [before, after] = [textOf(now), textOf(then)];
       return redact({
         ...v,
-        graph: then,
+        graph: hide(then),
         current: file.current()?.id === id,
-        diff: graphDiff(now, then),
+        diff: graphDiff(hide(now), hide(then)),
         text: after,
         currentText: before,
         lines: lineDiff(before, after),

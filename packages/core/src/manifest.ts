@@ -102,6 +102,12 @@ export const manifestSchema = z
      */
     configSecrets: z.array(z.string().min(1)).default([]),
     /**
+     * The keys of its `config` whose values are sensitive (docs/bot-os-api.md §2.1, bot-os.md
+     * D124): sealed in the graph's file and its history under `bot_os_key`, opened for the running
+     * node only, never shown back (the editor writes them, and says whether they are set).
+     */
+    configSensitive: z.array(z.string().min(1)).default([]),
+    /**
      * A connector that logs in from its node (docs/bot-os-api.md §4.5, bot-os.md D116): its
      * instance offers a `login` and keeps the credentials in its store, not in Docker secrets
      * (D118); without them it runs, needing a login.

@@ -56,6 +56,7 @@ import { ExportDialog } from './script/ExportDialog.tsx';
 import { ScriptEditor } from './script/ScriptEditor.tsx';
 import { ScriptPorts } from './script/ScriptPorts.tsx';
 import { scriptApi } from './script/types.ts';
+import { SensitiveField } from './SensitiveField.tsx';
 import { signature } from './signature.ts';
 import { NodeState } from './StateViewer.tsx';
 import { CHATS_KEY, MonitoredChats } from './Surfaces.tsx';
@@ -954,12 +955,21 @@ export function NodeDetails(props: {
             secretNames={props.secretNames}
             errors={props.configErrors}
             {...(connector ? { folded: CONNECTOR_TUNING } : {})}
-            custom={chatControls(
-              node.id,
-              view.configChats ?? [],
-              view.configSchema,
-              props.edges ?? []
-            )}
+            custom={{
+              ...chatControls(
+                node.id,
+                view.configChats ?? [],
+                view.configSchema,
+                props.edges ?? []
+              ),
+              // A sensitive value is never shown back: set or not, replaced or cleared (D124).
+              ...Object.fromEntries(
+                (view.configSensitive ?? []).map((key): [string, CustomControl] => [
+                  key,
+                  (value, set) => <SensitiveField name={key} value={value} set={set} />,
+                ])
+              ),
+            }}
           />
         )}
         {picked === undefined ? null : (

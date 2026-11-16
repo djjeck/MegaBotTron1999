@@ -87,13 +87,14 @@ with its own authentication, rather than publishing the port.
   `POST /restart`, which stops the instance, its state kept, and exits for Docker to start it again.
 - **Secrets** are files under `/run/secrets`, never environment variables: `web_ui_password` (the
   web UI's login; without it there is no UI at all), `bot_os_key` (to encrypt what the instance
-  keeps at rest: the core's own secrets and the connectors' logins, docs/bot-os.md D123; without it,
-  a Telegram login is kept in clear and its node says so; keep it, as a changed key makes them
-  unreadable and each connector then needs a login again), and each connector's own (`znc_password`,
-  `anthropic_api_key`; the Telegram connectors take none: they log in from their node, below).
-  Optional, `github_token` (a GitHub token, to raise the API's limit of 60 requests an hour for
-  installing and updating modules from GitHub links; `GITHUB_TOKEN` in the environment is read too,
-  though the secret is the safer place), and a token for each self-hosted Git server (below).
+  keeps at rest: the core's own secrets, the connectors' logins and the config fields a plugin marks
+  sensitive, docs/bot-os.md D123, D124; without it, a Telegram login is kept in clear and its node
+  says so; keep it, as a changed key makes them unreadable and each connector then needs a login
+  again), and each connector's own (`znc_password`, `anthropic_api_key`; the Telegram connectors
+  take none: they log in from their node, below). Optional, `github_token` (a GitHub token, to raise
+  the API's limit of 60 requests an hour for installing and updating modules from GitHub links;
+  `GITHUB_TOKEN` in the environment is read too, though the secret is the safer place), and a token
+  for each self-hosted Git server (below).
 - **Telegram, logged in from the editor** ([docs/bot-os.md](docs/bot-os.md) D116, D118): a
   `telegram-bot` or `telegram-user` node takes no Docker secret. Add it, **Apply**, and its card
   says `needs login`; open its panel, and under **Login**: for a bot, paste the token @BotFather

@@ -392,6 +392,15 @@ export {
   SecretStore,
 } from './secrets.ts';
 export {
+  HIDDEN,
+  hideSensitive,
+  isHidden,
+  openSensitive,
+  sealSensitive,
+  SENSITIVE_TEXT,
+  type SensitiveKeys,
+} from './sensitive.ts';
+export {
   PluginSettings,
   type SettingsBackend,
   SettingsRegistry,

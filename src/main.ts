@@ -169,7 +169,8 @@ gitModules.start();
 const controlApi = controlHandler({
   controls: core.controls,
   settings: core.settings,
-  graph: () => secrets.redactDeep(core.graph()),
+  // Its sensitive config values hidden (D124), its secrets redacted.
+  graph: () => secrets.redactDeep(core.hideSensitive(core.graph())),
   records: (from, to) => events.recordsSince(from, to),
   available: () => core.available(),
   // The names of the Docker secrets a connector's config may name, never their values; the UI's

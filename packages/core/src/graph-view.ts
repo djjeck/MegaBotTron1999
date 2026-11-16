@@ -11,6 +11,16 @@ import path from 'node:path';
 import { z } from 'zod';
 import { type Graph, type GraphEdge, networkOf, nodeAccount, nodeInputs } from './graph.ts';
 import { type Manifest } from './manifest.ts';
+import { HIDDEN, isSensitiveForm, SENSITIVE_TEXT } from './sensitive.ts';
+
+/** A config with its sensitive keys' values shown as set (D124). */
+const hideConfig = (
+  config: Record<string, unknown>,
+  keys: readonly string[]
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(config).map(([k, v]) => [k, keys.includes(k) ? { ...HIDDEN } : v])
+  );
 import {
   describePort,
   type InputPort,
@@ -80,8 +90,13 @@ export function graphText(graph: Graph): string {
       ['config', n.config],
       ['settings', n.settings],
     ] as const)
-      for (const key of Object.keys(values ?? {}).sort(byText))
-        lines.push(`    ${part}.${key}: ${stableJson(values?.[key])}`);
+      for (const key of Object.keys(values ?? {}).sort(byText)) {
+        const value = values?.[key];
+        // A sensitive value (D124) prints as such, whatever its form.
+        lines.push(
+          `    ${part}.${key}: ${isSensitiveForm(value) ? SENSITIVE_TEXT : stableJson(value)}`
+        );
+      }
   }
   lines.push('edges:');
   const edges = graph.edges.map((e) => {
@@ -303,6 +318,8 @@ export interface PluginView {
   /** A connector to a model, which bills by the call (D117): its node is marked with a `$`. */
   model?: boolean;
   configSecrets: string[];
+  /** The keys of its config whose values are never shown back (D124): written, said set or not. */
+  configSensitive?: string[];
   /** The event types it registers (§4.4). */
   events: string[];
   /** Where its nodes declare their own inputs in their config, and of which types (D80). */
@@ -470,6 +487,7 @@ export function describePlugin(m: Manifest): PluginView {
     },
     secrets: [...m.secrets],
     configSecrets: [...m.configSecrets],
+    ...(m.configSensitive.length === 0 ? {} : { configSensitive: [...m.configSensitive] }),
     ...(m.login ? { login: true } : {}),
     ...(m.model ? { model: true } : {}),
     events: Object.keys(m.events).sort(),
@@ -516,7 +534,8 @@ export function describeNodes(
       ...plugin,
       inputs: describeInputs(m, resolved),
       ...(account === undefined ? {} : { account }),
-      ...(node?.config === undefined ? {} : { config: node.config }),
+      // Its sensitive values shown as set, never as they are (D124).
+      ...(node?.config === undefined ? {} : { config: hideConfig(node.config, m.configSensitive) }),
     };
   });
 }
