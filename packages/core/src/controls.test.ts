@@ -803,6 +803,22 @@ describe('controlServer', () => {
     expect((await core.controls.surfaces('bot'))?.peers).toBeUndefined();
     await core.stop();
   });
+
+  it('leaves its own account out of its peers’ chats: a chat with itself is none', async () => {
+    const owner = { id: '42', title: 'Ada', kind: 'private' as const, aliases: ['@Ada_X'] };
+    const hall = { id: '-1002', title: 'Guild Hall', kind: 'group' as const };
+    const bot = new FakeConnector({ account: 'tg:bot', surfaces: [owner, hall] });
+    const user = new FakeConnector({ account: 'tg:user', self: 'ada_x', surfaces: [] });
+    const core = new Core({ clock: new VirtualClock(1000) });
+    core.register(fakeConnectorPlugin('bot', bot), fakeConnectorPlugin('user', user));
+    core.load();
+    await core.start();
+    for (const c of [bot, user]) c.open();
+    expect((await core.controls.surfaces('user', {}, true))?.peers).toEqual([
+      { connector: 'bot', surfaces: [hall] },
+    ]);
+    await core.stop();
+  });
 });
 
 describe('reads with an input, and a node’s state for the viewer (bot-os.md D72)', () => {

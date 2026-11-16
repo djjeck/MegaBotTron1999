@@ -1647,13 +1647,13 @@ the accounts counted by state); `GET /accounts`;
 `{ running, listed, surfaces, peers? }`, `running` false until it runs, `listed` false for a
 connector that cannot list its chats, 409 with why when it cannot tell now, such as not connected,
 404 for a node that is not a connector; with `peers=1`, `peers`: for each other running connector of
-its network, the chats it lists for the same query that this one does not by any name, bot-os.md
-D96); `GET /drift`; `GET /events?limit=100&type=<prefix>&hours=24` (the event log's latest records,
-newest first); `POST /off`, `/on`, `/kill`; `GET` and `POST /settings`; `GET /graph` and
-`GET /graph/view` (§4.12); `POST /plugins/<id>/kill` and `POST /plugins/<id>/clear-stop` (409 with
-why when refused, such as `actor is not stopped`); `GET /plugins/<id>/state/<name>?<field>=<value>`
-(a read, its input the query's fields, §2); `GET /plugins/<id>/queue` (what waits in a connector's
-queue, D73:
+its network, the chats it lists for the same query that this one does not by any name, nor its own
+account's chat (a chat with itself), bot-os.md D96); `GET /drift`;
+`GET /events?limit=100&type=<prefix>&hours=24` (the event log's latest records, newest first);
+`POST /off`, `/on`, `/kill`; `GET` and `POST /settings`; `GET /graph` and `GET /graph/view` (§4.12);
+`POST /plugins/<id>/kill` and `POST /plugins/<id>/clear-stop` (409 with why when refused, such as
+`actor is not stopped`); `GET /plugins/<id>/state/<name>?<field>=<value>` (a read, its input the
+query's fields, §2); `GET /plugins/<id>/queue` (what waits in a connector's queue, D73:
 `{ account, entries: [{ chat, text, command, queuedAt, waitingUntil, intervalS, nodes }], coalesced }`,
 each node with its `origin` and its `cancel`, `{ on?, when?, test?, deadline? }`, and `coalesced`
 the sends merged since the start, `{ count, pairs: [{ nodes: [a, b], count }] }`; 404 for a node

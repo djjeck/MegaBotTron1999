@@ -121,6 +121,7 @@ export interface Connection {
  * A connector's surfaces, as the owner picks from them (bot-os.md D63): `running` false while it
  * does not run (apply first), `listed` false for a connector that cannot list its chats. With
  * `peers` asked (D96), the chats the other running connectors of its network list that it does not,
+ * its own account's chat left out,
  * by connector: a bot cannot list its chats, so the owner's account names those it may not reach.
  */
 export interface SurfacesView {
@@ -326,8 +327,14 @@ export class Controls {
     const surfaces = await c.surfaces(query);
     if (!peers) return { running: true, listed: true, surfaces };
     // Every name the connector lists a chat by: a peer's chat it lists is not the peer's to add.
+    // Nor is its own account's (a bot's private chat with the owner, seen from the owner's account:
+    // a chat with itself), by its name as itself, bare or as a `@username`.
+    const me = c.self();
     const names = new Set(
-      surfaces.flatMap((s) => [s.id, ...(s.aliases ?? [])]).map((n) => n.toLowerCase())
+      [
+        ...surfaces.flatMap((s) => [s.id, ...(s.aliases ?? [])]),
+        ...(me === undefined ? [] : [me, me.startsWith('@') ? me : `@${me}`]),
+      ].map((n) => n.toLowerCase())
     );
     const others = this.host
       .nodes()
