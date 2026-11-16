@@ -7,10 +7,7 @@ import {
   CONNECT_WAIT_MS,
   DEFAULT_UNANSWERED_AT,
   FloodWait,
-  isMode,
   type Limits,
-  Modes,
-  modesIn,
   Outbox,
   type OutboxHandle,
   type QueuedSend,
@@ -18,7 +15,6 @@ import {
   type SendRecord,
   unreachableHint,
 } from './outbox.ts';
-import { Stores } from './store.ts';
 
 /** A connector whose sends answer later, as Telegram's do. */
 class LaterConnector extends ConnectorBase implements Connector {
@@ -72,60 +68,59 @@ class FakeConnector extends ConnectorBase implements Connector {
   }
 }
 
+/**
+ * Each sender's policy, as the core's edges and stops make it, changed as a test goes: anything,
+ * live (none set); a dry run to `#c` and `#d`; or held, with why.
+ */
+class Senders {
+  private readonly of = new Map<string, SenderPolicy>();
+  private readonly base: SenderPolicy;
+  constructor(base: SenderPolicy = {}) {
+    this.base = base;
+  }
+  live(plugin: string): void {
+    this.of.delete(plugin);
+  }
+  dryRun(plugin: string): void {
+    this.of.set(plugin, { reach: { sends: ['#c', '#d'], dryRun: true } });
+  }
+  hold(plugin: string, why: string): void {
+    this.of.set(plugin, { ...this.base, held: why });
+  }
+  readonly policy = (plugin: string): SenderPolicy => this.of.get(plugin) ?? this.base;
+}
+
 function setup(o: { policy?: SenderPolicy; limits?: boolean } = {}) {
   const clock = new VirtualClock(0);
   const connector = new FakeConnector('test:me', 'test');
-  const modes = new Modes();
+  const senders = new Senders(o.policy);
   const records: SendRecord[] = [];
   const outbox = new Outbox({
     account: 'test:me',
     connector: () => connector,
     ...(o.limits === false ? {} : { limits: () => ({ minIntervalMs: 3000, maxPerHour: 3 }) }),
     clock,
-    modes,
-    ...(o.policy === undefined ? {} : { policy: () => o.policy as SenderPolicy }),
+    policy: senders.policy,
     record: (r) => (r.type === 'core.send' ? records.push(r) : undefined),
   });
-  modes.set('p', 'live');
-  return { clock, connector, modes, records, outbox, p: outbox.as('p') };
+  return { clock, connector, senders, records, outbox, p: outbox.as('p') };
 }
-
-describe('Modes', () => {
-  it('start read-only, are kept, and only the owner raises them', () => {
-    const stores = new Stores();
-    const modes = new Modes(modesIn(stores.open('core')));
-    const changes: string[] = [];
-    modes.onChange((p, m) => changes.push(`${p} ${m}`));
-    expect(modes.get('p')).toBe('read-only');
-    expect(modes.set('p', 'live')).toBeUndefined();
-    expect(modes.set('p', 'dry-run', 'safety')).toBe('only the owner raises a mode');
-    expect(modes.set('p', 'read-only', 'safety')).toBeUndefined();
-    expect(modes.set('p', 'on' as never)).toBe('not a mode: on');
-    modes.set('q', 'dry-run');
-    expect(new Modes(modesIn(stores.open('core'))).get('q')).toBe('dry-run');
-    expect(new Modes(modesIn(stores.open('core'))).get('p')).toBe('read-only');
-    expect(changes).toEqual(['p live', 'p read-only', 'q dry-run']);
-    expect([isMode('live'), isMode('on')]).toEqual([true, false]);
-    expect([modes.has('q'), modes.has('nobody')]).toEqual([true, false]);
-  });
-});
 
 describe('deliver', () => {
   function later() {
     const clock = new VirtualClock(0);
     const connector = new LaterConnector();
-    const modes = new Modes();
+    const senders = new Senders();
     const records: SendRecord[] = [];
     const outbox = new Outbox({
       account: 'test:me',
       connector: () => connector,
       limits: () => ({ minIntervalMs: 3000, maxPerHour: 3 }),
       clock,
-      modes,
+      policy: senders.policy,
       record: (r) => (r.type === 'core.send' ? records.push(r) : undefined),
     });
-    modes.set('p', 'live');
-    return { clock, connector, modes, records, p: outbox.as('p') };
+    return { clock, connector, senders, records, p: outbox.as('p') };
   }
 
   it("waits for the network's answer, with the message's id, and logs it once", async () => {
@@ -185,12 +180,12 @@ describe('deliver', () => {
   });
 
   it('refuses as send does, and dry runs stop before the network', async () => {
-    const { connector, modes, p } = later();
-    modes.set('p', 'read-only');
-    await expect(p.deliver('#c', '/a')).resolves.toMatchObject({ reason: 'read-only' });
-    modes.set('p', 'dry-run');
+    const { connector, senders, p } = later();
+    senders.hold('p', 'stopped: drift');
+    await expect(p.deliver('#c', '/a')).resolves.toMatchObject({ reason: 'stopped: drift' });
+    senders.dryRun('p');
     await expect(p.deliver('#c', '/a')).resolves.toEqual({ text: '/a', outcome: 'dry-run' });
-    modes.set('p', 'live');
+    senders.live('p');
     connector.down();
     await expect(p.deliver('#d', '/a')).resolves.toMatchObject({ reason: 'too soon' });
   });
@@ -234,7 +229,7 @@ describe('Outbox.send', () => {
     expect(p.mode()).toBe('live');
   });
 
-  it('checks in order: the caller, the reach, the mode, a pause', () => {
+  it('checks in order: the caller, the reach, a pause', () => {
     const reach = { sends: ['#c'], commands: ['!roll'] };
     const a = setup({ policy: { reach } });
     expect(a.p.send('#c', '!roll x', { refuse: 'not a game command' }).reason).toBe(
@@ -242,21 +237,20 @@ describe('Outbox.send', () => {
     );
     expect(a.p.send('#other', '!roll x').reason).toBe('p does not send to #other');
     expect(a.p.send('#c', '!nuke x').reason).toBe("!nuke is not among p's commands");
-    a.modes.set('p', 'read-only');
-    expect(a.p.send('#c', '!roll x').reason).toBe('read-only');
-    const b = setup({ policy: { reach: { sends: ['#c'] }, held: 'stopped: drift' } });
-    expect(b.p.send('#c', 'anything').reason).toBe('stopped: drift');
-    expect(a.records.map((r) => r.origin)).toEqual(['p', 'p', 'p', 'p']);
+    a.senders.hold('p', 'stopped: drift');
+    expect(a.p.send('#c', '!roll x').reason).toBe('stopped: drift');
+    expect(a.p.send('#other', '!roll x').reason).toBe('p does not send to #other');
+    expect(a.records.map((r) => r.origin)).toEqual(['p', 'p', 'p', 'p', 'p']);
     expect(a.connector.sent).toEqual([]);
   });
 
   it('keeps the account’s interval and hourly limit, dry runs counted, refusals not', () => {
-    const { p, clock, modes, connector } = setup();
-    modes.set('p', 'dry-run');
+    const { p, clock, senders, connector } = setup();
+    senders.dryRun('p');
     expect(p.send('#c', '!a').outcome).toBe('dry-run');
     clock.advanceTo(2999);
     expect(p.send('#c', '!a').reason).toBe('too soon');
-    modes.set('p', 'live');
+    senders.live('p');
     clock.advanceTo(3000);
     connector.up = false;
     expect(p.send('#c', '!a').reason).toBe('not connected');
@@ -285,13 +279,10 @@ describe('Outbox.send', () => {
   });
 
   it('refuses without a connector', () => {
-    const modes = new Modes();
-    modes.set('p', 'live');
     const outbox = new Outbox({
       account: 'a:b',
       connector: () => undefined,
       clock: new VirtualClock(),
-      modes,
     });
     expect(outbox.send('p', '#c', 'x').reason).toBe('not connected');
   });
@@ -299,12 +290,10 @@ describe('Outbox.send', () => {
 
 describe('Outbox.enqueue', () => {
   it('hands the connector the buttons of a send, and never coalesces one that has them', async () => {
-    const { connector, outbox, modes, clock } = setup();
+    const { connector, outbox, clock } = setup();
     const buttons = [[{ label: 'Go', action: '/go' }]];
     const q = outbox.as('q');
     const r = outbox.as('r');
-    modes.set('q', 'live');
-    modes.set('r', 'live');
     // The account's pace holds the first while the others queue.
     const sends = [
       q.enqueue('#c', 'hold'),
@@ -351,10 +340,10 @@ describe('Outbox.enqueue', () => {
   });
 
   it('refuses at once what can never go now, and waits out a flood', async () => {
-    const { p, clock, connector, modes } = setup({ limits: false });
-    modes.set('p', 'read-only');
-    expect((await p.enqueue('#c', '!a')).reason).toBe('read-only');
-    modes.set('p', 'live');
+    const { p, clock, connector, senders } = setup({ limits: false });
+    senders.hold('p', 'stopped: drift');
+    expect((await p.enqueue('#c', '!a')).reason).toBe('stopped: drift');
+    senders.live('p');
     connector.flood = 5000;
     expect((await p.enqueue('#c', '!a')).reason).toBe('flood wait of 5 s');
     const later = p.enqueue('#c', '!b');
@@ -638,19 +627,15 @@ describe('a send the network refuses (D95)', () => {
     const connector = new LaterConnector();
     const records: { type: string }[] = [];
     const notices: Omit<Notice, 't'>[] = [];
-    const modes = new Modes();
     const outbox = new Outbox({
       account: 'test:me',
       connector: () => connector,
       clock,
-      modes,
       record: (r) => records.push(r),
       notice: (n) => notices.push(n),
       quiet: (plugin) => o.quiet === true && plugin === 'p',
       title: (chat) => (chat === '42' ? 'Alice' : undefined),
     });
-    modes.set('p', 'live');
-    modes.set('q', 'live');
     return { clock, connector, records, notices, outbox };
   }
   const fail = (reason: string) => () => Promise.reject(new Error(reason));
@@ -869,25 +854,24 @@ describe('a queued send while the account connects (D108)', () => {
     const clock = new VirtualClock(0);
     const connector = new LaterConnector();
     let down = false;
-    const modes = new Modes();
+    const senders = new Senders();
     const records: SendRecord[] = [];
     const outbox = new Outbox({
       account: 'test:me',
       connector: () => connector,
       limits: () => ({ minIntervalMs: 3000 }),
       clock,
-      modes,
+      policy: senders.policy,
       record: (r) => (r.type === 'core.send' ? records.push(r) : undefined),
       connection: () =>
         down ? 'down' : connector.status().state === 'connected' ? 'connected' : 'connecting',
     });
-    modes.set('p', 'live');
     connector.down();
     const flush = () => new Promise((r) => setImmediate(r));
     return {
       clock,
       connector,
-      modes,
+      senders,
       records,
       p: outbox.as('p'),
       flush,
@@ -918,7 +902,7 @@ describe('a queued send while the account connects (D108)', () => {
   });
 
   it('expires at its deadline, else is refused after the wait; a dry run does not wait', async () => {
-    const { clock, modes, p, flush } = connecting();
+    const { clock, senders, p, flush } = connecting();
     const timed = p.enqueue('#c', '/a', { cancel: { withinMs: 10_000 } });
     const untimed = p.enqueue('#c', '/b');
     clock.advance(10_000);
@@ -930,7 +914,7 @@ describe('a queued send while the account connects (D108)', () => {
       outcome: 'refused',
       reason: 'not connected: waited 5 min for the connection',
     });
-    modes.set('p', 'dry-run');
+    senders.dryRun('p');
     await expect(p.enqueue('#c', '/c')).resolves.toMatchObject({ outcome: 'dry-run' });
   });
 

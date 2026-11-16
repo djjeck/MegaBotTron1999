@@ -17,7 +17,7 @@ import { type DriftReporter } from './drift.ts';
 import { type LogCursor, type LogEntry, type LogTail } from './event-log.ts';
 import { type ManifestInput } from './manifest.ts';
 import { type NoticesHandle } from './notices.ts';
-import { type Mode, type OutboxHandle } from './outbox.ts';
+import { type OutboxHandle } from './outbox.ts';
 import { type Render } from './render.ts';
 import { type Scheduler } from './scheduler.ts';
 import { type SettingValue } from './settings.ts';
@@ -118,14 +118,6 @@ export interface PluginContext {
    */
   readonly summary?: SummaryHandle;
   /**
-   * Its mode, as module API 1 knew it (deprecated, bot-os.md D64): derived, `dry-run` when every
-   * chat-out edge of its node is a dry run (or it has none), `live` otherwise. `set('read-only')`,
-   * the owner's or a safety stop, stops the node (`stop`); `set('dry-run' | 'live')` is refused
-   * and logged, since a node's state and its edges' dry runs change only in the editor;
-   * `onChange` hears `read-only` when the node is stopped.
-   */
-  readonly mode: PluginMode;
-  /**
    * Stops its node (bot-os.md D64), its safety stop: its sends refused from now on, its `pause`
    * heard, and the stop kept in its instance across restarts, until the owner clears it in the
    * editor.
@@ -140,11 +132,6 @@ export interface PluginContext {
   fail(reason: string): void;
   /** Whether the owner turned the instance off (§4.11). */
   off(): boolean;
-  /**
-   * Module API 1 (deprecated, D64): refused and logged, false; a stop is cleared only by the owner,
-   * in the editor.
-   */
-  resume(): boolean;
   /** What `serialise` returned at the last stop, if anything (§3). */
   readonly restored?: unknown;
   /** The render service (§4.13): SVG to PNG. */
@@ -192,16 +179,6 @@ export interface EventQuery {
   all?: boolean;
 }
 
-/** A plugin's mode, as its context gives it (module API 1, deprecated, bot-os.md D64). */
-export interface PluginMode {
-  /** `dry-run` when every chat-out edge of its node is a dry run (or it has none), else `live`. */
-  get(): Mode;
-  /** `read-only` stops the node; another is refused, with why. */
-  set(mode: Mode, by?: 'owner' | 'safety'): string | undefined;
-  /** Hears `read-only` when the node is stopped. */
-  onChange(listener: (mode: Mode) => void): void;
-}
-
 /** A plugin's settings, as its context gives them. */
 export interface PluginSettingsHandle {
   /** The owner's values, as kept (a key never set has none: its default holds). */
@@ -236,8 +213,6 @@ export interface Instance {
    * are refused, and it is not started again until the owner clears the stop in the editor.
    */
   pause?(reason: string): void;
-  /** Module API 1 (deprecated, D64): never called, since a stop is cleared only by a restart. */
-  resume?(): void;
   /** A connector plugin's connector (§4.5): the core hands out handles to it. */
   readonly connector?: Connector;
   /** A connector's chat surface (§2, §4.11): the core serves it the commands. */

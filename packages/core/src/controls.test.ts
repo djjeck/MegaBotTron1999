@@ -46,7 +46,6 @@ function actor(seen: string[], grab: (ctx: PluginContext) => void = () => {}) {
     },
     create: (ctx) => {
       grab(ctx);
-      ctx.mode.onChange((m) => seen.push(`mode ${m}`));
       const values: Record<string, unknown> = { loud: false, level: 1 };
       return {
         settings: {
@@ -75,7 +74,6 @@ function actor(seen: string[], grab: (ctx: PluginContext) => void = () => {}) {
         on: () => 'actor back',
         kill: () => ({ text: 'actor stopped', buttons: [[{ label: 'On', action: 'master:on' }]] }),
         pause: (why) => seen.push(`pause ${why}`),
-        resume: () => seen.push('resume'),
       };
     },
   });
@@ -294,7 +292,6 @@ describe('a node’s kill (D44) and stop (D64)', () => {
     await core.start();
     expect(core.controls.killNode('actor')).toEqual({ result: 'actor killed: actor stopped' });
     expect(seen).toContain(`pause ${KILLED}`);
-    expect(seen).toContain('mode read-only');
     expect(core.controls.status().plugins[1]).toMatchObject({
       id: 'actor',
       state: 'stopped',
@@ -312,8 +309,6 @@ describe('a node’s kill (D44) and stop (D64)', () => {
         reason: KILLED,
       })
     );
-    // Its own resume no longer starts it: only the owner, in the editor.
-    expect(ctx().resume()).toBe(false);
     expect(core.controls.status().plugins[1]).toMatchObject({ state: 'stopped' });
     // Kept across a restart: not started again.
     await core.stop();
@@ -622,10 +617,6 @@ describe('controlServer', () => {
         { id: 'broken' },
       ],
     });
-    expect(await call('/plugins/actor/mode', { mode: 'dry-run' })).toEqual([
-      404,
-      { error: 'not found' },
-    ]);
     expect(await call('/plugins/actor/clear-stop', {})).toEqual([
       409,
       { error: 'actor is not stopped' },

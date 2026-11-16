@@ -37,7 +37,6 @@
  */
 import { z } from 'zod';
 import { ACCOUNT_ID, type Manifest, parseManifest, PLUGIN_ID } from './manifest.ts';
-import { isMode } from './outbox.ts';
 import {
   type ChatBinding,
   describePort,
@@ -456,7 +455,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  * The other edges and the nodes are kept as they are. Nothing is checked: `resolveGraph` does.
  */
 export function upgradeGraph(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unknown {
-  return dropInputs(moveChats(foldModes(upgradeChats(raw, plugins)), plugins), plugins);
+  return dropInputs(moveChats(upgradeChats(raw, plugins), plugins), plugins);
 }
 
 /**
@@ -530,45 +529,6 @@ export function moveChats(raw: unknown, plugins: ReadonlyMap<string, Manifest>):
     return Object.keys(rest).length === 0 ? node : { ...node, config: rest };
   });
   return moved ? { ...raw, nodes, edges } : raw;
-}
-
-/**
- * A graph whose nodes carry a `mode` (the mode a fresh instance started in, before bot-os.md D64)
- * with it folded into their chat-out edges: a node's `dry-run` or `read-only` makes each chat-out
- * edge from it a `dryRun`, a `live` leaves them live; the `mode` is dropped. Any other graph as it
- * is. The instances' own kept modes are the first start's to fold (`Core`).
- */
-export function foldModes(raw: unknown): unknown {
-  if (!isRecord(raw) || !Array.isArray(raw['nodes'])) return raw;
-  const nodes = raw['nodes'] as unknown[];
-  const modes = new Map<string, unknown>();
-  for (const n of nodes)
-    if (isRecord(n) && typeof n['id'] === 'string' && 'mode' in n) modes.set(n['id'], n['mode']);
-  if (modes.size === 0) return raw;
-  const dry = (id: string): boolean => {
-    const mode = modes.get(id);
-    return isMode(mode) && mode !== 'live';
-  };
-  return {
-    ...raw,
-    nodes: nodes.map((n) => {
-      if (!isRecord(n) || !('mode' in n)) return n;
-      const { mode: _, ...rest } = n;
-      return rest;
-    }),
-    ...(Array.isArray(raw['edges'])
-      ? {
-          edges: (raw['edges'] as unknown[]).map((e) =>
-            isRecord(e) &&
-            e['type'] === 'chat-out' &&
-            typeof e['from'] === 'string' &&
-            dry(e['from'].split('.')[0] as string)
-              ? { ...e, dryRun: true }
-              : e
-          ),
-        }
-      : {}),
-  };
 }
 
 /** A graph of version 1, its chat edges split (`upgradeGraph`); any other as it is. */

@@ -1,8 +1,6 @@
 /**
  * A node's states (bot-os.md D64): disabled in the graph, stopped by exception and kept in its
- * instance, inactive by the chain of required ports; dry runs on chat-out edges; and module API 1's
- * `ctx.mode`, derived, as a plugin that sets its own mode from its owner commands and its safety
- * stops uses it.
+ * instance, inactive by the chain of required ports; and dry runs on chat-out edges.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -12,10 +10,9 @@ import { z } from 'zod';
 import { VirtualClock } from './clock.ts';
 import { Core, STOP_DOC } from './core.ts';
 import { FakeConnector, fakeConnectorPlugin } from './devkit.ts';
-import { downText, foldModes, type GraphInput, nodeStates, resolveGraph } from './graph.ts';
+import { downText, type GraphInput, nodeStates, resolveGraph } from './graph.ts';
 import { graphText } from './graph-view.ts';
 import { parseManifest } from './manifest.ts';
-import { type Mode, Modes, type OutboxHandle } from './outbox.ts';
 import { definePlugin, type PluginContext } from './plugin.ts';
 
 let dir: string;
@@ -233,7 +230,6 @@ describe('a dry-run edge (D64)', () => {
     expect(ctx.outbox('loud').mode()).toBe('live');
     // By the connector's id, every edge to it: a chat a live one sends to goes for real.
     expect(ctx.outbox('tg').send('#lobby', 'hey')).toEqual({ text: 'hey', outcome: 'sent' });
-    expect(ctx.mode.get()).toBe('live');
     await core.stop();
     expect(tg.sent).toEqual([
       { chat: '#news', text: 'hi' },
@@ -249,7 +245,6 @@ describe('a dry-run edge (D64)', () => {
     const c = all.seen[0] as PluginContext;
     expect(c.outbox('loud').send('#news', 'hi')).toEqual({ text: 'hi', outcome: 'dry-run' });
     expect(c.outbox('loud').mode()).toBe('dry-run');
-    expect(c.mode.get()).toBe('dry-run');
     expect(all.tg.sent).toEqual([]);
     await all.core.stop();
   });
@@ -515,201 +510,5 @@ describe('a runtime stop’s cascade (#29)', () => {
       'fragile: warning: inactive: needs base (stopped)',
       'fragile: error: stop failed: stuck',
     ]);
-  });
-});
-
-/**
- * A plugin of module API 1 that keeps its commands' mode through `ctx.mode`, as a module's tactics
- * do: its owner commands set it (`owner`), its safety stops lower it (`safety`), through a `Modes`
- * look-alike over the context, and it reads its mode from its outbox handle.
- */
-function tactics(heard: string[], grab: (t: Tactics) => void) {
-  return definePlugin({
-    manifest: {
-      id: 'tactics',
-      version: '0.1.0',
-      kinds: ['actor'],
-      description: 'plays',
-      inputs: {
-        channel: { type: 'chat', bind: { node: 'tg', reads: ['#lobby'], sends: ['#lobby'] } },
-      },
-    },
-    create: (ctx) => {
-      const out: Tactics = {
-        handle: ctx.outbox('channel'),
-        modes: {
-          set: (_plugin: string, mode: Mode, by?: 'owner' | 'safety') => ctx.mode.set(mode, by),
-        },
-        ctx,
-      };
-      grab(out);
-      ctx.mode.onChange((m) => heard.push(`mode ${m}`));
-      return {
-        pause: (why) => heard.push(`pause ${why}`),
-        resume: () => heard.push('resume'),
-      };
-    },
-  });
-}
-
-interface Tactics {
-  handle: OutboxHandle;
-  modes: Pick<Modes, 'set'>;
-  ctx: PluginContext;
-}
-
-describe('module API 1: ctx.mode, derived (D64)', () => {
-  async function run(dryRun: boolean | undefined, dataDir?: string) {
-    const heard: string[] = [];
-    let t: Tactics | undefined;
-    const tg = new FakeConnector({ account: 'tg:me' });
-    const lines: string[] = [];
-    const core = new Core({
-      clock: new VirtualClock(Date.UTC(2026, 10, 12)),
-      print: (l) => lines.push(l),
-      ...(dataDir === undefined ? {} : { dataDir }),
-      graph: (g) => ({
-        ...g,
-        edges: g.edges.map((e) =>
-          e.type === 'chat-out' && dryRun !== undefined ? { ...e, dryRun } : e
-        ),
-      }),
-    });
-    core.register(
-      fakeConnectorPlugin('tg', tg),
-      tactics(heard, (x) => (t = x))
-    );
-    await core.start();
-    tg.open();
-    return { core, tg, heard, lines, t: t as Tactics };
-  }
-
-  it('gets live through a live edge, dry-run through dry-run ones', async () => {
-    const live = await run(undefined);
-    expect(live.t.ctx.mode.get()).toBe('live');
-    expect(live.t.handle.mode()).toBe('live');
-    expect(live.t.handle.send('#lobby', 'go').outcome).toBe('sent');
-    const dry = await run(true);
-    expect(dry.t.ctx.mode.get()).toBe('dry-run');
-    expect(dry.t.handle.mode()).toBe('dry-run');
-    expect(dry.t.handle.send('#lobby', 'go').outcome).toBe('dry-run');
-    expect(dry.tg.sent).toEqual([]);
-  });
-
-  it('refuses and logs a raise, the owner’s or not: states are raised in the editor', async () => {
-    const { t, core, lines, heard } = await run(true);
-    const why = "live refused: a node's state and its edges' dry runs change only in the editor";
-    expect(t.modes.set('tactics', 'live', 'owner')).toBe(why);
-    expect(t.modes.set('tactics', 'dry-run')).toBe(
-      "dry-run refused: a node's state and its edges' dry runs change only in the editor"
-    );
-    expect(t.ctx.mode.set('loud' as Mode)).toBe('not a mode: loud');
-    expect(lines).toContain(`tactics: warning: ctx.mode.set: ${why}`);
-    expect(core.state('tactics')?.state).toBe('running');
-    expect(t.ctx.mode.get()).toBe('dry-run');
-    expect(heard).toEqual([]);
-  });
-
-  it('stops the node on a safety stop, kept, its listeners told read-only', async () => {
-    const { t, core, heard, lines } = await run(undefined, dir);
-    expect(t.modes.set('tactics', 'read-only', 'safety')).toBeUndefined();
-    expect(core.state('tactics')).toMatchObject({
-      state: 'stopped',
-      reason: 'safety stop (read-only)',
-      stop: { source: 'safety' },
-    });
-    expect(heard).toEqual(['pause safety stop (read-only)', 'mode read-only']);
-    expect(t.handle.send('#lobby', 'go').reason).toBe('stopped: safety stop (read-only)');
-    // Its mode never reads `read-only`: a stopped node does not run.
-    expect(t.ctx.mode.get()).toBe('live');
-    // Its own way back is refused, and logged; so is a raise.
-    expect(t.ctx.resume()).toBe(false);
-    expect(lines).toContain(
-      'tactics: warning: ctx.resume refused: a stop is cleared only in the editor'
-    );
-    expect(t.modes.set('tactics', 'live', 'owner')).toMatch(/^live refused/u);
-    expect(heard).not.toContain('resume');
-    await core.stop();
-    // Not started again.
-    const again = await run(undefined, dir);
-    expect(again.core.state('tactics')?.state).toBe('stopped');
-  });
-
-  it('stops the node on the owner’s read-only too, with that reason', async () => {
-    const { t, core } = await run(undefined);
-    expect(t.modes.set('tactics', 'read-only')).toBeUndefined();
-    expect(core.state('tactics')).toMatchObject({
-      state: 'stopped',
-      reason: 'read-only, by the owner',
-      stop: { source: 'owner' },
-    });
-  });
-
-  it('an outbox made outside the core keeps its own modes, as before', () => {
-    const modes = new Modes();
-    const tg = new FakeConnector({ account: 'tg:me' });
-    tg.open();
-    const core = new Core({ clock: new VirtualClock() });
-    const outbox = new (core.outbox('tg:me').constructor as typeof import('./outbox.ts').Outbox)({
-      account: 'tg:me',
-      connector: () => tg,
-      clock: new VirtualClock(),
-      modes,
-    });
-    const p = outbox.as('mine');
-    expect(p.send('#lobby', 'x').reason).toBe('read-only');
-    modes.set('mine', 'dry-run');
-    expect([p.mode(), p.send('#lobby', 'x').outcome]).toEqual(['dry-run', 'dry-run']);
-    modes.set('mine', 'live');
-    expect(p.send('#lobby', 'x').outcome).toBe('sent');
-  });
-});
-
-describe('a graph’s node modes, folded into its chat-out edges', () => {
-  it('makes a dry-run or read-only node’s edges dry runs, a live one’s live, and drops the mode', () => {
-    expect(
-      foldModes({
-        version: 2,
-        nodes: [
-          { id: 'a', plugin: 'p', mode: 'dry-run' },
-          { id: 'b', plugin: 'p', mode: 'live' },
-          { id: 'c', plugin: 'p', mode: 'read-only' },
-          { id: 'd', plugin: 'p' },
-          'x',
-        ],
-        edges: [
-          { from: 'a.out', to: 'tg.chat', type: 'chat-out' },
-          { from: 'b.out', to: 'tg.chat', type: 'chat-out' },
-          { from: 'c.out', to: 'tg.chat', type: 'chat-out' },
-          { from: 'd.out', to: 'tg.chat', type: 'chat-out' },
-          { from: 'tg.chat', to: 'a.in', type: 'chat-in' },
-          'y',
-        ],
-      })
-    ).toEqual({
-      version: 2,
-      nodes: [
-        { id: 'a', plugin: 'p' },
-        { id: 'b', plugin: 'p' },
-        { id: 'c', plugin: 'p' },
-        { id: 'd', plugin: 'p' },
-        'x',
-      ],
-      edges: [
-        { from: 'a.out', to: 'tg.chat', type: 'chat-out', dryRun: true },
-        { from: 'b.out', to: 'tg.chat', type: 'chat-out' },
-        { from: 'c.out', to: 'tg.chat', type: 'chat-out', dryRun: true },
-        { from: 'd.out', to: 'tg.chat', type: 'chat-out' },
-        { from: 'tg.chat', to: 'a.in', type: 'chat-in' },
-        'y',
-      ],
-    });
-    const plain = { version: 2, nodes: [{ id: 'a', plugin: 'p' }], edges: [] };
-    expect(foldModes(plain)).toBe(plain);
-    expect(foldModes({ version: 2, nodes: [{ id: 'a', mode: 'live' }] })).toEqual({
-      version: 2,
-      nodes: [{ id: 'a' }],
-    });
-    expect(foldModes(null)).toBeNull();
   });
 });

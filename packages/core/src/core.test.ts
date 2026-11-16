@@ -261,7 +261,6 @@ describe('Core', () => {
       plugin('a', seen, {
         instance: {
           pause: (why) => seen.push(`pause ${why}`),
-          resume: () => seen.push('resume'),
         },
       }),
       plugin('b', seen)
@@ -280,7 +279,6 @@ describe('Core', () => {
     expect(c.stopNode('b', 'owner', 'owner')).toBe(true);
     expect(c.stopNode('nobody', 'x', 'owner')).toBe(false);
     expect(seen.filter((x) => x.startsWith('pause'))).toEqual(['pause drift']);
-    expect(seen).not.toContain('resume');
     expect(c.clearStop('a')).toBe(true);
     expect(c.clearStop('a')).toBe(false);
     await c.stop();

@@ -357,17 +357,15 @@ its edges bind; two whose commands share a name fail the load.
 - **Enabled**, the default: it starts and runs with all its edges allow.
 - **Disabled** by the owner: `"disabled": true` on the node. Never started; its config and edges are
   checked all the same, and it survives restarts, being in the graph.
-- **Stopped**, by exception: a safety stop (`ctx.stop`, or module API 1's
-  `ctx.mode.set('read-only')`), drift (§4.7), the send-queue watchdog (§4.6, bot-os.md D93), the
-  owner's kill in the editor or stop from Telegram's `/plugins` (§4.11). Kept in its instance (§2.2)
-  as `_stop.json`,
+- **Stopped**, by exception: a safety stop (`ctx.stop`), drift (§4.7), the send-queue watchdog
+  (§4.6, bot-os.md D93), the owner's kill in the editor or stop from Telegram's `/plugins` (§4.11).
+  Kept in its instance (§2.2) as `_stop.json`,
   `{ "reason": "killed by the owner", "time": "2026-11-12T10:00:00.000Z", "source": "owner" }`
   (`source`: `safety`, `drift`, `stalled` or `owner`), so it survives restarts: the node is not
   started while it is there. The owner clears it in the editor, a change of the draft that Apply
   makes (`POST /plugins/<id>/clear-stop`, then the restart). A stop made while the node runs takes
-  effect at once: its outbox refuses its sends (`stopped: <reason>`), its `pause` hook is called,
-  and module API 1's `ctx.mode` listeners hear `read-only`; and every node it makes inactive (below)
-  is shut down at once (bot-os.md D65).
+  effect at once: its outbox refuses its sends (`stopped: <reason>`) and its `pause` hook is called;
+  and every node it makes inactive (below) is shut down at once (bot-os.md D65).
 - **Inactive**, derived at the load, never stored: a node a **required** port of which (an input, or
   a chat-out output) binds a node disabled, stopped or inactive, transitively, is not started, and
   says why (`GET /status`: `state: "inactive"`, `reason: "needs tg (disabled)"`). A stop made at
@@ -387,16 +385,6 @@ the draft applied with Apply (a restart); nothing raises a state at runtime. **A
 sees it sent (§4.6). It covers messages only: a model's calls stop when its node is disabled. In the
 editor a new node starts disabled, for the owner to set its config first, and a new chat-out edge
 starts a dry run.
-
-**The first start since the modes** (at most once; `core/node-states.json` marks it done): each
-node's mode, as its instance kept it (`_mode.json`), else as its node's `mode` gave it, else
-`read-only` (the default before), is folded into the graph: `live`, its chat-out edges stay live;
-`dry-run` or `read-only`, each becomes a dry run. Every node is enabled, the node's `mode` is
-dropped, the file is written as a version of its history (`migrated`, §2.3) when that changes it,
-and the instances' `_mode.json` are deleted. No safety stop nor drift pause was kept across a
-restart before, so none becomes a stop. A graph read later with a node's `mode` (an older version of
-the history, a file written by hand) has it folded as it loads (`foldModes`), from the node's `mode`
-alone.
 
 **Where the graph comes from.** `CoreOptions.graph` is the instance's graph; without it, the core
 makes the default one from the plugins registered, in their order: a node per plugin, its id the
@@ -684,9 +672,8 @@ and the reason.
 - **Stopped** by exception is the core's (§2.1, Node states): a plugin stopped by its own safety
   stop, by drift (§4.7) or by the owner. Its sends are refused by the outbox from then on; its
   `pause` hook is called so that it can stop planning, and its stop is kept in its instance, so the
-  next start does not start it. Only the owner clears it, in the editor, applied with a restart; the
-  `resume` hook is never called (module API 1 keeps it, unused). The nodes the stop makes inactive
-  are shut down at once (§2.1, Node states; bot-os.md D65).
+  next start does not start it. Only the owner clears it, in the editor, applied with a restart. The
+  nodes the stop makes inactive are shut down at once (§2.1, Node states; bot-os.md D65).
 - **Disabled** and **inactive** nodes are never started (§2.1): their state is the load's, or, for a
   node made inactive by a runtime stop, the stop's.
 - **Serialise and restore** (P8): a plugin writes what must survive through its store as it changes,
@@ -702,7 +689,6 @@ interface Instance {
   stop?(): void | Promise<void>;
   serialise?(): unknown;
   pause?(reason: string): void; // the core stopped it (§2.1, Node states)
-  resume?(): void; // module API 1, deprecated: never called
   /** The owner changed settings; the new values are already in ctx.settings. */
   settingsChanged?(keys: string[]): void;
   off?(): void; // the owner turned the instance off (§4.11)
@@ -755,22 +741,12 @@ interface PluginContext<Config, Settings> {
   stop(reason: string): void; // its safety stop: its node stopped, kept (§2.1, Node states)
   fail(reason: string): void; // its node failed at runtime, not kept (§3)
   off(): boolean; // the instance is off (§4.11)
-  mode: { get(); set(mode, by?: 'owner' | 'safety'); onChange(listener) }; // module API 1, derived
-  resume(): boolean; // module API 1, deprecated: refused, false
   restored?: unknown; // what serialise returned at the last stop (§3)
   render: Render; // §4.13: SVG to PNG
 }
 ```
 
-**`ctx.mode`, module API 1, deprecated** (bot-os.md D64): the modes are gone, and `ctx.mode` is
-derived for the plugins written against them. `get()` is `dry-run` when every chat-out edge of the
-node is a dry run (or it has none), `live` otherwise, never `read-only` (a stopped node does not
-run). `set('read-only', by)`, the owner's (`by` absent or `owner`) or a safety stop's (`safety`),
-**stops** the node (`source` `owner` or `safety`, its reason `read-only, by the owner` or
-`safety stop (read-only)`). `set('dry-run' | 'live', …)` is **refused and logged**, returning why:
-states are raised only in the editor. `onChange(listener)` hears `read-only` when the node is
-stopped. `ctx.resume()` is refused and logged too, and returns false. A plugin written now uses
-`ctx.stop(reason)`, and reads how it sends from its outbox handle (`mode()`).
+A plugin's safety stop is `ctx.stop(reason)`; how it sends, its outbox handle's `mode()` (§4.6).
 
 A connector's context also has `secrets.get(name)`, for the secrets it declared or its config names
 (§4.9), `account`, its node's account (§4.5), on which it makes its connector, and `readers()`, what
@@ -813,7 +789,7 @@ plugin's interface (`use`), never its files.
 As built (`packages/core/src/store.ts`): documents are `<name>.json`, written with mode 600 in a
 directory of mode 700; the core keeps its own beside them (`_meta.json`, the version;
 `_restore.json`, what `serialise` returned, handed back once; `_timers.json`; `_settings.json`;
-`_mode.json`; `_instance.json`, the instance's record, §2.2). Migrations run on a staged copy
+`_instance.json`, the instance's record, §2.2). Migrations run on a staged copy
 (`<instance>.migrating/`) that replaces the directory only when every step has succeeded, so a
 failed one leaves the store as it was, and a store newer than its plugin (an image rolled back)
 fails that plugin rather than being read wrong. A crash between the two renames of the commit is
@@ -1113,9 +1089,7 @@ connector (§2.1):
   that let it send this, if any is live), it is sent. The handle's `mode()` says which: `dry-run`
   when every edge it sends through is a dry run, `live` otherwise.
 - **The node's state** (§2.1, Node states): a stopped node's sends are refused
-  (`stopped: <reason>`), and so are those of a node not running (`not running (<state>)`). The modes
-  of before (P10's `read-only`, `dry-run`, `live`, kept as `_mode.json`) are gone: the first start
-  folded them into the edges.
+  (`stopped: <reason>`), and so are those of a node not running (`not running (<state>)`).
 - **Pacing:** `send` sends now or is refused with why (too soon, the hourly limit), for actors that
   time their sends to the second; `enqueue` queues the send (below, bot-os.md D73) and spaces it
   within the account's limits (`connector.limits`) and its command's interval in its chat, and the
@@ -1309,11 +1283,6 @@ the node decides again from its state.
 - **The watchdog** (D93): an answer paired with a send answers that node's count of its command at
   once; an answer that never came adds an unanswered send at the end of its window.
 
-**An outbox made outside the core** (a module's own, over a game of its own: module API 1,
-deprecated) may still keep its senders' modes: `new Outbox({ …, modes: new Modes() })`, with
-`modes.set(plugin, mode, by?)`, where `read-only` refuses, `dry-run` logs as if sent and `live`
-sends, as before. The core's own outboxes have no modes.
-
 ### 4.7 Drift
 
 A parser sorts every message it sees into one of three (P5): **not its bot's**, **read** (events
@@ -1443,7 +1412,7 @@ control API, the web UI and later the agents, whose grants will be subsets of it
   checked against the action's schema (an error names the field) and which the plugin refuses by
   throwing, with why; a node's stop cleared (`clearStop`), for the next start. No control raises a
   state at runtime: a node is enabled, disabled or cleared of its stop, and an edge sent for real,
-  in the editor, applied with a restart (the modes and their `setMode`, and `resume`, are gone).
+  in the editor, applied with a restart.
 - **The off switch,** instance-wide, unchanged: off, every running plugin hears `off` and stops what
   it does, the owner is told nothing; `on` lets each plugin take up what it did and say what. It is
   kept in the core's store (`/data/core/power.json`) across restarts, logged as `core.power`, and a
@@ -2064,13 +2033,13 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   it logs its turn (`sent`, `/play (dry run)`) and sends nothing; a send refused as its command
   rests is tried again when it may go (`retryAt`), any other failed send two minutes later. It plays
   while its node runs and the instance is on; its safety stop (`kill`) stops its node (`ctx.stop`),
-  which drops its plan until the owner clears the stop in the editor. It needs no `ctx.mode`. It
-  declares no chat command, since two instances would clash: the owner reaches each with
-  `/plugins <id>` and its read `status`. Each step is published as `turn-actor.step`; its turns
-  (sent, in a dry run, by hand, failed) go in the owner's summary (§4.17, D92). The image offers it
-  (`src/main.ts`): the editor adds one node per bot, each on its own instance, its `chat` edges from
-  and to the owner's `telegram-user` node and its `parser` edge to its bot's parser. The turn
-  parsers are not the image's: each is made from a game's grammar, so a game's module offers it.
+  which drops its plan until the owner clears the stop in the editor. It declares no chat command,
+  since two instances would clash: the owner reaches each with `/plugins <id>` and its read
+  `status`. Each step is published as `turn-actor.step`; its turns (sent, in a dry run, by hand,
+  failed) go in the owner's summary (§4.17, D92). The image offers it (`src/main.ts`): the editor
+  adds one node per bot, each on its own instance, its `chat` edges from and to the owner's
+  `telegram-user` node and its `parser` edge to its bot's parser. The turn parsers are not the
+  image's: each is made from a game's grammar, so a game's module offers it.
 - **`owner-notice`** (`packages/turns/src/owner-notice.ts`, bot-os.md D91, D94): the one node that
   reports to a chat; without one, nothing is (the editor's events panel shows the notices, §4.16).
   It tells the owner what needs attention, from the notices (§4.16), through its `chat` output
@@ -2491,16 +2460,6 @@ second. A module written for the plugin API `"1"` before the split keeps loading
 input and a chat-out output of its name, its `bind`'s `reads` to the first and `sends` and
 `commands` to the second. Its graphs of version 1 are converted as they load (§2.3); code that types
 a graph as `GraphInput` writes `version: 2`, and its chat edges each way.
-
-**Its mode** (§4, bot-os.md D64): the plugin API stays `"1"`, and a module written for the modes
-keeps loading. Its `ctx.mode` is derived from its node's edges (`get()`: `dry-run` or `live`), its
-`ctx.mode.set('read-only', 'owner' | 'safety')` stops its node, kept until the owner clears it, and
-its `set('dry-run' | 'live', …)` is refused and logged, since only the editor raises a state;
-`onChange` hears `read-only` at a stop, and `ctx.resume()` is refused, false. So a module that
-lowers its mode from its owner commands and its safety stops stops its node with them, and its
-raises do nothing: the owner clears the stop, and chooses its edges' dry runs, in the editor. An
-outbox it makes of its own keeps its `Modes` (§4.6). These are deprecated: a plugin written now
-calls `ctx.stop(reason)`, and its outbox handle's `mode()` says whether it sends for real.
 
 ### 7.3 Loading
 

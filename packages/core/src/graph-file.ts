@@ -471,8 +471,7 @@ export class GraphFile {
   /**
    * The history taken in from the files before it if it has no version yet (`graph.previous.json`,
    * then `graph.json`, at their files' times; the first then removed), and the file kept as a
-   * version if none holds it: the newest version, if it is the file's graph. At each start, and
-   * before the core's first write of a start (the modes' migration, bot-os.md D64).
+   * version if none holds it: the newest version, if it is the file's graph. At each start.
    */
   adopt(upgrade: Upgrade = asIs): GraphVersion | undefined {
     const first = this.history.latest() === undefined;

@@ -57,7 +57,6 @@ import {
   type GraphFile,
   type GraphProblem,
   locateProblem,
-  sameGraph,
   type SaveBy,
 } from './graph-file.ts';
 import {
@@ -71,8 +70,6 @@ import { type InstanceInfo, InstanceRegistry } from './instance-registry.ts';
 import { type Manifest, parseManifest, SECRET_NAME } from './manifest.ts';
 import { type Notice, Notices } from './notices.ts';
 import {
-  isMode,
-  type Mode,
   Outbox,
   type OutboxHandle,
   type QueuedSend,
@@ -259,8 +256,6 @@ interface Entry {
   scheduler?: PluginScheduler;
   /** Its instance is up: started, neither failed nor shut down (it may be stopped since). */
   up?: boolean;
-  /** Its `ctx.mode.onChange` listeners (module API 1), told `read-only` when it is stopped. */
-  modeListeners?: ((mode: Mode) => void)[];
 }
 
 /**
@@ -273,10 +268,6 @@ const READING: ReadonlySet<PluginState> = new Set(['registered', 'starting', 'ru
 const CORE = CORE_STORE;
 /** The core's document, in each instance's store, of its stop (bot-os.md D64). */
 export const STOP_DOC = '_stop';
-/** The core's document, in each instance's store, of its mode before bot-os.md D64: migrated. */
-export const MODE_DOC = '_mode';
-/** The core's document of the first start's migration of the modes into states (D64). */
-export const STATES_DOC = 'node-states';
 /** How often the orphaned instances are looked for: daily. */
 const SWEEP_MS = 86_400_000;
 
@@ -1106,7 +1097,7 @@ export class Core {
    * Stops a node by exception (bot-os.md D64): a safety stop, drift, the owner's kill or stop.
    * Kept in its instance (`_stop.json`: why, when, who), so that it is not started again until the
    * owner clears it (`clearStop`) and the instance restarts; while it runs, its outbox refuses its
-   * sends, it hears `pause` and its `ctx.mode` listeners `read-only`. A node stopped again keeps
+   * sends, and it hears `pause`. A node stopped again keeps
    * the latest stop. Every node the stop makes inactive is shut down at once (`cascade`). False
    * for a node that is not up.
    */
@@ -1131,12 +1122,6 @@ export class Core {
     } catch (e) {
       this.logger(id).error(`pause: ${message(e)}`);
     }
-    for (const listener of [...(entry.modeListeners ?? [])])
-      try {
-        listener('read-only');
-      } catch (e) {
-        this.logger(id).error(`mode listener: ${message(e)}`);
-      }
     return true;
   }
 
@@ -1240,13 +1225,12 @@ export class Core {
     const file = this.o.graphFile;
     if (given === undefined && file !== undefined) {
       const r = file.read();
-      // No graph yet: nothing to migrate, ever (D64).
-      if (!r.exists) return { raw: this.migrateModes(file, undefined), fromFile: true };
+      if (!r.exists) return { raw: EMPTY_GRAPH, fromFile: true };
       if ('error' in r) {
         this.refused = [{ text: r.error }];
         return { raw: EMPTY_GRAPH, fromFile: true };
       }
-      return { raw: this.migrateModes(file, r.raw), fromFile: true };
+      return { raw: r.raw, fromFile: true };
     }
     if (typeof given === 'function' || given === undefined) {
       const manifests = this.plugins.flatMap((p) => {
@@ -1260,60 +1244,6 @@ export class Core {
       return { raw: typeof given === 'function' ? given(defaults) : defaults, fromFile: false };
     }
     return { raw: given, fromFile: false };
-  }
-
-  /**
-   * The first start since the modes were replaced by states (bot-os.md D64): each node's mode, as
-   * its instance kept it (`_mode.json`), else as its node gave it, else `read-only` (P10's default),
-   * folded into the graph: `live`, its chat-out edges live; `dry-run` or `read-only`, each a dry
-   * run; every node enabled. The file is written (a version of the history, `migrated`) if that
-   * changes it, the instances' modes are deleted, and it is done once (`node-states` in the core's
-   * store). No stop is made: no safety stop nor drift pause was kept across a restart before.
-   */
-  private migrateModes(file: GraphFile, raw: unknown): unknown {
-    const core = this.stores.internal(CORE);
-    if (core.get(STATES_DOC) !== undefined) return raw ?? EMPTY_GRAPH;
-    if (raw === undefined) {
-      core.put(STATES_DOC, { migrated: new Date(this.o.clock.now()).toISOString() });
-      this.o.record?.({ type: 'core.graph', t: this.o.clock.now(), event: 'migrated', modes: {} });
-      return EMPTY_GRAPH;
-    }
-    const nodes = isObject(raw) && Array.isArray(raw['nodes']) ? (raw['nodes'] as unknown[]) : [];
-    const instances: string[] = [];
-    const modes = nodes.flatMap((n) => {
-      if (!isObject(n) || typeof n['id'] !== 'string') return [];
-      const instance = typeof n['instance'] === 'string' ? n['instance'] : n['id'];
-      const kept = (this.stores.internal(instance).get(MODE_DOC) as { mode?: unknown } | undefined)
-        ?.mode;
-      if (kept !== undefined) instances.push(instance);
-      const mode = isMode(kept) ? kept : isMode(n['mode']) ? n['mode'] : 'read-only';
-      return [[n['id'], mode] as const];
-    });
-    const withModes = isObject(raw)
-      ? {
-          ...raw,
-          nodes: nodes.map((n) => {
-            if (!isObject(n)) return n;
-            const mode = modes.find(([id]) => id === n['id'])?.[1];
-            return mode === undefined ? n : { ...n, mode };
-          }),
-        }
-      : raw;
-    const migrated = this.upgrade(withModes);
-    if (!sameGraph(migrated, raw)) {
-      // The history first takes in what an older release left (§2.3), then this write.
-      file.adopt((g) => this.upgrade(g));
-      file.save(migrated as Graph, { source: 'migrated', upgrade: (g) => this.upgrade(g) });
-    }
-    for (const instance of instances) this.stores.internal(instance).backend.delete(MODE_DOC);
-    core.put(STATES_DOC, { migrated: new Date(this.o.clock.now()).toISOString() });
-    this.o.record?.({
-      type: 'core.graph',
-      t: this.o.clock.now(),
-      event: 'migrated',
-      modes: Object.fromEntries(modes),
-    });
-    return migrated;
   }
 
   /**
@@ -1824,36 +1754,11 @@ export class Core {
           }
         : {}),
       ...(entry.manifest.summary ? { summary: this.summaries.handle(id) } : {}),
-      // Module API 1's modes, derived from the node's state and its edges (D64), deprecated.
-      mode: {
-        get: () => (sendsOf(node).every(([, b]) => b.dryRun === true) ? 'dry-run' : 'live'),
-        set: (mode, by = 'owner') => {
-          if (!isMode(mode)) return `not a mode: ${String(mode)}`;
-          if (mode === 'read-only') {
-            this.stopNode(
-              id,
-              by === 'safety' ? 'safety stop (read-only)' : 'read-only, by the owner',
-              by === 'safety' ? 'safety' : 'owner'
-            );
-            return undefined;
-          }
-          const why = `${mode} refused: a node's state and its edges' dry runs change only in the editor`;
-          log.warn(`ctx.mode.set: ${why}`);
-          return why;
-        },
-        onChange: (listener) => {
-          (entry.modeListeners ??= []).push(listener);
-        },
-      },
       stop: (reason) => {
         this.stopNode(id, reason, 'safety');
       },
       fail: (reason) => this.failAtRuntime(entry, reason),
       off: () => this.controls.off,
-      resume: () => {
-        log.warn('ctx.resume refused: a stop is cleared only in the editor');
-        return false;
-      },
       render: this.o.render ?? resvgRender,
       events: {
         read: (options) => this.readEvents(entry, options),
