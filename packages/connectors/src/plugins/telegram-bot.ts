@@ -1,7 +1,9 @@
 /**
  * The `telegram-bot` connector plugin (docs/bot-os-api.md §4.5): a Telegram bot, on grammY
- * (packages/connectors/src/transport/telegram-bot.ts). Its token is the `telegram_bot_token`
- * Docker secret (P9), which it alone receives: it makes the bot from it at `create`, connects and
+ * (packages/connectors/src/transport/telegram-bot.ts). Its token is pasted in its node's panel
+ * (bot-os.md D116, `bot-login.ts`: checked with `getMe`, kept in its store), or else the
+ * `telegram_bot_token` Docker secret (P9), which it alone receives; without either it runs needing a
+ * login (`LoginNeeded`). It makes the bot from the token at `create`, connects and
  * polls at `start` (once the app listens), and stops it at `stop`. Other plugins get a handle, and
  * send through the account's outbox.
  *
@@ -26,6 +28,7 @@ import {
   commandIntervalS,
   definePlugin,
   liveGraceS,
+  LoginNeeded,
   type Plugin,
   type StateView,
   unansweredAt,
@@ -33,6 +36,7 @@ import {
 } from '@megabottron1999/core';
 import { type Bot } from 'grammy';
 import { z } from 'zod';
+import { BOT_LOGIN_DOC, BotLogin, type BotLoginDoc } from '#src/transport/bot-login.ts';
 import { createBot, TelegramBotConnector } from '#src/transport/telegram-bot.ts';
 import { DenyList } from '#src/transport/telegram-deny.ts';
 import { TelegramSurface } from '#src/transport/telegram-surface.ts';
@@ -150,6 +154,8 @@ export function telegramBotPlugin(
         'A Telegram bot: the owner’s commands, the public commands, and the chats it monitors',
       account,
       secrets: [BOT_TOKEN],
+      // Its token from its node's panel, its secret a fallback (D116).
+      login: true,
       config: telegramBotConfig,
       // The chats its config lists; unset, every chat (D89). A chat goes by its id and its
       // @username, which its connector tells apart (D90).
@@ -173,9 +179,24 @@ export function telegramBotPlugin(
     create: (ctx) => {
       const log = (line: string): void => ctx.log.info(line);
       const config = ctx.config as TelegramBotConfig;
-      const bot = make(ctx.secrets?.get(BOT_TOKEN) ?? '', log);
-      // The surface hears the connector's status; the connector polls once the surface listens.
+      const kept = ctx.store.read<BotLoginDoc>(BOT_LOGIN_DOC)?.token;
+      const secret = ctx.secrets?.has(BOT_TOKEN) === true;
+      const token = kept ?? (secret ? ctx.secrets?.get(BOT_TOKEN) : undefined);
       const ref: { connector?: TelegramBotConnector } = {};
+      const login = new BotLogin({
+        store: ctx.store,
+        clock: ctx.clock,
+        source: kept !== undefined ? 'store' : token === undefined ? undefined : 'secrets',
+        secrets: secret,
+        self: () => ref.connector?.self(),
+        check: (t) => make(t, log).api.getMe(),
+        remember: (value) => ctx.secrets?.remember(value),
+        log,
+      });
+      if (token === undefined)
+        return { connector: new LoginNeeded(ctx.account ?? account, 'telegram'), login };
+      const bot = make(token, log);
+      // The surface hears the connector's status; the connector polls once the surface listens.
       const surface =
         config.owner === undefined
           ? undefined
@@ -248,6 +269,7 @@ export function telegramBotPlugin(
               },
             }),
         ...(surface === undefined ? {} : { surface }),
+        login,
         start: () => c.start(),
         stop: async () => {
           surface?.stop();

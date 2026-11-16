@@ -88,13 +88,26 @@ with its own authentication, rather than publishing the port.
 - **Secrets** are files under `/run/secrets`, never environment variables: `web_ui_password` (the
   web UI's login; without it there is no UI at all), `bot_os_key` (to encrypt the secrets the core
   stores), and each connector's own (`znc_password`, `telegram_bot_token`, `telegram_user_api_id`,
-  `telegram_user_api_hash`, `telegram_user_session`, `anthropic_api_key`). Optional, `github_token`
-  (a GitHub token, to raise the API's limit of 60 requests an hour for installing and updating
-  modules from GitHub links; `GITHUB_TOKEN` in the environment is read too, though the secret is the
-  safer place), and a token for each self-hosted Git server (below).
-- **A Telegram account's session** (`telegram-user`): its three secrets come from
-  [my.telegram.org](https://my.telegram.org) (**API development tools**: the API id and hash; each
-  deployment registers its own app) and from a login, which the image runs for you
+  `telegram_user_api_hash`, `telegram_user_session`, `anthropic_api_key`; the Telegram ones
+  optional, a login from the node's panel taking their place, below). Optional, `github_token` (a
+  GitHub token, to raise the API's limit of 60 requests an hour for installing and updating modules
+  from GitHub links; `GITHUB_TOKEN` in the environment is read too, though the secret is the safer
+  place), and a token for each self-hosted Git server (below).
+- **Telegram, logged in from the editor** ([docs/bot-os.md](docs/bot-os.md) D116): a `telegram-bot`
+  or `telegram-user` node needs no secret. Add it, **Apply**, and its card says `needs login`; open
+  its panel, and under **Login**: for a bot, paste the token @BotFather gives (`/newbot`, or
+  `/token` for one you have), which is checked with Telegram; for your account, type your app's API
+  id and hash once (my.telegram.org → API development tools; each deployment registers its own app),
+  then **Log in with a QR code** and scan it in Telegram's Settings → Devices → Link Desktop Device
+  (or log in with your phone number, the code and your 2FA password). Then **Restart now**, and tick
+  its chats. The credentials are kept in the connector's store in `/data`, so in its backups, in
+  clear. **Log out** (an account's) ends the session on Telegram too; it also shows in Telegram's
+  Devices, where it can be ended from the phone. Connectors set up with the Docker secrets below
+  keep working as they are: a login in the panel takes their place, and forgetting it falls back to
+  them.
+- **A Telegram account's session** (`telegram-user`) as Docker secrets instead: its three secrets
+  come from [my.telegram.org](https://my.telegram.org) (**API development tools**: the API id and
+  hash; each deployment registers its own app) and from a login, which the image runs for you
   ([docs/bot-os.md](docs/bot-os.md) D115):
 
   ```sh

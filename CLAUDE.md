@@ -19,7 +19,7 @@ knows no game. See [README.md](README.md) for the overview.
 ### Read the documentation first
 
 - [README.md](README.md): what the project is, how to run it, how plugins work.
-- [docs/bot-os.md](docs/bot-os.md): the principles (P1–P17) and the decisions (D1–D115). Check every
+- [docs/bot-os.md](docs/bot-os.md): the principles (P1–P17) and the decisions (D1–D116). Check every
   design choice against them; a choice that breaks one changes the principle there, with its reason,
   or is dropped.
 - [docs/bot-os-api.md](docs/bot-os-api.md): the plugin API, as built.
@@ -57,11 +57,13 @@ Address every error before marking a sub-task complete.
 - **Dependencies:** as few as possible, each justified in the commit that adds it, pinned to exact
   versions at least two weeks old, with `package-lock.json` committed; the same rule for the GitHub
   Actions the workflows use (pinned to an exact release) and for the Node base image. The web UI's
-  build tools (React, React DOM, React Flow, Vite, Monaco) are `@megabottron1999/web`'s own
-  `devDependencies`, so that the image's build stage installs them alone; the test and type tools
-  stay at the root.
+  build tools (React, React DOM, React Flow, Vite, Monaco, qrcode-generator) are
+  `@megabottron1999/web`'s own `devDependencies`, so that the image's build stage installs them
+  alone; the test and type tools stay at the root.
 - **Secrets** are Docker secrets (files under `/run/secrets`, `packages/core/src/secrets.ts`), never
-  environment variables, and go only to the connector plugin that declares them.
+  environment variables, and go only to the connector plugin that declares them; a connector that
+  logs in from its node keeps its credentials in its own store instead, the secrets a fallback
+  (bot-os.md D116).
 - **People** are referred to as they/them.
 
 ## Conventions

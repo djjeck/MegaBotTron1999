@@ -1,11 +1,15 @@
-import { Core, definePlugin, type Inbound, VirtualClock } from '@megabottron1999/core';
+import { Core, definePlugin, type Inbound, NEEDS_LOGIN, VirtualClock } from '@megabottron1999/core';
 import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   type GramClient,
   type RawMessage,
   type UserCredentials,
 } from '#src/transport/telegram-user.ts';
+import { type UserLoginClient } from '#src/transport/user-login.ts';
 import { readWarnings } from '#test/monitors.ts';
 import { telegramUserPlugin, userCredentials } from './telegram-user.ts';
 
@@ -329,5 +333,94 @@ describe('the telegram-user plugin', () => {
     ).toThrow(
       'telegram_user_api_id is not an API id; telegram_user_api_hash is not 32 hex digits; telegram_user_session is empty'
     );
+  });
+});
+
+describe('the telegram-user plugin’s login (D116)', () => {
+  const data = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tg-user-'));
+  const keep = (dir: string, doc: unknown) => {
+    fs.mkdirSync(path.join(dir, 'instances', 'telegram-user'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'instances', 'telegram-user', 'login.json'),
+      JSON.stringify(doc)
+    );
+  };
+
+  it('runs without secrets, needing a login, and logs in from its node', async () => {
+    const core = new Core({ clock: new VirtualClock(), secrets: secretsWith({}) });
+    const fakeLogin = (): UserLoginClient => ({
+      connect: () => Promise.resolve(true),
+      disconnect: () => Promise.resolve(),
+      signInUser: () => Promise.reject(new Error('no')),
+      signInUserWithQrCode: () => Promise.reject(new Error('no')),
+    });
+    core.register(
+      telegramUserPlugin({ client: () => expect.fail('no client'), loginClient: fakeLogin })
+    );
+    await core.start();
+    expect(core.state('telegram-user')?.state).toBe('running');
+    expect(core.connector('telegram-user')?.status()).toMatchObject({
+      state: 'closed',
+      phase: NEEDS_LOGIN,
+    });
+    expect(core.controls.login('telegram-user')).toMatchObject({
+      value: { status: 'needed', step: { title: 'Your app’s API id and hash' } },
+    });
+    const saved = await core.controls.loginAct('telegram-user', 'api', {
+      apiId: USER.telegram_user_api_id,
+      apiHash: USER.telegram_user_api_hash,
+    });
+    expect(saved).toMatchObject({ value: { step: { title: 'Log in to Telegram' } } });
+    expect(await core.controls.loginAct('telegram-user', 'qr', {})).toMatchObject({
+      value: { status: 'needed', error: 'no' },
+    });
+    await core.stop();
+  });
+
+  it('takes its store’s session over its secrets, its secrets’ API pair spared typing', async () => {
+    const dir = data();
+    keep(dir, { apiId: 7654321, apiHash: USER.telegram_user_api_hash, session: '1BQSTORED' });
+    const made: UserCredentials[] = [];
+    let out = 0;
+    const core = new Core({ clock: new VirtualClock(), dataDir: dir, secrets: secretsWith(USER) });
+    core.register(
+      telegramUserPlugin({
+        client: (c) => (
+          made.push(c),
+          { ...client(), invoke: () => (out++, Promise.resolve(true)) }
+        ),
+      })
+    );
+    await core.start();
+    expect(made).toEqual([
+      { apiId: 7654321, apiHash: USER.telegram_user_api_hash, session: '1BQSTORED' },
+    ]);
+    await new Promise((r) => setImmediate(r));
+    expect(core.controls.login('telegram-user')).toMatchObject({
+      value: { status: 'done', source: 'store', as: 'alice' },
+    });
+    // Logged out: on Telegram too, and its secrets are its fallback.
+    expect(await core.controls.loginAct('telegram-user', 'logout', {})).toMatchObject({
+      value: { status: 'done', source: 'secrets', restart: true },
+    });
+    expect(out).toBe(1);
+    expect(core.connector('telegram-user')?.status()).toMatchObject({ phase: NEEDS_LOGIN });
+    await core.stop();
+  });
+
+  it('uses its secrets as before when its store keeps no session', async () => {
+    const made: UserCredentials[] = [];
+    const core = new Core({ clock: new VirtualClock(), secrets: secretsWith(USER) });
+    core.register(telegramUserPlugin({ client: (c) => (made.push(c), client()) }));
+    await core.start();
+    expect(made[0]?.session).toBe(USER.telegram_user_session);
+    expect(core.controls.login('telegram-user')).toMatchObject({
+      value: { status: 'done', source: 'secrets' },
+    });
+    // The secrets' API pair: a login here asks for none.
+    expect(await core.controls.loginAct('telegram-user', 'replace', {})).toMatchObject({
+      value: { step: { title: 'Log in to Telegram' } },
+    });
+    await core.stop();
   });
 });

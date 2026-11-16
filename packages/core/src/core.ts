@@ -420,6 +420,9 @@ export class Core {
       drift: () => this.drift(),
       cost: (id) => this.cost(id),
       backoffs: (id) => this.backoffs(id),
+      redact: (text) => this.o.secrets?.redact(text) ?? text,
+      recordLogin: (fields) =>
+        this.o.record?.({ type: 'core.login', t: this.o.clock.now(), ...fields }),
     });
     this.driftMonitor = new DriftMonitor({
       clock: options.clock,
@@ -1558,7 +1561,8 @@ export class Core {
         if (typeof value === 'string' && SECRET_NAME.test(value)) named.push(value);
         else problems.push(`plugin ${id}: config ${key}: expected the name of a secret`);
       }
-      for (const name of [...manifest.secrets, ...named])
+      // A connector that logs in from its node holds its declared secrets as a fallback (D116).
+      for (const name of [...(manifest.login ? [] : manifest.secrets), ...named])
         if (this.o.secrets?.has(name) !== true)
           problems.push(
             `plugin ${id}: the secret ${name} is not provided (${this.o.secrets?.dir ?? 'no secrets'}/${name})`
@@ -1948,10 +1952,15 @@ export class Core {
       .flatMap((e) => chatsOf(e.node).flatMap(([, b]) => (b.node === id ? [readFilter(b)] : [])));
   }
 
-  /** A connector's way to its declared secrets. */
-  private secretsOf(id: string): { get(name: string): string } {
+  /** A connector's way to its declared secrets, and to mark a value it keeps as one. */
+  private secretsOf(id: string): NonNullable<PluginContext['secrets']> {
     return {
       get: (name) => this.secretFor(id, name),
+      has: (name) => {
+        const m = this.entries.get(id)?.manifest;
+        return m?.secrets.includes(name) === true && this.o.secrets?.has(name) === true;
+      },
+      remember: (value) => this.o.secrets?.remember(value),
     };
   }
 

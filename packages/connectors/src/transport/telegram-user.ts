@@ -20,7 +20,8 @@
  * the connection and at the next one, until it is filled. A chat no running reader reads is not
  * fetched: its gap is skipped, and what is heard there live is accounted for all the same.
  *
- * The session string gives full access to the account: it comes from the deployment's secrets,
+ * The session string gives full access to the account: it comes from the connector's store (a login
+ * from its node, `user-login.ts`, D116) or the deployment's secrets,
  * never from this repository, and is never printed by this module.
  */
 import {
@@ -31,13 +32,14 @@ import {
   type Inbound,
   type InboundDocument,
   LIVE_GRACE_S,
+  NEEDS_LOGIN,
   readDocument,
   type ReadFilter,
   type Surface,
   type SurfaceQuery,
   type TimerHandle,
 } from '@megabottron1999/core';
-import { TelegramClient } from 'telegram';
+import { Api, TelegramClient } from 'telegram';
 import { type UserAuthParams } from 'telegram/client/auth.js';
 import { NewMessage } from 'telegram/events/index.js';
 import { Logger, LogLevel } from 'telegram/extensions/Logger.js';
@@ -119,6 +121,8 @@ export interface GramClient {
   ): void;
   /** A message's file, downloaded whole (a `Buffer`). */
   downloadMedia(message: never, params: object): Promise<unknown>;
+  /** A raw request: the logout (`auth.logOut`). */
+  invoke?(request: Api.auth.LogOut): Promise<unknown>;
 }
 
 /** A field of an entity GramJS returned, if it has one. */
@@ -303,6 +307,18 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     this.peers.clear();
     this.changed({ state: 'closed', phase: 'closed' });
     await this.o.client.disconnect();
+  }
+
+  /**
+   * Ends its session on Telegram's side (`auth.logOut`: gone from the account's Devices), then
+   * stops, needing a login (D116).
+   */
+  async logOut(): Promise<void> {
+    const { client } = this.o;
+    if (!this.connected || client.invoke === undefined) throw new Error('not connected');
+    await client.invoke(new Api.auth.LogOut());
+    await this.stop();
+    this.changed({ state: 'closed', phase: NEEDS_LOGIN, detail: 'logged out' });
   }
 
   /** Sends without waiting for the answer, which is logged if it fails; `deliver` waits. */
@@ -794,6 +810,9 @@ export interface UserCredentials {
   session: string;
 }
 
+/** The device a session shows as in the account's Settings → Devices (D116). */
+export const DEVICE_MODEL = 'MegaBotTron1999';
+
 /** A GramJS client for `credentials`, quiet but for errors. */
 export function createTelegramClient(
   credentials: UserCredentials,
@@ -803,6 +822,7 @@ export function createTelegramClient(
   return new TelegramClient(session, credentials.apiId, credentials.apiHash, {
     connectionRetries: 5,
     baseLogger: new Logger(LogLevel.ERROR),
+    deviceModel: DEVICE_MODEL,
   });
 }
 

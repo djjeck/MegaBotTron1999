@@ -1,7 +1,9 @@
 /**
  * The `telegram-user` connector plugin (docs/bot-os-api.md §4.5): the owner's own Telegram
- * account, on GramJS (packages/connectors/src/transport/telegram-user.ts). Its API id, API
- * hash and session string are Docker secrets (P9), which it alone receives; other plugins get a
+ * account, on GramJS (packages/connectors/src/transport/telegram-user.ts). Its API id, API hash and
+ * session string come from a login in its node's panel (bot-os.md D116, `user-login.ts`: by QR code
+ * or by phone), kept in its store, or else from Docker secrets (P9), which it alone receives;
+ * without either it runs needing a login (`LoginNeeded`). Other plugins get a
  * handle, which hears only the chats their reach reads, and send through the account's outbox,
  * within the chats and commands their reach names. It monitors the chats of its configuration
  * only (groups by id, private chats by `@username`), or every chat of the account when it names
@@ -13,10 +15,12 @@ import {
   commandIntervalS,
   definePlugin,
   liveGraceS,
+  LoginNeeded,
   type Plugin,
   unansweredAt,
   unansweredAtBy,
 } from '@megabottron1999/core';
+import { type StringSession } from 'telegram/sessions/index.js';
 import { z } from 'zod';
 import {
   createTelegramClient,
@@ -24,6 +28,12 @@ import {
   TelegramUserConnector,
   type UserCredentials,
 } from '#src/transport/telegram-user.ts';
+import {
+  LOGIN_DOC,
+  type LoginDoc,
+  UserLogin,
+  type UserLoginClient,
+} from '#src/transport/user-login.ts';
 
 export const TELEGRAM_USER = 'telegram-user';
 export const USER_SECRETS = [
@@ -90,10 +100,19 @@ export function telegramUserPlugin(
   o: {
     self?: string;
     client?: (credentials: UserCredentials) => GramClient;
+    /** Makes the client a login from its node uses (tests pass a fake). */
+    loginClient?: (
+      api: Omit<UserCredentials, 'session'>,
+      session: StringSession
+    ) => UserLoginClient;
   } = {}
 ): Plugin {
   const account = `telegram:${o.self ?? 'owner'}`;
   const make = o.client ?? ((c: UserCredentials): GramClient => createTelegramClient(c));
+  const makeLogin =
+    o.loginClient ??
+    ((api: Omit<UserCredentials, 'session'>, session: StringSession): UserLoginClient =>
+      createTelegramClient({ ...api, session: '' }, session));
   return definePlugin({
     manifest: {
       id: TELEGRAM_USER,
@@ -106,11 +125,57 @@ export function telegramUserPlugin(
       // @username, which its connector tells apart (D90).
       monitors: { config: 'chats', aliases: true },
       secrets: [...USER_SECRETS],
+      // Its credentials from a login in its node's panel, its secrets a fallback (D116).
+      login: true,
     },
     create: (ctx) => {
+      const secrets = ctx.secrets;
+      const has = USER_SECRETS.every((name) => secrets?.has(name) === true);
+      const fromSecrets = has ? userCredentials((name) => secrets?.get(name) ?? '') : undefined;
+      const kept = ctx.store.read<LoginDoc>(LOGIN_DOC);
+      const credentials: UserCredentials | undefined =
+        kept?.session === undefined ? fromSecrets : { ...kept, session: kept.session };
+      // The secrets' API pair, when they hold one, spares typing it in.
+      const secretApi =
+        secrets?.has('telegram_user_api_id') === true &&
+        secrets.has('telegram_user_api_hash') &&
+        apiProblems(secrets.get('telegram_user_api_id'), secrets.get('telegram_user_api_hash'))
+          .length === 0
+          ? {
+              apiId: Number(secrets.get('telegram_user_api_id')),
+              apiHash: secrets.get('telegram_user_api_hash'),
+            }
+          : undefined;
+      const log = (line: string): void => ctx.log.info(line);
+      const loginOf = (c?: TelegramUserConnector): UserLogin =>
+        new UserLogin({
+          store: ctx.store,
+          clock: ctx.clock,
+          source:
+            credentials === undefined
+              ? undefined
+              : kept?.session === undefined
+                ? 'secrets'
+                : 'store',
+          secrets: has,
+          secretApi,
+          self: () => c?.self(),
+          client: makeLogin,
+          ...(c === undefined ? {} : { logOut: () => c.logOut() }),
+          remember: (value) => secrets?.remember(value),
+          log,
+        });
+      if (credentials === undefined) {
+        const login = loginOf();
+        return {
+          connector: new LoginNeeded(ctx.account ?? account, 'telegram'),
+          login,
+          stop: () => login.drop(),
+        };
+      }
       const connector = new TelegramUserConnector({
         account: ctx.account ?? account,
-        client: make(userCredentials((name) => ctx.secrets?.get(name) ?? '')),
+        client: make(credentials),
         chats: (ctx.config as TelegramUserConfig).chats,
         clock: ctx.clock,
         log: (line) => ctx.log.info(line),
@@ -127,7 +192,16 @@ export function telegramUserPlugin(
         unansweredAt: config.unansweredAt,
         ...(config.unansweredAtBy === undefined ? {} : { unansweredAtBy: config.unansweredAtBy }),
       };
-      return { connector, start: () => connector.start(), stop: () => connector.stop() };
+      const login = loginOf(connector);
+      return {
+        connector,
+        login,
+        start: () => connector.start(),
+        stop: async () => {
+          await login.drop();
+          await connector.stop();
+        },
+      };
     },
   });
 }

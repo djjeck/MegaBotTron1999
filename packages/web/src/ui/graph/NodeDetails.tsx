@@ -40,6 +40,7 @@ import type {
 } from '#src/ui/api.ts';
 import { isSplit } from './cards.ts';
 import { ChatPicker, named, useSurfaces } from './ChatPicker.tsx';
+import { ConnectorLogin } from './ConnectorLogin.tsx';
 import type { Ranked } from './Costs.tsx';
 import { CostLine } from './Costs.tsx';
 import { withDefaults } from './defaults.ts';
@@ -419,13 +420,19 @@ function Served(props: { node: string; edges: readonly GraphEdge[] }) {
  * (`GET /secrets`); unknown until they are read.
  */
 function SecretSources(props: {
+  /** It logs in from its node (D116): its declared secrets are a fallback. */
+  login?: boolean;
   declared: readonly string[];
   keys: readonly string[];
   config: Readonly<Record<string, unknown>> | undefined;
   provided: readonly string[] | undefined;
 }) {
-  const rows: { name: string; why: string }[] = [
-    ...props.declared.map((name) => ({ name, why: 'read by its plugin' })),
+  const rows: { name: string; why: string; optional?: boolean }[] = [
+    ...props.declared.map((name) =>
+      props.login === true
+        ? { name, why: 'its fallback, without a login from its node', optional: true }
+        : { name, why: 'read by its plugin' }
+    ),
     ...props.keys.flatMap((key) => {
       const name = props.config?.[key];
       return typeof name === 'string' && name !== ''
@@ -447,6 +454,8 @@ function SecretSources(props: {
                 <span className="muted">(not known yet)</span>
               ) : set ? (
                 <span className="ok">set</span>
+              ) : r.optional === true ? (
+                <span className="muted">not provided</span>
               ) : (
                 <strong className="error">not provided</strong>
               )}
@@ -460,6 +469,9 @@ function SecretSources(props: {
         <code>/run/secrets</code> in the image). Its value is never shown here. A secret not
         provided fails the check and the start; it is added with the deployment’s Docker secrets,
         then a restart.
+        {props.login === true
+          ? ' This connector logs in from its panel instead (its Login, while it runs): its own secrets are then optional, a login taking their place.'
+          : null}
       </small>
     </section>
   );
@@ -674,6 +686,8 @@ export function NodeDetails(props: {
   edges?: readonly GraphEdge[];
   /** Selects an edge, by its key, opening its panel. */
   openEdge?: (key: string) => void;
+  /** Restarts the instance as Apply does: a connector's new login put in force (D116). */
+  restart?: () => void;
   /** For a script node (D76, D78): the draft's nodes, each one's view, and the plugins offered. */
   script?: {
     nodes: readonly GraphNode[];
@@ -833,6 +847,18 @@ export function NodeDetails(props: {
           </button>
         </p>
       )}
+      {view.login === true ? (
+        running ? (
+          <ConnectorLogin
+            node={view.id}
+            {...(props.restart === undefined ? {} : { restart: props.restart })}
+          />
+        ) : (
+          <p className="muted small">
+            It logs in from here once it runs: apply it, then its Login shows here.
+          </p>
+        )
+      ) : null}
       {running && live.status !== undefined ? <NodeStatus status={live.status} /> : null}
       {running && view.page !== undefined ? (
         <p>
@@ -908,6 +934,7 @@ export function NodeDetails(props: {
           />
         )}
         <SecretSources
+          login={view.login === true}
           declared={view.secrets}
           keys={view.configSecrets}
           config={node.config}

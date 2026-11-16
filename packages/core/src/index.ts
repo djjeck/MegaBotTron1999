@@ -206,6 +206,16 @@ export {
   ORPHAN_MS,
 } from './instance-registry.ts';
 export {
+  type Login,
+  type LoginAction,
+  loginAnswer,
+  type LoginField,
+  LoginNeeded,
+  type LoginState,
+  type LoginStep,
+  NEEDS_LOGIN,
+} from './login.ts';
+export {
   type Kind,
   KINDS,
   type Manifest,

@@ -15,6 +15,7 @@ import {
 import { type OwnCost } from './costs.ts';
 import { type DriftReporter } from './drift.ts';
 import { type LogCursor, type LogEntry, type LogTail } from './event-log.ts';
+import { type Login } from './login.ts';
 import { type ManifestInput } from './manifest.ts';
 import { type NoticesHandle } from './notices.ts';
 import { type OutboxHandle } from './outbox.ts';
@@ -41,9 +42,16 @@ export interface PluginContext {
   readonly store: Store;
   /**
    * A connector's secrets (§4.9, P9): those its manifest declares, from the Docker secrets. Other
-   * kinds of plugin receive none.
+   * kinds of plugin receive none. `has` says whether one is provided (a connector that logs in
+   * from its node holds them as a fallback); `remember` marks a value as secret, to be redacted
+   * from the logs, the records and the errors like the Docker secrets (a credential it keeps in its
+   * store, an answer to its login).
    */
-  readonly secrets?: { get(name: string): string };
+  readonly secrets?: {
+    get(name: string): string;
+    has(name: string): boolean;
+    remember(value: string): void;
+  };
   /**
    * A connector's readers (§4.5, bot-os.md D62, D66): what each chat-in edge leaving its node reads,
    * as the graph says, of the nodes that read now (starting or running: not disabled, stopped,
@@ -217,6 +225,11 @@ export interface Instance {
   readonly connector?: Connector;
   /** A connector's chat surface (§2, §4.11): the core serves it the commands. */
   readonly surface?: ChatSurface;
+  /**
+   * A connector's login from its node (§4.5, bot-os.md D116), for one whose manifest says `login`:
+   * what it asks next, and the owner's answers (`GET` and `POST /plugins/<id>/login`).
+   */
+  readonly login?: Login;
   /** The owner changed one of its settings, already in force (§2). */
   settingsChanged?(): void;
   /**

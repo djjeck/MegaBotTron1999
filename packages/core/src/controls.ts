@@ -25,6 +25,7 @@ import { type Buttons } from './commands.ts';
 import { type ConnectorStatus, type Surface, type SurfaceQuery } from './connector.ts';
 import { type NodeCost } from './costs.ts';
 import { type DriftCounts } from './drift.ts';
+import { type LoginState } from './login.ts';
 import { type Manifest } from './manifest.ts';
 import { type CoalescedView, type QueueEntryView } from './outbox.ts';
 import { type Instance } from './plugin.ts';
@@ -99,6 +100,10 @@ export interface ControlsHost {
   cost?(id: string): NodeCost | undefined;
   /** A node's commands the retry-loop guard holds back (bot-os.md D98). */
   backoffs?(id: string): BackoffView[];
+  /** Takes the secrets out of a text (§4.9): a login's error. */
+  redact?(text: string): string;
+  /** Logs a login's step in the event log (`core.login`, D116): never what was typed. */
+  recordLogin?(fields: Record<string, unknown>): void;
 }
 
 /** What the controls read of a running connector. */
@@ -508,6 +513,64 @@ export class Controls {
     } catch (e) {
       return { error: message(e), refused: true };
     }
+  }
+
+  /**
+   * A connector's login (bot-os.md D116): where it stands; undefined for a node that offers none,
+   * an error for one not running.
+   */
+  login(id: string): { value: LoginState } | { error: string } | undefined {
+    const m = this.manifest(id);
+    if (m === undefined || !m.login) return undefined;
+    const login = this.host.instance(id)?.login;
+    if (login === undefined) return { error: `${id} is not running` };
+    try {
+      return { value: this.redacted(login.state()) };
+    } catch (e) {
+      return { error: this.redact(message(e)) };
+    }
+  }
+
+  /**
+   * An action of a connector's login, with the step's fields (bot-os.md D116): where it stands
+   * next, recorded (`core.login`: the action and where it led, never the values); undefined for a
+   * node that offers none, an error for one not running or an action it does not offer now.
+   */
+  async loginAct(
+    id: string,
+    action: string,
+    values: Readonly<Record<string, string>>
+  ): Promise<{ value: LoginState } | { error: string } | undefined> {
+    const m = this.manifest(id);
+    if (m === undefined || !m.login) return undefined;
+    const login = this.host.instance(id)?.login;
+    if (login === undefined) return { error: `${id} is not running` };
+    try {
+      const state = this.redacted(await login.act(action, values));
+      this.host.recordLogin?.({
+        node: id,
+        action,
+        status: state.status,
+        ...(state.as === undefined ? {} : { as: state.as }),
+        ...(state.error === undefined ? {} : { error: state.error }),
+      });
+      return { value: state };
+    } catch (e) {
+      return { error: this.redact(message(e)) };
+    }
+  }
+
+  private redact(text: string): string {
+    return this.host.redact?.(text) ?? text;
+  }
+
+  /** A login's state with its texts redacted: its error, above all. */
+  private redacted(s: LoginState): LoginState {
+    return {
+      ...s,
+      ...(s.error === undefined ? {} : { error: this.redact(s.error) }),
+      ...(s.note === undefined ? {} : { note: this.redact(s.note) }),
+    };
   }
 
   private manifest(id: string): Manifest | undefined {

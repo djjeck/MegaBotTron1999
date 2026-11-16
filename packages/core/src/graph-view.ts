@@ -292,6 +292,8 @@ export interface PluginView {
   interface: { reads: MemberView[]; actions: MemberView[]; commands: MemberView[] };
   /** The Docker secrets it declares, and the keys of its config that name one (§4.9). */
   secrets: string[];
+  /** It logs in from its node (D116): its declared secrets are a fallback. */
+  login?: boolean;
   configSecrets: string[];
   /** The event types it registers (§4.4). */
   events: string[];
@@ -460,6 +462,7 @@ export function describePlugin(m: Manifest): PluginView {
     },
     secrets: [...m.secrets],
     configSecrets: [...m.configSecrets],
+    ...(m.login ? { login: true } : {}),
     events: Object.keys(m.events).sort(),
     ...(m.configInputs === undefined
       ? {}

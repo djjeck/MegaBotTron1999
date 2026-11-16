@@ -54,6 +54,10 @@
  *   for a node that keeps none, 409 for one not running.
  * - `POST /plugins/<id>/actions/<name>` with the action's input as the body: its output, a 400 for
  *   an input its schema refuses, a 409 when the plugin refuses, with why.
+ * - `GET /plugins/<id>/login`: where a connector's login stands (D116), what it asks next;
+ *   `POST /plugins/<id>/login {"action": "token", "values": {"token": "…"}}` answers it, and says
+ *   where it stands next (a refused answer in its `error`). 404 for a node that offers no login,
+ *   409 for one not running or an action not offered now, 400 for a body that is no answer.
  *
  * - `GET /available`: the plugins the instance offers, the image's and the modules' (§7), each
  *   with its ports, schemas, interface, secrets and event types, for the editor.
@@ -98,6 +102,7 @@ import { type Graph } from './graph.ts';
 import { type GraphFileControls, GraphFileError } from './graph-file.ts';
 import { describeNodes } from './graph-view.ts';
 import { type InstanceInfo } from './instance-registry.ts';
+import { loginAnswer } from './login.ts';
 import { type TreeListing } from './module-files.ts';
 import { GitError, type HostControls, type RepoPick } from './module-git.ts';
 import { type ModuleFile, ModuleInUse, type ModuleSource } from './module-store.ts';
@@ -522,7 +527,7 @@ export function controlHandler(
         return reply(200, settings.current());
       }
       const m =
-        /^\/plugins\/([^/]+)\/(clear-stop|kill|state|actions|view|queue)(?:\/([^/]+))?$/u.exec(
+        /^\/plugins\/([^/]+)\/(clear-stop|kill|state|actions|view|queue|login)(?:\/([^/]+))?$/u.exec(
           route
         );
       if (m !== null) {
@@ -552,6 +557,16 @@ export function controlHandler(
         if (!post && what === 'view' && name === undefined) {
           const r = controls.view(id);
           if (r === undefined) return reply(404, { error: `${id} keeps no state to view` });
+          return 'error' in r ? reply(409, r) : reply(200, r.value);
+        }
+        if (what === 'login' && name === undefined) {
+          let r: Awaited<ReturnType<typeof controls.loginAct>>;
+          if (post) {
+            const answer = loginAnswer(await body(req));
+            if ('error' in answer) return reply(400, answer);
+            r = await controls.loginAct(id, answer.action, answer.values);
+          } else r = controls.login(id);
+          if (r === undefined) return reply(404, { error: `${id} offers no login` });
           return 'error' in r ? reply(409, r) : reply(200, r.value);
         }
         if (post && what === 'actions' && name !== undefined) {

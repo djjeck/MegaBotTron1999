@@ -138,7 +138,14 @@ the server that guards them.
   status (read there, so its reads offer no **Read** of it), its settings in force (each set at once
   with its **Set**, as `/set` does in chat, above the form of the settings a fresh instance starts
   with) and its reads and actions, each called with **Read** or **Run**, its input in a form made
-  from its schema, its answer under it (`NodeControls.tsx`). **Widgets and pages** (docs/bot-os.md
+  from its schema, its answer under it (`NodeControls.tsx`). **A connector's login** (docs/bot-os.md
+  D116): one that logs in from its node (a Telegram one) says `needs login` on its card until it has
+  credentials, and its panel, while it runs, shows its **Login** as its connector says it
+  (`ConnectorLogin.tsx`, `GET` and `POST /plugins/<id>/login`): a step's title, how-to and link, a
+  QR code drawn from its link (`qrcode-generator`, renewed as the login asks again every 2 s while
+  under way), its fields (a secret one typed unseen, cleared once sent) and its buttons (a logout
+  asking first); once its credentials changed, **Restart now** restarts the instance as Apply does.
+  Its Docker secrets show as its fallback, not required. **Widgets and pages** (docs/bot-os.md
   D112): a node whose plugin declares a widget shows it in one line on its card while it runs
   (`Widget.tsx`'s `WidgetLine`, `widget-text.ts`: its fields, a count, a list's first items, a
   table's rows counted, an amount out of its total with a bar, or how long until a time, moving with

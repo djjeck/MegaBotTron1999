@@ -116,6 +116,14 @@ async function settle(clock: VirtualClock, steps = 40): Promise<void> {
   await flush();
 }
 
+/** A connector's options on a fake client, unstarted. */
+const optionsOf = (f: ReturnType<typeof fake>) => ({
+  account: 'telegram:alice',
+  client: f.client,
+  clock: new VirtualClock(0),
+  log: () => {},
+});
+
 async function connector(f = fake(), chats = [GROUP, '@Quiz_bot']) {
   const clock = new VirtualClock(0);
   const messages: Inbound[] = [];
@@ -136,6 +144,19 @@ async function connector(f = fake(), chats = [GROUP, '@Quiz_bot']) {
 }
 
 describe('TelegramUserConnector', () => {
+  it('logs out on Telegram, then needs a login; not before it is connected (D116)', async () => {
+    const { c, f } = await connector();
+    const sent: unknown[] = [];
+    await expect(new TelegramUserConnector({ ...optionsOf(f) }).logOut()).rejects.toThrow(
+      'not connected'
+    );
+    await expect(c.logOut()).rejects.toThrow('not connected');
+    f.client.invoke = (r) => (sent.push(r), Promise.resolve(true));
+    await c.logOut();
+    expect(sent).toHaveLength(1);
+    expect(c.status()).toEqual({ state: 'closed', phase: 'needs login', detail: 'logged out' });
+  });
+
   it('connects, fills the entity cache, then resolves its chats, once', async () => {
     const { c, f, logs } = await connector();
     expect(f.calls).toEqual(['connect', 'dialogs', `entity ${GROUP}`, 'entity @Quiz_bot', 'me']);

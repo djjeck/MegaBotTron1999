@@ -835,6 +835,7 @@ export function GraphPage({
         heard={heardBy(shownNode.id)}
         configErrors={placed.config.get(shownNode.id) ?? {}}
         settingErrors={placed.settings.get(shownNode.id) ?? {}}
+        restart={() => setRestarting(true)}
         secretNames={secrets.data?.names ?? []}
         provided={secrets.data?.names}
         groups={groupsOf(draft.nodes)}

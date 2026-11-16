@@ -27,6 +27,9 @@ import type { CardSide } from './cards.ts';
 import { cardTitle } from './cards.ts';
 import { WidgetLine } from './Widget.tsx';
 
+/** The phase of a connector that needs a login (the core's `NEEDS_LOGIN`, D116). */
+const NEEDS_LOGIN = 'needs login';
+
 export interface PluginNodeData extends Record<string, unknown> {
   view: NodeView;
   live?: PluginControl | undefined;
@@ -194,10 +197,11 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
           )}
           {connection === undefined ? null : (
             <span
-              className={`badge ${connection.state}`}
+              className={`badge ${connection.phase === NEEDS_LOGIN ? 'needs-login' : connection.state}`}
               title={`its connection: ${connection.phase}${connection.detail === undefined ? '' : `: ${connection.detail}`}`}
             >
-              {connection.state}
+              {/* A connector that needs a login says so on its card (D116): log in from its panel. */}
+              {connection.phase === NEEDS_LOGIN ? NEEDS_LOGIN : connection.state}
             </span>
           )}
         </div>

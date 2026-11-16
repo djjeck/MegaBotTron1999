@@ -102,6 +102,12 @@ export const manifestSchema = z
      */
     configSecrets: z.array(z.string().min(1)).default([]),
     /**
+     * A connector that logs in from its node (docs/bot-os-api.md §4.5, bot-os.md D116): its
+     * instance offers a `login`, keeps the credentials in its store, and its declared secrets are a
+     * fallback, not required: without either it runs, needing a login.
+     */
+    login: z.boolean().default(false),
+    /**
      * The steps that bring its store from each older version to the next (docs/bot-os-api.md §4.2):
      * the store's version is the number of them.
      */
@@ -263,6 +269,12 @@ export const manifestSchema = z
         code: 'custom',
         path: ['secrets'],
         message: 'only a connector may hold secrets (P9)',
+      });
+    if (m.login && !connector)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['login'],
+        message: 'only a connector logs in (P9)',
       });
     if (m.configSecrets.length > 0 && !connector)
       ctx.addIssue({

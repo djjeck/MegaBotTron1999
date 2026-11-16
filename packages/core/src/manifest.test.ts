@@ -16,6 +16,7 @@ describe('parseManifest', () => {
       answers: [],
       secrets: [],
       configSecrets: [],
+      login: false,
       configChats: [],
       notices: false,
       summary: false,

@@ -3,9 +3,13 @@ import {
   definePlugin,
   type Graph,
   type GraphEdge,
+  NEEDS_LOGIN,
   VirtualClock,
 } from '@megabottron1999/core';
 import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readWarnings } from '#test/monitors.ts';
 import { BOT_INFO, stubBot } from '#test/telegram.ts';
@@ -350,5 +354,58 @@ describe('the telegram-bot plugin', () => {
     ).toEqual([expect.objectContaining({ path: ['deny'], message: 'its owner cannot be denied' })]);
     expect(telegramBotConfig.safeParse({ deny: [String(AUTHOR)] }).success).toBe(true);
     expect(telegramBotConfig.safeParse({ denyReply: 'one\ntwo' }).success).toBe(false);
+  });
+});
+
+describe('the telegram-bot plugin’s login (D116)', () => {
+  const TOKEN = '123456:AAnotarealtokenatallxyz';
+
+  it('runs without a token, needing a login, and keeps the token pasted', async () => {
+    const tokens: string[] = [];
+    const stub = stubBot();
+    stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
+    const core = new Core({ clock: new VirtualClock(), secrets: secretsWith({}) });
+    core.register(telegramBotPlugin({ bot: (token) => (tokens.push(token), stub.bot) }));
+    await core.start();
+    expect(core.state('telegram-bot')?.state).toBe('running');
+    expect(core.connector('telegram-bot')?.status()).toMatchObject({
+      state: 'closed',
+      phase: NEEDS_LOGIN,
+    });
+    expect(tokens).toEqual([]);
+    expect(await core.controls.loginAct('telegram-bot', 'token', { token: TOKEN })).toMatchObject({
+      value: { status: 'done', source: 'store', as: '@ExampleBot', restart: true },
+    });
+    expect(tokens).toEqual([TOKEN]);
+    await core.stop();
+  });
+
+  it('makes the bot from its store’s token over its secret', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-bot-'));
+    fs.mkdirSync(path.join(dir, 'instances', 'telegram-bot'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'instances', 'telegram-bot', 'login.json'),
+      JSON.stringify({ token: TOKEN })
+    );
+    const tokens: string[] = [];
+    const stub = stubBot();
+    stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
+    stub.bot.start = () => new Promise<void>(() => {});
+    stub.bot.stop = () => Promise.resolve();
+    const core = new Core({
+      clock: new VirtualClock(),
+      dataDir: dir,
+      secrets: secretsWith({ telegram_bot_token: '1:abcdef' }),
+    });
+    core.register(
+      telegramBotPlugin({ listen: Promise.resolve(), bot: (t) => (tokens.push(t), stub.bot) })
+    );
+    await core.start();
+    await new Promise((r) => setImmediate(r));
+    expect(tokens).toEqual([TOKEN]);
+    expect(core.controls.login('telegram-bot')).toMatchObject({
+      value: { status: 'done', source: 'store', as: '@ExampleBot' },
+    });
+    await core.stop();
   });
 });
