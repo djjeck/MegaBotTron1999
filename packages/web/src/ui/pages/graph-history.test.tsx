@@ -192,6 +192,27 @@ describe('the graph history', () => {
     expect(screen.queryByRole('region', { name: `version of ${when(GOOD)}` })).toBeNull();
   });
 
+  it('offers no rollback to a version the check refuses now (D110)', async () => {
+    const api = fakeApi({
+      'GET /graph/history': [200, HISTORY],
+      [`GET /graph/history/${FIRST}`]: [
+        200,
+        version(FIRST, { problems: [{ text: 'graph: version: a graph of version 1' }] }),
+      ],
+    });
+    render(<GraphHistoryPage loggedOut={loggedOut} />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: `Open the version of ${when(FIRST)}` })
+    );
+    const opened = await screen.findByRole('region', { name: `version of ${when(FIRST)}` });
+    expect(within(opened).getByRole('alert').textContent).toContain('cannot be rolled back to');
+    const button = within(opened).getByRole('button', { name: 'Roll back to this' });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+    expect(screen.queryByRole('dialog', { name: 'roll back' })).toBeNull();
+    expect(api.calls.some((c) => c.startsWith('POST'))).toBe(false);
+  });
+
   it('restarts without the app, and says when the restart is refused', async () => {
     let restarts = 0;
     fakeApi({

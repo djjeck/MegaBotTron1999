@@ -5,12 +5,6 @@ import { ManifestError, parseManifest } from './manifest.ts';
 const base = { id: 'test-plugin', version: '0.1.0', kinds: ['stats'], description: 'a test' };
 
 describe('parseManifest', () => {
-  it('refuses a dropped input it still has (D99)', () => {
-    expect(() =>
-      parseManifest({ ...base, inputs: { chat: { type: 'chat-in' } }, droppedInputs: ['chat'] })
-    ).toThrow('droppedInputs.0: it still has an input chat');
-  });
-
   it('fills in the defaults', () => {
     expect(parseManifest(base)).toEqual({
       ...base,
@@ -23,8 +17,6 @@ describe('parseManifest', () => {
       secrets: [],
       configSecrets: [],
       configChats: [],
-      movedChats: [],
-      droppedInputs: [],
       notices: false,
       summary: false,
       audit: [],
@@ -261,26 +253,19 @@ describe('parseManifest', () => {
     ).toThrow("only a connector's own key names its owner's chat");
   });
 
-  it('declares the chats moved onto its edges, and the ports of one chat and of many edges (D97)', () => {
+  it('declares the ports of one chat and of many edges (D97)', () => {
     const teller = {
       ...base,
       outputs: { out: { type: 'chat-out', single: { pattern: '^@', expected: 'a bot' } } },
       inputs: { in: { type: 'chat-in', sameAs: 'out' } },
     };
-    const m = parseManifest({
-      ...teller,
-      movedChats: [
-        { key: 'chat', output: 'out' },
-        { key: 'chat', input: 'in' },
-      ],
-    });
-    expect(m.movedChats).toHaveLength(2);
-    expect(() => parseManifest({ ...teller, movedChats: [{ key: 'chat' }] })).toThrow(
-      'a moved chat names the output or input whose edge now holds it'
-    );
-    expect(() => parseManifest({ ...teller, movedChats: [{ key: 'chat', output: 'in' }] })).toThrow(
-      'it has no chat-out output in'
-    );
+    expect(() =>
+      parseManifest({
+        ...teller,
+        config: z.object({ chat: z.string() }),
+        configChats: [{ key: 'chat', output: 'in' }],
+      })
+    ).toThrow('it has no chat-out output in');
     expect(() =>
       parseManifest({ ...teller, inputs: { in: { type: 'chat-in', sameAs: 'nope' } } })
     ).toThrow('it has no chat-out output nope of one chat (single)');

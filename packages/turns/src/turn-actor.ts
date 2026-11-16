@@ -174,11 +174,6 @@ export function turnActorPlugin(): Plugin {
       description:
         "A game bot's turn, from the owner's account, in its private chat, at a person's pace",
       config: turnActorConfig,
-      // Its bot's chat is its edge's (D97); its config's `chat` of 0.1.19 moves there.
-      movedChats: [{ key: 'chat', output: 'chat' }],
-      // It read its bot's chat for the turns sent by hand, which its parser tells it now (D99): a
-      // graph saved with that edge loads without it.
-      droppedInputs: ['chat'],
       // Its turns since the last summary, for the owner (bot-os.md D92).
       summary: true,
       games: { registers: [TURN_ACTOR] },

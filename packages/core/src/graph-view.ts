@@ -21,11 +21,6 @@ import {
 
 /** The graph file, in the data volume. */
 export const GRAPH_FILE = 'graph.json';
-/**
- * The graph before the last change, as releases before the history kept it beside the file: read
- * once, at the first start with a history, into it (`graph-history.ts`), then removed.
- */
-export const PREVIOUS_GRAPH_FILE = 'graph.previous.json';
 
 /** JSON with its object keys sorted, on one line: two values that mean the same print the same. */
 export const stableJson = (v: unknown): string =>

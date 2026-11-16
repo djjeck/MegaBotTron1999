@@ -15,9 +15,9 @@
  * ```
  *
  * - `source`: a save (`PUT /graph/file`), a rollback (which names the version it `restores`), a
- *   file found at a start that no version holds (written by hand: `found`), or one of the files the
- *   history replaced (`graph.previous.json`, `graph.json`), taken in at its first start
- *   (`migrated`).
+ *   file found at a start that no version holds (written by hand, or there before the history:
+ *   `found`); `migrated`, written by releases up to 0.1.26 (the files the history replaced, and the
+ *   first starts' migrations, bot-os.md D110), is still read.
  * - `summary`: what changed from the version before, on one line.
  * - `start`: how the instance last started on it: it `ran`, or it was `refused`, with why; none if
  *   it never started on it.
@@ -47,7 +47,7 @@ export interface GraphStart {
   problems?: string[];
 }
 
-/** Where a version comes from. */
+/** Where a version comes from; nothing writes `migrated` any more (bot-os.md D110). */
 export type GraphVersionSource = 'save' | 'rollback' | 'found' | 'migrated';
 
 /** A version of the graph, without its graph. */

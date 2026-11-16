@@ -167,7 +167,7 @@ describe('App', () => {
     api.routes['GET /session'] = () => [200, { authenticated: !restarted, boot: 'boot-1' }];
     api.routes['GET /graph/file'] = [
       200,
-      { exists: true, graph: { version: 1, nodes: [], edges: [] }, differs: true },
+      { exists: true, graph: { version: 2, nodes: [], edges: [] }, differs: true },
     ];
     render(<App />);
     fireEvent.click(

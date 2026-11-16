@@ -11,7 +11,6 @@ import {
   graphMermaid,
   graphText,
   lineDiff,
-  PREVIOUS_GRAPH_FILE,
   readGraphFile,
   writeGraphFile,
 } from './graph-view.ts';
@@ -148,17 +147,14 @@ describe('the graph printed', () => {
     );
   });
 
-  it('is written to the data volume, keeping the one before when it changed', () => {
+  it('is written to the data volume, saying whether it changed', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'graph-'));
     expect(writeGraphFile(dir, graph)).toBe(true);
     expect(readGraphFile(path.join(dir, GRAPH_FILE))).toEqual(graph);
     expect(writeGraphFile(dir, graph)).toBe(false);
-    expect(fs.existsSync(path.join(dir, PREVIOUS_GRAPH_FILE))).toBe(false);
     const next = { ...graph, edges: [] };
     expect(writeGraphFile(dir, next)).toBe(true);
     expect(readGraphFile(path.join(dir, GRAPH_FILE))).toEqual(next);
-    // The versions before are the history's: no previous file.
-    expect(fs.existsSync(path.join(dir, PREVIOUS_GRAPH_FILE))).toBe(false);
     fs.rmSync(dir, { recursive: true });
   });
 });

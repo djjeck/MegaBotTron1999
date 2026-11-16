@@ -199,27 +199,6 @@ export const manifestSchema = z
       )
       .default([]),
     /**
-     * Keys its config had in an earlier release that named a chat its edge now names alone
-     * (bot-os.md D97): a graph saved with one is migrated as it loads (`upgradeGraph`), the chat
-     * added to the `sends` of the edge from its chat-out `output`, or to the `reads` of the edge to
-     * its chat-in `input`, where not there already, and the key dropped.
-     */
-    movedChats: z
-      .array(
-        z.strictObject({
-          key: z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key'),
-          output: z.string().min(1).optional(),
-          input: z.string().min(1).optional(),
-        })
-      )
-      .default([]),
-    /**
-     * Input ports it had in an earlier release and has no more (bot-os.md D99: the turn actor's
-     * chat-in): a graph saved with an edge to one is migrated as it loads (`upgradeGraph`), the
-     * edge dropped, so that it loads rather than being refused for a port that is gone.
-     */
-    droppedInputs: z.array(z.string().min(1)).default([]),
-    /**
      * It hears the owner's notices (bot-os.md D91, `ctx.notices`): what the core and the plugins
      * raise for the owner's attention, for a node that tells the owner (`owner-notice`).
      */
@@ -311,32 +290,21 @@ export const manifestSchema = z
         path: ['monitors', 'config'],
         message: `its config has no key ${m.monitors.config}`,
       });
-    const chatKeys = [
-      ...m.configChats.map((c, i) => ({ c, where: ['configChats', i] })),
-      // A key moved onto its edge (D97) is gone from its config, and leads to its connector.
-      ...m.movedChats.map((c, i) => ({ c, where: ['movedChats', i] })),
-    ];
-    for (const { c, where } of chatKeys) {
-      const moved = where[0] === 'movedChats';
-      if (!moved && !Object.hasOwn(m.config?.shape ?? {}, c.key))
+    for (const [i, c] of m.configChats.entries()) {
+      const where = ['configChats', i];
+      if (!Object.hasOwn(m.config?.shape ?? {}, c.key))
         ctx.addIssue({
           code: 'custom',
           path: [...where, 'key'],
           message: `its config has no key ${c.key}`,
         });
-      if ('owner' in c && c.owner === true && (c.output !== undefined || c.input !== undefined))
+      if (c.owner === true && (c.output !== undefined || c.input !== undefined))
         ctx.addIssue({
           code: 'custom',
           path: [...where, 'owner'],
           message: "only a connector's own key names its owner's chat",
         });
-      if (moved && c.output === undefined && c.input === undefined)
-        ctx.addIssue({
-          code: 'custom',
-          path: where,
-          message: 'a moved chat names the output or input whose edge now holds it',
-        });
-      else if (c.output !== undefined && c.input !== undefined)
+      if (c.output !== undefined && c.input !== undefined)
         ctx.addIssue({ code: 'custom', path: where, message: 'an output or an input, not both' });
       else if (c.output === undefined && c.input === undefined && !connector)
         ctx.addIssue({
@@ -381,14 +349,6 @@ export const manifestSchema = z
           message: `namespace ${ns} is not among games.registers`,
         });
     }
-    m.droppedInputs.forEach((port, i) => {
-      if (Object.hasOwn(m.inputs, port))
-        ctx.addIssue({
-          code: 'custom',
-          path: ['droppedInputs', i],
-          message: `it still has an input ${port}`,
-        });
-    });
     m.answers.forEach((a, i) => {
       if (!Object.hasOwn(m.events, a.event))
         ctx.addIssue({

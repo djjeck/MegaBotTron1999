@@ -510,8 +510,6 @@ export function ownerNoticePlugin(): Plugin {
       config: ownerNoticeConfig,
       notices: true,
       summary: true,
-      // Its chats are those its edges name (D97); its config's `chat` of 0.1.19 moves there.
-      movedChats: [{ key: 'chat', output: 'chat' }],
       outputs: {
         chat: {
           type: 'chat-out',

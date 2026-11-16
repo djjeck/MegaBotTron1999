@@ -7,12 +7,10 @@ import {
   type GraphInput,
   loadOrder,
   monitoredChats,
-  moveChats,
   requiredOf,
   type ResolvedNode,
   resolveGraph,
   unmonitoredReads,
-  upgradeGraph,
 } from './graph.ts';
 import { type Manifest, type ManifestInput, parseManifest } from './manifest.ts';
 import { describePort, type InputPort, mismatch, PORT_TYPE_INFO, PORT_TYPES } from './ports.ts';
@@ -197,7 +195,7 @@ describe('the graph', () => {
 
   it('names the node and the port of every problem', () => {
     expect(problems({ version: 3, nodes: [] })).toEqual([
-      'graph: version: Invalid input: expected 2',
+      'graph: version: a graph of version 3, which this release does not read (it reads version 2)',
     ]);
     expect(
       problems(
@@ -437,7 +435,6 @@ describe('chat-in and chat-out', () => {
       'teller',
       m('teller', {
         outputs: { chat: { type: 'chat-out', many: true, owner: true } },
-        movedChats: [{ key: 'chat', output: 'chat' }],
       })
     );
     const nodes = [
@@ -473,35 +470,6 @@ describe('chat-in and chat-out', () => {
         many
       )
     ).toEqual(['edge teller.chat → tg.chat: twice in the graph']);
-    // A chat its config held moves onto its edges (D97), bare or by port, and the key goes.
-    const saved = {
-      version: 2,
-      nodes: [...nodes.slice(0, 2), { id: 'teller', plugin: 'teller', config: { chat: '7' } }],
-      edges: [
-        { from: 'teller', to: 'tg.chat', type: 'chat-out', sends: ['1'] },
-        { from: 'teller.chat', to: 'tg-2.chat' },
-        'not an edge',
-      ],
-    };
-    expect(moveChats(saved, many)).toEqual({
-      ...saved,
-      nodes: [...nodes.slice(0, 2), { id: 'teller', plugin: 'teller' }],
-      edges: [
-        { from: 'teller', to: 'tg.chat', type: 'chat-out', sends: ['1', '7'] },
-        { from: 'teller.chat', to: 'tg-2.chat', sends: ['7'] },
-        'not an edge',
-      ],
-    });
-    // A key of no chat (null) goes too; a graph with none to move, and anything else, as they are.
-    expect(
-      moveChats(
-        { ...saved, nodes: [{ id: 'teller', plugin: 'teller', config: { chat: null, x: 1 } }] },
-        many
-      )
-    ).toMatchObject({ nodes: [{ id: 'teller', config: { x: 1 } }], edges: saved.edges });
-    const none = { ...saved, nodes: nodes.slice(0, 2) };
-    expect(moveChats(none, many)).toBe(none);
-    expect(moveChats('nope', many)).toBe('nope');
   });
 
   it('refuses a chat-out bound twice, unbound, or the wrong way round', () => {
@@ -552,113 +520,13 @@ describe('chat-in and chat-out', () => {
     ]);
   });
 
-  it('converts a version 1 graph, each chat edge by the ports of its node', () => {
-    // The shape of a graph saved before the split: a connector's chat edges, all empty, to a
-    // parser (it reads), a turn-actor (it reads and sends) and a reactor on events (it sends).
-    const shell = new Map(
-      [
-        m('telegram-user', { kinds: ['connector'], account: 'telegram:alice' }),
-        m('parser', {
-          kinds: ['parser'],
-          games: { registers: ['questbot'] },
-          interface: { state: { rest: { help: 'its rest', output: z.number() } } },
-          inputs: { chat: { type: 'chat-in', network: 'telegram' } },
-        }),
-        m('turn-actor', {
-          kinds: ['actor'],
-          inputs: {
-            chat: { type: 'chat-in', network: 'telegram' },
-            parser: { type: 'interface', members: ['state.rest'] },
-          },
-          outputs: { chat: { type: 'chat-out', network: 'telegram' } },
-        }),
-        m('reactor', {
-          kinds: ['actor'],
-          config: z.object({ on: z.string().optional(), match: z.string().optional() }),
-          inputs: {
-            chat: { type: 'chat-in', when: { config: 'match' } },
-            events: { type: 'events', namespace: { config: 'on' }, optional: true },
-          },
-          outputs: { chat: { type: 'chat-out' } },
-        }),
-      ].map((x) => [x.id, x])
-    );
-    const v1 = {
-      version: 1,
-      nodes: [
-        { id: 'telegram-user', plugin: 'telegram-user' },
-        { id: 'questbot', plugin: 'parser' },
-        { id: 'questbot-turns', plugin: 'turn-actor' },
-        { id: 'look', plugin: 'reactor', config: { on: 'questbot.turn' } },
-      ],
-      edges: [
-        { from: 'telegram-user.chat', to: 'questbot.chat', type: 'chat', reads: [], sends: [] },
-        {
-          from: 'telegram-user.chat',
-          to: 'questbot-turns.chat',
-          type: 'chat',
-          reads: [],
-          sends: [],
-        },
-        { from: 'telegram-user.chat', to: 'look.chat', type: 'chat', reads: [], sends: [] },
-        { from: 'questbot.interface', to: 'questbot-turns.parser', type: 'interface' },
-        { from: 'questbot.events', to: 'look.events', type: 'events' },
-      ],
-    };
-    const converted = [
-      { from: 'telegram-user.chat', to: 'questbot.chat', type: 'chat-in', reads: [] },
-      { from: 'telegram-user.chat', to: 'questbot-turns.chat', type: 'chat-in', reads: [] },
-      { from: 'questbot-turns.chat', to: 'telegram-user.chat', type: 'chat-out', sends: [] },
-      { from: 'look.chat', to: 'telegram-user.chat', type: 'chat-out', sends: [] },
-      { from: 'questbot.interface', to: 'questbot-turns.parser', type: 'interface' },
-      { from: 'questbot.events', to: 'look.events', type: 'events' },
-    ];
-    expect(upgradeGraph(v1, shell)).toEqual({ ...v1, version: 2, edges: converted });
-    const { graph: g, nodes } = resolveGraph(v1, shell);
-    expect(g).toEqual({ version: 2, nodes: v1.nodes, edges: converted });
-    expect(loadOrder(nodes).map((n) => n.id)).toEqual([
-      'telegram-user',
-      'questbot',
-      'questbot-turns',
-      'look',
+  it('refuses a graph of another version, saying which', () => {
+    expect(problems({ version: 1, nodes: [], edges: [] }, plugins)).toEqual([
+      'graph: version: a graph of version 1, which this release does not read (it reads version 2)',
     ]);
-    // A version 2 graph, and what is not a graph, are left as they are.
-    expect(upgradeGraph(g, shell)).toBe(g);
-    expect(upgradeGraph('x', shell)).toBe('x');
-  });
-
-  it('converts what it can of an odd version 1 graph, and leaves the check to say the rest', () => {
-    const v1 = {
-      version: 1,
-      nodes: [{ id: 'tg', plugin: 'tg' }, { id: 'old', plugin: 'old' }, { id: 'reader' }, 7],
-      edges: [
-        // Untyped, it is a chat edge by what it carries, or by its target's port.
-        { from: 'tg', to: 'old.line', reads: ['#a'], sends: ['#b'], commands: ['!go'] },
-        { from: 'tg', to: 'reader.chat', sends: ['#b'] },
-        { from: 'ghost', to: 'nobody.chat', type: 'chat', reads: ['#a'] },
-        { from: 'tg', to: 'old.nothing', type: 'chat' },
-        { from: 'tg', to: 'old.other' },
-        'junk',
-      ],
-    };
-    expect(upgradeGraph(v1, plugins)).toEqual({
-      ...v1,
-      version: 2,
-      edges: [
-        { from: 'tg', to: 'old.line', type: 'chat-in', reads: ['#a'] },
-        { from: 'old.line', to: 'tg.chat', type: 'chat-out', sends: ['#b'], commands: ['!go'] },
-        // Of a node with no plugin known, both halves, nothing lost.
-        { from: 'tg', to: 'reader.chat', type: 'chat-in' },
-        { from: 'reader.chat', to: 'tg.chat', type: 'chat-out', sends: ['#b'] },
-        { from: 'ghost', to: 'nobody.chat', type: 'chat-in', reads: ['#a'] },
-        { from: 'nobody.chat', to: 'ghost.chat', type: 'chat-out' },
-        // Of a known node with no such port, the input's half, for the check to refuse.
-        { from: 'tg', to: 'old.nothing', type: 'chat-in' },
-        { from: 'tg', to: 'old.other' },
-        'junk',
-      ],
-    });
-    expect(upgradeGraph({ version: 1 }, plugins)).toEqual({ version: 2 });
+    expect(problems({ version: 'x', nodes: [], edges: [] }, plugins)).toEqual([
+      expect.stringMatching(/^graph: version: /u),
+    ]);
   });
 });
 

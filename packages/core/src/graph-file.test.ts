@@ -518,16 +518,29 @@ describe('the graph API', () => {
     expect((await call('/graph/history'))[1]).toMatchObject({
       versions: [{ source: 'rollback' }, { source: 'found' }, {}, {}, {}, {}],
     });
-    // A version that the check refuses now says so, and rolls back all the same.
+    // A version that the check refuses now says so, and is not rolled back to (D110).
     const found = ((await call('/graph/history'))[1] as { versions: { id: string }[] }).versions[1]
       ?.id as string;
     expect((await call(`/graph/history/${found}`))[1]).toMatchObject({
       problems: [{}, {}, {}, {}],
     });
     clock.advance(1000);
-    expect((await call(`/graph/history/${found}/rollback`, 'POST'))[1]).toMatchObject({
-      rolledBack: true,
-      problems: [{}, {}, {}, {}],
+    const kept = fs.readFileSync(file.file, 'utf8');
+    expect(await call(`/graph/history/${found}/rollback`, 'POST')).toEqual([
+      409,
+      {
+        error: `version ${found} is refused by the check`,
+        problems: [
+          expect.objectContaining({ node: 'actor', port: 'score' }),
+          expect.objectContaining({ edge: { from: 'scorer', to: 'actor.chat' } }),
+          expect.objectContaining({ port: 'chat' }),
+          expect.objectContaining({ port: 'chat' }),
+        ],
+      },
+    ]);
+    expect(fs.readFileSync(file.file, 'utf8')).toBe(kept);
+    expect((await call('/graph/history'))[1]).toMatchObject({
+      versions: [{ source: 'rollback' }, { source: 'found' }, {}, {}, {}, {}],
     });
     write('graph.json', '{half');
     expect((await call('/graph/file'))[1]).toMatchObject({ error: expect.any(String) });
@@ -670,99 +683,65 @@ describe('the graph API', () => {
   });
 });
 
-describe('a graph file of version 1', () => {
-  let server: http.Server | undefined;
-  afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r())));
-
-  it('runs converted, is shown and saved as version 2, and rolls back as version 2', async () => {
-    write('graph.json', versionOne);
-    write('graph.previous.json', versionOne);
-    // Written a day before, each version is kept at its file's time.
-    const before = new Date(clock.now() - 86_400_000);
-    fs.utimesSync(path.join(dir, 'graph.previous.json'), before, before);
-    fs.utimesSync(path.join(dir, 'graph.json'), before, before);
-    const { core, file } = instance();
-    await core.start();
-    // The first start takes both files into the history: one version, as they are the same.
-    file.started(core);
-    expect(fs.existsSync(file.previous)).toBe(false);
-    expect(file.history.list()).toMatchObject([
-      { source: 'migrated', time: '2026-10-31T00:00:00.000Z', start: { result: 'ran' } },
-    ]);
-    expect(core.status().map((s) => s.state)).toEqual(['running', 'running', 'running']);
-    const converted = [
-      { from: 'chat.chat', to: 'actor.chat', type: 'chat-in', reads: ['#lobby'] },
-      { from: 'actor.chat', to: 'chat.chat', type: 'chat-out', sends: ['#lobby'] },
-      { from: 'scorer.interface', to: 'actor.score', type: 'interface' },
-    ];
-    expect(core.graph()).toMatchObject({ version: 2, edges: converted });
-    expect(core.sends('actor')).toBe(true);
-    server = controlServer({
-      controls: core.controls,
-      settings: core.settings,
-      graphFile: graphFileControls(file, core),
-    });
-    await new Promise<void>((r) => server?.listen(0, '127.0.0.1', r));
-    const { port } = server.address() as { port: number };
-    const call = async (p: string, method = 'GET', payload?: unknown) => {
-      const res = await fetch(`http://127.0.0.1:${port}${p}`, {
-        method,
-        ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
-      });
-      return (await res.json()) as Record<string, unknown>;
-    };
-    // Shown as version 2, the file left as it is until a save; what runs already.
-    expect(await call('/graph/file')).toMatchObject({
-      differs: false,
-      graph: { version: 2, edges: converted },
-    });
-    expect(JSON.parse(fs.readFileSync(file.file, 'utf8'))).toMatchObject({ version: 1 });
-    // Checked against the saved file, both converted: nothing changes.
-    expect(await call('/graph/check', 'POST', versionOne)).toMatchObject({
-      ok: true,
-      diff: { edges: { added: [], removed: [], changed: [] } },
-    });
-    // Saved, as version 2: the same graph, so it is no new version.
-    expect(await call('/graph/file', 'PUT', versionOne)).toEqual({
-      saved: true,
-      restart: false,
-      warnings: [],
-    });
-    expect(JSON.parse(fs.readFileSync(file.file, 'utf8'))).toMatchObject({
-      version: 2,
-      edges: converted,
-    });
-    expect(file.history.list()).toHaveLength(1);
-    // A version 1 version is shown, diffed and rolled back as version 2.
+describe('a graph file of an older release (D110)', () => {
+  it('is refused at the load, with why; its versions list, show their problems, and never roll back', async () => {
+    // As releases before 0.1.26 wrote them, kept in the history: version 1; and a version 2 with
+    // a node's mode (D64), which no release converts any more.
+    const withMode = { ...good, nodes: good.nodes.map((n) => ({ ...n, mode: 'live' })) };
+    const old = new GraphFile(dir, () => clock.now());
+    old.history.record(versionOne, { source: 'migrated', summary: '+ node chat' });
     clock.advance(1000);
-    const changed = {
-      ...good,
-      nodes: [...good.nodes.slice(0, 2), { ...good.nodes[2], config: { every: 3 } }],
-    };
-    expect(await call('/graph/file', 'PUT', changed)).toMatchObject({ saved: true });
-    const v1 = file.history.list()[1]?.id as string;
-    expect(await call(`/graph/history/${v1}`)).toMatchObject({
-      graph: { version: 2, edges: converted },
-      diff: {
-        nodes: { changed: [{ id: 'actor', fields: ['config'] }] },
-        edges: { added: [], removed: [], changed: [] },
-      },
-      lines: expect.arrayContaining([
-        { op: '-', text: '    config.every: 3' },
-        { op: '+', text: '    config.every: 2' },
+    old.history.record(withMode, { source: 'save', summary: '~ node chat: mode' });
+    clock.advance(1000);
+    write('graph.json', versionOne);
+    const { core, file, told } = instance();
+    await core.start();
+    file.started(core);
+    const why =
+      'graph: version: a graph of version 1, which this release does not read (it reads version 2)';
+    expect(core.graphProblems()).toEqual([{ text: why }]);
+    expect(core.nodes()).toEqual([]);
+    expect(told).toContain(`graph-refused: The saved graph is refused, and no node runs: ${why}`);
+    const controls = graphFileControls(file, core);
+    expect(controls.file()).toMatchObject({ exists: true, problems: [{ text: why }] });
+    // Listed as they were kept, the newest the file's, refused at this start.
+    const [found, mode, first] = file.history.list();
+    expect(controls.history()).toMatchObject({
+      versions: [
+        { id: found?.id, source: 'found', start: { result: 'refused', problems: [why] } },
+        { id: mode?.id, source: 'save', summary: '~ node chat: mode' },
+        { id: first?.id, source: 'migrated', summary: '+ node chat' },
+      ],
+      current: found?.id,
+    });
+    // Shown and diffed, with the check's problems.
+    expect(controls.version(first?.id as string)).toMatchObject({
+      graph: versionOne,
+      problems: [{ text: why }],
+    });
+    expect(controls.version(mode?.id as string)).toMatchObject({
+      problems: expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining('mode') }),
       ]),
     });
-    clock.advance(1000);
-    expect(await call('/graph/rollback', 'POST')).toMatchObject({
-      rolledBack: true,
-      restart: false,
-    });
-    expect(JSON.parse(fs.readFileSync(file.file, 'utf8'))).toMatchObject({
-      version: 2,
-      edges: converted,
-    });
-    expect(await call('/graph/file')).toMatchObject({ differs: false });
+    // A rollback to either is refused, with why, and writes nothing.
+    for (const id of [mode?.id, first?.id] as string[])
+      expect(() => controls.rollbackTo(id)).toThrow(
+        expect.objectContaining({
+          message: `version ${id} is refused by the check`,
+          status: 409,
+          problems: expect.arrayContaining([expect.objectContaining({ text: expect.any(String) })]),
+        })
+      );
+    expect(JSON.parse(fs.readFileSync(file.file, 'utf8'))).toEqual(versionOne);
+    expect(file.history.list()).toHaveLength(3);
+    // Fixed by a save of the current version, it runs at the next start.
+    expect(controls.save(good)).toMatchObject({ saved: true });
     await core.stop();
+    const again = instance();
+    await again.core.start();
+    expect(again.core.graphProblems()).toEqual([]);
+    await again.core.stop();
   });
 });
 

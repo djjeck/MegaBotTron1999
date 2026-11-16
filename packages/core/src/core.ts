@@ -50,7 +50,6 @@ import {
   requiredOf,
   type ResolvedNode,
   resolveGraph,
-  upgradeGraph,
 } from './graph.ts';
 import {
   type GraphCheck,
@@ -1376,22 +1375,6 @@ export class Core {
     } catch {
       return [];
     }
-  }
-
-  /**
-   * A graph file of version 1 as version 2 (§2.3, bot-os.md D60), against the plugins the
-   * instance offers; any other as it is. Nothing is checked.
-   */
-  upgrade(raw: unknown): unknown {
-    const manifests = new Map<string, Manifest>();
-    for (const p of this.plugins)
-      try {
-        const m = parseManifest(p.manifest);
-        if (!manifests.has(m.id)) manifests.set(m.id, m);
-      } catch {
-        // The check says why.
-      }
-    return upgradeGraph(raw, manifests);
   }
 
   /** Why the saved graph was not run at this start (§2.3); none when it was. */

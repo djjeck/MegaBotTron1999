@@ -10,11 +10,10 @@
  * - Every graph written (a save, a rollback) is kept as a version of the history
  *   (`graph-history.ts`, bot-os.md D61), with what changed from the one before; at each start the
  *   history says whether the instance ran the file's version or refused it. A rollback writes a
- *   version kept back as the newest. The history replaced `graph.previous.json`, which the first
- *   start with a history takes into it.
- * - A file of version 1 (one chat edge for reads and sends) is converted to version 2 as it is
- *   read (bot-os.md D60): the instance runs it, `GET /graph/file` shows it, and the check and a
- *   save take it, as version 2; the file itself is rewritten only by the next save, or rollback.
+ *   version kept back as the newest. A rollback to a version the check refuses now (one of an
+ *   older release's format, a plugin gone) is refused, with the check's problems, and writes
+ *   nothing (bot-os.md D110).
+ * - A file of another version than `GRAPH_VERSION` is refused, with why: nothing converts it.
  * - A problem is located where it can be: its node, its edge, its port, its config or setting key,
  *   for the editor to mark.
  *
@@ -31,14 +30,7 @@ import {
   HISTORY_DAYS,
   HISTORY_KEEP,
 } from './graph-history.ts';
-import {
-  GRAPH_FILE,
-  graphText,
-  lineDiff,
-  PREVIOUS_GRAPH_FILE,
-  stableJson,
-  writeGraphFile,
-} from './graph-view.ts';
+import { GRAPH_FILE, graphText, lineDiff, stableJson, writeGraphFile } from './graph-view.ts';
 
 /**
  * One problem of a graph, located where it can be; a warning (bot-os.md D89) has the same shape,
@@ -80,8 +72,6 @@ export type GraphCheck =
 export interface GraphChecker {
   /** Checks a graph against the plugins the instance offers, as the load does. */
   check(raw: unknown): GraphCheck;
-  /** A graph file of an older version as the current one (bot-os.md D60); none: as it is. */
-  upgrade?(raw: unknown): unknown;
   /** The graph the instance runs. */
   graph(): Graph | undefined;
   /** Why the saved graph was not run at start; none when it was. */
@@ -317,10 +307,6 @@ export function printable(raw: unknown): Graph {
 export type GraphFileRead =
   { exists: false } | { exists: true; raw: unknown } | { exists: true; error: string };
 
-/** A graph file of an older version as the current one; none: as it is. */
-type Upgrade = (raw: unknown) => unknown;
-const asIs: Upgrade = (raw) => raw;
-
 /** The graph's file in a data directory, and its history (`<dir>/graph-history/`). */
 export class GraphFile {
   readonly dir: string;
@@ -335,11 +321,6 @@ export class GraphFile {
 
   get file(): string {
     return path.join(this.dir, GRAPH_FILE);
-  }
-
-  /** Where releases before the history kept the graph before the last change. */
-  get previous(): string {
-    return path.join(this.dir, PREVIOUS_GRAPH_FILE);
   }
 
   /** The file's graph, unchecked. */
@@ -387,61 +368,45 @@ export class GraphFile {
   }
 
   /** The newest version of the history, if it is the file's graph. */
-  current(upgrade: Upgrade = asIs): GraphVersion | undefined {
+  current(): GraphVersion | undefined {
     const r = this.read();
     const newest = this.history.latest();
-    return newest !== undefined &&
-      r.exists &&
-      'raw' in r &&
-      sameGraph(upgrade(newest.graph), upgrade(r.raw))
+    return newest !== undefined && r.exists && 'raw' in r && sameGraph(newest.graph, r.raw)
       ? newest
       : undefined;
   }
 
   /** Keeps `graph` as the newest version, its summary what changed from the one before. */
-  private keep(
-    graph: unknown,
-    upgrade: Upgrade,
-    meta: { source: GraphVersionSource; restores?: string; time?: number }
-  ): void {
+  private keep(graph: unknown, meta: { source: GraphVersionSource; restores?: string }): void {
     const before = this.history.latest();
     this.history.record(graph, {
       ...meta,
-      summary: diffSummary(graphDiff(upgrade(before?.graph ?? EMPTY), upgrade(graph))),
+      summary: diffSummary(graphDiff(before?.graph ?? EMPTY, graph)),
     });
   }
 
   /**
-   * The file's graph kept as a version when no version holds it (written by hand, or before the
-   * history), `source` and `time` its own; the newest version, if it is the file's graph.
+   * The file's graph kept as a version (`found`) when no version holds it (written by hand, or
+   * before the history); the newest version, if it is the file's graph.
    */
-  private keepFile(
-    upgrade: Upgrade,
-    source: GraphVersionSource,
-    time?: number
-  ): GraphVersion | undefined {
+  private keepFile(): GraphVersion | undefined {
     const r = this.read();
     if (!r.exists || !('raw' in r)) return undefined;
-    if (this.current(upgrade) === undefined)
-      this.keep(r.raw, upgrade, { source, ...(time === undefined ? {} : { time }) });
-    return this.current(upgrade);
+    if (this.current() === undefined) this.keep(r.raw, { source: 'found' });
+    return this.current();
   }
 
   /**
    * Writes a graph, kept as the newest version of the history (a rollback's naming the version it
    * `restores`); false if nothing changed. A file that no version holds is kept first.
    */
-  save(
-    graph: Graph,
-    o: { source?: 'save' | 'rollback' | 'migrated'; restores?: string; upgrade?: Upgrade } = {}
-  ): boolean {
-    const upgrade = o.upgrade ?? asIs;
-    this.keepFile(upgrade, 'found');
+  save(graph: Graph, o: { source?: 'save' | 'rollback'; restores?: string } = {}): boolean {
+    this.keepFile();
     fs.mkdirSync(this.dir, { recursive: true });
     const changed = writeGraphFile(this.dir, graph);
-    // A file rewritten in the current version, the same graph, is no new version.
-    if (changed && this.current(upgrade) === undefined)
-      this.keep(graph, upgrade, {
+    // A file rewritten the same graph (its keys reordered) is no new version.
+    if (changed && this.current() === undefined)
+      this.keep(graph, {
         source: o.source ?? 'save',
         ...(o.restores === undefined ? {} : { restores: o.restores }),
       });
@@ -449,14 +414,11 @@ export class GraphFile {
   }
 
   /**
-   * At each start, once the core has loaded the file (`core.load()`): the history taken in from
-   * the files before it if it has no version yet (`graph.previous.json`, then `graph.json`, at
-   * their files' times; the first then removed), the file kept as a version if none holds it, and
-   * that version marked as run or refused, with why.
+   * At each start, once the core has loaded the file (`core.load()`): the file kept as a version
+   * if none holds it (`found`), and that version marked as run or refused, with why.
    */
-  started(core: Pick<GraphChecker, 'upgrade' | 'graphProblems'>): void {
-    const upgrade: Upgrade = core.upgrade === undefined ? asIs : (raw) => core.upgrade?.(raw);
-    const version = this.adopt(upgrade);
+  started(core: Pick<GraphChecker, 'graphProblems'>): void {
+    const version = this.keepFile();
     if (version === undefined) return;
     const problems = core.graphProblems();
     const at = new Date(this.now()).toISOString();
@@ -466,37 +428,6 @@ export class GraphFile {
         ? { result: 'ran', at }
         : { result: 'refused', at, problems: problems.map((p) => p.text) }
     );
-  }
-
-  /**
-   * The history taken in from the files before it if it has no version yet (`graph.previous.json`,
-   * then `graph.json`, at their files' times; the first then removed), and the file kept as a
-   * version if none holds it: the newest version, if it is the file's graph. At each start.
-   */
-  adopt(upgrade: Upgrade = asIs): GraphVersion | undefined {
-    const first = this.history.latest() === undefined;
-    let after: number | undefined;
-    if (first) {
-      let raw: unknown;
-      try {
-        raw = JSON.parse(fs.readFileSync(this.previous, 'utf8'));
-        after = fs.statSync(this.previous).mtimeMs;
-      } catch {
-        raw = undefined;
-      }
-      if (after !== undefined) {
-        this.keep(raw, upgrade, { source: 'migrated', time: after });
-        fs.rmSync(this.previous);
-      }
-    }
-    let time: number | undefined;
-    if (first)
-      try {
-        time = Math.max(fs.statSync(this.file).mtimeMs, (after ?? -Infinity) + 1);
-      } catch {
-        time = undefined;
-      }
-    return this.keepFile(upgrade, first ? 'migrated' : 'found', time);
   }
 }
 
@@ -531,14 +462,12 @@ export function graphFileControls(
   core: GraphChecker,
   redact: <T>(v: T) => T = (v) => v
 ): GraphFileControls {
-  /** A graph as the current version writes it, an older file's converted (D60). */
-  const current: Upgrade = (raw) => (core.upgrade === undefined ? raw : core.upgrade(raw));
   /** The saved graph, unchecked, or undefined. */
   const saved = (): unknown => {
     const r = file.read();
     return r.exists && 'raw' in r ? r.raw : undefined;
   };
-  const textOf = (raw: unknown): string => graphText(printable(current(raw)));
+  const textOf = (raw: unknown): string => graphText(printable(raw));
   const version = (id: string): GraphVersion => {
     const v = file.history.get(id);
     if (v === undefined) throw new GraphFileError(`there is no version ${id}`, [], 404);
@@ -554,20 +483,22 @@ export function graphFileControls(
     });
   };
   const rollbackTo = (id: string, by?: string): unknown => {
-    const target = current(version(id).graph);
-    const checked = core.check(target);
-    const graph = checked.ok ? checked.graph : (target as Graph);
+    const checked = core.check(version(id).graph);
+    // A version the check refuses now (an older release's format, a plugin gone) is not written:
+    // the instance would start on it with no nodes (D110).
+    if (!checked.ok)
+      throw new GraphFileError(`version ${id} is refused by the check`, checked.problems, 409);
+    const graph = checked.graph;
     const now = saved();
-    if (now !== undefined && sameGraph(current(now), graph))
+    if (now !== undefined && sameGraph(now, graph))
       throw new GraphFileError(`version ${id} is the current graph already`, [], 409);
-    file.save(graph, { source: 'rollback', restores: id, upgrade: current });
-    written(now === undefined ? EMPTY : current(now), graph, 'rollback', by);
+    file.save(graph, { source: 'rollback', restores: id });
+    written(now ?? EMPTY, graph, 'rollback', by);
     return redact({
       rolledBack: true,
       version: file.history.latest()?.id,
       restores: id,
       restart: !sameGraph(graph, core.graph()),
-      ...(checked.ok ? {} : { problems: checked.problems }),
     });
   };
   return {
@@ -580,7 +511,7 @@ export function graphFileControls(
         : checked === undefined || !checked.ok || !sameGraph(checked.graph, running);
       return redact({
         exists: r.exists,
-        ...(r.exists && 'raw' in r ? { graph: current(r.raw), text: textOf(r.raw) } : {}),
+        ...(r.exists && 'raw' in r ? { graph: r.raw, text: textOf(r.raw) } : {}),
         ...(r.exists && 'error' in r ? { error: r.error } : {}),
         ...(checked !== undefined && !checked.ok ? { problems: checked.problems } : {}),
         ...((checked?.warnings?.length ?? 0) > 0 ? { warnings: checked?.warnings } : {}),
@@ -593,19 +524,19 @@ export function graphFileControls(
         ok: checked.ok,
         problems: checked.ok ? [] : checked.problems,
         warnings: checked.warnings ?? [],
-        diff: graphDiff(current(saved() ?? EMPTY), current(raw)),
+        diff: graphDiff(saved() ?? EMPTY, raw),
         text: checked.ok ? graphText(checked.graph) : textOf(raw),
         // The nodes whose ports their config declares (D74), drawn as the draft declares them.
-        ...(core.nodeViews === undefined ? {} : { views: core.nodeViews(current(raw)) }),
+        ...(core.nodeViews === undefined ? {} : { views: core.nodeViews(raw) }),
         // Each node's inputs as the core resolves them from its config, defaults included (#6).
-        ...(core.nodeInputs === undefined ? {} : { inputs: core.nodeInputs(current(raw)) }),
+        ...(core.nodeInputs === undefined ? {} : { inputs: core.nodeInputs(raw) }),
       });
     },
     save: (raw, by) => {
       const checked = core.check(raw);
       if (!checked.ok) throw new GraphFileError('the graph is refused', checked.problems);
-      const before = current(saved() ?? EMPTY);
-      const changed = file.save(checked.graph, { upgrade: current });
+      const before = saved() ?? EMPTY;
+      const changed = file.save(checked.graph);
       if (changed) written(before, checked.graph, 'save', by);
       return {
         saved: changed,
@@ -618,7 +549,7 @@ export function graphFileControls(
       // The version before the current one: the second newest, or the newest when the file is
       // not it (written by hand since), which the rollback keeps first.
       const versions = file.history.list();
-      const target = file.current(current) === undefined ? versions[0] : versions[1];
+      const target = file.current() === undefined ? versions[0] : versions[1];
       if (target === undefined)
         throw new GraphFileError('there is no version before the current one to roll back to');
       return rollbackTo(target.id, by);
@@ -626,7 +557,7 @@ export function graphFileControls(
     problems: () => core.graphProblems(),
     history: () => {
       const versions = file.history.list();
-      const now = file.current(current)?.id;
+      const now = file.current()?.id;
       const lastGood = versions.find((v) => v.start?.result === 'ran')?.id;
       return redact({
         versions,
@@ -638,14 +569,14 @@ export function graphFileControls(
     version: (id) => {
       const v = version(id);
       const now = saved() ?? EMPTY;
-      const then = current(v.graph);
+      const then = v.graph;
       const checked = core.check(then);
       const [before, after] = [textOf(now), textOf(then)];
       return redact({
         ...v,
         graph: then,
-        current: file.current(current)?.id === id,
-        diff: graphDiff(current(now), then),
+        current: file.current()?.id === id,
+        diff: graphDiff(now, then),
         text: after,
         currentText: before,
         lines: lineDiff(before, after),

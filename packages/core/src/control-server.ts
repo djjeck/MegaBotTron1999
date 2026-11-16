@@ -350,7 +350,11 @@ export function controlHandler(
           if (id !== undefined && post && rollingBack)
             return reply(200, gf.rollbackTo(id, actorOf(req)));
         } catch (e) {
-          if (e instanceof GraphFileError) return reply(e.status ?? 409, { error: e.message });
+          if (e instanceof GraphFileError)
+            return reply(e.status ?? 409, {
+              error: e.message,
+              ...(e.problems.length === 0 ? {} : { problems: e.problems }),
+            });
           throw e;
         }
       }

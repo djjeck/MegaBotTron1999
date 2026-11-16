@@ -246,7 +246,7 @@ describe('the context’s connector services', () => {
     const check = new Core({ clock: new VirtualClock(T0), secrets: secretsWith({}) });
     check.register(service([]));
     const r = check.check({
-      version: 1,
+      version: 2,
       nodes: [
         { id: 'a', plugin: 'api', account: 'api:a', config: { token: 'Not A Name' } },
         { id: 'b', plugin: 'api', account: 'api:b', config: { token: 'missing' } },

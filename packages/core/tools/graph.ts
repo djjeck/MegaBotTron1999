@@ -6,20 +6,12 @@
  *
  * Usage: node packages/core/tools/graph.ts [/data/graph.json] [--mermaid]
  */
-import {
-  type Graph,
-  graphMermaid,
-  graphSchema,
-  graphText,
-  readGraphFile,
-  upgradeGraph,
-} from '#src/index.ts';
+import { type Graph, graphMermaid, graphSchema, graphText, readGraphFile } from '#src/index.ts';
 
 const args = process.argv.slice(2);
 const file =
   args.find((a) => !a.startsWith('--')) ?? `${process.env['LOG_DIR'] || '/data'}/graph.json`;
-// A version 1 file read as version 2 (bot-os.md D60), each chat edge as both of its halves.
-const parsed = graphSchema.safeParse(upgradeGraph(readGraphFile(file), new Map()));
+const parsed = graphSchema.safeParse(readGraphFile(file));
 if (!parsed.success) {
   console.error(`${file}: not a graph: ${parsed.error.issues.map((i) => i.message).join('; ')}`);
   process.exit(2);

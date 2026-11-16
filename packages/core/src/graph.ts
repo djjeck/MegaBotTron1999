@@ -18,7 +18,7 @@
  *   reader's input, with its `reads`; a chat-out edge from a sender's output to the connector's
  *   input, with its `sends` and `commands`. A connector's chat-out input takes any number of edges;
  *   a sender's chat-out output, one, and a required one left unbound fails the start, as an input
- *   does. A version 1 file, with one chat edge for both, is converted on load (`upgradeGraph`).
+ *   does.
  * - An events input whose namespace its node's config names (`{ config: key }`) is resolved per
  *   node, from the config as its plugin's schema makes it (`resolveInputs`): a required one the
  *   config leaves unresolved fails the start, naming the node.
@@ -51,8 +51,8 @@ import {
 
 /**
  * The format of the graph file; a change that old files cannot be read with bumps it. Version 2
- * splits each chat edge into a chat-in (reads) and a chat-out (sends) edge (bot-os.md D60); a
- * version 1 file is converted on load (`upgradeGraph`).
+ * splits each chat edge into a chat-in (reads) and a chat-out (sends) edge (bot-os.md D60). A file
+ * of another version is refused, with why (bot-os.md D110: the conversion of version 1 is gone).
  */
 export const GRAPH_VERSION = 2;
 
@@ -440,157 +440,6 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
- * A graph of version 1 as version 2 (bot-os.md D60), against the plugins' manifests; any other
- * graph as it is. Each chat edge of version 1 (its `type` `chat`, or a chat's reads, sends or
- * commands, or an input of a chat port) becomes, by the ports of its target node (its plugin's
- * manifest, its config resolving them):
- *
- * - a chat-in edge, the same two ends, with its `reads`, if the node has a chat-in input of that
- *   name (or has neither: the check then says why);
- * - a chat-out edge from the node's chat-out output of that name to the connector's chat-out input
- *   (`chat`), with its `sends` and `commands`, if it has one;
- * - both, for a node with both (a plugin of module API 1, whose old chat input is both), or one
- *   whose plugin is not known (none given: a tool that prints a file), so that nothing is lost.
- *
- * The other edges and the nodes are kept as they are. Nothing is checked: `resolveGraph` does.
- */
-export function upgradeGraph(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unknown {
-  return dropInputs(moveChats(upgradeChats(raw, plugins), plugins), plugins);
-}
-
-/**
- * A graph with an edge to an input port its node's plugin no longer has (`droppedInputs`,
- * bot-os.md D99: the turn actor's chat-in) without that edge; any other graph as it is. Nothing
- * is checked.
- */
-export function dropInputs(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unknown {
-  if (!isRecord(raw) || !Array.isArray(raw['nodes']) || !Array.isArray(raw['edges'])) return raw;
-  const gone = new Set<string>();
-  for (const n of raw['nodes'] as unknown[]) {
-    if (!isRecord(n) || typeof n['id'] !== 'string' || typeof n['plugin'] !== 'string') continue;
-    for (const port of plugins.get(n['plugin'])?.droppedInputs ?? [])
-      gone.add(`${n['id']}.${port}`);
-  }
-  if (gone.size === 0) return raw;
-  const edges = (raw['edges'] as unknown[]).filter(
-    (e) => !isRecord(e) || typeof e['to'] !== 'string' || !gone.has(e['to'])
-  );
-  return edges.length === (raw['edges'] as unknown[]).length ? raw : { ...raw, edges };
-}
-
-/**
- * A graph whose nodes still hold a chat in a config key their plugin moved onto its edges
- * (`movedChats`, bot-os.md D97: `owner-notice`'s and the turn actor's `chat`) with that chat on
- * the edges instead: added to the `sends` of each chat-out edge from the key's `output` (or from
- * the node named alone, typed `chat-out`), or to the `reads` of each chat-in edge to its `input`
- * (one that reads every chat, `'*'`, left as it is), where no name there is it already (without
- * case); then the key dropped, edge or none. Any other graph as it is: nothing is checked.
- */
-export function moveChats(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unknown {
-  if (!isRecord(raw) || !Array.isArray(raw['nodes']) || !Array.isArray(raw['edges'])) return raw;
-  let edges = raw['edges'] as unknown[];
-  let moved = false;
-  const add = (list: unknown, chat: string): unknown[] => {
-    const was = Array.isArray(list) ? (list as unknown[]) : [];
-    const has = was.some((c) => typeof c === 'string' && c.toLowerCase() === chat.toLowerCase());
-    return has ? was : [...was, chat];
-  };
-  const nodes = (raw['nodes'] as unknown[]).map((n) => {
-    if (!isRecord(n) || typeof n['id'] !== 'string' || typeof n['plugin'] !== 'string') return n;
-    const specs = plugins.get(n['plugin'])?.movedChats ?? [];
-    const config = n['config'];
-    if (specs.length === 0 || !isRecord(config)) return n;
-    const id = n['id'];
-    const keys = new Set<string>();
-    for (const spec of specs) {
-      const value = config[spec.key];
-      if (!(spec.key in config)) continue;
-      keys.add(spec.key);
-      if (typeof value !== 'string' && typeof value !== 'number') continue;
-      const chat = String(value);
-      edges = edges.map((e) => {
-        if (!isRecord(e)) return e;
-        if (
-          spec.output !== undefined &&
-          ((e['from'] === `${id}.${spec.output}` &&
-            (e['type'] === undefined || e['type'] === 'chat-out')) ||
-            (e['from'] === id && e['type'] === 'chat-out'))
-        )
-          return { ...e, sends: add(e['sends'], chat) };
-        if (spec.input !== undefined && e['to'] === `${id}.${spec.input}` && e['reads'] !== '*')
-          return { ...e, reads: add(e['reads'], chat) };
-        return e;
-      });
-    }
-    if (keys.size === 0) return n;
-    moved = true;
-    const rest = Object.fromEntries(Object.entries(config).filter(([k]) => !keys.has(k)));
-    const { config: _, ...node } = n;
-    return Object.keys(rest).length === 0 ? node : { ...node, config: rest };
-  });
-  return moved ? { ...raw, nodes, edges } : raw;
-}
-
-/** A graph of version 1, its chat edges split (`upgradeGraph`); any other as it is. */
-function upgradeChats(raw: unknown, plugins: ReadonlyMap<string, Manifest>): unknown {
-  if (!isRecord(raw) || raw['version'] !== 1) return raw;
-  const known = new Map<string, { manifest: Manifest; ports: Record<string, InputPort> }>();
-  for (const n of Array.isArray(raw['nodes']) ? (raw['nodes'] as unknown[]) : []) {
-    if (!isRecord(n) || typeof n['id'] !== 'string' || typeof n['plugin'] !== 'string') continue;
-    const manifest = plugins.get(n['plugin']);
-    if (manifest === undefined) continue;
-    const config = isRecord(n['config']) ? n['config'] : undefined;
-    known.set(n['id'], { manifest, ports: nodeInputs(manifest, config).ports });
-  }
-  const upgrade = (e: unknown): unknown[] => {
-    if (!isRecord(e) || typeof e['from'] !== 'string' || typeof e['to'] !== 'string') return [e];
-    const { from, to, type, reads, sends, commands, ...rest } = e as Record<string, unknown> & {
-      from: string;
-      to: string;
-    };
-    const [toNode = '', toPort = ''] = to.split('.');
-    const target = known.get(toNode);
-    const readsIt = target?.ports[toPort]?.type === 'chat-in';
-    const sendsIt = target?.manifest.outputs[toPort]?.type === 'chat-out';
-    const chat =
-      type === 'chat' ||
-      (type === undefined &&
-        (reads !== undefined ||
-          sends !== undefined ||
-          commands !== undefined ||
-          readsIt ||
-          sendsIt));
-    if (!chat) return [e];
-    const hasIn = target === undefined || readsIt;
-    const hasOut = target === undefined || sendsIt;
-    const out: unknown[] = [];
-    if (hasIn || !hasOut)
-      out.push({ ...rest, from, to, type: 'chat-in', ...(reads === undefined ? {} : { reads }) });
-    if (hasOut) {
-      const fromNode = from.split('.')[0] as string;
-      const into =
-        Object.entries(known.get(fromNode)?.manifest.inputs ?? {}).find(
-          ([, p]) => p.type === 'chat-out'
-        )?.[0] ?? 'chat';
-      out.push({
-        ...rest,
-        from: to,
-        to: `${fromNode}.${into}`,
-        type: 'chat-out',
-        ...(sends === undefined ? {} : { sends }),
-        ...(commands === undefined ? {} : { commands }),
-      });
-    }
-    return out;
-  };
-  return {
-    ...raw,
-    version: GRAPH_VERSION,
-    ...(Array.isArray(raw['edges']) ? { edges: (raw['edges'] as unknown[]).flatMap(upgrade) } : {}),
-  };
-}
-
-/**
  * Checks a graph against the manifests of the plugins the image has (by plugin id): the graph as
  * the core holds it (each edge's ends and type written out), its nodes, in the graph's order, and
  * its warnings (bot-os.md D89), which refuse nothing: a chat-in edge that reads a chat its
@@ -611,7 +460,11 @@ export function resolveGraph(
   chatNames: (node: string, plugin: string, chat: string) => readonly string[] | undefined = () =>
     undefined
 ): { graph: Graph; nodes: ResolvedNode[]; warnings: string[] } {
-  const parsed = graphSchema.safeParse(upgradeGraph(raw, plugins));
+  if (isRecord(raw) && typeof raw['version'] === 'number' && raw['version'] !== GRAPH_VERSION)
+    throw new GraphError([
+      `graph: version: a graph of version ${raw['version']}, which this release does not read (it reads version ${GRAPH_VERSION})`,
+    ]);
+  const parsed = graphSchema.safeParse(raw);
   if (!parsed.success)
     throw new GraphError(
       parsed.error.issues.map(

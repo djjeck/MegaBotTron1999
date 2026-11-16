@@ -5,7 +5,6 @@ import {
   fakeConnectorPlugin,
   GraphError,
   type GraphInput,
-  moveChats,
   parseManifest,
   resolveGraph,
   VirtualClock,
@@ -121,7 +120,7 @@ describe('its bot’s chat, its edges’ alone (D97)', () => {
       return [m.id, m];
     })
   );
-  const graph = (sends: string[], reads: string[] | '*', config = {}): GraphInput => ({
+  const graph = (sends: string[], config = {}): GraphInput => ({
     version: 2,
     nodes: [
       { id: TELEGRAM_USER, plugin: TELEGRAM_USER },
@@ -130,7 +129,6 @@ describe('its bot’s chat, its edges’ alone (D97)', () => {
     ],
     edges: [
       { from: `${TELEGRAM_USER}.chat`, to: `${QUEST}.chat`, type: 'chat-in', reads: [CHAT] },
-      { from: `${TELEGRAM_USER}.chat`, to: 'quest-turns.chat', type: 'chat-in', reads },
       { from: 'quest-turns.chat', to: `${TELEGRAM_USER}.chat`, type: 'chat-out', sends },
       { from: `${QUEST}.interface`, to: 'quest-turns.parser', type: 'interface' },
     ],
@@ -145,52 +143,24 @@ describe('its bot’s chat, its edges’ alone (D97)', () => {
   };
 
   it('takes the one chat its chat-out edge names', () => {
-    expect(problems(graph([CHAT], [CHAT]))).toEqual([]);
+    expect(problems(graph([CHAT]))).toEqual([]);
   });
 
   it('refuses an edge of no chat, of two, or of a chat not a bot’s @username', () => {
-    expect(problems(graph([], [CHAT]))).toEqual([
+    expect(problems(graph([]))).toEqual([
       `node quest-turns: output port chat sends to one chat, its bot's @username: its edge names none (edge quest-turns.chat → ${TELEGRAM_USER}.chat)`,
     ]);
-    expect(problems(graph([CHAT, '@OtherBot'], [CHAT]))[0]).toContain(
-      `its edge names ${CHAT}, @OtherBot`
-    );
-    expect(problems(graph(['5000001'], ['5000001']))).toEqual([
+    expect(problems(graph([CHAT, '@OtherBot']))[0]).toContain(`its edge names ${CHAT}, @OtherBot`);
+    expect(problems(graph(['5000001']))).toEqual([
       `node quest-turns: output port chat sends to its bot's @username, not 5000001 (edge quest-turns.chat → ${TELEGRAM_USER}.chat)`,
     ]);
   });
 
-  it('drops the chat-in edge a graph saved before gave it, whatever it read (D99)', () => {
-    for (const reads of [[CHAT], ['@OtherBot'], '*'] as const) {
-      const { graph: resolved } = resolveGraph(
-        graph([CHAT], reads === '*' ? '*' : [...reads]),
-        manifests
-      );
-      expect(resolved.edges.filter((e) => e.to === 'quest-turns.chat')).toEqual([]);
-      expect(resolved.edges).toHaveLength(3);
-    }
+  it('has no chat-in: an edge to one is refused (D99)', () => {
     expect(turnActorPlugin().manifest.inputs).not.toHaveProperty('chat');
-  });
-
-  it('moves the chat of a graph saved by 0.1.19 from its config onto its edges', () => {
-    const saved = graph([], [], { chat: CHAT, seed: 3 });
-    expect(problems(saved)).toEqual([]);
-    const moved = moveChats(saved, manifests) as GraphInput;
-    expect(moved.nodes.find((n) => n.id === 'quest-turns')?.config).toEqual({ seed: 3 });
-    // Onto its chat-out edge alone: its chat-in edge is dropped as the graph loads (D99).
-    expect(
-      moved.edges?.filter((e) => e.from === 'quest-turns.chat' || e.to === 'quest-turns.chat')
-    ).toMatchObject([{ reads: [] }, { sends: [CHAT] }]);
-    // A chat there already, by any case, is not added again; nothing else moved, nothing changed.
-    const again = moveChats(
-      graph([CHAT], [CHAT.toLowerCase()], { chat: CHAT }),
-      manifests
-    ) as GraphInput;
-    expect(again.edges?.[1]?.reads).toEqual([CHAT.toLowerCase()]);
-    expect(again.edges?.[2]?.sends).toEqual([CHAT]);
-    expect(again.nodes[2]).toEqual({ id: 'quest-turns', plugin: TURN_ACTOR });
-    const plain = graph([CHAT], [CHAT]);
-    expect(moveChats(plain, manifests)).toBe(plain);
+    const read = graph([CHAT]);
+    read.edges?.push({ from: `${TELEGRAM_USER}.chat`, to: 'quest-turns.chat', type: 'chat-in' });
+    expect(problems(read)).toEqual([expect.stringContaining('quest-turns')]);
   });
 });
 
@@ -470,7 +440,7 @@ describe('several turn-actor nodes', () => {
     const account = new Account({ account: 'telegram:alice' });
     const records: { type: string; instance?: unknown; event?: unknown }[] = [];
     const clock = new VirtualClock(T0);
-    // Each actor reads its bot's chat (chat-in) and sends its command there (chat-out).
+    // The parser reads the bot's chat (chat-in); each actor sends its command there (chat-out).
     const read = (to: string, bot: string) => ({
       from: `${TELEGRAM_USER}.chat`,
       to: `${to}.chat`,
@@ -478,7 +448,6 @@ describe('several turn-actor nodes', () => {
       reads: [bot],
     });
     const chat = (to: string, bot: string, commands = ['/play']) => [
-      read(to, bot),
       {
         from: `${to}.chat`,
         to: `${TELEGRAM_USER}.chat`,

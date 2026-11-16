@@ -9,7 +9,8 @@
  *   the current graph: **Changes**, the structured diff of the review (`DiffView`), and **As text**,
  *   the line diff of the two printouts. **Roll back to this** asks first, repeating the diff, then
  *   writes it as the current graph (`POST /graph/history/<id>/rollback`, itself a new version, so
- *   it can be undone) and restarts the instance on it, with the reconnect overlay.
+ *   it can be undone) and restarts the instance on it, with the reconnect overlay; a version the
+ *   check refuses now says why, and has no rollback (bot-os.md D110).
  * - **Graph as text**: the saved graph printed (`GET /graph/file`'s `text`), with a copy button.
  */
 import { useEffect, useState } from 'react';
@@ -132,7 +133,8 @@ function Refused({ v }: { v: GraphVersionView }) {
   if (v.problems === undefined || v.problems.length === 0) return null;
   return (
     <div role="alert" className="banner warn">
-      The check refuses this version now: the instance would start on it with no nodes.
+      The check refuses this version now (a plugin gone, or a format of an older release), so it
+      cannot be rolled back to.
       <ul className="problems">
         {v.problems.map((p) => (
           <li key={p.text}>{p.text}</li>
@@ -195,7 +197,12 @@ function Version(props: { v: GraphVersionView; rollback: () => void; close: () =
       </div>
       <Refused v={v} />
       <p className="actions">
-        <button type="button" className="primary" disabled={v.current} onClick={props.rollback}>
+        <button
+          type="button"
+          className="primary"
+          disabled={v.current || (v.problems?.length ?? 0) > 0}
+          onClick={props.rollback}
+        >
           Roll back to this
         </button>{' '}
         {v.current ? <span className="muted small">It is the current graph.</span> : null}

@@ -65,8 +65,6 @@ instance does not start.
 | `node`          | Optional: each node's own manifest, from its config and its id, for a plugin whose ports its node's config declares (below, bot-os.md D74)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `configInputs`  | Optional, with `node`: where its nodes declare their own inputs, `{ key, types }`: the key of its `config` holding a record of input ports by name, written as a manifest's, and the types it takes there (`events`, `interface`); the editor adds one there for an edge dropped on such a node (below, bot-os.md D80)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `configChats`   | Optional: the keys of its `config` that name a chat (bot-os.md D96), `[{ key, output?, input?, kinds?, template?, owner?, sender? }]`, so that the editor picks each in its chat picker from its connector's chats instead of having the owner type an id: the connector is its own node (a connector's, no port named), or the one at the other end of the edge from its chat-out `output` or to its chat-in `input`; a string or a list holds the chats as the connector names them (`Surface.id`), a number a chat by its numeric id; `kinds` the kinds it takes (`private`, `group`, `channel`, `bot`); `template`, a `{path}` template may stand for the chat instead; `owner`, a connector's key naming its account's owner's chat (`owner()`, §4.5); `sender`, a key naming people it recognises, not chats it sends to (bot-os.md D100): its picker says nothing of reaching them, and the editor writes them on no edge. A chat picked for a key with an `output` or an `input` (not a template) is **written on that edge too** (its `sends`, or its `reads` unless `"*"`), and replaced there when the pick changes, the chats added by hand kept (bot-os.md D97): the edge is what lets it send. `telegram-bot` declares its `owner` (a person, `owner: true`), `group` and `deny` (people and bots, `sender: true`), the reactor its `chat` (or a template) and `in` |
-| `movedChats`    | Optional: keys its `config` had in an earlier release that named a chat its edge now names alone (bot-os.md D97), `[{ key, output?, input? }]`: a graph saved with one is migrated as it loads (`upgradeGraph`, §2.3), the chat added to the `sends` of the edge from its chat-out `output`, or the `reads` of the edge to its chat-in `input`, where not there already, and the key dropped. `owner-notice` and the turn actor declare their old `chat`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `droppedInputs` | Optional: input ports it had in an earlier release and has no more (bot-os.md D99, the turn actor's `chat`): a graph saved with an edge to one loads with that edge dropped (§2.3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `audit`         | Optional: keys of its `config` whose every change a save or rollback of the graph records in the event log (`core.config`: who, when, the value's SHA-256, never the value; §2.3, bot-os.md D75)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 A connector's manifest also names its **account** (§4.5): the network and the identity it holds.
@@ -482,31 +480,13 @@ Quest nodes are drawn in the editor's Quest lane (`group`, bot-os.md D69); the c
 its group, outside every lane. A `group` is an addition to version 2, which a release before it
 refuses (its nodes are strict): roll the image back past it only with the groups taken out.
 
-**A chat moved from a config onto its edges** (bot-os.md D97): a node whose plugin declares
-`movedChats` (`owner-notice`'s and the turn actor's `chat`, gone in 0.1.20) is migrated as it loads,
-as version 1 is below: the chat its config named is added to the edge's list where no name there is
-it (without case), and the key dropped, so the owner picks nothing again
-(`{ "from": "owner-notice.chat", "to": "telegram-bot.chat", "sends": ["1000000002"] }` and the
-node's `"chat": "1000000002"` become the same edge and a node without `chat`). The file is rewritten
-by the next save.
-
-**An input a plugin no longer has** (bot-os.md D99): a node whose plugin declares `droppedInputs`
-(the turn actor's chat-in `chat`, gone in 0.1.21) loads with its edges to those inputs dropped
-(`dropInputs`), rather than refused for a port that is gone; the file is rewritten by the next save.
-
-**Version 1** (one `chat` edge for both the reads and the sends, from the connector to the plugin)
-is converted as it is read (`upgradeGraph`, `packages/core/src/graph.ts`, bot-os.md D60), against
-the plugins' manifests and each node's config: each `chat` edge becomes a chat-in edge with its
-`reads`, same ends, if its node has a chat-in input of that port's name; a chat-out edge with its
-`sends` and `commands`, from the node's chat-out output of that name to the connector's `chat`, if
-it has one; both for a node with both (the turn-actor, any plugin of module API 1); and both for a
-node whose plugin is unknown, so nothing is lost. The port names stay the same, so the conversion is
-mechanical (a version 1 edge has no `senders`: it reads from anyone): `tg.chat → quest.chat` (a
-parser) stays one edge, of `chat-in`; `tg.chat → look.chat` (a reactor on events) becomes
-`look.chat → tg.chat`, of `chat-out`. The instance runs a version 1 file so converted,
-`GET /graph/file` shows it so, and `POST /graph/check` and `PUT /graph/file` take version 1 too; the
-file itself is rewritten (as version 2) only by the next save or rollback, and a version of the
-history (below) written in version 1 is shown, diffed and rolled back as version 2.
+**Another version** of the file (version 1, with one `chat` edge for both the reads and the sends,
+bot-os.md D60) is refused as any graph the check refuses (below), with why
+(`graph: version: a graph of version 1, which this release does not read (it reads version 2)`):
+nothing converts it any more (bot-os.md D110). Nor does anything convert what earlier releases
+migrated as they loaded (a node's `mode`, D64; a chat a config held, D97; an edge to an input a
+plugin dropped, D99): such a graph is refused for what it holds. Release 0.1.26 converts each of
+them; an instance that never ran it starts it first.
 
 **At start** (`packages/core/src/graph-file.ts`, `GraphFile`), the core reads it and checks it as
 any graph (§2.1), against the plugins `core.available()` lists, their configuration and settings
@@ -533,18 +513,19 @@ millisecond), holding the graph as written and its metadata:
 }
 ```
 
-`source` is `save`, `rollback` (which names the version it `restores`), `found` (a file that no
-version holds, written by hand: kept at the next start, or before the next write replaces it) or
-`migrated`. `summary` is what changed from the version before (`diffSummary`): `+` added, `−`
-removed, `~` changed with the fields that changed, nodes then edges, at most 8 named and the rest
-counted (`… 3 more`). `start` is how the instance last started on it, set at each start once the
-graph is loaded (`GraphFile.started`): `ran`, or `refused` with its `problems`; none if it never
-started on it. A write that leaves the graph the same (a version 1 file rewritten as version 2) is
-no new version. Versions are kept 7 days, and never fewer than the 5 latest; the others are pruned
-at each new one. The history replaces `graph.previous.json`, which earlier releases kept: the first
-start with no history takes `graph.previous.json` and then `graph.json` in as `migrated` versions,
-at their files' times (one, if they are the same graph), and removes `graph.previous.json`; nothing
-writes it again.
+`source` is `save`, `rollback` (which names the version it `restores`) or `found` (a file that no
+version holds, written by hand or there before the history: kept at the next start, or before the
+next write replaces it); `migrated`, which releases up to 0.1.26 wrote (the files the history
+replaced, the first starts' migrations), is still read, and nothing writes it now. `summary` is what
+changed from the version before (`diffSummary`): `+` added, `−` removed, `~` changed with the fields
+that changed, nodes then edges, at most 8 named and the rest counted (`… 3 more`). `start` is how
+the instance last started on it, set at each start once the graph is loaded (`GraphFile.started`):
+`ran`, or `refused` with its `problems`; none if it never started on it. A write that leaves the
+graph the same (its keys reordered) is no new version. Versions are kept 7 days, and never fewer
+than the 5 latest; the others are pruned at each new one. A version kept by an older release, in a
+format this one refuses, is listed and shown as any other (its `summary` was written when it was
+kept), with the check's `problems`, and is never rolled back to. A `graph.previous.json` an older
+release left is ignored.
 
 **Audited config** (bot-os.md D75): a save or a rollback that changes a config key its node's
 manifest audits (`audit`: a script node's `code`) records it in the event log, one record a key:
@@ -594,10 +575,10 @@ as written decide. Other checks may add warnings in the same list.
 
 **The control API's graph routes** (§4.11), the owner's alone:
 
-- `GET /graph/file`: the saved file (`graph`, as written, a version 1 file as version 2) and its
-  `text` (`graphText`, §4.12), whether there is one (`exists`), why it does not read (`error`) or is
-  refused (`problems`), its `warnings` if it has any, and whether it differs from the graph running
-  (`differs`: a restart would change what runs).
+- `GET /graph/file`: the saved file (`graph`, as written) and its `text` (`graphText`, §4.12),
+  whether there is one (`exists`), why it does not read (`error`) or is refused (`problems`), its
+  `warnings` if it has any, and whether it differs from the graph running (`differs`: a restart
+  would change what runs).
 - `POST /graph/check`, a graph as the body: checked as the load would, nothing saved: `ok`, its
   `problems`, its `warnings` (none: `[]`), its `text`, and its `diff` from the saved file: the nodes
   `added`, `removed` and `changed` (with the fields that changed), and the edges `added`, `removed`
@@ -614,17 +595,18 @@ as written decide. Other checks may add warnings in the same list.
   `time`, `source`, `summary`, and `restores` and `start` if any; `current`, the id of the version
   that is the saved file, if one is; `lastGood`, the newest whose last start `ran`; and `keep`
   (`{ "days": 7, "latest": 5 }`).
-- `GET /graph/history/<id>`: one version: its metadata, its `graph` (as version 2), whether it is
-  the `current` one, the `diff` from the saved graph to it (as `POST /graph/check` gives it: what a
+- `GET /graph/history/<id>`: one version: its metadata, its `graph` (as written), whether it is the
+  `current` one, the `diff` from the saved graph to it (as `POST /graph/check` gives it: what a
   rollback to it would change), its `text` and the saved graph's (`currentText`), their line diff
   (`lines`, `[{ "op": " " | "-" | "+", "text" }]`, §4.12), and its `problems` if the check refuses
   it now. 404 for a version not kept.
 - `POST /graph/history/<id>/rollback`: that version written as the saved graph (as the check holds
-  it, or as it is if the check refuses it now), kept as a new version that `restores` it, so a
-  rollback can be undone; the file it replaces is kept first if no version holds it.
-  `{ "rolledBack": true, "version", "restores", "restart" }`, and its `problems` if the check
-  refuses it. 404 for a version not kept, 409 when it is the saved graph already. Nothing restarts:
-  the UI then asks `POST /restart`.
+  it), kept as a new version that `restores` it, so a rollback can be undone; the file it replaces
+  is kept first if no version holds it. `{ "rolledBack": true, "version", "restores", "restart" }`.
+  404 for a version not kept; 409 when it is the saved graph already, or when the check refuses it
+  now (an older release's format, a plugin gone: `version <id> is refused by the check`, with its
+  `problems`; nothing is written, bot-os.md D110). Nothing restarts: the UI then asks
+  `POST /restart`.
 - `POST /graph/rollback`: the same, to the version before the current one (the second newest, or the
   newest if the file was written by hand since), as the route of earlier releases did; a second goes
   forward again. 409 when there is none.
@@ -1529,8 +1511,7 @@ every line removed, then every one added). `graphMermaid` draws a Mermaid flowch
 a box per node (and a second, `<id> · out`, for a connector that chat-out edges reach, so that the
 sends flow left to right too) and an arrow per edge, coloured by its port type; `writeGraphFile`
 writes a graph to `<dir>/graph.json` atomically (the versions before it are the history's, §2.3).
-`packages/core/tools/graph.ts [file] [--mermaid]` prints a graph file, a version 1 file as
-version 2.
+`packages/core/tools/graph.ts [file] [--mermaid]` prints a graph file.
 
 **The graph editor** (bot-os.md D47, D55) is the web UI's home page (`packages/web/src/ui/graph/`),
 drawn with React Flow. It edits a draft of the saved graph (`GET /graph/file`), each node drawn from
@@ -2012,34 +1993,33 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   chat-out output on `telegram`, which sends to the private chat with its bot (its command only);
   and `parser`, a contract (`state.rest`, `state.lastTurn`, `actions.sent`) bound to its bot's
   parser, required, so that drift on the parser stops it. **It only sends** (bot-os.md D99): it
-  reads no chat, the turns the owner sends by hand coming from its parser (`state.lastTurn`), and
-  the chat-in edge a graph saved before gave it is dropped as the graph loads (§2.3,
-  `droppedInputs`). **Its bot's chat is its edge's alone** (bot-os.md D97): its chat-out edge names
-  exactly one chat, the bot's `@username` (`single`); the check refuses anything else, with why. Its
-  configuration names no chat (a `chat` saved by 0.1.19 moves onto its edges as the graph loads,
-  §2.3): `command` (the bot's turn command; `/play` when unset), `schedule` (the planner's pace,
-  each field with its default in the schema, `DEFAULT_SCHEDULE` of `packages/turns/src/schedule.ts`:
-  17–20 minutes between turns, some skipped, nights off: asleep from `bedtime` to the next `wake`,
-  wall-clock times in its `timeZone`, a night that may cross midnight or not, the two times never
-  equal), `nightSalt` (the instances with one salt sleep the same nights) and `seed`. It plans from
-  the owner's last turn with the bot (kept in its store; a turn sent by hand counts too: its
-  parser's `state.lastTurn`, read at its start and when its turn is due, a newer one planning afresh
-  from it), as the durable timer `turn` (dropped if it came due more than 10 minutes before a
-  start); when it is due, it asks its parser whether the bot rests, and its outbox what holds its
-  command back (`held`, D98: the bot's cooldown as an answer said, the retry-loop guard), and, if
-  anything does, comes back a few minutes after the longest; through a live chat-out edge it sends
-  through its outbox (refused `not connected`, it waits for the account, trying each minute) and
-  tells its parser the message's id; through a dry-run edge (bot-os.md D64, as a new one is drawn)
-  it logs its turn (`sent`, `/play (dry run)`) and sends nothing; a send refused as its command
-  rests is tried again when it may go (`retryAt`), any other failed send two minutes later. It plays
-  while its node runs and the instance is on; its safety stop (`kill`) stops its node (`ctx.stop`),
-  which drops its plan until the owner clears the stop in the editor. It declares no chat command,
-  since two instances would clash: the owner reaches each with `/plugins <id>` and its read
-  `status`. Each step is published as `turn-actor.step`; its turns (sent, in a dry run, by hand,
-  failed) go in the owner's summary (§4.17, D92). The image offers it (`src/main.ts`): the editor
-  adds one node per bot, each on its own instance, its `chat` edges from and to the owner's
-  `telegram-user` node and its `parser` edge to its bot's parser. The turn parsers are not the
-  image's: each is made from a game's grammar, so a game's module offers it.
+  reads no chat, the turns the owner sends by hand coming from its parser (`state.lastTurn`), and an
+  edge to a chat-in of it is refused. **Its bot's chat is its edge's alone** (bot-os.md D97): its
+  chat-out edge names exactly one chat, the bot's `@username` (`single`); the check refuses anything
+  else, with why. Its configuration names no chat: `command` (the bot's turn command; `/play` when
+  unset), `schedule` (the planner's pace, each field with its default in the schema,
+  `DEFAULT_SCHEDULE` of `packages/turns/src/schedule.ts`: 17–20 minutes between turns, some skipped,
+  nights off: asleep from `bedtime` to the next `wake`, wall-clock times in its `timeZone`, a night
+  that may cross midnight or not, the two times never equal), `nightSalt` (the instances with one
+  salt sleep the same nights) and `seed`. It plans from the owner's last turn with the bot (kept in
+  its store; a turn sent by hand counts too: its parser's `state.lastTurn`, read at its start and
+  when its turn is due, a newer one planning afresh from it), as the durable timer `turn` (dropped
+  if it came due more than 10 minutes before a start); when it is due, it asks its parser whether
+  the bot rests, and its outbox what holds its command back (`held`, D98: the bot's cooldown as an
+  answer said, the retry-loop guard), and, if anything does, comes back a few minutes after the
+  longest; through a live chat-out edge it sends through its outbox (refused `not connected`, it
+  waits for the account, trying each minute) and tells its parser the message's id; through a
+  dry-run edge (bot-os.md D64, as a new one is drawn) it logs its turn (`sent`, `/play (dry run)`)
+  and sends nothing; a send refused as its command rests is tried again when it may go (`retryAt`),
+  any other failed send two minutes later. It plays while its node runs and the instance is on; its
+  safety stop (`kill`) stops its node (`ctx.stop`), which drops its plan until the owner clears the
+  stop in the editor. It declares no chat command, since two instances would clash: the owner
+  reaches each with `/plugins <id>` and its read `status`. Each step is published as
+  `turn-actor.step`; its turns (sent, in a dry run, by hand, failed) go in the owner's summary
+  (§4.17, D92). The image offers it (`src/main.ts`): the editor adds one node per bot, each on its
+  own instance, its `chat` edges from and to the owner's `telegram-user` node and its `parser` edge
+  to its bot's parser. The turn parsers are not the image's: each is made from a game's grammar, so
+  a game's module offers it.
 - **`owner-notice`** (`packages/turns/src/owner-notice.ts`, bot-os.md D91, D94): the one node that
   reports to a chat; without one, nothing is (the editor's events panel shows the notices, §4.16).
   It tells the owner what needs attention, from the notices (§4.16), through its `chat` output
@@ -2050,18 +2030,17 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   `owner`), which the editor writes on the edge as it is drawn; to a connector with no owner, it
   sends nowhere and its panel says why. Its sends are queued as any node's (`enqueue`, D73), so a
   dry-run edge (as a new one is drawn, D64) logs each as `core.send` with outcome `dry-run` and
-  sends nothing. A `chat` its config held in 0.1.19 moves onto its edge as the graph loads (§2.3).
-  Its configuration (`ownerNoticeConfig`): `report`, each kind on or off (`refused`, `coalesced`,
-  `drift`, `cascade`, `failed`, `stalled`, `unreachable`, `warning`, `other` for every kind it does
-  not name, and `told`, the plugins' messages), all on by default; `pace`, per kind but `told`,
-  `gatherS`, how long the kind's first notice waits for others of its kind, and `everyMin`, the
-  least minutes between two of its messages, what comes meanwhile going in the next (`DEFAULT_PACE`:
-  `failed`, `drift`, `cascade` and `stalled` 10 s and 5 min; `unreachable` 30 s and 10 min;
-  `refused` 60 s and 10 min; `coalesced` 60 s and 30 min; `warning` 30 s and 60 min; `other` 60 s
-  and 10 min; a field left out keeps its default); `maxLines`, the most items a message lists (5),
-  the rest counted; `summaryEveryMin` and `startNotice`, below. A kind's message is plain text: one
-  notice is its own line (`script-1 failed: its script hung: …`); several, a title with their count
-  and, past a minute, how long they took, then an item each, alike ones counted once
+  sends nothing. Its configuration (`ownerNoticeConfig`): `report`, each kind on or off (`refused`,
+  `coalesced`, `drift`, `cascade`, `failed`, `stalled`, `unreachable`, `warning`, `other` for every
+  kind it does not name, and `told`, the plugins' messages), all on by default; `pace`, per kind but
+  `told`, `gatherS`, how long the kind's first notice waits for others of its kind, and `everyMin`,
+  the least minutes between two of its messages, what comes meanwhile going in the next
+  (`DEFAULT_PACE`: `failed`, `drift`, `cascade` and `stalled` 10 s and 5 min; `unreachable` 30 s and
+  10 min; `refused` 60 s and 10 min; `coalesced` 60 s and 30 min; `warning` 30 s and 60 min; `other`
+  60 s and 10 min; a field left out keeps its default); `maxLines`, the most items a message lists
+  (5), the rest counted; `summaryEveryMin` and `startNotice`, below. A kind's message is plain text:
+  one notice is its own line (`script-1 failed: its script hung: …`); several, a title with their
+  count and, past a minute, how long they took, then an item each, alike ones counted once
   (`inventory refused 5 events in the last 10 min:` and `- quest.gain: … (×3)`), grouped by node for
   `refused` and `coalesced`. It tells nothing of itself (a notice about its node, or a send it
   shared), so its own sends cannot feed it. The load's warnings it has told are kept in its store
@@ -2458,8 +2437,8 @@ outputs: { channel: { type: 'chat-out', network: 'irc', bind: { node: 'irc', sen
 second. A module written for the plugin API `"1"` before the split keeps loading unchanged: its
 `{ type: 'chat' }` input (and the `requires`/`reach` shorthand's chat) is read as both, a chat-in
 input and a chat-out output of its name, its `bind`'s `reads` to the first and `sends` and
-`commands` to the second. Its graphs of version 1 are converted as they load (§2.3); code that types
-a graph as `GraphInput` writes `version: 2`, and its chat edges each way.
+`commands` to the second. A graph of version 1 is refused (§2.3); code that types a graph as
+`GraphInput` writes `version: 2`, and its chat edges each way.
 
 ### 7.3 Loading
 
@@ -2730,4 +2709,4 @@ than the instance's is refused at start, by name. Moving past the split of chat 
 D60, `v0.1.0-alpha.7`) changes no module's plugins (§7.2), but a module's own code or tests that
 write a graph typed as `GraphInput` change it to `version: 2`, each `chat` edge as a `chat-in` edge
 (its `reads`) and a `chat-out` edge from the plugin to the connector's `chat` (its `sends`,
-`commands`); untyped, a version 1 graph still loads, converted.
+`commands`); untyped, a version 1 graph is refused (D110).

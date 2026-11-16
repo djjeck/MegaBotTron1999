@@ -438,17 +438,6 @@ describe('owner-notice: its edges are its chats (D97)', () => {
       value: { state: { notSent: [{ chat: '', reason: expect.stringContaining('no chat') }] } },
     });
   });
-
-  it('runs a graph saved by 0.1.19, its chat in its config and on its edge, as before', async () => {
-    // As 0.1.19 saved it: the chat in its config, and the same on its edge's sends.
-    const r = await d91({ node: { config: { chat: OWNER, ...D91_ONLY } } });
-    r.ctx('a').fail('crashed');
-    r.at(10 * S);
-    expect(r.sent()).toEqual([`${OWNER}: a failed: crashed`]);
-    const shown = r.kit.core.upgrade(r.graph) as GraphInput;
-    expect(shown.nodes.find((n) => n.id === 'notice')?.config).toEqual(D91_ONLY);
-    expect(shown.edges?.find((e) => e.from === 'notice.chat')?.sends).toEqual([OWNER]);
-  });
 });
 
 describe('owner-notice: the plugins’ messages (D94)', () => {

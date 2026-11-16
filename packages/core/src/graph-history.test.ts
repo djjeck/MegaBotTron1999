@@ -75,34 +75,25 @@ describe('the graph file at a start', () => {
     graphProblems: () => problems.map((text) => ({ text })),
   });
 
-  it('takes the files before the history into it, at their times', () => {
-    fs.writeFileSync(path.join(dir, 'graph.previous.json'), JSON.stringify(graph('a')));
+  it('keeps a file no version holds as found, and marks how the instance started on it', () => {
     fs.writeFileSync(path.join(dir, 'graph.json'), JSON.stringify(graph('a', 'b')));
-    const then = new Date(clock.now() - DAY);
-    fs.utimesSync(path.join(dir, 'graph.previous.json'), then, then);
-    fs.utimesSync(path.join(dir, 'graph.json'), then, then);
+    // Left by an older release (D110): ignored.
+    fs.writeFileSync(path.join(dir, 'graph.previous.json'), JSON.stringify(graph('a')));
     const file = new GraphFile(dir, () => clock.now());
     file.started(core());
-    expect(fs.existsSync(file.previous)).toBe(false);
     expect(file.history.list()).toEqual([
       {
-        id: '2026-10-31T00-00-00.001Z',
-        time: '2026-10-31T00:00:00.001Z',
-        source: 'migrated',
-        summary: '+ node b',
+        id: '2026-11-01T00-00-00.000Z',
+        time: '2026-11-01T00:00:00.000Z',
+        source: 'found',
+        summary: '+ node a; + node b',
         start: { result: 'ran', at: '2026-11-01T00:00:00.000Z' },
-      },
-      {
-        id: '2026-10-31T00-00-00.000Z',
-        time: '2026-10-31T00:00:00.000Z',
-        source: 'migrated',
-        summary: '+ node a',
       },
     ]);
     // A later start on the same file adds no version; one on a file changed by hand does.
     clock.advance(1000);
     file.started(core(['node b: refused']));
-    expect(file.history.list()).toHaveLength(2);
+    expect(file.history.list()).toHaveLength(1);
     expect(file.history.latest()).toMatchObject({
       start: { result: 'refused', problems: ['node b: refused'] },
     });
@@ -119,11 +110,9 @@ describe('the graph file at a start', () => {
     const file = new GraphFile(dir, () => clock.now());
     file.started(core());
     expect(file.history.list()).toEqual([]);
-    fs.writeFileSync(file.previous, '{half');
     fs.writeFileSync(file.file, '{half');
     file.started(core(['not JSON']));
     expect(file.history.list()).toEqual([]);
-    expect(fs.existsSync(file.previous)).toBe(true);
   });
 });
 
