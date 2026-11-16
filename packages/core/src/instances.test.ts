@@ -47,10 +47,11 @@ function actor(heard: string[], contexts: PluginContext[]) {
       description: 'an actor',
       inputs: {
         game: { type: 'interface', plugin: 'game', members: ['state.who'] },
-        chat: { type: 'chat', network: 'tg' },
+        chat: { type: 'chat-in', network: 'tg' },
         scores: { type: 'events', namespace: 'game' },
         helper: { type: 'interface', plugin: 'helper', optional: true },
       },
+      outputs: { chat: { type: 'chat-out', network: 'tg' } },
     },
     create: (ctx) => {
       contexts.push(ctx);

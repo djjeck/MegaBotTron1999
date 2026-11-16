@@ -179,13 +179,17 @@ describe('the nodes as the graph view shows them', () => {
     version: '0.2.0',
     kinds: ['actor'],
     description: 'acts',
-    requires: ['irc', 'game'],
-    reach: [{ connector: 'irc', sends: ['#a'] }],
+    requires: ['game'],
     uses: { game: ['state.board'] },
     games: { consumes: ['game'] },
     inputs: {
+      irc: { type: 'chat-in', bind: { node: 'irc', reads: [] } },
       helper: { type: 'interface', members: ['actions.help'], optional: true, help: 'any helper' },
-      lobby: { type: 'chat', network: 'irc', optional: true },
+      lobby: { type: 'chat-in', network: 'irc', optional: true },
+    },
+    outputs: {
+      irc: { type: 'chat-out', bind: { node: 'irc', sends: ['#a'] } },
+      lobby: { type: 'chat-out', network: 'irc', optional: true },
     },
     settings: z.object({ loud: z.boolean().default(false) }),
     interface: {
@@ -290,7 +294,7 @@ describe('the nodes as the graph view shows them', () => {
         help: 'Its chat commands: the connectors that answer them, where, and to whom',
       },
     });
-    // Its old chat inputs are chat-out outputs too, of the same names (module API 1).
+    // Its chat-outs, named as its chat-ins: the two ends of each account.
     expect(b?.outputs).toMatchObject({
       irc: { type: 'chat-out', label: 'chat-out of any network', optional: false },
       lobby: { type: 'chat-out', network: 'irc', optional: true },

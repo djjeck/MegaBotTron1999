@@ -92,17 +92,6 @@ export const manifestSchema = z
      */
     answers: z.array(answerSchema).default([]),
     uses: z.record(z.string().regex(PLUGIN_ID), z.array(z.string().min(1))).default({}),
-    reach: z
-      .array(
-        z.strictObject({
-          connector: z.string().regex(PLUGIN_ID),
-          reads: z.array(z.string().min(1)).default([]),
-          sends: z.array(z.string().min(1)).default([]),
-          /** The commands it may send there, by their first word (`!roll`); none: any text. */
-          commands: z.array(z.string().min(1)).optional(),
-        })
-      )
-      .default([]),
     config: objectSchema.optional(),
     settings: objectSchema.optional(),
     secrets: z.array(z.string().regex(SECRET_NAME, 'expected a Docker secret name')).default([]),
@@ -438,15 +427,11 @@ export const manifestSchema = z
         m.games.registers.length === 1 ? 'events' : `${ns}-events`
       ),
     ]);
-    const chatOuts = [
-      ...Object.keys(m.outputs),
-      ...Object.entries(m.inputs).flatMap(([n, p]) => (p.type === 'chat' ? [n] : [])),
-    ];
-    for (const port of chatOuts)
+    for (const port of Object.keys(m.outputs))
       if (derived.has(port))
         ctx.addIssue({
           code: 'custom',
-          path: [Object.hasOwn(m.outputs, port) ? 'outputs' : 'inputs', port],
+          path: ['outputs', port],
           message: `the output ${port} is derived: name its chat-out otherwise`,
         });
   })
@@ -464,15 +449,11 @@ function regexProblem(pattern: string): string | undefined {
 
 /**
  * The manifest with its shorthand read as ports (§2.1), and its output ports derived: `requires`
- * with `reach` a chat input named after the connector, `requires` with `uses` (or alone) an
- * interface input named after the plugin, `games.consumes` an optional events input
- * `<namespace>-events`. A port declared in `inputs` under one of these names is left as written.
+ * with `uses` (or alone) an interface input named after the plugin, `games.consumes` an optional
+ * events input `<namespace>-events`. A port declared in `inputs` under one of these names is left
+ * as written.
  *
- * A chat input (the old `chat` type, module API 1, or the shorthand's) is then read as a chat-in
- * input and a chat-out output of the same name (bot-os.md D60), its `bind` split between them: the
- * reads to the input, the sends and commands to the output. A chat-out output declared in
- * `outputs` under that name is left as written. A connector (its `account`) has a chat-in output
- * and a chat-out input, both named `chat`.
+ * A connector (its `account`) has a chat-in output and a chat-out input, both named `chat`.
  */
 function normalise<
   M extends {
@@ -480,12 +461,6 @@ function normalise<
     account?: string | undefined;
     requires: string[];
     uses: Record<string, string[]>;
-    reach: {
-      connector: string;
-      reads: string[];
-      sends: string[];
-      commands?: string[] | undefined;
-    }[];
     games: { registers: string[]; consumes: string[] };
     inputs: Record<string, DeclaredInput>;
     outputs: Record<string, DeclaredOutput>;
@@ -496,72 +471,22 @@ function normalise<
     };
   },
 >(m: M) {
-  const { requires, uses, reach, games, inputs: declared, outputs: declaredOut, ...rest } = m;
+  const { requires, uses, games, inputs: declared, outputs: declaredOut, ...rest } = m;
   const inputs: Record<string, DeclaredInput> = {};
   const add = (name: string, port: DeclaredInput): void => {
     let n = name;
     for (let i = 2; Object.hasOwn(inputs, n) || Object.hasOwn(declared, n); i++) n = `${name}-${i}`;
     inputs[n] = port;
   };
-  const chatOf = (r: (typeof reach)[number], optional: boolean): DeclaredInput => ({
-    type: 'chat',
-    optional,
-    bind: {
-      node: r.connector,
-      reads: r.reads,
-      sends: r.sends,
-      ...(r.commands === undefined ? {} : { commands: r.commands }),
-    },
-  });
-  // In the order of `requires`, which the load order follows.
-  for (const id of requires) {
-    const r = reach.find((x) => x.connector === id);
-    if (r !== undefined) add(id, chatOf(r, false));
-    if (r === undefined || Object.hasOwn(uses, id))
-      add(id, { type: 'interface', plugin: id, members: uses[id] ?? [], optional: false });
-  }
-  // A plugin used is required, as one required is.
+  // In the order of `requires`, which the load order follows; a plugin used is required too.
+  for (const id of requires)
+    add(id, { type: 'interface', plugin: id, members: uses[id] ?? [], optional: false });
   for (const [id, members] of Object.entries(uses))
     if (!requires.includes(id))
       add(id, { type: 'interface', plugin: id, members, optional: false });
-  for (const r of reach) if (!requires.includes(r.connector)) add(r.connector, chatOf(r, true));
   for (const ns of games.consumes)
     add(`${ns}-events`, { type: 'events', namespace: ns, optional: true });
-  const all: Record<string, ManifestInputPort> = {};
-  const chatOuts: Record<string, DeclaredOutput> = {};
-  for (const [name, p] of Object.entries({ ...inputs, ...declared })) {
-    if (p.type !== 'chat') {
-      all[name] = p;
-      continue;
-    }
-    const { bind, type: _, ...port } = p;
-    all[name] = {
-      ...port,
-      type: 'chat-in',
-      ...(bind === undefined
-        ? {}
-        : {
-            bind: {
-              node: bind.node,
-              reads: bind.reads,
-              ...(bind.senders === undefined ? {} : { senders: bind.senders }),
-            },
-          }),
-    };
-    chatOuts[name] = {
-      ...port,
-      type: 'chat-out',
-      ...(bind === undefined
-        ? {}
-        : {
-            bind: {
-              node: bind.node,
-              sends: bind.sends,
-              ...(bind.commands === undefined ? {} : { commands: bind.commands }),
-            },
-          }),
-    };
-  }
+  const all: Record<string, ManifestInputPort> = { ...inputs, ...declared };
   // Its chat commands, served through the edges to this input (D109).
   const commands = Object.keys(m.interface.commands ?? {});
   if (commands.length > 0)
@@ -586,7 +511,7 @@ function normalise<
         help: 'What the plugins send through its account',
       };
   }
-  for (const [name, p] of Object.entries({ ...chatOuts, ...declaredOut }))
+  for (const [name, p] of Object.entries(declaredOut))
     if (!Object.hasOwn(outputs, name)) outputs[name] = p;
   for (const ns of games.registers)
     outputs[games.registers.length === 1 ? 'events' : `${ns}-events`] = {

@@ -371,8 +371,17 @@ describe('the outboxes of the core', () => {
         version: '0.1.0',
         kinds: ['actor' as const],
         description: id,
-        requires: ['conn'],
-        ...(reach ? { reach: [{ connector: 'conn', sends: ['#c'], commands: ['!a'] }] } : {}),
+        ...(reach
+          ? {
+              inputs: { conn: { type: 'chat-in' as const, bind: { node: 'conn', reads: [] } } },
+              outputs: {
+                conn: {
+                  type: 'chat-out' as const,
+                  bind: { node: 'conn', sends: ['#c'], commands: ['!a'] },
+                },
+              },
+            }
+          : { requires: ['conn'] }),
       },
       create: (ctx: { outbox(a: string): unknown }) => {
         try {
@@ -438,7 +447,16 @@ describe('the outboxes of the core', () => {
           version: '0.1.0',
           kinds: ['actor' as const],
           description: 'early',
-          reach: [{ connector: 'conn', sends: ['#c'], commands: ['!a'] }],
+          inputs: {
+            conn: { type: 'chat-in' as const, optional: true, bind: { node: 'conn', reads: [] } },
+          },
+          outputs: {
+            conn: {
+              type: 'chat-out' as const,
+              optional: true,
+              bind: { node: 'conn', sends: ['#c'], commands: ['!a'] },
+            },
+          },
         },
         create: (ctx: { outbox(a: string): OutboxHandle }) => ({
           ready: () => {

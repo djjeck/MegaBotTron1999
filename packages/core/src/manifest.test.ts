@@ -32,10 +32,6 @@ describe('parseManifest', () => {
       account: 'irc:alice',
       requires: ['game', 'irc', 'extra'],
       uses: { game: ['state.game'], loose: ['actions.go'], irc: ['state.status'] },
-      reach: [
-        { connector: 'irc', reads: ['#lobby'], sends: ['#lobby'], commands: ['!roll'] },
-        { connector: 'tg', sends: ['-100'] },
-      ],
       games: { registers: ['one', 'two'], consumes: ['game'] },
       interface: {
         state: { s: { help: 'a read', output: z.number() } },
@@ -49,12 +45,9 @@ describe('parseManifest', () => {
     });
     expect(m.inputs).toEqual({
       game: { type: 'interface', plugin: 'game', members: ['state.game'], optional: false },
-      // The shorthand's chat, read as a chat-in input (and a chat-out output, below).
-      irc: { type: 'chat-in', optional: false, bind: { node: 'irc', reads: ['#lobby'] } },
-      'irc-2': { type: 'interface', plugin: 'irc', members: ['state.status'], optional: false },
+      irc: { type: 'interface', plugin: 'irc', members: ['state.status'], optional: false },
       'extra-2': { type: 'interface', plugin: 'extra', members: [], optional: false },
       loose: { type: 'interface', plugin: 'loose', members: ['actions.go'], optional: false },
-      tg: { type: 'chat-in', optional: true, bind: { node: 'tg', reads: [] } },
       'game-events': { type: 'events', namespace: 'game', optional: true },
       extra: { type: 'events', namespace: 'other', optional: true },
       own: {
@@ -74,12 +67,6 @@ describe('parseManifest', () => {
     });
     expect(m.outputs).toEqual({
       chat: { type: 'chat-in', network: 'irc' },
-      irc: {
-        type: 'chat-out',
-        optional: false,
-        bind: { node: 'irc', sends: ['#lobby'], commands: ['!roll'] },
-      },
-      tg: { type: 'chat-out', optional: true, bind: { node: 'tg', sends: ['-100'] } },
       'one-events': { type: 'events', namespace: 'one' },
       'two-events': { type: 'events', namespace: 'two' },
       interface: { type: 'interface', plugin: 'test-plugin', members: ['state.s', 'actions.a'] },
@@ -90,58 +77,51 @@ describe('parseManifest', () => {
     expect(() =>
       parseManifest({ ...base, inputs: { Bad: { type: 'events', namespace: 'x' } } })
     ).toThrow(/inputs\.Bad/u);
+    // Module API 1's chat shorthand is gone (bot-os.md D110): a chat is its ports.
+    expect(() =>
+      parseManifest({ ...base, requires: ['irc'], reach: [{ connector: 'irc', reads: ['#a'] }] })
+    ).toThrow(/reach/u);
   });
 
-  it('reads chat-in inputs and chat-out outputs, and the old chat input as both', () => {
+  it('reads chat-in inputs and chat-out outputs, but no old chat input', () => {
     const m = parseManifest({
       ...base,
       config: z.object({ match: z.string().optional() }),
       inputs: {
         heard: { type: 'chat-in', network: 'irc', when: { config: 'match' } },
-        old: {
-          type: 'chat',
-          network: 'irc',
-          help: 'module API 1',
-          bind: { node: 'irc', reads: ['#a'], sends: ['#b'], commands: ['!go'] },
-        },
+        // An input and an output may share a name: the two ends of one account.
+        both: { type: 'chat-in', network: 'irc', bind: { node: 'irc', reads: ['#a'] } },
       },
       outputs: {
         said: { type: 'chat-out', bind: { node: 'irc', sends: ['#a'] } },
-        // Declared, it takes the place of the old input's half of that name.
-        old: { type: 'chat-out', network: 'irc', optional: true },
+        both: { type: 'chat-out', network: 'irc', optional: true },
       },
     });
     expect(m.inputs).toEqual({
       heard: { type: 'chat-in', network: 'irc', when: { config: 'match' }, optional: false },
-      old: {
+      both: {
         type: 'chat-in',
         network: 'irc',
-        help: 'module API 1',
         optional: false,
         bind: { node: 'irc', reads: ['#a'] },
       },
     });
     expect(m.outputs).toMatchObject({
       said: { type: 'chat-out', optional: false, bind: { node: 'irc', sends: ['#a'] } },
-      old: { type: 'chat-out', network: 'irc', optional: true },
+      both: { type: 'chat-out', network: 'irc', optional: true },
     });
-    const oldChat = parseManifest({
-      ...base,
-      inputs: { old: { type: 'chat', bind: { node: 'irc', reads: [], sends: ['#b'] } } },
-    });
-    expect(oldChat.outputs['old']).toEqual({
-      type: 'chat-out',
-      optional: false,
-      bind: { node: 'irc', sends: ['#b'] },
-    });
+    // Module API 1's chat input is gone (bot-os.md D110).
+    expect(() =>
+      parseManifest({
+        ...base,
+        inputs: { old: { type: 'chat', bind: { node: 'irc', reads: [], sends: ['#b'] } } },
+      })
+    ).toThrow(/inputs\.old/u);
     expect(() =>
       parseManifest({ ...base, inputs: { x: { type: 'chat-in', when: { config: 'nope' } } } })
     ).toThrow(/inputs\.x\.when: its config has no key nope/u);
     expect(() => parseManifest({ ...base, outputs: { interface: { type: 'chat-out' } } })).toThrow(
       /outputs\.interface: the output interface is derived/u
-    );
-    expect(() => parseManifest({ ...base, inputs: { interface: { type: 'chat' } } })).toThrow(
-      /inputs\.interface: the output interface is derived/u
     );
     expect(() => parseManifest({ ...base, outputs: { x: { type: 'events' } } })).toThrow(
       /outputs\.x/u
@@ -157,7 +137,6 @@ describe('parseManifest', () => {
       requires: ['other'],
       games: { registers: ['dice'], consumes: ['dice'] },
       events: { 'dice.message': z.object({ text: z.string() }) },
-      reach: [{ connector: 'irc', reads: ['#lobby'], sends: ['#lobby'], commands: ['!roll'] }],
       settings: z.object({ on: z.boolean().default(false) }),
       interface: {
         commands: { status: { help: 'the status' } },

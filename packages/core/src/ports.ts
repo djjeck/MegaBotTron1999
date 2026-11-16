@@ -11,8 +11,6 @@
  *   connector's input. Bound, it carries the chats sent to (`sends`) and the commands sent
  *   (`commands`). Data flows left to right: the connector reads on the left of the graph, and is
  *   written to on its right.
- * - The old `chat` input of a manifest (module API 1), and the `requires`/`reach` shorthand, are
- *   read as both: a chat-in input and a chat-out output of the same name (`normalise`).
  * - `events`: the events of a namespace, from the plugins that register it. The manifest names the
  *   namespace, or the key of its node's config that does (`{ config: 'on' }`), so that a plugin
  *   that learns what it listens to from its config (the reactor) has the port resolved per node.
@@ -163,17 +161,6 @@ export const inputSchema = z.discriminatedUnion('type', [
       })
       .optional(),
   }),
-  /**
-   * The old chat input (module API 1): read as a chat-in input and a chat-out output of the same
-   * name, its `bind` split between them.
-   */
-  z.strictObject({
-    type: z.literal('chat'),
-    /** The network it connects to; none: any. */
-    network: z.string().regex(NETWORK).optional(),
-    ...common,
-    bind: z.strictObject({ node: z.string().regex(ID), ...chatBindingSchema.shape }).optional(),
-  }),
   z.strictObject({
     type: z.literal('events'),
     /**
@@ -286,11 +273,10 @@ export interface ChatOutInput {
   help?: string;
 }
 /**
- * An input port of a manifest as the core holds it: the old `chat` read as a chat-in (and a
- * chat-out output), a connector's chat-out added.
+ * An input port of a manifest as the core holds it: as declared, with a connector's chat-out and a
+ * plugin's commands input added.
  */
-export type ManifestInputPort =
-  Exclude<DeclaredInput, { type: 'chat' }> | ChatOutInput | CommandsInput;
+export type ManifestInputPort = DeclaredInput | ChatOutInput | CommandsInput;
 /**
  * A plugin's commands input, derived from its manifest's `interface.commands` (bot-os.md D109):
  * the connectors that serve them, each edge saying which, where and to whom. Optional: a plugin

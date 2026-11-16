@@ -14,8 +14,10 @@ function pinger() {
       version: '0.1.0',
       kinds: ['actor'],
       description: 'answers ping',
-      requires: ['fake'],
-      reach: [{ connector: 'fake', reads: ['#test'], sends: ['#test'], commands: ['!pong'] }],
+      inputs: { fake: { type: 'chat-in', bind: { node: 'fake', reads: ['#test'] } } },
+      outputs: {
+        fake: { type: 'chat-out', bind: { node: 'fake', sends: ['#test'], commands: ['!pong'] } },
+      },
       config: z.object({ every: z.number().default(10_000) }),
       settings: z.object({ loud: z.boolean().default(false) }),
     },

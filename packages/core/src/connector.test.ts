@@ -172,8 +172,7 @@ describe('connectors', () => {
           version: '0.1.0',
           kinds: ['stats'],
           description: 'reader',
-          requires: [],
-          reach: [{ connector: 'down' }],
+          inputs: { down: { type: 'chat-in', optional: true, bind: { node: 'down', reads: [] } } },
         },
         create: (ctx) => {
           try {

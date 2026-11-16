@@ -59,11 +59,11 @@ async function run(state: 'live' | 'dry-run' | 'stopped' = 'live') {
           kinds: ['actor'],
           description: 'reacts',
           inputs: {
-            chat: {
-              type: 'chat',
-              bind: { node: 'tg', reads: [BOT, '#lobby'], sends: [BOT], commands: ['/look'] },
-            },
+            chat: { type: 'chat-in', bind: { node: 'tg', reads: [BOT, '#lobby'] } },
             quest: { type: 'events', namespace: 'quest' },
+          },
+          outputs: {
+            chat: { type: 'chat-out', bind: { node: 'tg', sends: [BOT], commands: ['/look'] } },
           },
         },
         create: (ctx) => {

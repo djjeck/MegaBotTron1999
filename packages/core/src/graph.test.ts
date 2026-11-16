@@ -376,13 +376,11 @@ describe('chat-in and chat-out', () => {
         inputs: { chat: { type: 'chat-in', when: { config: 'match' } } },
         outputs: { chat: { type: 'chat-out', optional: true } },
       }),
-      // Module API 1: its old chat input is both.
-      m('old', { kinds: ['actor'], inputs: { line: { type: 'chat' } } }),
     ].map((x) => [x.id, x])
   );
 
   it('binds a sender to the connector, the connector taking any number of them', () => {
-    const g = defaultGraph([...plugins.values()].filter((p) => p.id !== 'old'));
+    const g = defaultGraph([...plugins.values()]);
     expect(g.edges).toEqual([
       {
         from: 'sender.chat',

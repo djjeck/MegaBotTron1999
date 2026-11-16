@@ -22,8 +22,8 @@ function actor(seen: string[], grab: (ctx: PluginContext) => void = () => {}) {
       version: '0.1.0',
       kinds: ['actor'],
       description: 'acts',
-      requires: ['chat'],
-      reach: [{ connector: 'chat', sends: ['#chat'] }],
+      inputs: { chat: { type: 'chat-in', bind: { node: 'chat', reads: [] } } },
+      outputs: { chat: { type: 'chat-out', bind: { node: 'chat', sends: ['#chat'] } } },
       settings: z.object({
         loud: z.preprocess((v) => (v === 'on' ? true : v === 'off' ? false : v), z.boolean()),
         level: z.coerce.number(),
@@ -588,7 +588,7 @@ describe('controlServer', () => {
     });
     const [, view] = await call('/graph/view');
     expect(view).toMatchObject({
-      // The shorthand's reach: the actor sends only, through its chat-out (bot-os.md D60).
+      // The actor reads nothing, and sends through its chat-out (bot-os.md D60).
       graph: {
         version: 2,
         edges: [

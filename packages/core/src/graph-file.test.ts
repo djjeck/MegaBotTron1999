@@ -34,9 +34,10 @@ const actor = definePlugin({
     description: 'acts on the score',
     config: z.object({ every: z.number().int().min(1) }),
     inputs: {
-      chat: { type: 'chat', network: 'chat' },
+      chat: { type: 'chat-in', network: 'chat' },
       score: { type: 'interface', plugin: 'scorer', members: ['state.score'] },
     },
+    outputs: { chat: { type: 'chat-out', network: 'chat' } },
   },
   create: () => ({}),
 });
