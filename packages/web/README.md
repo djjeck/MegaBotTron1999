@@ -85,23 +85,25 @@ the server that guards them.
   connector's shared tuning (`commandIntervalS`, `unansweredAt`, `unansweredAtBy`, `liveGraceS`)
   folded under **Tuning**, and a connector not yet logged in told to log in first (D122); a new
   node's config starts filled with its schema's defaults, and an opened node shows its unset ones
-  filled in, written with its first change (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), a
-  config key that names a secret a choice of the secrets' names, a sensitive one (docs/bot-os.md
-  D124) said set or not, replaced typed unseen or cleared, never shown (`SensitiveField.tsx`), a
-  connector's secrets listed under its config, each by name, whether it is provided (`GET /secrets`)
-  and where it comes from (a Docker secret), never its value, a list of strings or numbers as rows
-  of plain fields with add (+) and remove buttons, and a record of plain values (the reactor's
-  `when`) as rows of a key and a value, its type picked where several are allowed
-  (`ListFields.tsx`); JSON is typed only for what none of these draws. An events edge says what it
-  carries (`Payloads.tsx`, #3): each event type and its payload's fields by dotted path and type, in
-  its panel, in the title of its rhombus (a line per type), and in the panel of the node it enters,
-  under the input (narrowed to the type the reactor's `on` names), for a reaction's `when` and
-  `send` paths. Its outputs say what they carry (docs/bot-os.md D71): an events output its event
-  types, each with its description; an interface output its members, folded, each with its signature
-  (`signature.ts`) and help when opened. A node up that keeps a state (docs/bot-os.md D72) has a
-  **State** section, drawn from its schema alone (`StateViewer.tsx`): its pinned paths first, then
-  each section with its freshness; a list of objects as a sortable, searchable table, a map as a
-  table of keys and values, an object folded, a value as a labelled line; its card shows a line of
+  filled in, written with its first change (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), an
+  enum whose schema labels its values (`choices`, docs/bot-os.md D127) as radio buttons by those
+  labels, a field shown only while a sibling has the value its `shownWhen` names, and taken away
+  when a change makes it not apply, a config key that names a secret a choice of the secrets' names,
+  a sensitive one (docs/bot-os.md D124) said set or not, replaced typed unseen or cleared, never
+  shown (`SensitiveField.tsx`), a connector's secrets listed under its config, each by name, whether
+  it is provided (`GET /secrets`) and where it comes from (a Docker secret), never its value, a list
+  of strings or numbers as rows of plain fields with add (+) and remove buttons, and a record of
+  plain values (the reactor's `when`) as rows of a key and a value, its type picked where several
+  are allowed (`ListFields.tsx`); JSON is typed only for what none of these draws. An events edge
+  says what it carries (`Payloads.tsx`, #3): each event type and its payload's fields by dotted path
+  and type, in its panel, in the title of its rhombus (a line per type), and in the panel of the
+  node it enters, under the input (narrowed to the type the reactor's `on` names), for a reaction's
+  `when` and `send` paths. Its outputs say what they carry (docs/bot-os.md D71): an events output
+  its event types, each with its description; an interface output its members, folded, each with its
+  signature (`signature.ts`) and help when opened. A node up that keeps a state (docs/bot-os.md D72)
+  has a **State** section, drawn from its schema alone (`StateViewer.tsx`): its pinned paths first,
+  then each section with its freshness; a list of objects as a sortable, searchable table, a map as
+  a table of keys and values, an object folded, a value as a labelled line; its card shows a line of
   it. A running connector's panel lists its **Queue** (`Queue.tsx`, D73): each send waiting, until
   when, and the nodes that asked for it with what cancels them, a send several share marked so, and
   the sends coalesced since the start with the pairs of nodes that shared them; a chat-out edge's

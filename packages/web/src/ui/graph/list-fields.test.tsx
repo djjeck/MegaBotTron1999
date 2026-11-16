@@ -170,3 +170,51 @@ describe('a record as rows', () => {
     expect(state.value).toEqual({ spacing: { a: false } });
   });
 });
+
+describe('a choice as radio buttons, and fields shown for a choice (D127)', () => {
+  const schema = {
+    type: 'object',
+    properties: {
+      mode: {
+        type: 'string',
+        enum: ['any', 'only'],
+        default: 'any',
+        choices: { any: 'Any group it is added to', only: 'Only these groups' },
+      },
+      only: { type: 'array', items: { type: 'string' }, shownWhen: { mode: 'only' } },
+      block: {
+        anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }],
+        shownWhen: { mode: 'any' },
+      },
+      plain: { type: 'string', enum: ['a', 'b'] },
+    },
+  };
+  const radio = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
+
+  it('labels each value, shows the fields of the choice alone, and drops the others on a change', () => {
+    const { state } = editing(schema, { block: ['x'] });
+    expect(screen.getByRole('radiogroup', { name: 'mode' })).toBeDefined();
+    // Unset, at its default.
+    expect(radio('Any group it is added to').checked).toBe(true);
+    expect(radio('Only these groups').checked).toBe(false);
+    expect(screen.queryByLabelText('add to only')).toBeNull();
+    expect(screen.getByLabelText('add to block')).toBeDefined();
+    // An enum without labels is still a choice of its values.
+    expect(screen.getByLabelText('plain').tagName).toBe('SELECT');
+    fireEvent.click(radio('Only these groups'));
+    expect(state.value).toEqual({ mode: 'only' });
+    expect(screen.getByLabelText('add to only')).toBeDefined();
+    expect(screen.queryByLabelText('add to block')).toBeNull();
+    fireEvent.click(screen.getByLabelText('add to only'));
+    fireEvent.change(screen.getByLabelText('only 1'), { target: { value: 'g' } });
+    expect(state.value).toEqual({ mode: 'only', only: ['g'] });
+    fireEvent.click(radio('Any group it is added to'));
+    expect(state.value).toEqual({ mode: 'any' });
+  });
+
+  it('draws the choice read-only without a change to make', () => {
+    render(<SchemaForm legend="input" schema={schema} value={{ mode: 'only' }} />);
+    expect(radio('Only these groups').checked).toBe(true);
+    expect(radio('Only these groups').disabled).toBe(true);
+  });
+});

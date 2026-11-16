@@ -3,7 +3,11 @@
  * them (`GET /available`, `GET /graph/view`). One field per property, by its type: a check box, a
  * number, a text, a choice of the enum's values, a nested group for an object, a list of strings or
  * numbers as rows with add and remove buttons, a record of plain values as rows of a key and a value
- * (`ListFields.tsx`, #9); anything else as JSON. Each field shows its value, or the schema's default, unmarked (the editor fills a node's
+ * (`ListFields.tsx`, #9); anything else as JSON. An enum whose schema labels its values (`choices`,
+ * a plugin's zod `.meta({ choices: { value: 'label' } })`, bot-os.md D127) is a radio button per
+ * value, each by its label; a field whose schema says when it applies (`shownWhen: { key: value }`,
+ * a sibling key's value, its default counted) is shown only then, and taken away from the value as
+ * soon as a change makes it not apply, so that a list of a mode not chosen never lingers hidden. Each field shows its value, or the schema's default, unmarked (the editor fills a node's
  * config with its defaults, `defaults.ts`); its description, the schema's, is its help.
  *
  * Editable when given `onChange` (the editor's draft, D55): a field emptied (once left) is taken
@@ -14,13 +18,70 @@
  * (D44).
  */
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { JsonSchema } from '#src/ui/api.ts';
 import { plain } from './defaults.ts';
 import type { Scalar } from './ListFields.tsx';
 import { ListField, listItems, RecordField, recordValues } from './ListFields.tsx';
 
 const show = (v: unknown): string => JSON.stringify(v, null, 2) ?? '';
+
+/** An enum's labels, by value (`choices`), when its schema gives them. */
+function choicesOf(schema: JsonSchema): Readonly<Record<string, string>> | undefined {
+  const c = schema['choices'] ?? plain(schema)['choices'];
+  return typeof c === 'object' && c !== null && !Array.isArray(c)
+    ? (c as Record<string, string>)
+    : undefined;
+}
+
+/**
+ * Whether a property applies given its siblings' values (`shownWhen`), each sibling unset taken at
+ * its default; always, when its schema does not say.
+ */
+function applies(
+  schema: JsonSchema,
+  value: Readonly<Record<string, unknown>> | undefined,
+  properties: Readonly<Record<string, JsonSchema>>
+): boolean {
+  const when = schema['shownWhen'] ?? plain(schema)['shownWhen'];
+  if (typeof when !== 'object' || when === null) return true;
+  return Object.entries(when as Record<string, unknown>).every(([key, wanted]) => {
+    const sibling = properties[key];
+    const v =
+      value?.[key] ??
+      (sibling === undefined ? undefined : (sibling['default'] ?? plain(sibling)['default']));
+    return v === wanted;
+  });
+}
+
+/** One radio button per value of an enum, each by its label (`choices`). */
+function Choices(props: {
+  name: string;
+  values: readonly unknown[];
+  labels: Readonly<Record<string, string>>;
+  value: unknown;
+  set: ((v: unknown) => void) | undefined;
+}) {
+  const group = useId();
+  return (
+    <span className="choices" role="radiogroup" aria-label={props.name}>
+      {props.values.map((o) => (
+        <label key={String(o)} className="choice">
+          <input
+            type="radio"
+            name={group}
+            checked={props.value === o}
+            disabled={props.set === undefined}
+            onChange={(e) => {
+              if (e.target.checked) props.set?.(o);
+            }}
+          />{' '}
+          {props.labels[String(o)] ?? String(o)}
+        </label>
+      ))}
+    </span>
+  );
+}
 
 /** What a form needs to be edited, passed down to its nested groups. */
 interface Editing {
@@ -135,7 +196,10 @@ function Field(props: {
     );
   let control;
   const custom = editing?.custom[name];
+  const labels = choicesOf(props.schema);
   if (custom !== undefined && set !== undefined) control = custom(props.value, set);
+  else if (enumOf !== undefined && labels !== undefined)
+    control = <Choices name={name} values={enumOf} labels={labels} value={value} set={set} />;
   else if (editing?.secretKeys.includes(name) === true && set !== undefined) {
     const names = [...editing.secretNames];
     if (typeof props.value === 'string' && !names.includes(props.value)) names.push(props.value);
@@ -212,7 +276,10 @@ function Field(props: {
     );
   else control = <JsonField name={name} value={value} set={set} />;
   // A list's or a record's rows hold their own inputs, each labelled: no label around them all.
-  const rows = listItems(schema) !== undefined || recordValues(schema) !== undefined;
+  const rows =
+    listItems(schema) !== undefined ||
+    recordValues(schema) !== undefined ||
+    (enumOf !== undefined && labels !== undefined);
   return (
     <div className={`field${errors.length > 0 ? ' refused' : ''}`}>
       {(custom !== undefined && set !== undefined) || rows ? (
@@ -254,7 +321,8 @@ export function SchemaForm(props: {
 }) {
   const properties = (props.schema['properties'] ?? {}) as Record<string, JsonSchema>;
   const required = (props.schema['required'] ?? []) as string[];
-  const all = Object.entries(properties);
+  // A field that does not apply now (`shownWhen`) is not drawn.
+  const all = Object.entries(properties).filter(([, s]) => applies(s, props.value, properties));
   const folded = all.filter(([name]) => props.folded?.includes(name) === true);
   const entries = all.filter(([name]) => props.folded?.includes(name) !== true);
   const onChange = props.onChange;
@@ -275,6 +343,10 @@ export function SchemaForm(props: {
           const next: Record<string, unknown> = { ...props.value };
           if (v === undefined) delete next[name];
           else next[name] = v;
+          // A field the change makes not apply goes: its value would hold unseen.
+          for (const [key, s] of Object.entries(properties))
+            if (key !== name && next[key] !== undefined && !applies(s, next, properties))
+              delete next[key];
           onChange(next);
         };
   return (
