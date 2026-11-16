@@ -384,7 +384,7 @@ describe('the telegram-user plugin’s login (D116)', () => {
     expect(made).toEqual([{ apiId: 7654321, apiHash: LOGIN.apiHash, session: '1BQSTORED' }]);
     await new Promise((r) => setImmediate(r));
     expect(core.controls.login('telegram-user')).toMatchObject({
-      value: { status: 'done', source: 'store', as: 'alice' },
+      value: { status: 'done', source: 'store', as: '@alice' },
     });
     // Logged out: on Telegram too; it needs a login again, its API pair kept.
     expect(await core.controls.loginAct('telegram-user', 'logout', {})).toMatchObject({

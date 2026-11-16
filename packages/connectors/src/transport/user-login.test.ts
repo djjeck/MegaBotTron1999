@@ -6,6 +6,7 @@ import {
   LOGIN_DOC,
   LOGIN_TIMEOUT_MS,
   refusal,
+  userId,
   UserLogin,
   type UserLoginClient,
   type UserLoginOptions,
@@ -108,7 +109,7 @@ describe('a telegram-user login (D116)', () => {
         }
         expect(code).toBe('22222');
         expect(await p.password?.('a cat')).toBe('hunter22');
-        return { username: 'alice' };
+        return { username: 'alice', id: 5000001 };
       },
     });
     const { login, remembered, logged } = setUp({ client, store });
@@ -142,7 +143,13 @@ describe('a telegram-user login (D116)', () => {
       actions: [],
     });
     expect(done.status).not.toBe('needed');
-    expect(store.read(LOGIN_DOC)).toEqual({ ...API, session: SESSION });
+    // Whom it is, and the account's id, never shown, kept beside the session (D120).
+    expect(store.read(LOGIN_DOC)).toEqual({
+      ...API,
+      session: SESSION,
+      as: '@alice',
+      user: '5000001',
+    });
     expect(calls).toEqual(['connect', 'disconnect']);
     // What was typed is marked secret, the code too short to be; the session too.
     expect(remembered).toEqual([HASH, '+15550100', 'hunter22', SESSION]);
@@ -228,6 +235,13 @@ describe('a telegram-user login (D116)', () => {
     expect(calls.filter((c) => c === 'disconnect')).toHaveLength(3);
   });
 
+  it('says whom it is from what its login kept, before it connects (D120)', () => {
+    const store = memoryStore();
+    store.write(LOGIN_DOC, { ...API, session: SESSION, as: 'Alice', user: '5000001' });
+    const { login } = setUp({ client: fakeClient({}).client, store, source: 'store' });
+    expect(login.state()).toMatchObject({ status: 'done', as: 'Alice' });
+  });
+
   it('logs out a session of its store, on Telegram too, keeping the API pair', async () => {
     const store = memoryStore();
     store.write(LOGIN_DOC, { ...API, session: SESSION });
@@ -241,7 +255,7 @@ describe('a telegram-user login (D116)', () => {
     });
     expect(remembered).toEqual([HASH, SESSION]);
     const state = login.state();
-    expect(state).toMatchObject({ status: 'done', source: 'store', as: 'alice' });
+    expect(state).toMatchObject({ status: 'done', source: 'store', as: '@alice' });
     expect(state.actions[0]).toMatchObject({ name: 'logout' });
     expect(state.actions[0]?.confirm).toContain('ends on Telegram too');
     // Not while logged in.
@@ -289,8 +303,12 @@ describe('a telegram-user login (D116)', () => {
   });
 });
 
-describe('userName and refusal', () => {
+describe('userName, userId and refusal', () => {
   it('name a user and a refusal', () => {
+    expect(userId({ id: { toString: () => '5000001' } })).toBe('5000001');
+    expect(userId({ id: null })).toBeUndefined();
+    expect(userId({})).toBeUndefined();
+    expect(userId(null)).toBeUndefined();
     expect(userName({ username: 'alice', firstName: 'Alice' })).toBe('@alice');
     expect(userName({ username: '', firstName: 'Alice' })).toBe('Alice');
     expect(userName({})).toBeUndefined();

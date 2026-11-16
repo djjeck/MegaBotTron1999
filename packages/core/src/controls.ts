@@ -141,6 +141,11 @@ export interface AccountControl {
   /** While it runs and connects anywhere: the network, the account's own name, the status. */
   network?: string;
   self?: string;
+  /**
+   * Whom it is logged in as, as its login says (`@ExampleBot`, D120): what the owner recognises,
+   * kept from the login, so known before it connects.
+   */
+  as?: string;
   connection?: ConnectorStatus;
 }
 
@@ -277,6 +282,7 @@ export class Controls {
         const s = this.host.status(id);
         const { account, connection: c } = this.host.account(id);
         const self = c?.self();
+        const as = this.loginAs(id);
         return {
           id,
           plugin: m.id,
@@ -285,8 +291,18 @@ export class Controls {
           ...(s?.reason === undefined ? {} : { reason: s.reason }),
           ...(c === undefined ? {} : { network: c.network, connection: c.status() }),
           ...(self === undefined ? {} : { self }),
+          ...(as === undefined ? {} : { as }),
         };
       });
+  }
+
+  /** Whom a connector's login says it is, if it offers one that says (D120). */
+  private loginAs(id: string): string | undefined {
+    try {
+      return this.host.instance(id)?.login?.state().as;
+    } catch {
+      return undefined;
+    }
   }
 
   /**

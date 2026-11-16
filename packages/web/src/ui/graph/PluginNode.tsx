@@ -12,7 +12,8 @@
  * cards show its account's connection (D111): connected, connecting or closed, with its step. A
  * node whose plugin declares a widget (D112) shows it in a line while it runs, its card a line
  * taller for it whatever its state, so that the map does not move as nodes start and stop. A
- * model connector, which spends money on each call, is marked with a `$` (D117).
+ * model connector, which spends money on each call, is marked with a `$` (D117). A connector that
+ * logs in says whom as, beside its connection (`@ExampleBot`, D120).
  */
 import type { Node, NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
@@ -37,6 +38,8 @@ export interface PluginNodeData extends Record<string, unknown> {
   drift?: DriftCounts | undefined;
   /** A connector's connection, as its account runs (`GET /accounts`). */
   connection?: AccountControl['connection'];
+  /** Whom a connector is logged in as, as its login says (`@ExampleBot`, D120). */
+  as?: string | undefined;
   portTypes: Record<string, PortTypeInfo>;
   /** Disabled in the draft (D64). */
   disabled?: boolean;
@@ -154,6 +157,7 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
     live,
     drift,
     connection,
+    as,
     portTypes,
     problems = [],
     portProblems = {},
@@ -213,6 +217,12 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
             >
               {/* A connector that needs a login says so on its card (D116): log in from its panel. */}
               {connection.phase === NEEDS_LOGIN ? NEEDS_LOGIN : connection.state}
+            </span>
+          )}
+          {as === undefined ? null : (
+            <span className="as small" title={`logged in as ${as}`}>
+              {' '}
+              {as}
             </span>
           )}
         </div>

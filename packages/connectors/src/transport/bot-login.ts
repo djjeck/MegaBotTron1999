@@ -15,10 +15,11 @@ import {
 } from '@megabottron1999/core';
 import { GrammyError } from 'grammy';
 
-/** The store's document of the login: the bot's token. */
+/** The store's document of the login: the bot's token, and whom it is (`@ExampleBot`, D120). */
 export const BOT_LOGIN_DOC = 'login';
 export interface BotLoginDoc {
   token: string;
+  as?: string;
 }
 
 /** What a token looks like: the bot's id, a colon, and its secret. */
@@ -55,8 +56,9 @@ export class BotLogin implements Login {
   constructor(o: BotLoginOptions) {
     this.o = o;
     this.source = o.source;
-    const kept = o.store.read<BotLoginDoc>(BOT_LOGIN_DOC)?.token;
-    if (kept !== undefined) o.remember(kept);
+    const kept = o.store.read<BotLoginDoc>(BOT_LOGIN_DOC);
+    if (kept !== undefined) o.remember(kept.token);
+    this.as = kept?.as;
   }
 
   state(): LoginState {
@@ -65,7 +67,9 @@ export class BotLogin implements Login {
       ...(this.changed ? { restart: true } : {}),
       ...(this.error === undefined ? {} : { error: this.error }),
     };
-    const as = this.changed ? this.as : (this.as ?? this.o.self());
+    // Whom it is: the running bot's name, else the one its login kept (D120).
+    const live = this.changed ? undefined : this.o.self();
+    const as = live ?? this.as;
     const who = as === undefined ? {} : { as: as.startsWith('@') ? as : `@${as}` };
     if (this.source === undefined || this.replacing)
       return {
@@ -149,9 +153,12 @@ export class BotLogin implements Login {
       this.error = `Telegram refused it: ${e instanceof GrammyError ? e.description : e instanceof Error ? e.message : String(e)}`;
       return this.state();
     }
-    this.o.store.write(BOT_LOGIN_DOC, { token } satisfies BotLoginDoc);
+    this.as = me.username === undefined ? undefined : `@${me.username}`;
+    this.o.store.write(BOT_LOGIN_DOC, {
+      token,
+      ...(this.as === undefined ? {} : { as: this.as }),
+    } satisfies BotLoginDoc);
     this.source = 'store';
-    this.as = me.username;
     this.changed = true;
     this.replacing = false;
     this.o.log(`its token is kept: connected as @${me.username ?? '?'}; a restart connects it`);

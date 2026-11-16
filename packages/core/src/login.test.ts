@@ -116,6 +116,8 @@ describe('a connector that logs in from its node (D116)', () => {
     expect(
       await call('/plugins/tg/login', { action: 'token', values: { token: 'good-token-456' } })
     ).toEqual([200, { status: 'done', source: 'store', as: '@Me', restart: true, actions: [] }]);
+    // Whom it is logged in as, on its account too (D120).
+    expect(core.controls.accounts().find((x) => x.id === 'tg')?.as).toBe('@Me');
     // An action it does not offer: 409, redacted too.
     expect(await call('/plugins/tg/login', { action: 'boom' })).toEqual([
       409,
@@ -192,6 +194,7 @@ describe('a connector that logs in from its node (D116)', () => {
     );
     await core.start();
     expect(core.controls.login('tg')).toEqual({ error: 'lost' });
+    expect(core.controls.accounts()[0]).not.toHaveProperty('as');
     expect(await core.controls.loginAct('tg', 'x', {})).toEqual({ error: 'lost' });
     await core.stop();
   });

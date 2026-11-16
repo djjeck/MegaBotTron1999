@@ -787,7 +787,9 @@ export function NodeDetails(props: {
           <>
             <dt>Connection</dt>
             <dd>
-              {account.self === undefined ? null : <>as {account.self} </>}
+              {(account.as ?? account.self) === undefined ? null : (
+                <>as {account.as ?? account.self} </>
+              )}
               {account.connection === undefined ? (
                 <span className="muted">not connected</span>
               ) : (

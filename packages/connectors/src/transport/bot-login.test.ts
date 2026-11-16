@@ -48,9 +48,16 @@ describe('a telegram-bot login (D116)', () => {
         expect.objectContaining({ name: 'logout', label: 'Forget the token' }) as unknown,
       ],
     });
-    expect(store.read(BOT_LOGIN_DOC)).toEqual({ token: TOKEN });
+    expect(store.read(BOT_LOGIN_DOC)).toEqual({ token: TOKEN, as: '@ExampleBot' });
     expect(remembered).toEqual(['nonsense', TOKEN]);
     expect(logged.join('\n')).not.toContain(TOKEN);
+  });
+
+  it('says whom it is from what its login kept, before the bot connects (D120)', () => {
+    const store = new Stores().open('named');
+    store.write(BOT_LOGIN_DOC, { token: TOKEN, as: '@ExampleBot' });
+    const { login } = setUp({ store, source: 'store' });
+    expect(login.state()).toMatchObject({ status: 'done', as: '@ExampleBot' });
   });
 
   it('says why Telegram refused a token, or did not answer', async () => {

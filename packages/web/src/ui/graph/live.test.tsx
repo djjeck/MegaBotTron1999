@@ -50,6 +50,7 @@ const ACCOUNTS = [
     state: 'running',
     network: 'chat',
     self: 'ExampleBot',
+    as: '@ExampleBot',
     connection: { state: 'closed', phase: 'closed', detail: 'refused' },
   },
 ];
@@ -108,11 +109,13 @@ describe('a connector’s account, on its cards and in its panel', () => {
     const card = await screen.findByLabelText('node chat · in', {}, slow);
     const badge = await within(card).findByText('closed', {}, slow);
     expect(badge.getAttribute('title')).toBe('its connection: closed: refused');
+    // Whom it is logged in as, from its login (D120): what the owner recognises.
+    expect(within(card).getByTitle('logged in as @ExampleBot').textContent).toBe(' @ExampleBot');
     expect(within(screen.getByLabelText('node actor-a')).queryByText('closed')).toBeNull();
     fireEvent.click(card);
     const details = await screen.findByLabelText('details of chat');
     const account = (await within(details).findByText('Connection')).nextElementSibling;
-    expect(account?.textContent).toBe('as ExampleBot closed closed: refused');
+    expect(account?.textContent).toBe('as @ExampleBot closed closed: refused');
   });
 
   it('says when a running connector is not connecting', async () => {

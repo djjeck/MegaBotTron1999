@@ -1154,22 +1154,24 @@ Docker secret (bot-os.md D118). Without them it runs all the same, as a `LoginNe
 `closed`, its phase `needs login` (which its card shows), hearing, sending and listing nothing, so
 that a new connector is added, applied, logged in and restarted, and its chats ticked. Its instance
 offers a `login`, `{ state(), act(action, values) }`: where it stands (`LoginState`: `status`
-`needed`, `pending` or `done`; `source`, `store`; `as`, whom it is logged in as; `restart`, its
-credentials changed since the start, which a restart puts in force; a `note`; an `error`, why the
-last answer failed; the `step` it asks, with a `title`, a how-to `text`, a `link`, a `qr` link to
-show as a QR code and when it `expires`, and its `fields`, each a line of text, `secret` ones typed
-unseen; and the `actions` offered, buttons that send the step's fields when they `submit`, ask first
-when they say `confirm`). The web UI draws it generically, as it draws a form from a schema, knowing
-no network. A connector marks each value typed and each credential it keeps secret
-(`ctx.secrets.remember`), so that the core redacts them from what it prints, records and answers;
-the core records each action (`core.login`: the node, the action, where it led and whom as, never a
-value). `telegram-bot` asks for its token (checked with `getMe`, "as @ExampleBot") and forgets it on
-demand (revoking it is @BotFather's `/revoke`); `telegram-user` asks for its API id and hash once
-(my.telegram.org), then logs in by QR code (GramJS's `signInUserWithQrCode`, renewed as it expires)
-or by phone (the number, the code, the 2FA password), one login at a time, dropped after 5 minutes
-without an answer; its logout ends the session on Telegram too (`auth.logOut`), and its sessions
-show in the account's Devices as the app registered at my.telegram.org on the device
-`MegaBotTron1999`.
+`needed`, `pending` or `done`; `source`, `store`; `as`, whom it is logged in as, the name the owner
+recognises (`@ExampleBot`, an account's `@username` or first name), kept with the credentials so
+that it is known before the connector connects, and shown on its card and in its panel through
+`GET /accounts`'s `as` (bot-os.md D120); `restart`, its credentials changed since the start, which a
+restart puts in force; a `note`; an `error`, why the last answer failed; the `step` it asks, with a
+`title`, a how-to `text`, a `link`, a `qr` link to show as a QR code and when it `expires`, and its
+`fields`, each a line of text, `secret` ones typed unseen; and the `actions` offered, buttons that
+send the step's fields when they `submit`, ask first when they say `confirm`). The web UI draws it
+generically, as it draws a form from a schema, knowing no network. A connector marks each value
+typed and each credential it keeps secret (`ctx.secrets.remember`), so that the core redacts them
+from what it prints, records and answers; the core records each action (`core.login`: the node, the
+action, where it led and whom as, never a value). `telegram-bot` asks for its token (checked with
+`getMe`, "as @ExampleBot") and forgets it on demand (revoking it is @BotFather's `/revoke`);
+`telegram-user` asks for its API id and hash once (my.telegram.org), then logs in by QR code
+(GramJS's `signInUserWithQrCode`, renewed as it expires) or by phone (the number, the code, the 2FA
+password), one login at a time, dropped after 5 minutes without an answer; its logout ends the
+session on Telegram too (`auth.logOut`), and its sessions show in the account's Devices as the app
+registered at my.telegram.org on the device `MegaBotTron1999`.
 
 As built (`packages/core/src/connector.ts`): a connector plugin's instance offers its `connector`,
 whose account must be its node's (`ctx.account`; a test's fake connector, given an account of its
@@ -1552,8 +1554,8 @@ control API, the web UI and later the agents, whose grants will be subsets of it
   kept in the core's store (`/data/core/power.json`) across restarts, logged as `core.power`, and a
   plugin reads it with `ctx.off()`. The outbox does not refuse sends while off: a plugin's `off`
   stops it (D30).
-- **The accounts and drift:** each connector instance with its account and its connection's status
-  (`accounts`), and each parser's drift (`drift`).
+- **The accounts and drift:** each connector instance with its account, its connection's status, and
+  whom its login says it is (`as`, D120) (`accounts`), and each parser's drift (`drift`).
 - **The kill switch:** each running plugin's own `kill`, its safety stop (which may stop its node,
   `ctx.stop`), with what came of it and the buttons of its ways on; a plugin without one is left as
   it is (D30).

@@ -427,6 +427,7 @@ export function GraphPage({
             live: live.get(c.node),
             drift: drifts.get(c.node),
             connection: accountOf.get(c.node)?.connection,
+            as: accountOf.get(c.node)?.as,
             portTypes,
             disabled: draftNodes.get(c.node)?.disabled === true,
             cleared: clears.has(c.node),

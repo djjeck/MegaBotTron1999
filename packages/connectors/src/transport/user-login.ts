@@ -28,12 +28,17 @@ import {
 } from 'telegram/client/auth.js';
 import { StringSession } from 'telegram/sessions/index.js';
 
-/** The store's document of the login: the API pair, and the session once logged in. */
+/**
+ * The store's document of the login: the API pair, and the session once logged in, with whom it is
+ * (`as`, `@alice` or a first name) and the account's user id (`user`, never shown), D120.
+ */
 export const LOGIN_DOC = 'login';
 export interface LoginDoc {
   apiId: number;
   apiHash: string;
   session?: string;
+  as?: string;
+  user?: string;
 }
 
 /** How long a login waits for an answer before it is dropped. */
@@ -63,6 +68,13 @@ export function userName(user: unknown): string | undefined {
   const { username, firstName } = user as { username?: unknown; firstName?: unknown };
   if (typeof username === 'string' && username !== '') return `@${username}`;
   return typeof firstName === 'string' && firstName !== '' ? firstName : undefined;
+}
+
+/** The user id of a user GramJS returned, as text; never shown, only compared (D120). */
+export function userId(user: unknown): string | undefined {
+  if (typeof user !== 'object' || user === null || !('id' in user)) return undefined;
+  const id = (user as { id: unknown }).id;
+  return id === undefined || id === null ? undefined : String(id as string | number);
 }
 
 /** A Telegram refusal in words: its RPC error's name (`PHONE_CODE_INVALID`), else its message. */
@@ -171,6 +183,7 @@ export class UserLogin implements Login {
     const doc = this.doc();
     if (doc !== undefined) o.remember(doc.apiHash);
     if (doc?.session !== undefined) o.remember(doc.session);
+    this.as = doc?.session === undefined ? undefined : doc.as;
   }
 
   private doc(): LoginDoc | undefined {
@@ -201,7 +214,9 @@ export class UserLogin implements Login {
         actions: [...(step?.actions ?? []), CANCEL],
       };
     }
-    const as = this.changed ? this.as : (this.as ?? this.o.self());
+    // Whom it is: the running account's @username, else the one its login kept (D120).
+    const live = this.changed ? undefined : this.o.self();
+    const as = live === undefined ? this.as : `@${live}`;
     const who = as === undefined ? {} : { as };
     if (this.source !== undefined)
       return {
@@ -408,9 +423,15 @@ export class UserLogin implements Login {
         if (attempt.over) return;
         const saved = session.save();
         this.o.remember(saved);
-        this.o.store.write(LOGIN_DOC, { ...api, session: saved });
-        this.source = 'store';
         this.as = userName(user);
+        const id = userId(user);
+        this.o.store.write(LOGIN_DOC, {
+          ...api,
+          session: saved,
+          ...(this.as === undefined ? {} : { as: this.as }),
+          ...(id === undefined ? {} : { user: id }),
+        } satisfies LoginDoc);
+        this.source = 'store';
         this.changed = true;
         this.o.log(`logged in as ${this.as ?? 'the account'}; a restart connects it`);
         void this.finish(attempt, undefined);
