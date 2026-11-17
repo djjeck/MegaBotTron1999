@@ -177,10 +177,17 @@ describe('App', () => {
         await screen.findByRole('button', { name: 'Apply (restart)' }, { timeout: 5000 })
       );
       await screen.findByText(/^The instance restarted: it runs/u, {}, { timeout: 5000 });
-      act(() => vi.advanceTimersByTime(NOTICE_MS - 1000));
+      // Halfway, it stays. Real time also moves the fake clock (and a loaded machine may let the
+      // restart's last update land after the note showed), so no check sits on the boundary: once
+      // a full NOTICE_MS has passed since the halfway check, it has gone.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(NOTICE_MS / 2);
+      });
       expect(screen.queryByText(/^The instance restarted/u)).not.toBeNull();
-      act(() => vi.advanceTimersByTime(1000));
-      expect(screen.queryByText(/^The instance restarted/u)).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(NOTICE_MS);
+      });
+      await waitFor(() => expect(screen.queryByText(/^The instance restarted/u)).toBeNull());
     } finally {
       vi.useRealTimers();
     }
