@@ -16,8 +16,8 @@
  *   claims and cannot read, which pauses the turn-actor that requires it past the threshold;
  * - offers `state.rest`: until when its bot rests, as its last answer said (the bot's rest after a
  *   turn, or the wait of a "too soon"), for the actor to wait out; and `state.lastTurn`: the
- *   owner's last turn in the private chat with its bot, by hand or its actor's, from which the
- *   actor counts (bot-os.md D99: the actor reads no chat);
+ *   owner's last turn, by hand or its actor's, in the private chat or the group alike (a turn is a
+ *   turn, bot-os.md D129), from which the actor counts (D99: the actor reads no chat);
  * - declares its `<id>.turn` an answer to its turn commands (bot-os.md D98): `refused` with
  *   `cooldown` for a "too soon", `ok` for any other outcome read (not an unread one), each with its
  *   `retryAt` (the rest it starts), so that a turn queued by any node settles with what the bot
@@ -213,7 +213,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
             output: z.object({ until: z.number(), why: z.string() }).optional(),
           },
           lastTurn: {
-            help: `The owner's last turn in the private chat with @${spec.bot}: by hand, from any device, or its actor's`,
+            help: `The owner's last turn with @${spec.bot}, in private or in the group: by hand, from any device, or its actor's`,
             output: z.object({ t: z.number(), id: z.string().optional() }).optional(),
           },
         },
@@ -323,12 +323,11 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
         state: {
           rest: () => (rest !== undefined && rest.until > ctx.clock.now() ? rest : undefined),
           lastTurn: () => {
-            const last = turns
-              .filter((x) => x.private ?? isPrivate({ chat: x.chat }))
-              .reduce<Parsed['turns'][number] | undefined>(
-                (a, x) => (a === undefined || x.t >= a.t ? x : a),
-                undefined
-              );
+            // A turn is a turn, in private or in the group (D129).
+            const last = turns.reduce<Parsed['turns'][number] | undefined>(
+              (a, x) => (a === undefined || x.t >= a.t ? x : a),
+              undefined
+            );
             return last === undefined
               ? undefined
               : { t: last.t, ...(last.id === undefined ? {} : { id: last.id }) };

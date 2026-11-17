@@ -2247,25 +2247,25 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   publishes as `<id>.turn` (`{ chat, outcome, retryAt?, playback? }`, `retryAt` the end of the rest
   it starts, `playback: true` for a message played back, D83); a message it claims and cannot read
   goes to drift (§4.7) and is published as an `unknown` outcome. Its read `rest` says until when the
-  bot rests, from its last answer. Its read `lastTurn` says the owner's last turn in the private
-  chat with its bot (`{ t, id? }`, by hand from any device or its actor's), from which its actor
-  counts (D99). **Its turn answers its turn commands** (§4.6, Command answers, bot-os.md D98):
-  `refused` with `cooldown` for a "too soon" (`kind: nothing`, `reason: cooldown`), `ok` (`rest`)
-  for any other outcome read, not an `unknown` one, each with its `retryAt`, within two minutes; so
-  a turn queued by any node settles with the bot's answer, and the outbox holds the turn command
-  back in that chat until the bot's rest is over. It resumes from what it parsed (D62): the owner's
-  recent turns and its bot's rest are kept in its store (`parsed`) as they change and read back at
-  its start; it never re-reads the chat, and reads missed messages as any other. Its game gives it a
-  spec (`TurnParserSpec`): its `id`, its `bot`, its `description`, its grammar (`read`, given each
-  of its bot's messages as a `BotMessage`: `text`, `private`, `answers`, `replies`, `self`, and
-  `document`, the file it carries with its text when it has one, such as the bot's export of the
-  player's state, beside the caption in `text`, D82) and its `turnCommands`, the bot's turn commands
-  by first word (`["/play"]`, at least one): which commands are turns is a fact of the game, so it
-  has no config (bot-os.md D70). A node saved while it had one (`"config": { "commands": [...] }`)
-  still loads and runs: a plugin with no config schema ignores its node's config, which the file
-  keeps as written until the owner takes it out. It adds to the owner's summary the answers it read
-  live, by their outcome's kind (§4.17, D92). The tests play a made-up @QuestBot
-  (`packages/turns/test/quest.ts`).
+  bot rests, from its last answer. Its read `lastTurn` says the owner's last turn with its bot, in
+  the private chat or the group alike (`{ t, id? }`, by hand from any device or its actor's;
+  bot-os.md D129), from which its actor counts (D99). **Its turn answers its turn commands** (§4.6,
+  Command answers, bot-os.md D98): `refused` with `cooldown` for a "too soon" (`kind: nothing`,
+  `reason: cooldown`), `ok` (`rest`) for any other outcome read, not an `unknown` one, each with its
+  `retryAt`, within two minutes; so a turn queued by any node settles with the bot's answer, and the
+  outbox holds the turn command back in that chat until the bot's rest is over. It resumes from what
+  it parsed (D62): the owner's recent turns and its bot's rest are kept in its store (`parsed`) as
+  they change and read back at its start; it never re-reads the chat, and reads missed messages as
+  any other. Its game gives it a spec (`TurnParserSpec`): its `id`, its `bot`, its `description`,
+  its grammar (`read`, given each of its bot's messages as a `BotMessage`: `text`, `private`,
+  `answers`, `replies`, `self`, and `document`, the file it carries with its text when it has one,
+  such as the bot's export of the player's state, beside the caption in `text`, D82) and its
+  `turnCommands`, the bot's turn commands by first word (`["/play"]`, at least one): which commands
+  are turns is a fact of the game, so it has no config (bot-os.md D70). A node saved while it had
+  one (`"config": { "commands": [...] }`) still loads and runs: a plugin with no config schema
+  ignores its node's config, which the file keeps as written until the owner takes it out. It adds
+  to the owner's summary the answers it read live, by their outcome's kind (§4.17, D92). The tests
+  play a made-up @QuestBot (`packages/turns/test/quest.ts`).
 - **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
   (P3, P17), each with its own id, configuration, store, timer and state. Its ports: `chat`, a
   chat-out output on `telegram`, which sends to the private chat with its bot (its command only);
