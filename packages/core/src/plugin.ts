@@ -100,6 +100,13 @@ export interface PluginContext {
    * (a helper's data that the plugin can do without).
    */
   useOptional<T = PluginInterface>(port: string): T | undefined;
+  /**
+   * What the node its attention input `port` (`attention` by default) binds offers it (§2.1,
+   * bot-os.md D133): that node's instance's `attention`, called with this node's id; the two
+   * plugins agree on its shape, as on an interface's members. Refused for an input it does not
+   * have, unbound, or whose other end is not running.
+   */
+  attention<T = unknown>(port?: string): T;
   /** Its runtime settings (§2): the owner's values as kept, and a change, kept and put in force. */
   readonly settings: PluginSettingsHandle;
   /** A parser's reports of the messages it read and could not read (§4.7). */
@@ -259,6 +266,11 @@ export interface Instance {
   };
   /** What it offers other plugins (§2 `interface`), for those that use it. */
   readonly interface?: PluginInterface;
+  /**
+   * What its attention output offers each node its edges bind (§2.1, bot-os.md D133), given the
+   * asking node's id, as that node's `ctx.attention` asks for it.
+   */
+  readonly attention?: (node: string) => unknown;
   /**
    * The state it keeps, for the owner's eyes (bot-os.md D72, §4.11): read whole, with its schema,
    * by the node panel's generic viewer (`GET /plugins/<id>/view`), and one line of it on its card

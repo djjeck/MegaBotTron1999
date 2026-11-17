@@ -258,6 +258,7 @@ hears a namespace's events only through a port an edge binds.
 | `events`    | `events` (`<ns>-events` with more than one): each namespace it registers (derived)                                              | `{ type: 'events', namespace }`, bound to any number of instances; it hears only theirs; `namespace` may be `{ config: key }`                                                         |
 | `interface` | `interface`: its declared reads and actions (every plugin has one, derived)                                                     | `{ type: 'interface', plugin, members }`; none for a plugin it only needs started first; no `plugin`: a contract                                                                      |
 | `commands`  | `{ type: 'commands' }` (declared in `outputs`, a connector's alone, of its account's network); its edges carry what each serves | `commands`: a plugin's chat commands (derived from `interface.commands`), bound to any number of connectors; each edge carries `serves`, `chats`, `privateChats`, `senders`, `dryRun` |
+| `attention` | `{ type: 'attention' }` (declared in `outputs`): a simulated person's attention, bound to any number of players                 | `{ type: 'attention', bind? }` (declared): the person whose sittings it plays in, one edge; it carries nothing                                                                        |
 
 **Chats flow left to right** (bot-os.md D60): only parsers read chats, actors only send, and
 everything else consumes events and interfaces. A chat-in edge runs from a connector's chat-in
@@ -317,6 +318,17 @@ drawn in the editor starts one, P10). A connector serves commands by declaring t
 per connector and plugin; a plugin served by two bots has two. These fields belong to it alone
 (`only a commands edge carries serves, chats and privateChats`), as `senders` belongs to it and to a
 chat-in. Its `serves` is not a chat-out's `commands`, the first words a plugin may send.
+
+**An attention edge** (bot-os.md D133) runs from a node that holds a simulated person's attention
+(the `attention` plugin, §5), its `attention` output, to each node that plays when that person sits
+down (a `player`), their `attention` input: any number of edges leave the output (players attached
+to one person share their sittings), one reaches an input (required unless `optional`, so the person
+starts first and a person stopped makes its players inactive, D64). It carries nothing. At runtime
+the core hands the player what the person's node offers it: the person's instance returns
+`attention: (node) => …`, called with the asking node's id, and the player asks for it with
+`ctx.attention(port?)` (`attention` by default), refused for an input it does not have, unbound, or
+whose other end is not running; what passes between them is the two plugins' agreement, as an
+interface's members are (the turns package's `AttentionHandle`).
 
 A chat-in or an events input may say `when: { config: key }`, a key of its plugin's `config` schema:
 the node has the port only while its config sets that key (the reactor reads a chat only with a
@@ -781,6 +793,7 @@ interface Instance {
     state?: Record<string, (input?) => unknown>; // a read's input, if it declares one (§2)
     actions?: Record<string, Function>;
   };
+  attention?: (node: string) => unknown; // what its attention output offers each player (§2.1)
   view?: { read(): StateView; summary?(): string | undefined }; // the state it keeps (§4.11)
   connector?: Connector; // a connector plugin's (§4.5)
   surface?: ChatSurface; // a connector's chat surface (§2)
@@ -813,6 +826,7 @@ interface PluginContext<Config, Settings> {
   outboxes(port: string): Outbox[]; // §4.6, one per connector an output of several edges binds (D97)
   use<T>(port: string): T; // the interface an input's edge binds (§2.1)
   useOptional<T>(port: string): T | undefined; // an optional input's, while bound and running
+  attention<T>(port?: string): T; // what the person its attention input binds offers it (§2.1)
   drift: DriftReporter; // §4.7, parsers only
   notify(text: string, buttons?: Buttons): void; // a `told` notice for the owner (§4.8, §4.16)
   notice(kind: string, text: string, detail?: object): void; // for the owner's attention (§4.16)

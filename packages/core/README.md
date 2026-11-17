@@ -63,13 +63,14 @@ hidden from every view of it (`src/sensitive.ts`, `hideSensitive`, D124).
   cursor into the log (a length read per day file) for a reader that resumes where it left it.
 - `src/rng.ts`: a seeded generator, so that a simulated run repeats exactly.
 - `src/graph.ts`, `src/ports.ts`: the graph, its port types (`chat-in`, `chat-out`, `events`,
-  `interface`) and its check, with its problems, which refuse it, and its warnings, which do not (a
-  chat-in edge reading a chat its connector's `monitors` leaves out, docs/bot-os.md D89, a chat
-  matched by any of its names as the running connector tells them, D90); a graph file of another
-  version than 2 is refused, with why (docs/bot-os.md D110); a chat-out output may take several
-  edges (`many`, `ctx.outboxes`), send to its connector's owner through an edge naming none
-  (`owner`), or need its edge to name one chat that a chat-in input reads alone (`single`,
-  `sameAs`).
+  `interface`, `commands`, and `attention`, a simulated person's to its players, run by
+  `ctx.attention`, docs/bot-os.md D133) and its check, with its problems, which refuse it, and its
+  warnings, which do not (a chat-in edge reading a chat its connector's `monitors` leaves out,
+  docs/bot-os.md D89, a chat matched by any of its names as the running connector tells them, D90);
+  a graph file of another version than 2 is refused, with why (docs/bot-os.md D110); a chat-out
+  output may take several edges (`many`, `ctx.outboxes`), send to its connector's owner through an
+  edge naming none (`owner`), or need its edge to name one chat that a chat-in input reads alone
+  (`single`, `sameAs`).
 - `src/graph-file.ts`, `src/graph-history.ts`: the graph file of the data volume, its check, diff
   and rollback for the control API, and its history: every graph written kept as a version for 7
   days (never fewer than the 5 latest), with what changed and whether the instance started on it

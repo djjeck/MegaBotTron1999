@@ -28,6 +28,9 @@
  *   (none: all), the `chats` it answers in and every private chat (`privateChats`), who may ask
  *   (`senders`, `owner` for the connector's owner; none: anyone) and its `dryRun`. No edge, no chat
  *   command. Either end takes any number of them, two between the same nodes refused.
+ * - A simulated person's attention (bot-os.md D133) runs from the node that holds it, its
+ *   `attention` output, to each node that plays in its sittings, their `attention` input: any number
+ *   of edges leave the output, one reaches an input. It carries nothing.
  * - A node may be `disabled` by the owner: checked as any other, never started. A chat-out edge, or
  *   a commands edge, may be a `dryRun`: what it sends is logged as sent, never sent (bot-os.md D64). A node whose
  *   required ports bind one that is down (disabled, stopped or inactive) is inactive
@@ -341,7 +344,7 @@ export function defaultGraph(
             manifests
               .filter((o) => o.id !== m.id && o.games.registers.includes(input.namespace))
               .map((o) => o.id))
-          : input.type === 'chat-in' || input.type === 'interface'
+          : input.type === 'chat-in' || input.type === 'interface' || input.type === 'attention'
             ? [input.bind?.node ?? (input.type === 'interface' ? input.plugin : undefined)].filter(
                 (n) => n !== undefined
               )
@@ -765,7 +768,7 @@ export function resolveGraph(
       if (input.optional || named.has(`${n.id}.${port}`) || (n.inputs.get(port)?.length ?? 0) > 0)
         continue;
       const target =
-        input.type === 'chat-in'
+        input.type === 'chat-in' || input.type === 'attention'
           ? input.bind?.node
           : input.type === 'interface'
             ? (input.bind?.node ?? input.plugin)

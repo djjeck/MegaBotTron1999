@@ -1857,6 +1857,7 @@ export class Core {
         return used as T;
       },
       useOptional: <T>(key: string): T | undefined => this.interfaceOf(entry, key) as T | undefined,
+      attention: <T>(port = 'attention'): T => this.attentionOf(entry, port) as T,
       settings: {
         kept: () => this.settings.of(id)?.kept() ?? {},
         set: (key, raw) => this.settings.set(`${id}.${key}`, raw),
@@ -2060,6 +2061,23 @@ export class Core {
     const e = other === undefined ? undefined : this.entries.get(other);
     if (e?.up !== true) return undefined;
     return interfaceOf(e.id, e.instance?.interface ?? {}, input.members, entry.id);
+  }
+
+  /**
+   * What the node its attention input `port` binds offers it (bot-os.md D133): its instance's
+   * `attention`, called with the asking node's id. Refused for an input it does not have, unbound,
+   * or whose other end is not running or offers none.
+   */
+  private attentionOf(entry: Entry, port: string): unknown {
+    const input = entry.node.ports[port];
+    if (input?.type !== 'attention')
+      throw new Error(`${entry.id} has no attention input ${port}: add one`);
+    const other = entry.node.inputs.get(port)?.[0]?.node;
+    const e = other === undefined ? undefined : this.entries.get(other);
+    const offer = e?.up === true ? e.instance?.attention : undefined;
+    if (offer === undefined)
+      throw new Error(`${entry.id}: its attention ${other ?? port} is not running`);
+    return offer(entry.id);
   }
 
   /**

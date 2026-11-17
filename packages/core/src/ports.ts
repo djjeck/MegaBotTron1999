@@ -23,13 +23,25 @@
  *   commands, on its left. Bound, it carries which of them it serves (`serves`), the chats it answers
  *   in (`chats`, `privateChats`), who may ask (`senders`) and whether it is a dry run (`dryRun`). No
  *   edge, no chat command.
+ * - `attention` (bot-os.md D133): a simulated person's attention, from the node that holds it (its
+ *   output, on its right) to each node that plays when that person sits down (its input, on its
+ *   left): many players to one person, one person to a player. Bound, it carries nothing: the core
+ *   hands the player what the person's node offers it (`ctx.attention`, its instance's
+ *   `attention`), which the two plugins agree on, as an interface's members.
  *
  * Nothing in here knows of any game or any network.
  */
 import { z } from 'zod';
 
 /** The port types, by their stable id. */
-export const PORT_TYPES = ['chat-in', 'chat-out', 'events', 'interface', 'commands'] as const;
+export const PORT_TYPES = [
+  'chat-in',
+  'chat-out',
+  'events',
+  'interface',
+  'commands',
+  'attention',
+] as const;
 export type PortType = (typeof PORT_TYPES)[number];
 
 /** What the UI shows of a port type: stable, so that a drawing keeps its look. */
@@ -76,6 +88,13 @@ export const PORT_TYPE_INFO: Readonly<Record<PortType, PortTypeInfo>> = {
       'A plugin’s chat commands, served by a connector in the chats its edge names, to whom it names: from the connector to the plugin',
     shape: 'diamond',
     colour: '#c2407a',
+  },
+  attention: {
+    id: 'attention',
+    description:
+      'A simulated person’s attention: the sittings they play in and their pace, from the node that holds it to each node that plays then',
+    shape: 'square',
+    colour: '#b8860b',
   },
 };
 
@@ -195,6 +214,12 @@ export const inputSchema = z.discriminatedUnion('type', [
       message: 'an interface input names its plugin, or the members it uses',
       path: ['members'],
     }),
+  z.strictObject({
+    type: z.literal('attention'),
+    ...common,
+    /** By default, the node of this id (bot-os.md D133). */
+    bind: z.strictObject({ node: z.string().regex(ID) }).optional(),
+  }),
 ]);
 
 /**
@@ -258,6 +283,14 @@ export const outputSchema = z.discriminatedUnion('type', [
     type: z.literal('commands'),
     help: z.string().min(1).optional(),
   }),
+  /**
+   * A simulated person's attention (bot-os.md D133), for the nodes that play when they sit down:
+   * any number of edges leave it, one per player.
+   */
+  z.strictObject({
+    type: z.literal('attention'),
+    help: z.string().min(1).optional(),
+  }),
 ]);
 export type DeclaredOutput = z.output<typeof outputSchema>;
 export type OutputPortInput = z.input<typeof outputSchema>;
@@ -315,6 +348,7 @@ export function describePort(p: ManifestInputPort | InputPort | OutputPort): str
     return `${p.type} of ${p.network ?? 'any network'}`;
   if (p.type === 'commands')
     return 'commands' in p ? 'commands' : `commands of ${p.network ?? 'any network'}`;
+  if (p.type === 'attention') return 'attention';
   if (p.type === 'events')
     return `events of ${typeof p.namespace === 'string' ? p.namespace : `config ${p.namespace.config}`}`;
   return p.plugin === undefined
@@ -339,7 +373,8 @@ export function mismatch(input: InputPort, output: OutputPort): string | undefin
   if (input.type === 'events')
     return output.type === 'events' && input.namespace === output.namespace ? undefined : no;
   if (input.type === 'commands') return output.type === 'commands' ? undefined : no;
-  if (output.type === 'commands') return no;
+  if (input.type === 'attention') return output.type === 'attention' ? undefined : no;
+  if (output.type === 'commands' || output.type === 'attention') return no;
   if (output.type !== 'interface' || (input.plugin ?? output.plugin) !== output.plugin) return no;
   const missing = input.members.filter((m) => !output.members.includes(m));
   return missing.length === 0

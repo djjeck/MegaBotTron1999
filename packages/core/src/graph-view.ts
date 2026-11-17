@@ -252,6 +252,8 @@ export type PortView = (
       types?: EventTypeView[];
     }
   | { type: 'interface'; plugin?: string; members: string[] }
+  /** A simulated person's attention (bot-os.md D133): carries nothing of its own. */
+  | { type: 'attention' }
   | {
       type: 'commands';
       /** A connector's output: its network. */
@@ -374,6 +376,7 @@ function inputView(
       ...base,
     };
   if (p.type === 'commands') return { type: 'commands', commands: [...p.commands], ...base };
+  if (p.type === 'attention') return { type: 'attention', ...base };
   if (p.type === 'events') {
     const from = declared.type === 'events' ? declared.namespace : undefined;
     return {
@@ -420,6 +423,13 @@ function outputView(p: OutputPort, events: Manifest['events']): PortView {
     return {
       type: 'commands',
       ...(p.network === undefined ? {} : { network: p.network }),
+      label: describePort(p),
+      optional: false,
+      ...(p.help === undefined ? {} : { help: p.help }),
+    };
+  if (p.type === 'attention')
+    return {
+      type: 'attention',
       label: describePort(p),
       optional: false,
       ...(p.help === undefined ? {} : { help: p.help }),
