@@ -2326,7 +2326,7 @@ those the owner played by hand; a `player` its commands, `sent` and `in a dry ru
   players of one person share their sittings, so gameplay comes in bursts). Its configuration holds
   once what each turn actor held on its own: when the person comes back, `minGapMin` and `maxGapMin`
   between two sittings (17 and 20 by default, 1 at least), `skipChance` (a sitting forgotten), the
-  nights, `bedtime` and `wake` on the clock of `timeZone` with their `jitterMin` and
+  nights, `wake` and `bedtime` on the clock of `timeZone` with their `jitterMin` and
   `wakeDelayMaxMin` (`DEFAULT_SCHEDULE` of `packages/turns/src/sittings.ts`, its nights drawn from
   their date and the node's id, so that a restart keeps them), `seed`; and `reaction`, how fast they
   act within a sitting (`minS` to `maxS` seconds, plus `perCharMs` per character of the answer read,

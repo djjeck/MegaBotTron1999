@@ -114,20 +114,22 @@ export const attentionConfig = z
       .number()
       .default(D.skipChance)
       .describe('The chance that a sitting is forgotten, from 0 to under 1'),
-    bedtime: z
-      .string()
-      .default(D.bedtime)
-      .describe('When they go to sleep, HH:MM on the clock of timeZone: no sitting until wake'),
     wake: z
       .string()
       .default(D.wake)
       .describe(
-        'When they wake up, HH:MM on the clock of timeZone, not equal to bedtime; earlier than bedtime means the next morning (bedtime 23:00, wake 07:00)'
+        'When they wake up, HH:MM on the clock of timeZone: no sitting from bedtime until then'
+      ),
+    bedtime: z
+      .string()
+      .default(D.bedtime)
+      .describe(
+        'When they go to sleep, HH:MM on the clock of timeZone, not equal to wake; a wake earlier than it is the next morning (wake 07:00, bedtime 23:00)'
       ),
     jitterMin: z
       .number()
       .default(D.jitterMin)
-      .describe('How far bedtime and wake may each move, either way, in minutes'),
+      .describe('How far wake and bedtime may each move, either way, in minutes'),
     wakeDelayMaxMin: z
       .number()
       .default(D.wakeDelayMaxMin)
@@ -135,7 +137,7 @@ export const attentionConfig = z
     timeZone: z
       .string()
       .default(D.timeZone)
-      .describe('The time zone of bedtime and wake, an IANA name such as Europe/Rome'),
+      .describe('The time zone of wake and bedtime, an IANA name such as Europe/Rome'),
     reaction: reactionShape
       .default(() => reactionShape.parse({}))
       .describe('How fast they act within a sitting'),
