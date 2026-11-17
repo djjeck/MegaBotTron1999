@@ -35,6 +35,16 @@ nothing of the shell, so that the wiki could import them in place of its copy.
   `account`, the `owner` (`username`, and their display `names` or `ids`: their messages are the
   account's own), the `chats` (by title or chat id: the name the connector's config lists, whether
   private, aliases) and the `senders` (by id or display name: the username).
+- `src/replay.ts` (Node, docs/bot-os.md D131):
+  `replay({ plugins, inbounds, graph?, playback?, self?, start?, until?, config?, settings?, documents?, history? })`
+  runs a module's plugins, or a graph file in the live format (its path), on a `DevKit` whose
+  `telegram-user` nodes are `FakeConnector`s (the real plugin's config schema; a node's `chats`
+  deliver what it monitors, named as listed), and feeds the `Inbound`s in time order on its
+  `VirtualClock`, the timers due on the way run at their time, live or as history (`playback`); each
+  account's outbox is made at the start, so that the answers read hold commands back as live (D98).
+  It returns the running `kit`, the `connectors` by node, `delivered`, `records()` (the event log),
+  `drift()`, `read(node, name)` and `act(node, name, input)` (the plugins' state and actions, as the
+  owner's controls reach them), `sent()` and `stop()`. `asMonitored` is a node's filter alone.
 - `src/cli.ts`, run by `tools/telegram-export.ts`: prints the messages, or with
   `--inbounds <mapping.json>` the `Inbound`s, as JSON Lines, for a module's own replay tool to build
   on:
@@ -45,7 +55,12 @@ nothing of the shell, so that the wiki could import them in place of its copy.
   ```
 
 The tests read invented exports only (`test/fixtures/`: alice's private chat with a made-up
-@QuestBot and its group, as HTML and as JSON; `test/helpers.ts` builds others). A real export never
-enters this repository.
+@QuestBot and its group, as HTML and as JSON, a mapping, and a graph file; `test/helpers.ts` builds
+others). The replay's test runs them through the shell's own `turnParserPlugin` with @QuestBot's
+made-up grammar (`@megabottron1999/turns/test/quest.ts`, a dev dependency): turns by hand in private
+and in the group, the bot's answers, a "too soon", an unread answer, `lastTurn` and `rest` after,
+and drift. A real export never enters this repository.
 
-Its dependency: htmlparser2, whose tokenizer the HTML reader is built on (as the wiki's).
+Its dependencies: htmlparser2, whose tokenizer the HTML reader is built on (as the wiki
+generator's); the core and the connectors (the replay's kit, and `telegram-user`'s id and config
+schema).

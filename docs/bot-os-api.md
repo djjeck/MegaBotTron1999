@@ -1576,6 +1576,12 @@ public API (`packages/core/src/devkit.ts`):
   account (`telegram-user`) would have delivered (`toInbounds`, by a per-replay mapping of the
   owner, the chats and the senders), for a replay through real plugins; a command line prints either
   as JSON Lines. The format: [telegram-export.md](telegram-export.md).
+- **Replay** (`replay` of `@megabottron1999/telegram-export`, bot-os.md D131, #49's history): those
+  `Inbound`s fed to a module's plugins, or to a graph file in the live format, on a kit whose
+  `telegram-user` nodes are fake connectors (their config's `chats` filter and name what they
+  deliver, as live), in time order on the virtual clock, its timers run on the way, live or as
+  history (`playback`); out come the event log, drift, and the plugins' state and actions, read as
+  the owner's controls read them.
 
 ### 4.11 The owner's controls
 

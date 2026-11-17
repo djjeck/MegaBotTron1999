@@ -866,5 +866,8 @@ A replay feeds a recorded chat to plugins as the owner's own account (`telegram-
 | `playback`                      | As the replay asks: live (`false`) by default.                                                                                                                                                                                    |
 | `document`                      | A text file the export holds: `{ name, mime: 'text/plain', size, text }`.                                                                                                                                                         |
 
+`replay` ([`replay.ts`](../packages/telegram-export/src/replay.ts), bot-os.md D131) feeds them to
+real plugins on the dev kit, in time order on its virtual clock, its `telegram-user` nodes faked.
+
 Times from an HTML export made on Windows carry its offset label ([§5.1](#51-date)): during daylight
 saving time they are an hour off the true instant, all alike, so the gaps between messages hold.

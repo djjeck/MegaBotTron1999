@@ -24,3 +24,6 @@ export const LOBBY = '-1001000000002';
 
 /** The first message's time: 6 November 2026, 13:00 at UTC+01:00. */
 export const T0 = Date.parse('2026-11-06T12:00:00Z');
+
+/** A graph file in the live format: alice's account, monitoring both chats, and @QuestBot's parser. */
+export const QUEST_GRAPH = path.join(FIXTURES, 'quest-graph.json');

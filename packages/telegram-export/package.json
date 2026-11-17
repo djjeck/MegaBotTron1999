@@ -17,7 +17,11 @@
     "node": ">=24"
   },
   "dependencies": {
+    "@megabottron1999/connectors": "0.1.36",
     "@megabottron1999/core": "0.1.36",
     "htmlparser2": "12.0.0"
+  },
+  "devDependencies": {
+    "@megabottron1999/turns": "0.1.36"
   }
 }

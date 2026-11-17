@@ -259,15 +259,15 @@ D67, D68). A module repository develops and tests against this one vendored as a
 
 ## Layout
 
-| Path                       | What it holds                                                                                                                                                                     |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/core`            | `@megabottron1999/core`: manifests, the lifecycle, the bus, the store, the scheduler, the outbox, drift, settings, secrets, the graph of ports, the owner's controls, the dev kit |
-| `packages/connectors`      | `@megabottron1999/connectors`: IRC through a ZNC bouncer; Telegram as a bot (the owner's chat surface) and as a user                                                              |
-| `packages/turns`           | `@megabottron1999/turns`: base plugins for a game bot played one turn at a time: a parser of its answers, an actor at a person's pace                                             |
-| `packages/telegram-export` | `@megabottron1999/telegram-export`: the dev kit's reader of Telegram Desktop chat exports (HTML and JSON), as the `Inbound`s a replay feeds ([format](docs/telegram-export.md))   |
-| `packages/web`             | `@megabottron1999/web`: the web UI (React, React Flow, built by Vite) and its server behind a login                                                                               |
-| `src/main.ts`              | The image's entry point                                                                                                                                                           |
-| `docs/`                    | The design: [principles and decisions](docs/bot-os.md), [the plugin API](docs/bot-os-api.md), and [Telegram's chat exports](docs/telegram-export.md)                              |
+| Path                       | What it holds                                                                                                                                                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/core`            | `@megabottron1999/core`: manifests, the lifecycle, the bus, the store, the scheduler, the outbox, drift, settings, secrets, the graph of ports, the owner's controls, the dev kit                                  |
+| `packages/connectors`      | `@megabottron1999/connectors`: IRC through a ZNC bouncer; Telegram as a bot (the owner's chat surface) and as a user                                                                                               |
+| `packages/turns`           | `@megabottron1999/turns`: base plugins for a game bot played one turn at a time: a parser of its answers, an actor at a person's pace                                                                              |
+| `packages/telegram-export` | `@megabottron1999/telegram-export`: the dev kit's reader of Telegram Desktop chat exports (HTML and JSON), as `Inbound`s, and their replay through real plugins on the dev kit ([format](docs/telegram-export.md)) |
+| `packages/web`             | `@megabottron1999/web`: the web UI (React, React Flow, built by Vite) and its server behind a login                                                                                                                |
+| `src/main.ts`              | The image's entry point                                                                                                                                                                                            |
+| `docs/`                    | The design: [principles and decisions](docs/bot-os.md), [the plugin API](docs/bot-os-api.md), and [Telegram's chat exports](docs/telegram-export.md)                                                               |
 
 Each package has its own README.
 

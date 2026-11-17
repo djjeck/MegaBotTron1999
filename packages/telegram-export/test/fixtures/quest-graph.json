@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "nodes": [
+    {
+      "id": "alice-account",
+      "plugin": "telegram-user",
+      "account": "telegram:alice",
+      "config": { "chats": ["@QuestBot", "-1001000000002"] }
+    },
+    { "id": "quest", "plugin": "quest" }
+  ],
+  "edges": [
+    {
+      "from": "alice-account.chat",
+      "to": "quest.chat",
+      "type": "chat-in",
+      "reads": ["@QuestBot", "-1001000000002"],
+      "senders": ["@QuestBot", "me"]
+    }
+  ]
+}
