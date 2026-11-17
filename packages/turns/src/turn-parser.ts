@@ -191,12 +191,18 @@ export interface Readiness {
   answer?: { t: number; length: number };
 }
 
-/** A send of a command, as its player tells its parser. */
+/**
+ * A send of a command, as a player tells its parser: its own, or one of another player of the same
+ * person's (bot-os.md D139), which counts only if it reaches this parser's bot.
+ */
 export interface SentCommand {
   chat: string;
   id?: string;
   t: number;
-  /** The command sent, by first word; a turn (its first turn command) when not given. */
+  /**
+   * The command sent, as sent: bare (`/play`) or addressed (`/play@QuestBot`); a turn (its first
+   * turn command) when not given. Addressed to another bot, it is not this bot's.
+   */
   command?: string;
 }
 
@@ -208,6 +214,8 @@ export interface TurnParserInterface {
     ready(): Record<string, Readiness>;
     /** Its bot's commands, the turns first, with their mechanics, as its spec declares (D137). */
     commands(): BotCommand[];
+    /** Its bot's username, without `@`: a command addressed to it is `/play@<bot>` (D139). */
+    bot(): string;
   };
   actions: { sent(sent: SentCommand): void };
 }
@@ -218,6 +226,7 @@ export const TURN_PARSER_MEMBERS = [
   'state.lastTurn',
   'state.ready',
   'state.commands',
+  'state.bot',
   'actions.sent',
 ];
 
@@ -373,6 +382,15 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
     event: string,
     commands: string[],
     extra: Partial<AnswerDeclarationInput>
+  ): AnswerDeclarationInput[] => {
+    // Each command answered bare or addressed to its bot (D139), as a player may send it.
+    const forms = [...commands, ...commands.map((c) => `${c}@${spec.bot}`)];
+    return answerForms(event, forms, extra);
+  };
+  const answerForms = (
+    event: string,
+    commands: string[],
+    extra: Partial<AnswerDeclarationInput>
   ): AnswerDeclarationInput[] => [
     {
       event,
@@ -440,6 +458,8 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       games: { registers: [spec.id] },
       // Its bot's commands, for the editor's player checklist (D137): known without the node.
       botCommands: declared,
+      // Its bot's name, for a command addressed to it, as a player in a group may send (D139).
+      botUsername: spec.bot,
       events: {
         [`${spec.id}.turn`]: z
           .object({
@@ -505,10 +525,14 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
             help: `@${spec.bot}'s commands it knows, the turns first, each with its mechanics (D137): a player's defaults`,
             output: z.array(commandSchema),
           },
+          bot: {
+            help: `Its bot's username, ${spec.bot}: a command addressed to it is /play@${spec.bot} (D139)`,
+            output: z.string(),
+          },
         },
         actions: {
           sent: {
-            help: 'A command sent by its player, whose answer it matches: a turn when it names none',
+            help: "A command sent by a player (its own, or another of the person's), whose answer it matches: a turn when it names none; counted only if it reaches its bot",
             input: z.object({
               chat: z.string(),
               id: z.string().optional(),
@@ -521,6 +545,15 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
     },
     create: (ctx) => {
       const handle = ctx.connector('chat');
+      /**
+       * A chat its edge reads (D139); reading every chat, any but another's private chat (a
+       * `@username`), which its bot never sees.
+       */
+      const reachable = (chat: string): boolean => {
+        const reads = handle.reads?.() ?? '*';
+        if (reads === '*') return !chat.startsWith('@');
+        return reads.some((r) => r.toLowerCase() === chat.toLowerCase());
+      };
       /** The answers read live (not history), by their outcome's kind; `unknown`, unread. */
       const read = new Tally(ctx.clock);
       ctx.summary?.contribute((w) => {
@@ -756,12 +789,16 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
             return Object.fromEntries(all.map((c) => [c, readiness(c, now)]));
           },
           commands: () => structuredClone(declared),
+          bot: () => spec.bot,
         },
-        // Its player sends to its bot's private chat alone (D97).
         actions: {
+          // A send reaches its bot (D139) in its private chat, or in a group its edge reads, bare
+          // or addressed to it: so a bare turn another player sent in the group is its turn too.
           sent: (sent) => {
-            const command = named(sent.command ?? (turnCommands[0] as string));
-            if (command === undefined) return;
+            const command =
+              sent.command === undefined ? turnCommands[0] : commandOf(sent.command, all, spec.bot);
+            const inPrivate = sent.chat.toLowerCase() === privateChat.toLowerCase();
+            if (command === undefined || !(inPrivate || reachable(sent.chat))) return;
             remember(
               {
                 chat: sent.chat,
@@ -770,7 +807,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
                 command,
                 byHand: false,
               },
-              true
+              inPrivate
             );
           },
         },

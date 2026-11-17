@@ -49,6 +49,7 @@ import type { PortChange } from './draft.ts';
 import { edgeKey, endOf, instanceOf } from './draft.ts';
 import { MemberCall, NodeStatus, SettingsInForce } from './NodeControls.tsx';
 import { heardTypes, Payloads } from './Payloads.tsx';
+import type { PlayPlace } from './plays.ts';
 import { PlaysField } from './PlaysField.tsx';
 import { ConnectorQueue } from './Queue.tsx';
 import type { CustomControl } from './SchemaForm.tsx';
@@ -755,7 +756,12 @@ export function NodeDetails(props: {
    * A player's (D137): the commands of the parser its edge binds, for its checklist; undefined,
    * none known, `missing` saying why.
    */
-  plays?: { declared: readonly BotCommand[] | undefined; missing: string };
+  plays?: {
+    declared: readonly BotCommand[] | undefined;
+    missing: string;
+    /** Where it sends (D139): its bot, and whether in a group. */
+    place?: PlayPlace | undefined;
+  };
 }) {
   const { node, view, live, drift, account } = props;
   const running = live?.state === 'running';
@@ -987,6 +993,7 @@ export function NodeDetails(props: {
                         set={set}
                         declared={props.plays?.declared}
                         missing={props.plays?.missing ?? ''}
+                        place={props.plays?.place}
                       />
                     )) satisfies CustomControl,
                   }),

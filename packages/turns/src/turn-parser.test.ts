@@ -92,6 +92,34 @@ describe('a turn parser', () => {
     await p.kit.stop();
   });
 
+  it('counts a send told of it only where it reaches its bot, bare or addressed (D139)', async () => {
+    const p = await run(questPlugin(), {}, GROUP);
+    const outbox = p.kit.core.outbox('telegram:alice').as('anyone');
+    const last = () => {
+      const r = p.kit.core.controls.read(QUEST, 'lastTurn');
+      return 'value' in r ? r.value : r;
+    };
+    const bot = p.kit.core.controls.read(QUEST, 'bot');
+    expect('value' in bot ? bot.value : bot).toBe(QUESTBOT);
+    // Not its bot's: another bot's private chat, a group it does not read, another bot's command.
+    await p.iface.sent({ chat: '@LoreBot', id: '1', t: T0, command: '/play' });
+    await p.iface.sent({ chat: '-1009999999999', id: '2', t: T0, command: '/play' });
+    await p.iface.sent({ chat: GROUP, id: '3', t: T0, command: '/play@LoreBot' });
+    expect(last()).toBeUndefined();
+    // Bare in the group it reads, or addressed to its bot: its turn, which its bot's reply answers.
+    await p.iface.sent({ chat: GROUP, id: '4', t: T0, command: '/play' });
+    expect(last()).toEqual({ t: T0, id: '4' });
+    p.hear({ sender: QUESTBOT, chat: GROUP, replyTo: '4', text: 'Found an apple.' });
+    expect(p.iface.rest()).toMatchObject({ until: T0 + 15 * MIN });
+    p.kit.clock.advance(MIN);
+    await p.iface.sent({ chat: GROUP, id: '5', t: T0 + MIN, command: `/Play@${QUESTBOT}` });
+    expect(last()).toEqual({ t: T0 + MIN, id: '5' });
+    // Its answers hold the addressed form back as the bare one (D98).
+    expect(outbox.held(GROUP, `/play@${QUESTBOT}`)?.until).toBe(T0 + 15 * MIN);
+    expect(outbox.held(GROUP, '/play')?.until).toBe(T0 + 15 * MIN);
+    await p.kit.stop();
+  });
+
   it("answers a turn (D98): a too soon refuses it, its rest holds the bot's turns back", async () => {
     const p = await run(questPlugin());
     const outbox = p.kit.core.outbox('telegram:alice').as('anyone');

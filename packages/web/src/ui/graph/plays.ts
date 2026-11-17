@@ -6,6 +6,9 @@
  * alone: a turn, whenever ready (the bot's rest over); a command whose success clears another's hold
  * (a reset), only while that other is held (cooling down); any other, whenever ready; an entry's
  * `whileHeld` or `whenReady` overrides it. Its config unset, every command but an interactive one.
+ * Each is sent bare (`/play`) or, as its entry's `addressed` says, addressed to its bot
+ * (`/play@QuestBot`, the parser's `botUsername`, D139): in a group, a bare command reaches every bot
+ * there that sees it, an addressed one only its own.
  *
  * The editor keeps the player's chat-out edge allowing the commands it plays (`followPlays`), so
  * that the owner never keeps a second list in step by hand.
@@ -18,6 +21,8 @@ export interface PlayEntry {
   command: string;
   whileHeld?: string;
   whenReady?: true;
+  /** Sent addressed to its bot, `/play@QuestBot` (D139); unset, bare. */
+  addressed?: true;
 }
 
 /** A command's policy: whenever ready (`undefined`), or only while another is held. */
@@ -50,6 +55,8 @@ export interface PlayRow {
   policy: Policy;
   /** Its policy overridden by its entry. */
   overridden: boolean;
+  /** Sent addressed to its bot (D139). */
+  addressed?: boolean;
 }
 
 /**
@@ -70,6 +77,7 @@ export function playRows(value: unknown, declared: readonly BotCommand[]): PlayR
       policy,
       overridden:
         entry !== undefined && (entry.whenReady === true || entry.whileHeld !== undefined),
+      ...(entry?.addressed === true ? { addressed: true } : {}),
     };
   });
 }
@@ -93,24 +101,51 @@ export function rowsValue(
     .filter((r) => r.played)
     .map((r): PlayEntry => {
       const derived = derivedPolicy(r.command);
-      if (samePolicy(r.policy, derived)) return { command: r.command.command };
+      const form = r.addressed === true ? { addressed: true as const } : {};
+      if (samePolicy(r.policy, derived)) return { command: r.command.command, ...form };
       return r.policy === undefined
-        ? { command: r.command.command, whenReady: true }
-        : { command: r.command.command, whileHeld: r.policy };
+        ? { command: r.command.command, whenReady: true, ...form }
+        : { command: r.command.command, whileHeld: r.policy, ...form };
     });
   const defaults =
     extra.length === 0 &&
     rows.every((r) => r.played === (r.command.interactive !== true)) &&
-    entries.every((e) => e.whileHeld === undefined && e.whenReady === undefined);
+    entries.every(
+      (e) => e.whileHeld === undefined && e.whenReady === undefined && e.addressed === undefined
+    );
   return defaults ? undefined : [...entries, ...extra];
 }
 
-/** The commands a player plays, in order: its config's, or its defaults. */
-export function playedCommands(value: unknown, declared: readonly BotCommand[]): string[] {
+/**
+ * The commands a player plays, in order, as it sends them: its config's, or its defaults; one
+ * addressed to its bot as `/play@QuestBot` (D139), when its parser names its `bot`.
+ */
+export function playedCommands(
+  value: unknown,
+  declared: readonly BotCommand[],
+  bot?: string
+): string[] {
   const entries = entriesOf(value);
   if (entries === undefined)
     return declared.filter((d) => d.interactive !== true).map((d) => d.command);
-  return entries.map((e) => e.command);
+  return entries.map((e) =>
+    e.addressed === true && bot !== undefined ? `${e.command}@${bot}` : e.command
+  );
+}
+
+/**
+ * Where a player sends (D139): in a group, when its one chat is not its bot's private chat; and
+ * its bot's name, for an addressed command. Undefined without a parser naming its bot.
+ */
+export interface PlayPlace {
+  bot: string;
+  group: boolean;
+}
+
+/** A play's form, in words, for its sentence (D139): addressed, or bare in a group. */
+export function formWords(c: string, addressed: boolean, place: PlayPlace): string | undefined {
+  if (addressed) return `sent as ${c}@${place.bot}, which only @${place.bot} takes`;
+  return place.group ? 'sent bare, which every bot in the group that sees it takes' : undefined;
 }
 
 /** A number of minutes in words: `30 minutes`, `1 hour`, `24 hours`, `90 minutes`. */
@@ -137,9 +172,11 @@ export function duration(min: number): string {
  * - `/shop`, interactive, by default: "needs you to answer: not played by default"
  */
 export function playSentence(
-  row: Pick<PlayRow, 'command' | 'played' | 'policy'>,
+  row: Pick<PlayRow, 'command' | 'played' | 'policy' | 'addressed'>,
   /** The config is unset: what is not played is left out by default. */
-  defaults = false
+  defaults = false,
+  /** Where it sends, to say how a command goes (D139); unknown, nothing said. */
+  place?: PlayPlace
 ): string {
   const c = row.command;
   const what: string[] = [];
@@ -177,6 +214,9 @@ export function playSentence(
       return [];
     });
     if (effects.length > 0) how += `; ${effects.join(' and ')}`;
+    const form =
+      place === undefined ? undefined : formWords(c.command, row.addressed === true, place);
+    if (form !== undefined) how += `; ${form}`;
   }
   return what.length === 0 ? how : `${what.join(', ')}: ${how}`;
 }
@@ -196,6 +236,36 @@ export function boundCommands(
   const parser = g.nodes.find((n) => n.id === endOf(edge.from).node);
   const commands = parser === undefined ? undefined : viewOf(parser)?.botCommands;
   return commands === undefined || commands.length === 0 ? undefined : commands;
+}
+
+/**
+ * Where a node's player sends (D139): its parser's bot (that its `input` binds) and whether the
+ * one chat of its `output`'s edge is a group (not the bot's private chat; none named yet, a
+ * group's form is not offered). Undefined while its parser names no bot.
+ */
+export function playPlace(
+  g: Graph,
+  node: string,
+  plays: { input: string; output: string },
+  viewOf: (n: GraphNode) => PluginView | undefined
+): PlayPlace | undefined {
+  const bot = boundBot(g, node, plays.input, viewOf);
+  if (bot === undefined) return undefined;
+  const chat = g.edges.find((e) => e.from === `${node}.${plays.output}`)?.sends?.[0];
+  return { bot, group: chat !== undefined && chat.toLowerCase() !== `@${bot}`.toLowerCase() };
+}
+
+/** The bot of the parser a node's `input` binds (D139), as its plugin names it. */
+export function boundBot(
+  g: Graph,
+  node: string,
+  input: string,
+  viewOf: (n: GraphNode) => PluginView | undefined
+): string | undefined {
+  const edge = g.edges.find((e) => e.to === `${node}.${input}`);
+  const parser =
+    edge === undefined ? undefined : g.nodes.find((n) => n.id === endOf(edge.from).node);
+  return parser === undefined ? undefined : viewOf(parser)?.botUsername;
 }
 
 /**
@@ -226,7 +296,8 @@ export function followPlays(g: Graph, viewOf: (n: GraphNode) => PluginView | und
     if (plays === undefined) continue;
     const declared = boundCommands(g, n.id, plays.input, viewOf);
     if (declared === undefined) continue;
-    const commands = playedCommands(n.config?.[plays.key], declared);
+    const bot = boundBot(g, n.id, plays.input, viewOf);
+    const commands = playedCommands(n.config?.[plays.key], declared, bot);
     const from = `${n.id}.${plays.output}`;
     if (
       !out.edges.some(

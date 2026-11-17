@@ -15,7 +15,7 @@ const DECLARED: BotCommand[] = [
 ];
 
 /** The checklist, keeping its value as the editor's draft does, seen in `state.value`. */
-function checklist(start: unknown, known = true) {
+function checklist(start: unknown, known = true, place?: { bot: string; group: boolean }) {
   const declared = known ? DECLARED : undefined;
   const state = { value: start };
   function Field() {
@@ -30,6 +30,7 @@ function checklist(start: unknown, known = true) {
         }}
         declared={declared}
         missing="Draw its parser edge first."
+        place={place}
       />
     );
   }
@@ -39,6 +40,37 @@ function checklist(start: unknown, known = true) {
 
 const said = (c: string): string | null =>
   screen.getByLabelText(`what it does with ${c}`).textContent;
+
+describe('a command’s form in a group (D139)', () => {
+  it('offers bare or addressed in a group, says it, and writes it', () => {
+    const state = checklist(undefined, true, { bot: 'QuestBot', group: true });
+    expect(screen.getByRole('note', { name: 'bare or addressed' }).textContent).toContain(
+      'only @QuestBot takes it'
+    );
+    expect(said('/play')).toContain('sent bare, which every bot in the group that sees it takes');
+    fireEvent.change(screen.getByLabelText('how it sends /play'), {
+      target: { value: 'addressed' },
+    });
+    expect(state.value).toEqual([
+      { command: '/play', addressed: true },
+      { command: '/coffee' },
+      { command: '/daily' },
+    ]);
+    expect(said('/play')).toContain('sent as /play@QuestBot');
+    fireEvent.change(screen.getByLabelText('how it sends /play'), { target: { value: 'bare' } });
+    expect(state.value).toBeUndefined();
+  });
+
+  it('offers no form in its bot’s private chat, unless one is addressed already', () => {
+    checklist([{ command: '/play' }, { command: '/daily', addressed: true }], true, {
+      bot: 'QuestBot',
+      group: false,
+    });
+    expect(screen.queryByLabelText('how it sends /play')).toBeNull();
+    expect(screen.getByLabelText('how it sends /daily')).not.toBeNull();
+    expect(screen.queryByRole('note', { name: 'bare or addressed' })).toBeNull();
+  });
+});
 
 describe('a player’s commands as a checklist (D137)', () => {
   it('checks every command but an interactive one, and says what it will do with each', () => {

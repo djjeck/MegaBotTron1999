@@ -61,27 +61,30 @@ the server that guards them.
   kept; a new edge starts with the chats its node's config names (`edgeOf`), and one from an output
   that sends to the owner (`owner-notice`'s) with its connector's owner's chat, its panel saying so
   of one left with none. `owner-notice` and the player have no chat key: their edges are their only
-  chat setting, the player's naming its bot's one chat (its panel says so, and the check). **A
-  player's commands are a checklist** (`PlaysField.tsx`, `plays.ts`, docs/bot-os.md D137): a row per
-  command of the parser its `parser` edge binds (the parser's manifest's `botCommands`, in its
-  order), a box to play it or not (every one but an interactive one by default, the config left
-  unset while so), a sentence saying what the player will do with it ("played if /play is cooling
-  down; ends its cool-down"), and its policy to pick (whenever ready, or if another command is
-  cooling down); without a parser edge the list is typed as JSON, as it can be under **Edit as
-  JSON**. Its chat edge's `commands` follow the checklist: each change of the draft sets them to the
-  commands it plays (`followPlays`), and the edge's panel shows them rather than a list to keep in
-  step. Each chat shows by its name, its kind by an icon in a colour of its own (a person, a bot, a
-  group, a channel), a person's or a bot's `@username` beside it, and when it was last active
-  (`3 days ago`); the chats picked come first; a search finds a chat by its name, its `@username` or
-  its id, and an id is never shown for a chat that has a name. What is kept is the name its
-  connector sends to (`Surface.id`; a number for a key whose schema is one). A chat saved otherwise
-  (an id, a `@username`) is found by any of its names, from the lists or a search for it
-  (`useLookups`), so after a reload too, and shown as saved only when no search finds it, with why.
-  A chat its connector says it cannot reach shows why (`unreachable`), and so do the chats only
-  another connector of its network lists (`peers`: the owner's account knows people and groups a bot
-  never saw); picked, one is first asked of the connector, which lists it if it can reach it, else
-  it is picked by its id with why it cannot. A key of people to recognise rather than chats to send
-  to (`sender`, `telegram-bot`'s `onlyPeople` and `blockPeople`, D128) says nothing of reaching
+  chat setting, the player's naming its one chat, its bot's or a group's (D139; its panel says so,
+  and the check). **A player's commands are a checklist** (`PlaysField.tsx`, `plays.ts`,
+  docs/bot-os.md D137): a row per command of the parser its `parser` edge binds (the parser's
+  manifest's `botCommands`, in its order), a box to play it or not (every one but an interactive one
+  by default, the config left unset while so), a sentence saying what the player will do with it
+  ("played if /play is cooling down; ends its cool-down"), and its policy to pick (whenever ready,
+  or if another command is cooling down); where its edge sends to a group, each command's form too
+  (D139): bare, or addressed to its bot (`/play@QuestBot`, its parser's `botUsername`), said in its
+  sentence, with a note that a bare command reaches every bot in the group that sees it (not offered
+  in its bot's private chat); without a parser edge the list is typed as JSON, as it can be under
+  **Edit as JSON**. Its chat edge's `commands` follow the checklist: each change of the draft sets
+  them to the commands it plays, as sent (`followPlays`), and the edge's panel shows them rather
+  than a list to keep in step. Each chat shows by its name, its kind by an icon in a colour of its
+  own (a person, a bot, a group, a channel), a person's or a bot's `@username` beside it, and when
+  it was last active (`3 days ago`); the chats picked come first; a search finds a chat by its name,
+  its `@username` or its id, and an id is never shown for a chat that has a name. What is kept is
+  the name its connector sends to (`Surface.id`; a number for a key whose schema is one). A chat
+  saved otherwise (an id, a `@username`) is found by any of its names, from the lists or a search
+  for it (`useLookups`), so after a reload too, and shown as saved only when no search finds it,
+  with why. A chat its connector says it cannot reach shows why (`unreachable`), and so do the chats
+  only another connector of its network lists (`peers`: the owner's account knows people and groups
+  a bot never saw); picked, one is first asked of the connector, which lists it if it can reach it,
+  else it is picked by its id with why it cannot. A key of people to recognise rather than chats to
+  send to (`sender`, `telegram-bot`'s `onlyPeople` and `blockPeople`, D128) says nothing of reaching
   them, picks a peer's person at once by id, and is written on no edge. A connector that cannot list
   its chats at all is the one place a chat is typed. Once the draft changes a connector's chats, a
   reminder beside them says that the edges which should read a chat need it ticked too (P6: the

@@ -330,6 +330,8 @@ export interface PluginView {
   configChats?: ConfigChatView[];
   /** A game bot's parser's: its bot's commands, the turns first, with their mechanics (D137). */
   botCommands?: BotCommand[];
+  /** A game bot's parser's: its bot's username, without `@` (D139). */
+  botUsername?: string;
   /**
    * A player's (D137): the key of its config that lists the commands it plays, picked from the
    * `botCommands` of the node its `input` binds, and its chat-out `output` that sends them.
@@ -515,6 +517,7 @@ export function describePlugin(m: Manifest): PluginView {
       ? {}
       : { configChats: m.configChats.map((c) => structuredClone(c) as ConfigChatView) }),
     ...(m.botCommands === undefined ? {} : { botCommands: structuredClone(m.botCommands) }),
+    ...(m.botUsername === undefined ? {} : { botUsername: m.botUsername }),
     ...(m.configPlays === undefined ? {} : { configPlays: { ...m.configPlays } }),
     ...(m.widget === undefined ? {} : { widget: structuredClone(m.widget) }),
     ...(m.page === undefined ? {} : { page: structuredClone(m.page) }),

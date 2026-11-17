@@ -19,8 +19,11 @@ the owner what needs attention.
   needs the person to answer or choose (a minigame, a shop; D137): tracked as any other, left out of
   a player's defaults. It publishes its commands, the turns first, with their mechanics, in its
   manifest (`botCommands`, for the editor's checklist) and its read `state.commands` (for a player's
-  defaults at run time), from its spec alone (D137). It resumes from what it parsed, kept in its
-  store, never by re-reading the chat (docs/bot-os.md D62).
+  defaults at run time), from its spec alone (D137), and its bot's name (`botUsername`,
+  `state.bot`). A send a player tells it of (`actions.sent`: its own player's, or another's of the
+  same person, D139) counts only if it reaches its bot: bare or addressed to it, in its bot's
+  private chat or a chat its edge reads; its answers hold both forms back. It resumes from what it
+  parsed, kept in its store, never by re-reading the chat (docs/bot-os.md D62).
 - `attentionPlugin` (`src/attention.ts`): `attention`, a simulated person, one node per person
   (docs/bot-os.md D134): when they sit down to play (`src/sittings.ts`: a gap drawn from a range,
   forgotten sittings, nights off in a time zone) and how fast they act within a sitting (a reaction
@@ -32,27 +35,31 @@ the owner what needs attention.
   default), a sitting `followDelayS` (3 s) after any message of the owner's own in the chats it
   `listen`s to, through its `listen` chat-in from the owner's own account (network `telegram`: the
   check refuses a bot's; none during a sitting: its players look again instead), counted as the
-  owner's own sitting. Both off, the check warns that it never plays. Its card shows its next
-  sitting (`follows your play` when not scheduled), its page (**Sittings**) its behaviours, its last
-  and next.
+  owner's own sitting. Both off, the check warns that it never plays. Its players hear each other's
+  sends through it (`sent`, `heard`, D139), each telling its own parser, so that a bare command one
+  sent in a group is every bot's turn there. Its card shows its next sitting (`follows your play`
+  when not scheduled), its page (**Sittings**) its behaviours, its last and next.
 - `playerPlugin` (`src/player.ts`): the `player`, one node per bot, in place of the turn actor
   (D134): given a sitting, it plays each of its commands that its parser says is ready
   (`state.ready`, D132) and its policy allows: its config's `commands` (each
-  `{ command, whileHeld?, whenReady? }`), or, unset, every command its parser declares
+  `{ command, whileHeld?, whenReady?, addressed? }`), or, unset, every command its parser declares
   (`state.commands`) but an interactive one, in its parser's order (D137). The policy comes from the
   mechanics (a turn, whenever ready; a reset, only while what it clears is cooling down; any other,
   whenever ready), an entry's `whileHeld` or `whenReady` overriding it (`playsOf`). The editor draws
   its `commands` as a checklist of its parser's (`configPlays`) and keeps its chat edge allowing
   them. Each goes after its person's reaction time, looking again after each answer (so an unlock
   announced, or a reset, is taken in the same sitting), until nothing is left. In a sitting that
-  follows the owner's play (D138), it first waits for the answer to the owner's send by hand that
-  its parser has not read an answer to yet, then plays its whole checklist. No schedule of its own:
-  the outbox's `held` (D98) stays as the safety net. It only sends (docs/bot-os.md D99); its bot's
-  chat is its edge's alone (D97). Through a dry-run chat-out edge it logs each command and sends
-  nothing; through a live one it waits for the account to be connected. Its card shows its next
-  play, its page (**Plays**) its chat, commands, last and next play (D112). Its safety stop (the
-  kill switch) stops its node (`ctx.stop`, docs/bot-os.md D64), until the owner clears the stop in
-  the editor.
+  follows the owner's play (D138), or in which another player of its person sent a command (D139),
+  it first waits for the answer to the last send its parser has not read an answer to yet, then
+  plays its whole checklist. No schedule of its own: the outbox's `held` (D98) stays as the safety
+  net. It only sends (docs/bot-os.md D99); its one chat is its edge's alone (D97): its bot's private
+  chat or, as the owner prefers, a group its bot is in (D139), where each command goes bare
+  (`/play`, which every bot there that sees it takes) or addressed to its bot (`/play@QuestBot`,
+  `addressed: true`). Each command it sends live it tells its parser and its person, which tells its
+  other players. Through a dry-run chat-out edge it logs each command and sends nothing; through a
+  live one it waits for the account to be connected. Its card shows its next play, its page
+  (**Plays**) its chat, commands, last and next play (D112). Its safety stop (the kill switch) stops
+  its node (`ctx.stop`, docs/bot-os.md D64), until the owner clears the stop in the editor.
 - `reactorPlugin` (`src/reactor.ts`): the `reactor`, one reaction (`react()` of the core) from its
   node's config: when an event of its `on` type is heard (on its events input, there only with `on`
   and then required: the check refuses a reactor on events that no edge binds), or a message on its

@@ -76,12 +76,16 @@ describe('its ports: its bot’s chat, its parser, its person (D97, D133)', () =
       'node quest-player: input port attention (attention) is not bound',
     ]);
     expect(problems(graph([], [person]))).toEqual([
-      `node quest-player: output port chat sends to one chat, its bot's @username: its edge names none (edge quest-player.chat → ${TELEGRAM_USER}.chat)`,
+      `node quest-player: output port chat sends to one chat, its bot's @username, or a group's id: its edge names none (edge quest-player.chat → ${TELEGRAM_USER}.chat)`,
     ]);
     expect(problems(graph([CHAT, '@OtherBot'], [person]))[0]).toContain(
       `its edge names ${CHAT}, @OtherBot`
     );
     expect(problems(graph(['5000001'], [person]))[0]).toContain('not 5000001');
+  });
+
+  it('takes a group instead of its bot’s private chat, as the owner prefers (D139)', () => {
+    expect(problems(graph(['-1001000000001'], [person]))).toEqual([]);
   });
 
   it('has no chat-in: an edge to one is refused (D99)', () => {
@@ -93,6 +97,15 @@ describe('its ports: its bot’s chat, its parser, its person (D97, D133)', () =
 });
 
 describe('playerConfig', () => {
+  it('takes a command addressed to its bot (D139)', () => {
+    expect(playerConfig.parse({ commands: [{ command: '/play', addressed: true }] })).toEqual({
+      commands: [{ command: '/play', addressed: true }],
+    });
+    expect(playsOf([{ command: '/play', addressed: true }], [])).toEqual([
+      { command: '/play', addressed: true },
+    ]);
+  });
+
   it('takes no commands (the defaults), or each command with its override, in order', () => {
     expect(playerConfig.parse({})).toEqual({});
     expect(playerConfig.parse({ commands: PLAYS }).commands?.[3]).toEqual({

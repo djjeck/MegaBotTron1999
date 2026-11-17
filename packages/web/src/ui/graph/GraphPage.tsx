@@ -126,7 +126,7 @@ import { layout, swimlanes } from './layout.ts';
 import { NodeDetails } from './NodeDetails.tsx';
 import { Palette } from './Palette.tsx';
 import { payloadLine } from './Payloads.tsx';
-import { boundCommands, followedBy, followPlays } from './plays.ts';
+import { boundCommands, followedBy, followPlays, playPlace } from './plays.ts';
 import type { PluginNodeType } from './PluginNode.tsx';
 import { nodeHeight, PluginNode } from './PluginNode.tsx';
 import type { PortEdgeData, PortEdgeType } from './PortEdge.tsx';
@@ -891,6 +891,7 @@ export function GraphPage({
           : {
               plays: {
                 declared: boundCommands(draft, shownNode.id, view.configPlays.input, pluginOf),
+                place: playPlace(draft, shownNode.id, view.configPlays, pluginOf),
                 missing: draft.edges.some(
                   (e) => e.to === `${shownNode.id}.${view.configPlays?.input ?? ''}`
                 )

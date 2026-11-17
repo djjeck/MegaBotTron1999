@@ -259,6 +259,11 @@ export const manifestSchema = z
      */
     botCommands: z.array(botCommandSchema).optional(),
     /**
+     * A game bot's parser's: its bot's username, without `@` (bot-os.md D139), so that the editor
+     * can name a command addressed to it (`/play@QuestBot`), as a player in a group may send it.
+     */
+    botUsername: z.string().regex(/^\w+$/u, 'expected a username, without @').optional(),
+    /**
      * A player's (bot-os.md D137): the key of its config that lists the commands it plays (`[{
      * command, whileHeld?, whenReady? }]`, unset: the defaults), picked from the `botCommands` of
      * the node its interface `input` binds; and its chat-out `output`, whose edge the editor keeps

@@ -1,16 +1,19 @@
 /**
  * The `player` (docs/bot-os-api.md §5, bot-os.md D134): one plugin, run as one node per game bot
  * that may be automated (P3, P17), in place of the turn actor. It plays its bot's commands, in a
- * simulated person's sittings, from the owner's account, in the private chat with its bot: those
- * its config names, or by default (D137) every command its parser declares (`state.commands`) but
- * an interactive one, in its parser's order. Its ports:
+ * simulated person's sittings, from the owner's account, in the private chat with its bot or in a
+ * group its bot is in, as its edge names (D139): those its config names, or by default (D137)
+ * every command its parser declares (`state.commands`) but an interactive one, in its parser's
+ * order, each bare (`/play`) or addressed to its bot (`/play@QuestBot`) as its entry says. Its
+ * ports:
  *
- * - `chat`, a chat-out output: its bot's private chat, **its edge's alone** (bot-os.md D97: the one
- *   chat its edge names, the bot's `@username`; the check refuses anything else), its commands
- *   those its edge allows; it reads no chat (D99);
- * - `parser`, a contract on its bot's parser (`state.ready`, `state.commands`, `actions.sent`,
- *   D132, D137), required, so that drift on the parser stops it: each command's readiness, its
- *   commands with their mechanics, and the sends it tells it of;
+ * - `chat`, a chat-out output: one chat, **its edge's alone** (bot-os.md D97, D139: the one chat
+ *   its edge names, the bot's `@username` or a group's id; the check refuses anything else), its
+ *   commands those its edge allows; it reads no chat (D99);
+ * - `parser`, a contract on its bot's parser (`state.ready`, `state.commands`, `state.bot`,
+ *   `actions.sent`, D132, D137, D139), required, so that drift on the parser stops it: each
+ *   command's readiness, its commands with their mechanics, its bot's name, and the sends it tells
+ *   it of;
  * - `attention`, its person (bot-os.md D133), required: the sittings it plays in, and the person's
  *   reaction time.
  *
@@ -24,8 +27,10 @@
  * unlocks, or one a reset makes ready again, is taken in the same sitting. A command it sent in
  * the sitting goes again only if it became ready again since (its readiness `since` after the
  * send), so that a dry run, or an answer that holds nothing, plays it once. In a sitting that
- * follows the owner's play (D138), or one they wrote during, it first waits the same way for the
- * answer to the owner's last send by hand its parser has read none to. When nothing is left,
+ * follows the owner's play (D138), or one they wrote during, or one in which another player of its
+ * person sent a command (D139), it first waits the same way for the answer to the last send its
+ * parser has read none to: a bare command another sent in the group may have taken its bot's turn
+ * too. When nothing is left,
  * it sleeps until the next sitting. **No schedule of its own:** its person's sittings, its
  * parser's readiness, and its outbox's `held` (D98) as the safety net, are all it waits on.
  *
@@ -38,7 +43,8 @@
  * - Through a dry-run chat-out edge (D64) each command is logged, nothing sent; through a live one,
  *   it waits for the account to be connected (its send refused `not connected`, it tries again
  *   each minute), and tells its parser each command sent with its message's id, so that the parser
- *   matches the bot's reply to it. A send refused (a cooldown its outbox holds, the retry-loop
+ *   matches the bot's reply to it; and its person, which tells the other players, each its own
+ *   parser (D139). A send refused (a cooldown its outbox holds, the retry-loop
  *   guard) or failed is not tried again in that sitting.
  * - It plays while its node runs and the instance is on; stopped (bot-os.md D64: drift on its
  *   parser, the owner's kill or stop, or its own safety stop, `kill`), it drops its sitting and
@@ -59,7 +65,7 @@ import {
   Tally,
 } from '@megabottron1999/core';
 import { z } from 'zod';
-import { type AttentionHandle, type Sitting } from '#src/attention.ts';
+import { type AttentionHandle, type PlayerSend, type Sitting } from '#src/attention.ts';
 import { ANSWER_WINDOW_MS, type Readiness, type TurnParserInterface } from './turn-parser.ts';
 
 export const PLAYER = 'player';
@@ -76,7 +82,9 @@ export const CONNECT_WAIT_MS = 60_000;
 /** The most sends of one sitting: a guard against two commands that reset each other forever. */
 export const MAX_SENDS_PER_SITTING = 20;
 /** The members of its parser it uses (D132, D137). */
-export const PLAYER_PARSER_MEMBERS = ['state.ready', 'state.commands', 'actions.sent'];
+export const PLAYER_PARSER_MEMBERS = ['state.ready', 'state.commands', 'state.bot', 'actions.sent'];
+/** The one chat it sends to (D97, D139): its bot's private chat, or a group's id. */
+export const PLAYER_CHAT = String.raw`^(@\w{4,}|-\d+)$`;
 
 const COMMAND = /^\/\w+$/u;
 
@@ -95,6 +103,12 @@ const playSchema = z
       .literal(true)
       .optional()
       .describe('Played whenever it is ready, whatever its mechanics say'),
+    addressed: z
+      .literal(true)
+      .optional()
+      .describe(
+        'Sent addressed to its bot (/play@QuestBot), which only its bot takes; unset, bare (/play), which in a group every bot that sees it takes'
+      ),
   })
   .refine((p) => p.whileHeld === undefined || p.whenReady === undefined, {
     message: 'whileHeld or whenReady, not both',
@@ -117,6 +131,8 @@ export type PlayerConfig = z.output<typeof playerConfig>;
 export interface Play {
   command: string;
   whileHeld?: string;
+  /** Sent addressed to its bot: `/play@QuestBot` (D139). */
+  addressed?: true;
 }
 
 /**
@@ -139,8 +155,11 @@ export function playsOf(
 ): Play[] {
   const find = (c: string): BotCommand | undefined =>
     declared.find((d) => d.command.toLowerCase() === c.toLowerCase());
-  const play = (command: string, whileHeld: string | undefined): Play =>
-    whileHeld === undefined ? { command } : { command, whileHeld };
+  const play = (command: string, whileHeld: string | undefined, addressed?: true): Play => ({
+    command,
+    ...(whileHeld === undefined ? {} : { whileHeld }),
+    ...(addressed === true ? { addressed } : {}),
+  });
   if (commands === undefined)
     return declared
       .filter((d) => d.interactive !== true)
@@ -148,7 +167,8 @@ export function playsOf(
   return commands.map((p) =>
     play(
       p.command,
-      p.whenReady === true ? undefined : (p.whileHeld ?? derivedWhileHeld(find(p.command)))
+      p.whenReady === true ? undefined : (p.whileHeld ?? derivedWhileHeld(find(p.command))),
+      p.addressed
     )
   );
 }
@@ -163,8 +183,9 @@ interface InSitting {
   /** A live send whose answer it waits for. */
   waiting?: { command: string; t: number };
   /**
-   * It follows the owner's play (D138): at its next look, it first waits for the answer to the
-   * owner's last send by hand, if its parser has read none yet.
+   * It follows the owner's play (D138), or another player of its person sent (D139): at its next
+   * look, it first waits for the answer to the last send its parser knows of, if it has read none
+   * yet.
    */
   hand?: true;
 }
@@ -211,7 +232,7 @@ export function playerPlugin(): Plugin {
       version: '0.1.0',
       kinds: ['actor'],
       description:
-        "A game bot's commands, from the owner's account, in its private chat, in a simulated person's sittings",
+        "A game bot's commands, from the owner's account, in its private chat or a group, in a simulated person's sittings",
       config: playerConfig,
       // Its commands, a checklist of its parser's in the editor (D137), which its chat edge follows.
       configPlays: { key: 'commands', input: 'parser', output: 'chat' },
@@ -237,9 +258,9 @@ export function playerPlugin(): Plugin {
         chat: {
           type: 'chat-out',
           network: 'telegram',
-          // Its edge names its bot's chat, the one it plays in (D97).
-          single: { pattern: String.raw`^@\w{4,}$`, expected: "its bot's @username" },
-          help: "the owner's own account: the private chat with its bot, the one chat its edge names, and the commands it plays",
+          // Its edge names the one chat it plays in (D97): its bot's, or a group's (D139).
+          single: { pattern: PLAYER_CHAT, expected: "its bot's @username, or a group's id" },
+          help: "the owner's own account: the private chat with its bot, or a group its bot is in, the one chat its edge names, and the commands it plays",
         },
       },
       interface: {
@@ -275,7 +296,7 @@ export function playerPlugin(): Plugin {
 class Player {
   private readonly ctx: PluginContext;
   private readonly c: PlayerConfig;
-  /** Its bot's private chat, the one its chat-out edge names (D97). */
+  /** The one chat its chat-out edge names (D97): its bot's private chat, or a group (D139). */
   private readonly chat: string;
   private state: PlayerState;
   private attention: AttentionHandle | undefined;
@@ -287,6 +308,8 @@ class Player {
   private waitingAccount = false;
   /** Its parser's commands (D137), once read: its defaults, and its policies. */
   private declared: BotCommand[] | undefined;
+  /** Its bot's username (D139), once read: an addressed command's suffix. */
+  private bot: string | undefined;
   /** The commands its parser declares none of, told once. */
   private readonly unknown = new Set<string>();
   /** Its sends by how they went (`sent <command>`, `dry-run <command>`, `failed`). */
@@ -312,6 +335,7 @@ class Player {
           lastByHand: () => this.lastByHand(),
           inSitting: () => this.state.sitting !== undefined,
           again: () => this.again(),
+          heard: (s) => this.heard(s),
         });
         // A sitting kept without its next step (dropped as too late): it ended with the restart.
         if (this.state.sitting !== undefined && this.ctx.scheduler.get(PLAY_TIMER) === undefined)
@@ -351,13 +375,33 @@ class Player {
   }
 
   /**
-   * The owner's last send by hand its parser has read no answer to yet, if it was sent less than
-   * `ANSWER_WAIT_MS` ago: what a sitting that follows their play waits for (D138).
+   * Another player of its person sent a command (D139): its parser is told, and counts it if it
+   * reaches its bot (a bare command in a group its bot is in); in a sitting, it waits at its next
+   * look for that send's answer, so that it does not send its own over a turn just taken.
+   */
+  private heard(s: PlayerSend): void {
+    try {
+      this.parser().actions.sent({
+        chat: s.chat,
+        ...(s.id === undefined ? {} : { id: s.id }),
+        t: s.t,
+        command: s.text,
+      });
+    } catch {
+      return;
+    }
+    this.again();
+  }
+
+  /**
+   * The last send its parser knows of (the owner's by hand, or another player's, D139) that it has
+   * read no answer to yet, if it was sent less than `ANSWER_WAIT_MS` ago: what a sitting that
+   * follows their play waits for (D138).
    */
   private unanswered(ready: Record<string, Readiness>, now: number): number | undefined {
     let last: Readiness | undefined;
     for (const r of Object.values(ready))
-      if (r.sent?.byHand === true && (last?.sent === undefined || r.sent.t > last.sent.t)) last = r;
+      if (r.sent !== undefined && (last?.sent === undefined || r.sent.t > last.sent.t)) last = r;
     const sent = last?.sent;
     if (sent === undefined || now - sent.t >= ANSWER_WAIT_MS) return undefined;
     return last?.answer !== undefined && last.answer.t >= sent.t ? undefined : sent.t;
@@ -397,6 +441,13 @@ class Player {
         return playsOf(this.c.commands, []);
       }
     return playsOf(this.c.commands, this.declared);
+  }
+
+  /** A play as it is sent (D139): bare, or addressed to its bot (`/play@QuestBot`). */
+  private textOf(play: Play): string {
+    if (play.addressed !== true) return play.command;
+    this.bot ??= this.parser().state.bot();
+    return `${play.command}@${this.bot}`;
   }
 
   /** The owner's latest play by hand with its bot, as its parser read it (any command). */
@@ -474,7 +525,7 @@ class Player {
     const sent = sitting.sent[play.command];
     if (sent !== undefined && !(r.since !== undefined && r.since > sent)) return false;
     if (play.whileHeld !== undefined && ready[play.whileHeld]?.ready !== false) return false;
-    const held = this.ctx.outbox('chat').held(this.chat, play.command);
+    const held = this.ctx.outbox('chat').held(this.chat, this.textOf(play));
     return held === undefined || held.until <= now;
   }
 
@@ -527,13 +578,15 @@ class Player {
       );
       return;
     }
-    await this.send(play.command, sitting);
+    await this.send(play, sitting);
   }
 
-  private async send(command: string, sitting: InSitting): Promise<void> {
+  private async send(play: Play, sitting: InSitting): Promise<void> {
+    const { command } = play;
     this.sending = true;
     try {
-      const r = await this.ctx.outbox('chat').deliver(this.chat, command);
+      const text = this.textOf(play);
+      const r = await this.ctx.outbox('chat').deliver(this.chat, text);
       const t = this.ctx.clock.now();
       // The account not connected (a dry run never waits for it, D64): it tries again shortly.
       if (r.outcome === 'refused' && r.reason === 'not connected') {
@@ -549,20 +602,18 @@ class Player {
         this.state.last = t;
         this.plays.add(`${r.outcome} ${command}`);
         if (r.outcome === 'sent') {
-          this.parser().actions.sent({
-            chat: this.chat,
-            ...(r.id === undefined ? {} : { id: r.id }),
-            t,
-            command,
-          });
+          const id = r.id === undefined ? {} : { id: r.id };
+          this.parser().actions.sent({ chat: this.chat, ...id, t, command: text });
+          // The other players of its person hear it, each its own parser (D139).
+          this.attention?.sent({ chat: this.chat, text, ...id, t });
           sitting.waiting = { command, t };
         }
         this.keep();
         this.step(
           'sent',
           r.outcome === 'sent'
-            ? `${command}${r.id === undefined ? '' : ` #${r.id}`}`
-            : `${command} (dry run)`
+            ? `${text}${r.id === undefined ? '' : ` #${r.id}`}`
+            : `${text} (dry run)`
         );
         if (this.playing()) this.arm(r.outcome === 'sent' ? t + ANSWER_POLL_MS : this.react());
       } else {

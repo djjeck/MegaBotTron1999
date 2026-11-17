@@ -238,6 +238,11 @@ export interface ConnectorHandle {
   /** Hears every change of status; returns the way to stop. */
   onStatus(handler: (s: ConnectorStatus) => void): () => void;
   /**
+   * The chats its edge reads (bot-os.md D139): `'*'`, every chat, also for a handle that reads
+   * unfiltered. A send it is told of elsewhere counts only in one of these.
+   */
+  reads?(): readonly string[] | '*';
+  /**
    * Whether the account administers `chat`, where the network can say (a Telegram bot in a group); false when it cannot tell.
    */
   isAdmin?(chat: string): Promise<boolean>;
@@ -333,6 +338,7 @@ export function handleOf(c: Connector, filter?: ReadFilter): ConnectorHandle {
         if (filter === undefined || hears(filter, m, c.self())) h(m);
       }),
     onStatus: (h) => c.onStatus(h),
+    reads: () => filter?.reads ?? '*',
     ...(c.isAdmin === undefined
       ? {}
       : { isAdmin: (chat: string) => c.isAdmin?.(chat) ?? Promise.resolve(false) }),

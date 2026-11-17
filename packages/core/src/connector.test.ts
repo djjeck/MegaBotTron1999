@@ -59,6 +59,9 @@ describe('connectors', () => {
     c.hear('c', '-100123');
     expect(heard).toEqual(['#lobby', '@bot']);
     expect(all).toEqual(['#lobby', '@bot', '-100123']);
+    // What it reads, as its edge says (D139): every chat without a filter.
+    expect(handleOf(c, { reads: ['#Lobby'] }).reads?.()).toEqual(['#Lobby']);
+    expect(handleOf(c).reads?.()).toBe('*');
     expect(handleOf(c).self()).toBeUndefined();
     c.call('me');
     expect(handleOf(c).self()).toBe('me');

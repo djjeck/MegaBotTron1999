@@ -8,6 +8,7 @@ import {
   followedBy,
   followPlays,
   playedCommands,
+  playPlace,
   playRows,
   playSentence,
   rowsValue,
@@ -225,5 +226,61 @@ describe('the player’s chat edge, following its checklist (D137)', () => {
     // No parser bound: as it was.
     const loose = graph(undefined, false);
     expect(followPlays(loose, viewOf)).toBe(loose);
+  });
+
+  it('allows a command addressed to its bot as it is sent, and knows where it sends (D139)', () => {
+    const named = (n: GraphNode) =>
+      n.plugin === 'quest'
+        ? ({ botCommands: DECLARED, botUsername: 'QuestBot' } as unknown as PluginView)
+        : viewOf(n);
+    const config = { commands: [{ command: '/play', addressed: true }, { command: '/daily' }] };
+    expect(followPlays(graph(config), named).edges[1]?.commands).toEqual([
+      '/play@QuestBot',
+      '/daily',
+    ]);
+    // Its parser naming no bot: bare.
+    expect(followPlays(graph(config), viewOf).edges[1]?.commands).toEqual(['/play', '/daily']);
+    const plays = { input: 'parser', output: 'chat' };
+    expect(playPlace(graph(), 'p', plays, named)).toEqual({ bot: 'QuestBot', group: false });
+    expect(playPlace(graph(), 'p', plays, viewOf)).toBeUndefined();
+    expect(playPlace(graph(undefined, false), 'p', plays, named)).toBeUndefined();
+    const inGroup = graph();
+    const g: Graph = {
+      ...inGroup,
+      edges: inGroup.edges.map((e) => (e.from === 'p.chat' ? { ...e, sends: ['-1001'] } : e)),
+    };
+    expect(playPlace(g, 'p', plays, named)).toEqual({ bot: 'QuestBot', group: true });
+  });
+});
+
+describe('a command’s form, bare or addressed (D139)', () => {
+  it('reads and writes it per command, and says it in the sentence', () => {
+    const rows = playRows([{ command: '/play', addressed: true }], [PLAY, DAILY]);
+    expect(rows[0]).toMatchObject({ played: true, addressed: true });
+    expect(rowsValue(rows)).toEqual([{ command: '/play', addressed: true }]);
+    // Addressed with an override, both kept; the defaults with one addressed are no longer them.
+    expect(
+      rowsValue([
+        { command: DAILY, played: true, policy: '/play', overridden: true, addressed: true },
+      ])
+    ).toEqual([{ command: '/daily', whileHeld: '/play', addressed: true }]);
+    expect(
+      rowsValue([
+        { command: PLAY, played: true, policy: undefined, overridden: false, addressed: true },
+      ])
+    ).toEqual([{ command: '/play', addressed: true }]);
+    const group = { bot: 'QuestBot', group: true };
+    const row = { command: PLAY, played: true, policy: undefined };
+    expect(playSentence({ ...row, addressed: true }, false, group)).toBe(
+      "a turn: played whenever the bot's rest is over; sent as /play@QuestBot, which only @QuestBot takes"
+    );
+    expect(playSentence(row, false, group)).toBe(
+      "a turn: played whenever the bot's rest is over; sent bare, which every bot in the group that sees it takes"
+    );
+    // In its bot's private chat, bare goes unsaid.
+    expect(playSentence(row, false, { ...group, group: false })).toBe(
+      "a turn: played whenever the bot's rest is over"
+    );
+    expect(playedCommands([{ command: '/play', addressed: true }], [PLAY])).toEqual(['/play']);
   });
 });

@@ -16,6 +16,9 @@
  *
  * - Its players join it at their start (`AttentionHandle.join`, through `ctx.attention`), each
  *   with how to start a sitting and how to tell the person's last play by hand.
+ * - **Its players hear each other's sends** (bot-os.md D139): a player tells it each command it
+ *   sent (`sent`), which it tells every other (`heard`), each telling its own parser, so that a
+ *   bare command one sent in a group, which reaches every bot there, is each bot's turn taken.
  * - **The owner's own play counts as a sitting by the real person:** when a sitting is due, it
  *   asks each of its players for the latest play by hand its parser read (`ready`'s sends marked
  *   `byHand`: a turn, or any other command, from any device); one newer than its last sitting is a
@@ -91,6 +94,22 @@ export interface AttentionPlayer {
    * their command, if any.
    */
   again(): void;
+  /**
+   * Another player of this person sent a command (bot-os.md D139): it tells its parser, whose bot
+   * a bare command in a group reaches too, so that it does not send its own after it.
+   */
+  heard?(sent: PlayerSend): void;
+}
+
+/** A command a player sent, as its person tells the others (D139). */
+export interface PlayerSend {
+  /** The chat it went to, as its edge names it. */
+  chat: string;
+  /** The command as sent: bare (`/play`) or addressed (`/play@QuestBot`). */
+  text: string;
+  /** The network's id of its message. */
+  id?: string;
+  t: number;
 }
 
 /** What a player has of its person (`ctx.attention`, bot-os.md D133). */
@@ -107,6 +126,8 @@ export interface AttentionHandle {
    * (`follows your play`, or `never`).
    */
   next(): number | string | undefined;
+  /** It sent a command (D139): told to every other player of this person (`heard`). */
+  sent(s: PlayerSend): void;
 }
 
 const D = DEFAULT_SCHEDULE;
@@ -421,6 +442,9 @@ class Attention {
         },
         react: (o = {}) => this.react(o.length ?? 0),
         next: () => this.next(),
+        sent: (s) => {
+          for (const [id, p] of [...this.players]) if (id !== node) p.heard?.(s);
+        },
       }),
       interface: { state: { status: () => this.status() } },
     };

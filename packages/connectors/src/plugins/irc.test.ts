@@ -182,6 +182,7 @@ describe('the irc plugin in the core', () => {
       'network',
       'onMessage',
       'onStatus',
+      'reads',
       'self',
       'status',
     ]);

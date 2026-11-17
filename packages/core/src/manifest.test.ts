@@ -246,6 +246,11 @@ describe('parseManifest', () => {
       ],
     };
     expect(parseManifest(parser).botCommands).toEqual(parser.botCommands);
+    // Its bot's username, for a command addressed to it (D139): a name, without @.
+    expect(parseManifest({ ...parser, botUsername: 'QuestBot' }).botUsername).toBe('QuestBot');
+    expect(() => parseManifest({ ...parser, botUsername: '@QuestBot' })).toThrow(
+      'expected a username, without @'
+    );
     expect(() =>
       parseManifest({ ...parser, botCommands: [{ command: '/a' }, { command: '/A' }] })
     ).toThrow('/A is declared twice');

@@ -262,14 +262,17 @@ describe('the nodes as the graph view shows them', () => {
     expect(describePlugin({ ...irc, model: true })).toMatchObject({ model: true });
     // A parser's bot commands and a player's checklist (D137), as declared; none, nothing.
     expect(describePlugin(irc)).not.toHaveProperty('botCommands');
+    expect(describePlugin(irc)).not.toHaveProperty('botUsername');
     expect(
       describePlugin({
         ...irc,
         botCommands: [{ command: '/play', turn: true }],
+        botUsername: 'QuestBot',
         configPlays: { key: 'commands', input: 'parser', output: 'chat' },
       })
     ).toMatchObject({
       botCommands: [{ command: '/play', turn: true }],
+      botUsername: 'QuestBot',
       configPlays: { key: 'commands', input: 'parser', output: 'chat' },
     });
     expect(views[1]?.outputs).toMatchObject({

@@ -3,13 +3,16 @@
  * parser its `parser` edge binds, in the parser's order, each with a checkbox (played or not; by
  * default every one but an interactive one), a sentence saying what the player will do with it,
  * and a choice of its policy when played: whenever ready, or only while another command is cooling
- * down. Left as the defaults, its config names no commands, and the player follows its parser.
+ * down; and, where the player sends to a group (D139), or a command is addressed already, its form:
+ * bare (`/play`, which every bot in the group that sees it takes) or addressed to its bot
+ * (`/play@QuestBot`). In its bot's private chat the form is not offered: bare is all it needs.
+ * Left as the defaults, its config names no commands, and the player follows its parser.
  * Without a parser edge, or a parser that declares no commands, the list is typed as JSON, as it
  * always can be under "Edit as JSON".
  */
 import { useState } from 'react';
 import type { BotCommand } from '#src/ui/api.ts';
-import type { PlayRow, Policy } from './plays.ts';
+import type { PlayPlace, PlayRow, Policy } from './plays.ts';
 import { entriesOf, playRows, playSentence, rowsValue, unknownEntries } from './plays.ts';
 import { JsonField } from './SchemaForm.tsx';
 
@@ -23,9 +26,11 @@ export function PlaysField(props: {
   declared: readonly BotCommand[] | undefined;
   /** Why none are known, said instead of the checklist. */
   missing: string;
+  /** Where it sends (D139): its bot, and whether in a group; undefined, unknown. */
+  place?: PlayPlace | undefined;
 }) {
   const [json, setJson] = useState(false);
-  const { declared } = props;
+  const { declared, place } = props;
   if (declared === undefined)
     return (
       <>
@@ -59,7 +64,7 @@ export function PlaysField(props: {
                 <code>{c}</code>
               </label>{' '}
               <span className="muted small" aria-label={`what it does with ${c}`}>
-                {playSentence(r, defaults)}
+                {playSentence(r, defaults, place)}
               </span>
               {r.played ? (
                 <select
@@ -79,10 +84,30 @@ export function PlaysField(props: {
                   ))}
                 </select>
               ) : null}
+              {r.played && place !== undefined && (place.group || r.addressed === true) ? (
+                <select
+                  aria-label={`how it sends ${c}`}
+                  className="small"
+                  value={r.addressed === true ? 'addressed' : 'bare'}
+                  onChange={(e) => change(i, { addressed: e.target.value === 'addressed' })}
+                >
+                  <option value="bare">bare: {c}</option>
+                  <option value="addressed">
+                    addressed: {c}@{place.bot}
+                  </option>
+                </select>
+              ) : null}
             </li>
           );
         })}
       </ul>
+      {place?.group === true ? (
+        <p className="muted small" role="note" aria-label="bare or addressed">
+          In a group, a bare command reaches every bot there that sees it (one that is an admin, or
+          whose privacy mode is off), so one send plays them all; addressed, only @{place.bot} takes
+          it, wherever it is.
+        </p>
+      ) : null}
       {extra.length === 0 ? null : (
         <p className="warning small" role="note">
           Its parser declares none of {extra.map((e) => e.command).join(', ')}: kept, never played.
