@@ -9,9 +9,9 @@
  * A graph whose nodes name groups is drawn in swimlanes (`swimlanes`, bot-os.md D69): the same
  * global columns, each group a horizontal band holding its cards in their columns, and the
  * connectors' cards outside every band, their in cards in a column of their own at the left and
- * their out cards in the one at the right. An ungrouped source that feeds the bands alone (a
- * person's `attention`, shared by the players of several lanes, D136) is drawn in that left
- * column too, under the in cards.
+ * their out cards in the one at the right. An ungrouped source that feeds the bands alone (a card
+ * with no input port, such as a person's `attention` shared by the players of several lanes, D136)
+ * is drawn in that left column too, under the in cards.
  */
 
 /** The gaps between columns and rows, in the drawing's pixels. */
@@ -117,9 +117,11 @@ export interface LaneLayout {
  * name) last; within a band, cards keep the graph's order in their columns. The in and out cards
  * are stacked from the top, outside every band. A card in a band is placed relative to the band.
  *
- * An ungrouped card that no edge feeds and whose every edge, one at least, reaches a card in a
- * band (a person's `attention`, D136) is no band's: it is drawn with the in cards, in their column
- * and stacked under them, its consumers in their bands to its right.
+ * A source is aside: an ungrouped card with no input port (`hasInputs`, the ports its card draws,
+ * wired or not), that no edge feeds and whose every edge, one at least, reaches a card in a band (a
+ * person's `attention`, D136). It is no band's: it is drawn with the in cards, in their column and
+ * stacked under them, its consumers in their bands to its right. A card with an input stays in its
+ * band even while that input is unwired, since its port is on its left.
  */
 export function swimlanes(
   ids: readonly string[],
@@ -129,6 +131,7 @@ export function swimlanes(
     first: ReadonlySet<string>;
     last: ReadonlySet<string>;
     groupOf: (id: string) => string | undefined;
+    hasInputs: (id: string) => boolean;
   }
 ): LaneLayout {
   const links = edges
@@ -136,13 +139,14 @@ export function swimlanes(
     .filter(([from, to]) => from !== to);
   const banded = (id: string): boolean =>
     !o.first.has(id) && !o.last.has(id) && o.groupOf(id) !== undefined;
-  // The ungrouped sources that feed the bands alone, beside the in cards (D136).
+  // The ungrouped sources (no input port) that feed the bands alone, beside the in cards (D136).
   const aside = new Set(
     ids.filter(
       (id) =>
         !o.first.has(id) &&
         !o.last.has(id) &&
         o.groupOf(id) === undefined &&
+        !o.hasInputs(id) &&
         !links.some(([, to]) => to === id) &&
         links.some(([from]) => from === id) &&
         links.every(([from, to]) => from !== id || banded(to))

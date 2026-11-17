@@ -191,19 +191,20 @@ the server that guards them.
   each group a tinted band with its name at its top left, in the order of its first node, the
   ungrouped nodes in an unlabelled band last, and the connectors' in and out cards outside every
   band, at the left and the right (a connector's group is ignored, which its panel says); an
-  ungrouped node that nothing feeds and that feeds only nodes in lanes (a person's `attention`,
-  shared by the players of several lanes, D136) is drawn under the connectors' in cards, at the
-  left. A card is its lane's child in React Flow, and stays in its lane when dragged. A lane's label
-  zooms to fit it; resting on a node dims what it does not reach, and on a lane's label everything
-  outside the lane but its edges and the connectors they reach; the minimap tints each lane. Its
-  colour comes from a fixed palette, by a hash of its name, the next free one when an earlier lane
-  has it. **Modules** (`#/modules`, `ModulesPage.tsx`, docs/bot-os.md D67, D102) lists the modules
-  installed, each with its version, its source (a folder upload, a tarball, or a repository on
-  GitHub or a self-hosted Git server, linked at its commit) and when it was installed. It installs
-  modules from a folder, chosen (**Choose folder**) or dropped on the page, or from a repository's
-  link: a public GitHub one (`https://github.com/<owner>/<repo>` or `…/tree/<ref>/<path>`), or one
-  on a Git server added under **Git servers** (`GitServers.tsx`: each server with its token's Docker
-  secret, picked from `GET /modules/hosts`'s names, added with `POST /modules/hosts`, removed with
+  ungrouped node with no input port on its card (wired or not), that nothing feeds and that feeds
+  only nodes in lanes (a person's `attention`, shared by the players of several lanes, D136) is
+  drawn under the connectors' in cards, at the left. A card is its lane's child in React Flow, and
+  stays in its lane when dragged. A lane's label zooms to fit it; resting on a node dims what it
+  does not reach, and on a lane's label everything outside the lane but its edges and the connectors
+  they reach; the minimap tints each lane. Its colour comes from a fixed palette, by a hash of its
+  name, the next free one when an earlier lane has it. **Modules** (`#/modules`, `ModulesPage.tsx`,
+  docs/bot-os.md D67, D102) lists the modules installed, each with its version, its source (a folder
+  upload, a tarball, or a repository on GitHub or a self-hosted Git server, linked at its commit)
+  and when it was installed. It installs modules from a folder, chosen (**Choose folder**) or
+  dropped on the page, or from a repository's link: a public GitHub one
+  (`https://github.com/<owner>/<repo>` or `…/tree/<ref>/<path>`), or one on a Git server added under
+  **Git servers** (`GitServers.tsx`: each server with its token's Docker secret, picked from
+  `GET /modules/hosts`'s names, added with `POST /modules/hosts`, removed with
   `DELETE /modules/hosts/<host>`), a module's own folder or a repository's that holds several. The
   folder's paths, its `module.json` files and its `.gitignore` files go to `POST /modules/plan`
   (`src/ui/module-folder.ts`), a link to `POST /modules/link`; the modules found, but those under

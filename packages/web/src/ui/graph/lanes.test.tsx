@@ -120,6 +120,7 @@ describe('swimlanes', () => {
         first: new Set(['tg']),
         last: new Set(['tg::out']),
         groupOf: (id) => groups[id],
+        hasInputs: () => true,
       }
     );
     const x0 = COLUMN_GAP - LANE_PAD;
@@ -154,6 +155,7 @@ describe('swimlanes', () => {
       first: new Set(),
       last: new Set(),
       groupOf: () => 'Game',
+      hasInputs: () => true,
     });
     expect(bare.lanes[0]?.x).toBe(-LANE_PAD);
     expect(bare.placed.get('p')).toEqual({ x: LANE_PAD, y: LANE_HEAD, lane: 0 });
@@ -179,6 +181,7 @@ describe('swimlanes', () => {
         'carol-player',
         'clock',
         'stats',
+        'dave',
         'tg::out',
       ],
       [
@@ -194,14 +197,22 @@ describe('swimlanes', () => {
         { from: 'carol.attention', to: 'carol-player.attention' },
         // One that feeds an ungrouped card stays in the ungrouped band, with it.
         { from: 'clock.events', to: 'stats.events' },
+        // One with an input port, unwired (a gated listen switched on), stays in the ungrouped
+        // band: its port is on its left.
+        { from: 'dave.attention', to: 'quest-player.attention' },
       ],
       () => 100,
-      { first: new Set(['tg']), last: new Set(['tg::out']), groupOf: (id) => groups[id] }
+      {
+        first: new Set(['tg']),
+        last: new Set(['tg::out']),
+        groupOf: (id) => groups[id],
+        hasInputs: (id) => !['alice', 'carol', 'clock'].includes(id),
+      }
     );
     expect(lanes.map((l) => [l.name, l.cards])).toEqual([
       ['Quest', ['quest-parser', 'quest-player']],
       ['Dice', ['dice-parser', 'dice-player', 'carol-player']],
-      [undefined, ['clock', 'stats']],
+      [undefined, ['clock', 'stats', 'dave']],
     ]);
     // The in card first, then the sources, in the graph's order, stacked in column 0.
     expect(placed.get('tg')).toEqual({ x: 0, y: 0 });
@@ -219,14 +230,19 @@ describe('swimlanes', () => {
       ['bob', 'player'],
       [{ from: 'bob.attention', to: 'player.attention' }],
       () => 100,
-      { first: new Set(), last: new Set(), groupOf: () => 'Quest' }
+      { first: new Set(), last: new Set(), groupOf: () => 'Quest', hasInputs: (id) => id !== 'bob' }
     );
     expect(own.lanes.map((l) => l.cards)).toEqual([['bob', 'player']]);
     const bare = swimlanes(
       ['bob', 'player'],
       [{ from: 'bob.attention', to: 'player.attention' }],
       () => 100,
-      { first: new Set(), last: new Set(), groupOf: (id) => (id === 'bob' ? undefined : 'Quest') }
+      {
+        first: new Set(),
+        last: new Set(),
+        groupOf: (id) => (id === 'bob' ? undefined : 'Quest'),
+        hasInputs: (id) => id !== 'bob',
+      }
     );
     expect(bare.placed.get('bob')).toEqual({ x: 0, y: 0 });
     expect(bare.lanes).toEqual([
@@ -242,6 +258,56 @@ const grouped = (): Graph => ({
     n.id === 'parser' ? { ...n, group: 'Game' } : n.id === 'chat' ? { ...n, group: 'Ignored' } : n
   ),
 });
+
+/**
+ * A person (D138): its listen chat-in there only while its switch is on (`when`), its chats the
+ * config key `listen` (`configChats`), and its output feeding the lane's actor alone.
+ */
+const PERSON: PluginView = {
+  plugin: 'person',
+  version: '0.1.0',
+  description: 'a simulated person',
+  kinds: ['actor'],
+  inputs: { listen: { type: 'chat-in', label: 'chat-in', optional: false, when: 'follows' } },
+  outputs: {
+    events: { type: 'events', namespace: 'game', label: 'events of game', optional: false },
+  },
+  interface: { reads: [], actions: [], commands: [] },
+  secrets: [],
+  configSecrets: [],
+  events: [],
+  configChats: [{ key: 'listen', input: 'listen' }],
+};
+
+/** The grouped graph with a person feeding the lane's actor, its switch on (and read) or off. */
+const personGraph = (follows: boolean): Graph => ({
+  ...grouped(),
+  nodes: [
+    ...grouped().nodes.map((n) => (n.id === 'actor-a' ? { ...n, group: 'Game' } : n)),
+    follows
+      ? { id: 'alice', plugin: 'person', config: { follows: true, listen: ['#a'] } }
+      : { id: 'alice', plugin: 'person', config: { follows: false } },
+  ],
+  edges: [
+    ...grouped().edges.filter((e) => e.to !== 'actor-a.game-events'),
+    { from: 'alice.events', to: 'actor-a.game-events', type: 'events' },
+    ...(follows
+      ? [{ from: 'chat.chat', to: 'alice.listen', type: 'chat-in' as const, reads: ['#a'] }]
+      : []),
+  ],
+});
+
+const personCore = (graph: Graph): ReturnType<typeof fakeCore> =>
+  fakeCore({
+    file: graph,
+    available: [...AVAILABLE, { ...PERSON, id: 'person', module: 'game' }],
+    routes: {
+      'GET /graph/view': [
+        200,
+        { ...VIEW, graph, nodes: [...VIEW.nodes, { ...PERSON, id: 'alice' }] },
+      ],
+    },
+  });
 
 const nodeOf = (label: string): HTMLElement =>
   screen.getByLabelText(label).closest('.react-flow__node') as HTMLElement;
@@ -346,45 +412,8 @@ describe('the graph editor’s lanes', () => {
   });
 
   it('keeps a node whose gated chat-in edge is removed, and its sender whose chat-out edge is', async () => {
-    // A person (D138): its listen chat-in there only while its switch is on (`when`), its chats
-    // the config key `listen` (`configChats`), and its output feeding the lane's actor alone.
-    const person: PluginView = {
-      plugin: 'person',
-      version: '0.1.0',
-      description: 'a simulated person',
-      kinds: ['actor'],
-      inputs: { listen: { type: 'chat-in', label: 'chat-in', optional: false, when: 'follows' } },
-      outputs: {
-        events: { type: 'events', namespace: 'game', label: 'events of game', optional: false },
-      },
-      interface: { reads: [], actions: [], commands: [] },
-      secrets: [],
-      configSecrets: [],
-      events: [],
-      configChats: [{ key: 'listen', input: 'listen' }],
-    };
-    const graph: Graph = {
-      ...grouped(),
-      nodes: [
-        ...grouped().nodes.map((n) => (n.id === 'actor-a' ? { ...n, group: 'Game' } : n)),
-        { id: 'alice', plugin: 'person', config: { follows: true, listen: ['#a'] } },
-      ],
-      edges: [
-        ...grouped().edges.filter((e) => e.to !== 'actor-a.game-events'),
-        { from: 'alice.events', to: 'actor-a.game-events', type: 'events' },
-        { from: 'chat.chat', to: 'alice.listen', type: 'chat-in', reads: ['#a'] },
-      ],
-    };
-    const core = fakeCore({
-      file: graph,
-      available: [...AVAILABLE, { ...person, id: 'person', module: 'game' }],
-      routes: {
-        'GET /graph/view': [
-          200,
-          { ...VIEW, graph, nodes: [...VIEW.nodes, { ...person, id: 'alice' }] },
-        ],
-      },
-    });
+    const graph = personGraph(true);
+    const core = personCore(graph);
     render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
     await screen.findByLabelText('node alice', {}, slow);
     // Read by its edge, it is in the ungrouped lane.
@@ -399,16 +428,15 @@ describe('the graph editor’s lanes', () => {
     };
     await remove('chat.chat → alice.listen');
     // The node stays, its config too (the switch on and its chats, for the check to say what
-    // they lack), now beside the in cards (D136), the ungrouped lane gone with its only card.
+    // they lack), and so does its place in the ungrouped lane: its listen input, unwired, is still
+    // on its card's left, so it is no source to draw beside the in cards (D136).
     expect(core.checked.at(-1)?.nodes.find((n) => n.id === 'alice')).toEqual({
       id: 'alice',
       plugin: 'person',
       config: { follows: true, listen: ['#a'] },
     });
-    await waitFor(() =>
-      expect(screen.queryByRole('group', { name: 'lane of the ungrouped nodes' })).toBeNull()
-    );
-    expect(nodeOf('node alice').style.transform).toMatch(/^translate\(0px,/u);
+    expect(screen.getByRole('group', { name: 'lane of the ungrouped nodes' })).toBeDefined();
+    expect(nodeOf('node alice').style.transform).not.toMatch(/^translate\(0px,/u);
     // A chat-out edge removed takes no node either.
     await remove('actor-a.chat → chat.chat');
     expect(core.checked.at(-1)?.nodes.map((n) => n.id)).toEqual([
@@ -419,6 +447,16 @@ describe('the graph editor’s lanes', () => {
     ]);
     expect(screen.getByLabelText('node actor-a')).toBeDefined();
     expect(screen.getByLabelText('node alice')).toBeDefined();
+  }, 15000);
+
+  it('draws a node with no input port, its gated input off, beside the in cards (D136)', async () => {
+    personCore(personGraph(false));
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    await screen.findByLabelText('node alice', {}, slow);
+    // Its switch off, its card has no input: a source of the lane alone, in the left column, and
+    // the ungrouped lane, with no card, is not drawn.
+    expect(nodeOf('node alice').style.transform).toMatch(/^translate\(0px,/u);
+    expect(screen.queryByRole('group', { name: 'lane of the ungrouped nodes' })).toBeNull();
   }, 15000);
 
   it('draws a graph without groups as before, with no lane', async () => {

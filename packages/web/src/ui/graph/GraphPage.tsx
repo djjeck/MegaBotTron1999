@@ -49,7 +49,8 @@
  *
  * A draft whose nodes name groups is drawn in swimlanes (D69, `layout.ts`, `lanes.ts`): each group
  * a band, a React Flow group node holding its cards, the connectors' cards outside every band, and
- * an ungrouped source of the bands alone (a person's `attention`, D136) under the in cards. A
+ * an ungrouped source of the bands alone (a card with no input port, such as a person's
+ * `attention`, D136) under the in cards. A
  * lane's label zooms to it; resting on a node or a lane's label dims what it does not reach.
  */
 import type { Connection, Edge, FinalConnectionState, Node } from '@xyflow/react';
@@ -366,6 +367,9 @@ export function GraphPage({
         first: new Set(cards.filter((c) => c.side === 'in').map((c) => c.id)),
         last,
         groupOf: (id) => draftNodes.get(byId.get(id)?.node ?? '')?.group,
+        // The inputs its card draws (`inputsOf`, those gated by `when` included while on), wired or
+        // not: only a card without any is a source, drawn beside the in cards (D136).
+        hasInputs: (id) => Object.keys(byId.get(id)?.view.inputs ?? {}).length > 0,
       });
       // Coloured in the order of the lanes drawn: a group only connectors name draws none.
       const colours = laneColours(

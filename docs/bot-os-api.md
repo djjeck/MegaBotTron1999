@@ -1906,13 +1906,14 @@ across lanes; each group is a horizontal band across them, a tinted rounded box 
 top left, ordered by its first node in the graph's order, and the ungrouped nodes have an unlabelled
 band last. The connectors (the nodes drawn as two cards) stay outside every band, their in cards
 stacked in the leftmost column and their out cards in the rightmost; a connector's group is kept and
-ignored, as its panel says. An ungrouped node that no edge feeds and whose every edge (one at least)
-reaches a node in a lane, such as a person's `attention` shared by the players of several lanes
-(bot-os.md D136), is no band's either: it is stacked under the in cards, in the leftmost column. A
-band is a React Flow group node and its cards its children, kept inside it: a card cannot be dragged
-into another lane. A node's panel sets its **Group**: none, one of the draft's, or **new group…**,
-named and set; a change of the draft, applied with Apply. A lane's label zooms to fit it; resting on
-a node dims what it does not reach, and resting on a lane's label dims everything outside it but the
+ignored, as its panel says. An ungrouped node with no input port (as its card draws them, those a
+`when` gates while on, wired or not), that no edge feeds and whose every edge (one at least) reaches
+a node in a lane, such as a person's `attention` shared by the players of several lanes (bot-os.md
+D136), is no band's either: it is stacked under the in cards, in the leftmost column. A band is a
+React Flow group node and its cards its children, kept inside it: a card cannot be dragged into
+another lane. A node's panel sets its **Group**: none, one of the draft's, or **new group…**, named
+and set; a change of the draft, applied with Apply. A lane's label zooms to fit it; resting on a
+node dims what it does not reach, and resting on a lane's label dims everything outside it but the
 edges its cards are at and the connectors those reach; the minimap tints each lane in its colour. A
 lane's colour is the one of a fixed palette its name hashes to, or the next free one when a lane
 before it has it, so that no two lanes share one while the palette's eight last. A draft with no
