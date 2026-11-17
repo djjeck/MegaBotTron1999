@@ -70,7 +70,7 @@ but by you. The Modules page also installs a `.tar.gz` and rolls a module back t
 version. In the graph, each node shows what belongs to it: its state, a connector's connection, and
 in its panel what it costs and, while it runs, its status, settings, reads and actions; the
 instance's off and kill switches head the map's bar (D111). A plugin may declare a widget, drawn in
-a line on its node's card (a turn actor's next turn), and a page of its own, opened from its node's
+a line on its node's card (a player's next play), and a page of its own, opened from its node's
 panel, both made from its reads (D112). The History page shows the graph's history (each version
 applied in the last 7 days, what changed, whether the instance started on it, and a rollback to it)
 (D59, D61). A **script** node runs TypeScript typed in its panel, on the ports its panel declares,
@@ -200,13 +200,15 @@ export const greeter = definePlugin({
   drift reporting, its settings, a way to raise a notice for the owner (`ctx.notice`), and its own
   safety stop (`ctx.stop`). A plugin is built from its node's saved config and its context alone. It
   never holds a credential: connectors do.
-- **The image offers** the connectors (`irc`, `telegram-bot`, `telegram-user`, `anthropic`) and the
-  `turn-actor`, one node per game bot, and the `reactor`, one node per reaction ("when this event is
-  heard, or a message matches, send this command", from its config alone, on `react()`, which any
-  plugin may call too), the `script` node, and `owner-notice`, the one node that reports to a chat:
-  it tells the owner what needs attention (refused events, coalesced sends, drift, cascades,
-  failures, stalled sends, the graph's warnings), grouped and paced per kind, and the plugins'
-  messages (`ctx.notify`) at once with their buttons, to every chat its edges name (a
+- **The image offers** the connectors (`irc`, `telegram-bot`, `telegram-user`, `anthropic`),
+  `attention`, a simulated person whose sittings its players share (one node per person), and the
+  `player`, one node per game bot, which plays each of the bot's commands its parser says is ready,
+  in its person's sittings (docs/bot-os.md D132–D134), and the `reactor`, one node per reaction
+  ("when this event is heard, or a message matches, send this command", from its config alone, on
+  `react()`, which any plugin may call too), the `script` node, and `owner-notice`, the one node
+  that reports to a chat: it tells the owner what needs attention (refused events, coalesced sends,
+  drift, cascades, failures, stalled sends, the graph's warnings), grouped and paced per kind, and
+  the plugins' messages (`ctx.notify`) at once with their buttons, to every chat its edges name (a
   `telegram-bot`'s owner's private chat, an IRC channel, both at once); everything that knows a game
   comes from a module.
 - **Standard services,** implemented once by the shell (D52): SVG to PNG in every plugin's context

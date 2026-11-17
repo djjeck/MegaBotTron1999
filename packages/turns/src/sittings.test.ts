@@ -10,7 +10,7 @@ import {
   type ScheduleParams,
   scheduleProblem,
   zonedInstant,
-} from './schedule.ts';
+} from './sittings.ts';
 
 const MIN = 60_000;
 const ROME = 'Europe/Rome';
@@ -37,9 +37,7 @@ describe('scheduleProblem', () => {
     const bad = (p: Partial<ScheduleParams>) => scheduleProblem({ ...DEFAULT_SCHEDULE, ...p });
     expect(bad({ skipChance: -0.1 })).toBe('numbers must be finite and not negative');
     expect(bad({ maxGapMin: Number.NaN })).toBe('numbers must be finite and not negative');
-    expect(bad({ minGapMin: 14, maxGapMin: 20 })).toBe(
-      'minGapMin must be at least 15, the bots’ own rest'
-    );
+    expect(bad({ minGapMin: 0.5, maxGapMin: 20 })).toBe('minGapMin must be at least 1');
     expect(bad({ maxGapMin: 16 })).toBe('maxGapMin must not be under minGapMin');
     expect(bad({ skipChance: 1 })).toBe('skipChance must be under 1');
     expect(bad({ bedtime: '1:30' })).toBe('bedtime and wake must be HH:MM');

@@ -413,7 +413,7 @@ export interface InstanceInput {
 /**
  * The graph with the default node of `plugin` (the one whose id is the plugin's) and its edges
  * replaced by `instances`, each a node of that plugin with its own edges: how the programmatic
- * wiring runs a plugin meant for several instances (the turn-actor's, one per bot), its other
+ * wiring runs a plugin meant for several instances (the player's, one per bot), its other
  * plugins left one node each. No instances: the plugin runs nowhere.
  */
 export function withInstances(

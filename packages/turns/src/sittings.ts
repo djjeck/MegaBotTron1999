@@ -1,18 +1,17 @@
 /**
- * When to send the next turn to a game bot: at the pace of a person, not of a
- * timer. The game bots answer a turn every 15 minutes at most; a person neither presses it at the
- * 15th minute nor all night. So, for each bot's turn-actor
- * (packages/turns/src/turn-actor.ts):
+ * When a simulated person next sits down to play (bot-os.md D134): at the pace of a person, not of a
+ * timer. The `attention` node (packages/turns/src/attention.ts) plans its sittings with it, one
+ * planner per person, whatever bots they play:
  *
- * - each send comes 17–20 minutes (uniform) after the owner's last turn with that bot, whoever sent
- *   it, and never sooner; after a rest the bot states, a few minutes after it ends (`after`);
- * - about 8% of turns are forgotten: that send comes one more interval later;
- * - it sleeps from bedtime to the next wake, wall-clock times in its time zone (`timeZone`): by
+ * - each sitting comes 17–20 minutes (uniform, by default) after the person's last one, theirs by
+ *   hand included, and never sooner; one planned while they are still busy, after that;
+ * - about 8% of sittings are forgotten: that one comes one more interval later;
+ * - they sleep from bedtime to the next wake, wall-clock times in their time zone (`timeZone`): by
  *   default from about 01:30 to 08:30 in Europe/Rome. A night may cross midnight (23:00 to 07:00)
  *   or not (01:30 to 08:30); wake at or before bedtime on the clock means the next day's. Bedtime
- *   and waking each move by up to 45 minutes, drawn once a night, and after waking it waits up to
- *   10 more minutes. With a `nightSalt` the night is drawn from its date and the salt alone, so
- *   that the planners of every bot (one person) sleep the same night, and a restart keeps it.
+ *   and waking each move by up to 45 minutes, drawn once a night, and after waking they wait up to
+ *   10 more minutes. With a `nightSalt` (the attention node's id) the night is drawn from its date
+ *   and the salt alone, so that a restart keeps it.
  *
  * Pure: the clock is the caller's, and the draws come from the seeded `Rng`, so a simulation over
  * many days can check all of the above.
@@ -20,10 +19,10 @@
 import { Rng } from '@megabottron1999/core/rng.ts';
 
 export interface ScheduleParams {
-  /** The interval between sends, in minutes. */
+  /** The interval between sittings, in minutes. */
   minGapMin: number;
   maxGapMin: number;
-  /** The chance that a turn is forgotten. */
+  /** The chance that a sitting is forgotten. */
   skipChance: number;
   /**
    * The night, `HH:MM` wall-clock times in `timeZone`: asleep from bedtime to the next wake, which
@@ -33,7 +32,7 @@ export interface ScheduleParams {
   wake: string;
   /** How far bedtime and waking may each move, either way, in minutes. */
   jitterMin: number;
-  /** The most extra minutes after waking before the first send. */
+  /** The most extra minutes after waking before the first sitting. */
   wakeDelayMaxMin: number;
   timeZone: string;
 }
@@ -65,7 +64,7 @@ export function scheduleProblem(p: ScheduleParams): string | undefined {
   const finite = [p.minGapMin, p.maxGapMin, p.skipChance, p.jitterMin, p.wakeDelayMaxMin];
   if (!finite.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0))
     return 'numbers must be finite and not negative';
-  if (p.minGapMin < 15) return 'minGapMin must be at least 15, the bots’ own rest';
+  if (p.minGapMin < 1) return 'minGapMin must be at least 1';
   if (p.maxGapMin < p.minGapMin) return 'maxGapMin must not be under minGapMin';
   if (p.skipChance >= 1) return 'skipChance must be under 1';
   if (bed === undefined || wake === undefined) return 'bedtime and wake must be HH:MM';
@@ -132,9 +131,9 @@ export function localDate(t: number, timeZone: string): string {
 }
 
 export interface Plan {
-  /** When to send. */
+  /** When it starts. */
   at: number;
-  /** How many turns were forgotten before it. */
+  /** How many sittings were forgotten before it. */
   skipped: number;
   /** Whether it waits for the morning. */
   afterSleep: boolean;
@@ -154,9 +153,9 @@ export class Planner {
     this.nightSalt = nightSalt;
   }
 
-  /** A uniform draw in [lo, hi] minutes, in ms. */
+  /** A uniform draw in [lo, hi] minutes, in whole ms. */
   private minutes(lo: number, hi: number): number {
-    return (lo + this.rng.next() * (hi - lo)) * MINUTE;
+    return Math.round((lo + this.rng.next() * (hi - lo)) * MINUTE);
   }
 
   /**
@@ -201,9 +200,9 @@ export class Planner {
   }
 
   /**
-   * The next send after the owner's last `/play` at `last` (undefined if none is known), as of
-   * `now`. With none known, or a last one so old that its turn has passed, it sends at once: the
-   * author turned it on with no recent `/play` to wait for.
+   * The next sitting after the person's last at `last` (undefined if none is known), as of `now`.
+   * With none known, or a last one so old that its gap has passed, at once: the owner turned it on
+   * with no recent sitting to wait for.
    */
   next(last: number | undefined, now: number): Plan {
     const { minGapMin: lo, maxGapMin: hi } = this.p;
@@ -221,8 +220,9 @@ export class Planner {
   }
 
   /**
-   * The next send after a rest the bot stated, ending at `until`: a few minutes after it (up to the
-   * spread of the interval, `maxGapMin - minGapMin`), as a person would come back to it.
+   * A sitting a few minutes after `until` (up to the spread of the interval, `maxGapMin -
+   * minGapMin`), as a person would come back: the first one of a fresh start, spread so that two
+   * people do not start in the same second.
    */
   after(until: number): Plan {
     return this.awake(until + this.minutes(0, this.p.maxGapMin - this.p.minGapMin), 0);

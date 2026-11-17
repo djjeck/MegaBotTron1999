@@ -199,9 +199,9 @@ progress of no number, an `until` of a list):
 a `.describe()`: it is their label. The core reads the widget's read for each running node with
 `GET /status` (its `widget`, the read's output; none while its read throws), which the editor asks
 every five seconds; the page asks each of its reads (once, however many sections show it) every five
-seconds while it is open. The turn actor's, for one (§5):
-`widget: { show: 'until', read: 'status', path: 'next' }`, and a page **Turns** with its chat and
-command, its last turn and its next. A script node declares neither: it offers no reads (§5), its
+seconds while it is open. The player's, for one (§5):
+`widget: { show: 'until', read: 'status', path: 'next' }`, and a page **Plays** with its chat and
+commands, its last play and its next. A script node declares neither: it offers no reads (§5), its
 code running in a worker thread that a synchronous read could not ask.
 
 **Chat commands (P11).** A command of `interface.commands` has its `help` (the owner's words: the
@@ -289,7 +289,7 @@ chat (`owner()`, §4.5: a `telegram-bot`'s `owner`), which the outbox then lets 
 writes that chat on a new edge drawn from it, and says so on an edge left without one. One declared
 **`single: { pattern?, expected? }`** has its edge name exactly one chat, matching `pattern` when
 given
-(`node quest-turns: output port chat sends to one chat, its bot's @username: its edge names none`);
+(`node quest-player: output port chat sends to one chat, its bot's @username: its edge names none`);
 and a chat-in input declared **`sameAs: '<output>'`** has its edge read that one chat and no other
 (`node look: input port chat reads @QuestBot, the chat its output chat sends to, and no other: its edge reads every chat`;
 the turn actor had one until it stopped reading its chat, bot-os.md D99). A handle's `chats()` gives
@@ -342,9 +342,9 @@ that reads and sends through one account declares a chat-in input and a chat-out
 name: its `ctx.connector('channel')` and `ctx.outbox('channel')` name the two.
 
 An interface input that names no plugin is a **contract**: any node whose interface declares its
-members binds it (`interface with state.rest, state.lastTurn, state.ready, actions.sent`), so each
-instance of one plugin may use another plugin's interface (each turn-actor instance its own bot's
-parser, §5). It has no default edge: the graph binds it.
+members binds it (`interface with state.ready, actions.sent`), so each instance of one plugin may
+use another plugin's interface (each player its own bot's parser, §5). It has no default edge: the
+graph binds it.
 
 **An events input whose namespace its node's config names** (bot-os.md D57): a plugin that learns
 what it listens to from its node's config (the `reactor`, §5) declares
@@ -488,8 +488,9 @@ plugin's, each input bound as its `bind` says (`defaultGraph`), which tests and 
 `withInstances(graph, plugin, instances)` replaces the default node of a plugin meant for several
 instances by its instances. `core.graph()` gives the graph the instance runs, every edge written
 out. A changed graph takes effect at the next start (P8). The instance's entry point (`src/main.ts`)
-registers the connectors, the turn-actor, the reactor, the script node, `owner-notice` and the
-modules' plugins (§7), and runs the graph saved in its volume (`CoreOptions.graphFile`, §2.3).
+registers the connectors, `attention` and the player, the reactor, the script node, `owner-notice`
+and the modules' plugins (§7), and runs the graph saved in its volume (`CoreOptions.graphFile`,
+§2.3).
 
 ### 2.2 Instances
 
@@ -498,8 +499,7 @@ D50): its store and the core's documents beside it (its timers, its settings, it
 serialised), in `/data/instances/<instance>/`. A node names its instance: an existing one of the
 same plugin, whose state it takes up, or a fresh id, made at its first start. So a node can be
 removed and added again, renamed, or replaced by another node of its plugin, without losing what it
-kept; and one plugin can run as several nodes (the turn-actor, one per bot), each on its own
-instance.
+kept; and one plugin can run as several nodes (the player, one per bot), each on its own instance.
 
 As built (`packages/core/src/instance-registry.ts`): each instance keeps a record of itself,
 `_instance.json`: its `plugin`, when it was `created` and when a node last `referenced` it (each a
@@ -531,11 +531,12 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
       "config": { "chats": ["@QuestBot", "-1001000000001"] }
     },
     { "id": "quest", "plugin": "quest-parser", "group": "Quest" },
+    { "id": "alice", "plugin": "attention", "config": { "timeZone": "Europe/Rome" } },
     {
-      "id": "quest-turns",
-      "plugin": "turn-actor",
-      "instance": "quest-turns",
-      "config": { "chat": "@QuestBot" },
+      "id": "quest-player",
+      "plugin": "player",
+      "instance": "quest-player",
+      "config": { "commands": [{ "command": "/play" }, { "command": "/daily" }] },
       "group": "Quest"
     }
   ],
@@ -548,14 +549,15 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
       "senders": ["@QuestBot", "me"]
     },
     {
-      "from": "quest-turns.chat",
+      "from": "quest-player.chat",
       "to": "tg.chat",
       "type": "chat-out",
       "sends": ["@QuestBot"],
-      "commands": ["/play"],
+      "commands": ["/play", "/daily"],
       "dryRun": true
     },
-    { "from": "quest.interface", "to": "quest-turns.parser", "type": "interface" },
+    { "from": "quest.interface", "to": "quest-player.parser", "type": "interface" },
+    { "from": "alice.attention", "to": "quest-player.attention", "type": "attention" },
     {
       "from": "bot.commands",
       "to": "quest-stats.commands",
@@ -572,11 +574,12 @@ control API), and a restart applies it (P8). It is the graph of §2.1, each node
 (The `bot` and `quest-stats` nodes, a `telegram-bot` and a plugin of a `/map` command, are left out
 of `nodes` here.)
 
-Here `quest-turns` sends its turns as a dry run, logged and not sent, until the owner switches its
-edge to send for real; a node `"disabled": true` would not start at all (§2.1, Node states). Both
-Quest nodes are drawn in the editor's Quest lane (`group`, bot-os.md D69); the connector, whatever
-its group, outside every lane. A `group` is an addition to version 2, which a release before it
-refuses (its nodes are strict): roll the image back past it only with the groups taken out.
+Here `quest-player` plays in `alice`'s sittings as a dry run, logged and not sent, until the owner
+switches its edge to send for real; a node `"disabled": true` would not start at all (§2.1, Node
+states). Both Quest nodes are drawn in the editor's Quest lane (`group`, bot-os.md D69); the
+connector, whatever its group, outside every lane. A `group` is an addition to version 2, which a
+release before it refuses (its nodes are strict): roll the image back past it only with the groups
+taken out.
 
 **Another version** of the file (version 1, with one `chat` edge for both the reads and the sends,
 bot-os.md D60) is refused as any graph the check refuses (below), with why
@@ -927,7 +930,7 @@ wake.
   (`z.object({...}).describe('A roll of the dice')`), says what the event is: the editor lists each
   events output's types with it (bot-os.md D71). It is optional; a type without one is listed by
   name. The namespace is a game's, or the registering plugin's own id for what belongs to no game
-  (`turn-actor.step`); `core.*` is the core's.
+  (`player.step`); `core.*` is the core's.
 - `bus.publish(type, payload, t?)` fails for a type nobody registered, or one in a namespace the
   plugin does not register (its node's, for a plugin whose nodes register their own, bot-os.md D74:
   two such nodes never publish each other's types). In tests and in development (`NODE_ENV` not
@@ -959,10 +962,9 @@ wake.
   reads the instance's log (`CoreOptions.events`); the dev kit's is in memory (§4.10); without one
   it reads nothing. **By instance:** it reads its own instance's records of its own namespaces, and,
   of a namespace an events input consumes, those of the instances its edges bind, as the bus would
-  have delivered them; so two instances of one plugin (a turn-actor per bot) never read each
-  other's. `all: true` reads every instance's. A record with no `instance` (the core's own, or one
-  written before records carried one) belongs to no instance, and every reader of its namespace
-  reads it.
+  have delivered them; so two instances of one plugin (a player per bot) never read each other's.
+  `all: true` reads every instance's. A record with no `instance` (the core's own, or one written
+  before records carried one) belongs to no instance, and every reader of its namespace reads it.
 
 **A cursor into the log** (bot-os.md D72), for a reader that resumes where it left the log (the
 state plugins, §5). A record goes to the file of its own time's UTC day, so one of an old time (a
@@ -1744,13 +1746,13 @@ id, edges by their text, so the same graph prints the same:
 ```text
 nodes:
   quest (quest-parser), group Quest
-  quest-turns (turn-actor), instance quest-turns-old, disabled, group Quest
-    config.chat: "@QuestBot"
+  quest-player (player), instance quest-player-old, disabled, group Quest
+    config.commands: [{"command":"/play"}]
   tg (telegram-user), account telegram:alice
     config.chats: ["@QuestBot"]
 edges:
-  quest-turns.chat → tg.chat (chat-out): sends @QuestBot; commands /play; dry-run
-  quest.interface → quest-turns.parser (interface)
+  quest-player.chat → tg.chat (chat-out): sends @QuestBot; commands /play; dry-run
+  quest.interface → quest-player.parser (interface)
   tg.chat → quest.chat (chat-in): reads @QuestBot
 ```
 
@@ -2139,8 +2141,9 @@ counts for each node it went for), but those of the nodes that tell the owner (`
 whose sends are the summaries and notices themselves; and `Notices`, the notices raised (§4.16),
 counted by kind (`1 cascade, 1 stalled`). **The shell's plugins contribute:** a state node its
 events heard live, `applied` and `refused` (D72); a turn parser the answers to turns it read live,
-by their outcome's kind (`unknown` for one it could not read); a `turn-actor` its turns, `sent`,
-`in a dry run`, `by hand`, `failed`. `core.summary(window)` gives what `collect` gives, for tests.
+by their outcome's kind (`unknown` for one it could not read); an `attention` node its sittings, and
+those the owner played by hand; a `player` its commands, `sent` and `in a dry run` by command, and
+`failed`. `core.summary(window)` gives what `collect` gives, for tests.
 
 ## 5. The shell's own plugins
 
@@ -2152,7 +2155,8 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
 | `anthropic`     | connector    | `@megabottron1999/connectors` | The Claude API: `ask`, with structured output (§4.13)                                                                            |
 | (service)       | connector    | `@megabottron1999/connectors` | `ServiceConnector`: the connector of a plugin that holds secrets for an API client, no chat                                      |
 | (turn parsers)  | parser       | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives                                     |
-| `turn-actor`    | actor        | `@megabottron1999/turns`      | One game bot's turns, at a person's pace, run as one instance per bot                                                            |
+| `attention`     | actor        | `@megabottron1999/turns`      | A simulated person: when they sit down to play and how fast they act, one node per person, for the players bound to it           |
+| `player`        | actor        | `@megabottron1999/turns`      | One game bot's commands, each when ready, in its person's sittings, run as one node per bot                                      |
 | `reactor`       | actor        | `@megabottron1999/turns`      | One reaction (§4.15) from its config: a command sent when an event is heard or a message matches                                 |
 | `script`        | actor, stats | `@megabottron1999/turns`      | TypeScript typed in the editor, on the ports its config declares, in a worker thread of its own                                  |
 | `owner-notice`  | stats        | `@megabottron1999/turns`      | Tells the owner what needs attention (§4.16), a summary on a cadence (§4.17) and a notice at each start, through a chat-out edge |
@@ -2268,7 +2272,7 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   (`telegram-user`), the private chat with its bot and, when its edge also reads it, the game's
   group: a `chat-in` input only, with no way to send; its default edge reads from its bot and the
   owner (`senders: ["@<bot>", "me"]`). It knows the owner's turns (a turn command of its game's,
-  bare or addressed to its bot, sent by hand from any device; and those its actor sends, told
+  bare or addressed to its bot, sent by hand from any device; and those its player sends, told
   through its action `sent`, since the account never sees its own sends come back), and which of its
   bot's messages answer one: a reply to it or, in the private chat, the first message within two
   minutes of it (a chat is private as its connector says, `Inbound.private`, so that one configured
@@ -2277,22 +2281,21 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   it starts, `playback: true` for a message played back, D83); a message it claims and cannot read
   goes to drift (§4.7) and is published as an `unknown` outcome. Its read `rest` says until when the
   bot rests, from its last answer. Its read `lastTurn` says the owner's last turn with its bot, in
-  the private chat or the group alike (`{ t, id? }`, by hand from any device or its actor's;
-  bot-os.md D129), from which its actor counts (D99). **Its turn answers its turn commands** (§4.6,
-  Command answers, bot-os.md D98): `refused` with `cooldown` for a "too soon" (`kind: nothing`,
-  `reason: cooldown`), `ok` (`rest`) for any other outcome read, not an `unknown` one, each with its
-  `retryAt`, within two minutes; so a turn queued by any node settles with the bot's answer, and the
-  outbox holds the turn command back in that chat until the bot's rest is over. It resumes from what
-  it parsed (D62): the owner's recent turns and its bot's rest are kept in its store (`parsed`) as
-  they change and read back at its start; it never re-reads the chat, and reads missed messages as
-  any other. Its game gives it a spec (`TurnParserSpec`): its `id`, its `bot`, its `description`,
-  its grammar (`read`, given each of its bot's messages as a `BotMessage`: `text`, `private`,
-  `answers`, `replies`, `self`, and `document`, the file it carries with its text when it has one,
-  such as the bot's export of the player's state, beside the caption in `text`, D82) and its
-  `turnCommands`, the bot's turn commands by first word (`["/play"]`, at least one): which commands
-  are turns is a fact of the game, so it has no config (bot-os.md D70). **Each command's readiness**
-  (bot-os.md D132): the spec may also declare the bot's other commands, with their mechanics as data
-  (`commands`:
+  the private chat or the group alike (`{ t, id? }`, by hand from any device or its player's;
+  bot-os.md D129). **Its turn answers its turn commands** (§4.6, Command answers, bot-os.md D98):
+  `refused` with `cooldown` for a "too soon" (`kind: nothing`, `reason: cooldown`), `ok` (`rest`)
+  for any other outcome read, not an `unknown` one, each with its `retryAt`, within two minutes; so
+  a turn queued by any node settles with the bot's answer, and the outbox holds the turn command
+  back in that chat until the bot's rest is over. It resumes from what it parsed (D62): the owner's
+  recent turns and its bot's rest are kept in its store (`parsed`) as they change and read back at
+  its start; it never re-reads the chat, and reads missed messages as any other. Its game gives it a
+  spec (`TurnParserSpec`): its `id`, its `bot`, its `description`, its grammar (`read`, given each
+  of its bot's messages as a `BotMessage`: `text`, `private`, `answers`, `replies`, `self`, and
+  `document`, the file it carries with its text when it has one, such as the bot's export of the
+  player's state, beside the caption in `text`, D82) and its `turnCommands`, the bot's turn commands
+  by first word (`["/play"]`, at least one): which commands are turns is a fact of the game, so it
+  has no config (bot-os.md D70). **Each command's readiness** (bot-os.md D132): the spec may also
+  declare the bot's other commands, with their mechanics as data (`commands`:
   `{ "/daily": { cooldownMin: 1440 }, "/chest": { unlock: { pattern: "A chest appears!", forMin: 30 } }, "/coffee": { cooldownMin: 60, effects: [{ command: "/play", clear: true }] } }`):
   a `cooldownMin` holds a command that long after a success; an `unlock` holds it from the start and
   after each success until a message of the bot (in private, or answering the owner) matches its
@@ -2312,40 +2315,72 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   its node's config, which the file keeps as written until the owner takes it out. It adds to the
   owner's summary the answers it read live, by their outcome's kind (§4.17, D92). The tests play a
   made-up @QuestBot (`packages/turns/test/quest.ts`).
-- **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
-  (P3, P17), each with its own id, configuration, store, timer and state. Its ports: `chat`, a
-  chat-out output on `telegram`, which sends to the private chat with its bot (its command only);
-  and `parser`, a contract (`state.rest`, `state.lastTurn`, `state.ready`, `actions.sent`) bound to
-  its bot's parser, required, so that drift on the parser stops it. **It only sends** (bot-os.md
-  D99): it reads no chat, the turns the owner sends by hand coming from its parser
-  (`state.lastTurn`), and an edge to a chat-in of it is refused. **Its bot's chat is its edge's
-  alone** (bot-os.md D97): its chat-out edge names exactly one chat, the bot's `@username`
-  (`single`); the check refuses anything else, with why. Its configuration names no chat: `command`
-  (the bot's turn command; `/play` when unset), `schedule` (the planner's pace, each field with its
-  default in the schema, `DEFAULT_SCHEDULE` of `packages/turns/src/schedule.ts`: 17–20 minutes
-  between turns, some skipped, nights off: asleep from `bedtime` to the next `wake`, wall-clock
-  times in its `timeZone`, a night that may cross midnight or not, the two times never equal),
-  `nightSalt` (the instances with one salt sleep the same nights) and `seed`. It plans from the
-  owner's last turn with the bot (kept in its store; a turn sent by hand counts too: its parser's
-  `state.lastTurn`, read at its start and when its turn is due, a newer one planning afresh from
-  it), as the durable timer `turn` (dropped if it came due more than 10 minutes before a start);
-  when it is due, it asks its parser whether the bot rests, and its outbox what holds its command
-  back (`held`, D98: the bot's cooldown as an answer said, the retry-loop guard), and, if anything
-  does, comes back a few minutes after the longest; through a live chat-out edge it sends through
-  its outbox (refused `not connected`, it waits for the account, trying each minute) and tells its
-  parser the message's id; through a dry-run edge (bot-os.md D64, as a new one is drawn) it logs its
-  turn (`sent`, `/play (dry run)`) and sends nothing; a send refused as its command rests is tried
-  again when it may go (`retryAt`), any other failed send two minutes later. It plays while its node
-  runs and the instance is on; its safety stop (`kill`) stops its node (`ctx.stop`), which drops its
-  plan until the owner clears the stop in the editor. It declares no chat command, since two
-  instances would clash: the owner reaches each with `/plugins <id>` and its read `status`, which
-  its node's widget and page show in the web UI (bot-os.md D112): its next turn on its card
-  (`Next turn: in 12m 5s`), and a page, **Turns**, with its chat and command, its last turn and its
-  next. Each step is published as `turn-actor.step`; its turns (sent, in a dry run, by hand, failed)
-  go in the owner's summary (§4.17, D92). The image offers it (`src/main.ts`): the editor adds one
-  node per bot, each on its own instance, its `chat` edges from and to the owner's `telegram-user`
-  node and its `parser` edge to its bot's parser. The turn parsers are not the image's: each is made
-  from a game's grammar, so a game's module offers it.
+- **`attention`** (`packages/turns/src/attention.ts`, bot-os.md D134): a simulated person, one node
+  per person (or account), for the players its `attention` output binds (§2.1, D133: any number; the
+  players of one person share their sittings, so gameplay comes in bursts). Its configuration holds
+  once what each turn actor held on its own: when the person comes back, `minGapMin` and `maxGapMin`
+  between two sittings (17 and 20 by default, 1 at least), `skipChance` (a sitting forgotten), the
+  nights, `bedtime` and `wake` on the clock of `timeZone` with their `jitterMin` and
+  `wakeDelayMaxMin` (`DEFAULT_SCHEDULE` of `packages/turns/src/sittings.ts`, its nights drawn from
+  their date and the node's id, so that a restart keeps them), `seed`; and `reaction`, how fast they
+  act within a sitting (`minS` to `maxS` seconds, plus `perCharMs` per character of the answer read,
+  and with `longChance` up to `longMaxS` more). It starts each **sitting** at its durable timer
+  `sitting` (dropped if it came due more than 10 minutes before a start), planned a gap after the
+  last (kept in its store, `state`), for every player at once. **The owner's own play counts as a
+  sitting** by the real person: when a sitting is due, and once every node has started, it asks each
+  player for the owner's latest play by hand its parser read (any command, from any device:
+  `ready`'s sends marked `byHand`); one newer than its last sitting is kept as its last (`seen`),
+  and the next simulated sitting is planned a gap after it, so the bot plays only once the owner has
+  been away longer than their pace. A sitting due while the person is still busy (a reaction
+  reserved past now) waits a gap after that (`busy`). A player asks it, through `ctx.attention`, for
+  the person's next reaction (`AttentionHandle.react({ length? })`), which it reserves, so that the
+  players of one person act one after the other. It plays while its node runs and the instance is
+  on; its safety stop (`kill`) stops its node, and its players are inactive with it. Its read
+  `status` gives its players, its last sitting (and whether by hand) and its next, which its node's
+  widget (its next sitting) and page (**Sittings**) show (D112). Each step is published as
+  `attention.step` (`planned`, `sitting`, `seen`, `busy`, `stopped`); its sittings, and those by
+  hand, go in the owner's summary (§4.17).
+- **`player`** (`packages/turns/src/player.ts`, bot-os.md D134): one plugin run as one node per game
+  bot (P3, P17), in place of the turn actor, each with its own id, configuration, store, timer and
+  state. Its ports: `chat`, a chat-out output on `telegram`, which sends to the private chat with
+  its bot; `parser`, a contract (`state.ready`, `actions.sent`) bound to its bot's parser, required,
+  so that drift on the parser stops it; and `attention`, its person (§2.1, D133), required. **It
+  only sends** (bot-os.md D99): it reads no chat, and an edge to a chat-in of it is refused. **Its
+  bot's chat is its edge's alone** (bot-os.md D97): its chat-out edge names exactly one chat, the
+  bot's `@username` (`single`), and allows the commands it plays. Its configuration: `commands`, the
+  commands it plays in order, each `{ command, whileHeld? }` (`[{ "command": "/play" }]` by
+  default): played whenever its parser says it is ready, or, with `whileHeld`, only while that other
+  command is held (a reset, only while the turn rests). **No schedule of its own:** given a sitting,
+  it plays, one at a time, each configured command that is ready (its parser's `state.ready`),
+  allowed by its policy and not held back by its outbox (`held`, D98: the safety net), each after
+  its person's reaction time (a glance first, then the answer read, scaled to its length); after
+  each live send it waits for the answer its parser reads (looking every 5 seconds, up to two
+  minutes), then looks again, so that a command an answer unlocks, or one a reset makes ready again,
+  is taken in the same sitting. A command it sent in the sitting goes again only if it became ready
+  again since (its readiness `since` after the send), at most 20 sends a sitting; when nothing is
+  left, it sleeps until the next sitting. Its next step is the durable timer `play`, and the sitting
+  it is in is kept in its store (`state`), so a restart takes the sitting up where it was (one whose
+  step came due more than 10 minutes before is dropped). Through a live chat-out edge it sends
+  through its outbox (refused `not connected`, it waits for the account, trying each minute) and
+  tells its parser each command sent, with its message's id; through a dry-run edge (bot-os.md D64,
+  as a new one is drawn) it logs each command (`sent`, `/play (dry run)`) and sends nothing, each
+  command once a sitting since no answer comes; a send refused or failed is not tried again in that
+  sitting, and a command its parser declares none of is never played (said once). It plays while its
+  node runs and the instance is on; its safety stop (`kill`) stops its node (`ctx.stop`), which
+  drops its sitting until the owner clears the stop in the editor. It declares no chat command,
+  since two nodes would clash: the owner reaches each with `/plugins <id>` and its read `status`
+  (its chat, its commands, its last play and its next: its next step in a sitting, else its person's
+  next sitting), which its node's widget and page (**Plays**) show (D112). Each step is published as
+  `player.step` (`sitting`, `sent`, `read`, `done`, `waiting`, `failed`, `stopped`); its commands
+  sent, by command, go in the owner's summary (§4.17, D92). The image offers both (`src/main.ts`):
+  the editor adds one `attention` node per person and one player per bot, each on its own instance,
+  its `chat` edge to the owner's `telegram-user` node, its `parser` edge from its bot's parser and
+  its `attention` edge from its person. The turn parsers are not the image's: each is made from a
+  game's grammar, so a game's module offers it. **A game's module declares its commands' mechanics**
+  in its parser's spec (`commands`, D132): a cooldown (`{ "/daily": { cooldownMin: 1440 } }`), an
+  announced unlock (`{ "/chest": { unlock: { pattern: "A chest appears!" } } }`, or a reading's
+  `unlocks`) and a reset (`{ "/coffee": { effects: [{ command: "/play", clear: true }] } }`, or a
+  reading's `effects`); the player needs nothing more.
 - **`owner-notice`** (`packages/turns/src/owner-notice.ts`, bot-os.md D91, D94): the one node that
   reports to a chat; without one, nothing is (the editor's events panel shows the notices, §4.16).
   It tells the owner what needs attention, from the notices (§4.16), through its `chat` output

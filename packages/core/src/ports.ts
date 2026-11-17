@@ -168,7 +168,7 @@ export const inputSchema = z.discriminatedUnion('type', [
     when: configKey.optional(),
     /**
      * The chat-out output of its node whose one chat (its `single`) its edge reads, that chat
-     * alone (bot-os.md D97): the turn actor reads the bot's chat it sends to.
+     * alone (bot-os.md D97): the turn actor read the bot's chat it sent to, until D99.
      */
     sameAs: z.string().min(1).optional(),
     ...common,

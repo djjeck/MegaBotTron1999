@@ -285,7 +285,7 @@ export interface OutboxHandle {
   /**
    * The chats it may send to (bot-os.md D97): those its edges name, or, for an edge that names
    * none from an output that sends to the owner's (`owner`), the owner's chat while the connector
-   * runs. A node whose edge is its only setting (owner-notice, the turn actor) sends there.
+   * runs. A node whose edge is its only setting (owner-notice, the player) sends there.
    */
   chats(): string[];
 }

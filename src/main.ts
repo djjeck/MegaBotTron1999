@@ -3,7 +3,7 @@
  * owner's control API and the web UI, and no game. Everything it calls is tested; this file is
  * wiring, left out of coverage.
  *
- * The connectors, the turn-actor, the reactor, the script node and owner-notice are registered, and so are the plugins of the modules installed under
+ * The connectors, attention and the player, the reactor, the script node and owner-notice are registered, and so are the plugins of the modules installed under
  * `/data/modules/<id>/` (docs/bot-os.md D49, docs/bot-os-api.md §7), so the image offers them; the
  * graph is the saved one, `/data/graph.json` (D50, docs/bot-os-api.md §2.3), each node's state in
  * its instance under `/data/instances/`. No file: no node runs until the owner adds one. A file
@@ -35,10 +35,11 @@ import {
   Stores,
   wallClock,
 } from '@megabottron1999/core';
+import { attentionPlugin } from '@megabottron1999/turns/attention.ts';
 import { ownerNoticePlugin } from '@megabottron1999/turns/owner-notice.ts';
+import { playerPlugin } from '@megabottron1999/turns/player.ts';
 import { reactorPlugin } from '@megabottron1999/turns/reactor.ts';
 import { scriptPlugin } from '@megabottron1999/turns/script-plugin.ts';
-import { turnActorPlugin } from '@megabottron1999/turns/turn-actor.ts';
 import { startWebUi } from '@megabottron1999/web/server/web-server.ts';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -90,15 +91,17 @@ const core = new Core({
 });
 // The connectors the image offers (docs/bot-os-api.md §5), each built from its node's config alone;
 // a node gives each its own account.
-// The turn-actor too, built from its config alone, as many nodes as there are bots (each on its own
-// instance); its parsers are a game's, from the game's grammar, so they come from a module. And the
-// reactor, one node per reaction, each from its config alone.
+// Attention too, one node per person, and the player, as many nodes as there are bots (each on its
+// own instance), each built from its config alone (docs/bot-os.md D134); the players' parsers are a
+// game's, from the game's grammar, so they come from a module. And the reactor, one node per
+// reaction, each from its config alone.
 const image: Plugin[] = [
   ircPlugin(),
   telegramBotPlugin(),
   telegramUserPlugin(),
   anthropicPlugin(),
-  turnActorPlugin(),
+  attentionPlugin(),
+  playerPlugin(),
   reactorPlugin(),
   // Script nodes (docs/bot-os.md D76): the owner's code, each in a worker thread of its own.
   scriptPlugin(),

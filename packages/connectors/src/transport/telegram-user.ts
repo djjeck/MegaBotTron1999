@@ -1,6 +1,6 @@
 /**
  * A Telegram user account, logged in as a user session with GramJS as a connector of the core
- * (docs/bot-os-api.md §4.5): the owner's own account, for parsers and turn-actors that read and
+ * (docs/bot-os-api.md §4.5): the owner's own account, for parsers and players that read and
  * play in its chats.
  *
  * It monitors the chats it is given and no other (a group by its id, `-100…`; a private chat by the
