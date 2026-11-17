@@ -220,8 +220,8 @@ export const greeter = definePlugin({
   owner clears it), or **inactive** while a node its required ports bind is down, at once when that
   node is stopped at runtime (D65). A chat-out edge that is a **dry run** logs what it would send,
   as sent, and sends nothing; so does a commands edge for a command's answers (D109). New nodes
-  start disabled and new chat-out edges dry runs; every state is raised only in the editor, applied
-  with a restart.
+  start disabled, their required ports that one port alone serves wired (D135), and new chat-out
+  edges dry runs; every state is raised only in the editor, applied with a restart.
 - **Drift:** a parser reports every message it claims but cannot read; past a threshold, the core
   stops the actors that depend on it, and what requires them goes inactive, until the owner looks.
 - **The send-queue watchdog** (D93): an actor that keeps sending one command to a bot's chat with no

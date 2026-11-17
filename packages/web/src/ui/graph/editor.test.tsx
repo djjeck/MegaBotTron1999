@@ -185,6 +185,18 @@ describe('the graph editor', () => {
         disabled: true,
       })
     );
+    // Its required ports, each served by one port of the draft alone, start wired (D135): its
+    // chat-out edge a dry run.
+    expect(core.checked.at(-1)?.edges.filter((e) => e.to.startsWith('actor-b.'))).toEqual([
+      { from: 'chat.chat', to: 'actor-b.chat', type: 'chat-in' },
+      { from: 'parser.interface', to: 'actor-b.parser', type: 'interface' },
+    ]);
+    expect(core.checked.at(-1)?.edges.filter((e) => e.from === 'actor-b.chat')).toEqual([
+      { from: 'actor-b.chat', to: 'chat.chat', type: 'chat-out', dryRun: true },
+    ]);
+    expect(screen.getByRole('status').textContent).toContain(
+      'wired chat.chat → actor-b.chat, parser.interface → actor-b.parser, actor-b.chat → chat.chat (a dry run), wire the rest'
+    );
     // A fresh one, named as the node by default.
     fireEvent.click(screen.getByRole('button', { name: 'Add a node' }));
     fireEvent.click(

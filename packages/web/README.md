@@ -79,8 +79,10 @@ the server that guards them.
   reminder beside them says that the edges which should read a chat need it ticked too (P6: the
   edges filter again), naming the chat-in edges with a `reads` list that miss a chat added or still
   read one removed, each a link that opens its panel. A connector not running yet says to apply
-  first. A new node starts **disabled** and a new chat-out edge a **dry run**: its rhombus hollow
-  and its part from the rhombus to the connector greyed and dashed; its panel's **Dry-run / Send for
+  first. A new node starts **disabled**, each of its required ports that one port of the draft alone
+  serves already wired to it (`wireRequired`, docs/bot-os.md D135: with one `attention` node, a new
+  `player` gets its `attention` edge), and a new chat-out edge a **dry run**: its rhombus hollow and
+  its part from the rhombus to the connector greyed and dashed; its panel's **Dry-run / Send for
   real** switch, and a node's **Enabled** switch, are changes of the draft, applied with Apply. A
   node's config and settings are forms made from its schemas (a connector's account is nothing to
   type: its node's id, read-only under **Advanced**, docs/bot-os.md D119), each field's description

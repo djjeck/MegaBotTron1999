@@ -33,6 +33,7 @@ import {
   updateEdge,
   updateNode,
   viewOf,
+  wireRequired,
 } from './draft.ts';
 
 const plugins = new Map(AVAILABLE.map((p) => [p.id, p]));
@@ -754,6 +755,129 @@ describe('an edge dragged (#4)', () => {
     expect(bindProblem(served, port({ type: 'chat-in' }))).toBe(
       'commands of telegram cannot bind chat-in port'
     );
+  });
+});
+
+describe('a node added, wired (D135)', () => {
+  const port = (p: Record<string, unknown>): PortView =>
+    ({ optional: false, label: `${String(p['type'])} port`, ...p }) as PortView;
+  const view = (
+    plugin: string,
+    inputs: Record<string, PortView>,
+    outputs: Record<string, PortView>
+  ): PluginView => ({
+    plugin,
+    version: '0.1.0',
+    description: plugin,
+    kinds: [],
+    inputs,
+    outputs,
+    interface: { reads: [], actions: [], commands: [] },
+    secrets: [],
+    configSecrets: [],
+    events: [],
+  });
+  const face = (plugin: string, members: string[]): PortView =>
+    port({ type: 'interface', plugin, members });
+  const all = new Map(
+    [
+      view(
+        'telegram-user',
+        { chat: port({ type: 'chat-out', network: 'telegram', optional: true }) },
+        {
+          chat: port({ type: 'chat-in', network: 'telegram' }),
+          interface: face('telegram-user', []),
+        }
+      ),
+      view(
+        'irc',
+        { chat: port({ type: 'chat-out', network: 'irc', optional: true }) },
+        { chat: port({ type: 'chat-in', network: 'irc' }), interface: face('irc', []) }
+      ),
+      view(
+        'attention',
+        {},
+        { attention: port({ type: 'attention' }), interface: face('attention', ['state.status']) }
+      ),
+      view(
+        'turn-parser',
+        {},
+        {
+          events: port({ type: 'events', namespace: 'game' }),
+          interface: face('turn-parser', ['state.ready', 'actions.sent']),
+        }
+      ),
+      view(
+        'player',
+        {
+          parser: port({ type: 'interface', members: ['state.ready', 'actions.sent'] }),
+          attention: port({ type: 'attention' }),
+          moods: port({ type: 'attention', optional: true }),
+        },
+        {
+          chat: port({ type: 'chat-out', network: 'telegram' }),
+          interface: face('player', ['state.status']),
+        }
+      ),
+      view('reactor', { on: port({ type: 'events', config: 'on' }) }, {}),
+    ].map((v) => [v.plugin, v])
+  );
+  const portsOf = (n: { plugin: string }) => all.get(n.plugin);
+  const graph = (...nodes: [string, string][]): Graph => ({
+    version: 2,
+    nodes: nodes.map(([id, plugin]) => ({ id, plugin })),
+    edges: [],
+  });
+  const added = (g: Graph, id: string, plugin: string) =>
+    wireRequired(addNode(g, { id, plugin, disabled: true }), id, portsOf, all);
+
+  it('binds each required port the one port of the draft serves, a chat-out edge a dry run', () => {
+    const g = graph(['me', 'telegram-user'], ['bob', 'attention'], ['game', 'turn-parser']);
+    const { graph: out, wired } = added(g, 'player', 'player');
+    expect(wired).toEqual([
+      { from: 'game.interface', to: 'player.parser', type: 'interface' },
+      { from: 'bob.attention', to: 'player.attention', type: 'attention' },
+      // Its chat unnamed, for the owner to pick; sent nowhere until the owner says so.
+      { from: 'player.chat', to: 'me.chat', type: 'chat-out', dryRun: true },
+    ]);
+    expect(out.edges).toEqual(wired);
+    expect(out.nodes.at(-1)).toEqual({ id: 'player', plugin: 'player', disabled: true });
+  });
+
+  it('leaves a port unwired when no port, or several, serve it', () => {
+    // Two people, two Telegram accounts: the owner says which; no IRC connector serves its chat.
+    const two = graph(
+      ['me', 'telegram-user'],
+      ['bot', 'telegram-user'],
+      ['bob', 'attention'],
+      ['carol', 'attention'],
+      ['game', 'turn-parser']
+    );
+    expect(added(two, 'player', 'player').wired).toEqual([
+      { from: 'game.interface', to: 'player.parser', type: 'interface' },
+    ]);
+    expect(added(graph(['irc', 'irc']), 'player', 'player').wired).toEqual([]);
+    // An events input whose namespace is not known yet is the check's to say, never guessed.
+    expect(added(graph(['game', 'turn-parser']), 'reactor', 'reactor').wired).toEqual([]);
+    // A node nothing is known of is added as it is.
+    const unknown = added(graph(['bob', 'attention']), 'ghost', 'ghost');
+    expect(unknown.wired).toEqual([]);
+    expect(unknown.graph.edges).toEqual([]);
+    expect(wireRequired(EMPTY_GRAPH, 'none', portsOf, all)).toEqual({
+      graph: EMPTY_GRAPH,
+      wired: [],
+    });
+  });
+
+  it('keeps a port bound already as it is', () => {
+    const g: Graph = {
+      ...graph(['me', 'telegram-user'], ['bob', 'attention'], ['player', 'player']),
+      edges: [
+        { from: 'bob.attention', to: 'player.attention', type: 'attention' },
+        { from: 'player.chat', to: 'me.chat', type: 'chat-out', sends: ['@QuestBot'] },
+      ],
+    };
+    expect(wireRequired(g, 'player', portsOf, all)).toEqual({ graph: g, wired: [] });
   });
 });
 

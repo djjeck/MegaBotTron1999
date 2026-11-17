@@ -644,6 +644,78 @@ export function bindProblem(output: PortView, input: PortView): string | undefin
     : `${output.plugin ?? output.label} does not declare ${missing.join(', ')}`;
 }
 
+/**
+ * Whether an output surely serves an input, for an edge made without the owner (D135): it binds
+ * (`bindProblem`), and an events port's namespace is known at both ends, not left to the check.
+ */
+function surelyServes(output: PortView, input: PortView): boolean {
+  if (bindProblem(output, input) !== undefined) return false;
+  return (
+    output.type !== 'events' ||
+    input.type !== 'events' ||
+    (output.namespace !== undefined && input.namespace !== undefined)
+  );
+}
+
+/** The ports of a node as the editor draws it: its inputs and outputs. */
+type Ported = Pick<PluginView, 'inputs' | 'outputs'>;
+
+/**
+ * A node just added, wired (docs/bot-os.md D135): each of its required ports left unbound, an
+ * input not `optional` or a chat-out output not `optional` (those the check refuses unbound), bound
+ * to the one port of another node of the draft that serves it (`surelyServes`), when there is
+ * exactly one; with none or several, left for the owner to wire. Each edge is made as a drag would
+ * make it (`edgeOf`): a chat-out edge, to a connector, starts a dry run (D64), naming no chat its
+ * node's config does not. The edges made, in the order of its inputs, then its outputs.
+ */
+export function wireRequired(
+  g: Graph,
+  id: string,
+  portsOf: (n: GraphNode) => Ported | undefined,
+  plugins: ReadonlyMap<string, PluginView>,
+  /** The nodes whose ports their config declares, by id (`POST /graph/check`'s `views`, D74). */
+  views: Readonly<Record<string, PluginView>> = {}
+): { graph: Graph; wired: GraphEdge[] } {
+  const node = g.nodes.find((n) => n.id === id);
+  const own = node === undefined ? undefined : portsOf(node);
+  if (own === undefined) return { graph: g, wired: [] };
+  const others = g.nodes.flatMap((n) => {
+    const ports = n.id === id ? undefined : portsOf(n);
+    return ports === undefined ? [] : [{ id: n.id, ports }];
+  });
+  let out = g;
+  const wired: GraphEdge[] = [];
+  const bind = (c: Parameters<typeof edgeOf>[0]): void => {
+    const edge = edgeOf(c, plugins, out, views);
+    out = connect(out, edge);
+    wired.push(edge);
+  };
+  for (const [port, input] of Object.entries(own.inputs)) {
+    if (input.optional || out.edges.some((e) => e.to === `${id}.${port}`)) continue;
+    const serving = others.flatMap((o) =>
+      Object.entries(o.ports.outputs)
+        .filter(([, output]) => surelyServes(output, input))
+        .map(([name]) => ({ node: o.id, port: name }))
+    );
+    const [one] = serving;
+    if (serving.length === 1 && one !== undefined)
+      bind({ source: one.node, sourceHandle: one.port, target: id, targetHandle: port });
+  }
+  for (const [port, output] of Object.entries(own.outputs)) {
+    if (output.type !== 'chat-out' || output.optional) continue;
+    if (out.edges.some((e) => e.from === `${id}.${port}`)) continue;
+    const taking = others.flatMap((o) =>
+      Object.entries(o.ports.inputs)
+        .filter(([, input]) => surelyServes(output, input))
+        .map(([name]) => ({ node: o.id, port: name }))
+    );
+    const [one] = taking;
+    if (taking.length === 1 && one !== undefined)
+      bind({ source: id, sourceHandle: port, target: one.node, targetHandle: one.port });
+  }
+  return { graph: out, wired };
+}
+
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /**

@@ -479,7 +479,8 @@ the draft applied with Apply (a restart); nothing raises a state at runtime. **A
 (`core.send`, outcome `dry-run`, counted in the account's rate as a send) and never sent; the plugin
 sees it sent (§4.6). It covers messages only: a model's calls stop when its node is disabled. In the
 editor a new node starts disabled, for the owner to set its config first, and a new chat-out edge
-starts a dry run.
+starts a dry run, one the editor wires itself (a new node's required port that one port of the draft
+alone serves, bot-os.md D135) included.
 
 **Where the graph comes from.** `CoreOptions.graph` is the instance's graph; without it, the core
 makes the default one from the plugins registered, in their order: a node per plugin, its id the
@@ -1829,8 +1830,10 @@ instance's release, how long it has run and its memory (`GET /instance`). **Stat
 (bot-os.md D64, §2.1): a node is drawn greyed while disabled in the draft (its panel's **Enabled**
 switch), in red tones with a warning icon and its reason while stopped, greyed with the node it
 needs while inactive (from `GET /status`); a stopped node's panel says why, when and by what, with
-**Clear stop**. A node added starts disabled, and a chat-out or a commands edge drawn starts a dry
-run: its rhombus hollow and its part from the rhombus to the connector greyed and dashed, its
+**Clear stop**. A node added starts disabled, each of its required ports (an input, or a chat-out
+output, not optional) that exactly one port of another node serves wired to it (bot-os.md D135; with
+none or several, left for the owner), and a chat-out or a commands edge drawn, or so wired, starts a
+dry run: its rhombus hollow and its part from the rhombus to the connector greyed and dashed, its
 panel's **Dry-run / Send for real** switch setting `dryRun`. All of these are changes of the draft,
 listed in the review (a stop cleared as "Stops cleared") and made by Apply. A connector is drawn as
 two cards (`cards.ts`, bot-os.md D60), one node in the graph all the same: its **in** card

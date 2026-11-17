@@ -7,7 +7,8 @@
  *
  * - **Add a node** from the plugins the instance offers (`GET /available`), choosing its id and its
  *   instance: fresh, or kept already. It starts disabled, for the owner to set it up first (D64),
- *   and selected, its panel open on it.
+ *   and selected, its panel open on it; each of its required ports that one port of the draft
+ *   alone serves starts wired to it, a chat-out edge a dry run (D135, `wireRequired`).
  * - **Wire it**: an edge dragged from an output to an input; a chat-in edge's chats, or a chat-out
  *   edge's chats and commands, set in its panel; a new chat-out edge is a dry run until the owner
  *   sends for real (D64). Every change is checked by the core as the load would
@@ -110,6 +111,7 @@ import {
   updateEdge,
   updateNode,
   viewOf,
+  wireRequired,
 } from './draft.ts';
 import { DraggedEdge } from './DraggedEdge.tsx';
 import { EdgeDetails } from './EdgeDetails.tsx';
@@ -668,14 +670,27 @@ export function GraphPage({
     // starts disabled, for the owner to set it up first (D64).
     const config = withDefaults(plugins.get(n.plugin)?.configSchema, undefined);
     const node = { ...n, disabled: true };
-    change((g) => addNode(g, Object.keys(config).length === 0 ? node : { ...node, config }));
+    // Each required port of it that one port of the draft alone serves, wired (D135): a chat-out
+    // edge a dry run, as a drag makes it.
+    const { graph, wired } = wireRequired(
+      addNode(draft ?? EMPTY_GRAPH, Object.keys(config).length === 0 ? node : { ...node, config }),
+      n.id,
+      nodeView,
+      plugins,
+      declared
+    );
+    change(() => graph);
     setPanel(undefined);
     // It takes the selection, so that its panel opens on it.
     setNodes((ns) => ns.map((x) => (x.selected === true ? { ...x, selected: false } : x)));
     setEdges((es) => es.map((e) => (e.selected === true ? { ...e, selected: false } : e)));
     setSelected({ nodes: [n.id], edges: [] });
     setSaid(
-      `${n.id} added, disabled, on the instance ${n.instance}: wire it, set it up, enable it, then review and apply`
+      `${n.id} added, disabled, on the instance ${n.instance}: ${
+        wired.length === 0
+          ? 'wire it'
+          : `wired ${wired.map((e) => `${edgeKey(e)}${e.dryRun === true ? ' (a dry run)' : ''}`).join(', ')}, wire the rest`
+      }, set it up, enable it, then review and apply`
     );
     instances.reload();
   };
