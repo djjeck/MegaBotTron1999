@@ -295,9 +295,12 @@ export function attentionPlugin(): Plugin {
       inputs: {
         // There only while it follows the owner's play (D138): then required, so the check
         // refuses one not wired; the editor draws it as soon as followsMyPlay is ticked, so that
-        // its listen chats are picked among its edge's account's.
+        // its listen chats are picked among its edge's account's. Of the owner's own account
+        // (network telegram, as a player's chat-out): only there are the owner's messages their
+        // own; a bot's account never hears one, so the check refuses its edge.
         listen: {
           type: 'chat-in',
+          network: 'telegram',
           when: { config: 'followsMyPlay' },
           help: 'With followsMyPlay: your own account, whose messages in the chats it listens to start a sitting',
         },

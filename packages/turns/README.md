@@ -30,10 +30,11 @@ the owner what needs attention.
   simulated one back. Two behaviours, each on its own (D138): `scheduled` (on by default), the
   sittings it plans from its schedule, hidden in the editor while off; and `followsMyPlay` (off by
   default), a sitting `followDelayS` (3 s) after any message of the owner's own in the chats it
-  `listen`s to, through its `listen` chat-in from the owner's account (none during a sitting: its
-  players look again instead), counted as the owner's own sitting. Both off, the check warns that it
-  never plays. Its card shows its next sitting (`follows your play` when not scheduled), its page
-  (**Sittings**) its behaviours, its last and next.
+  `listen`s to, through its `listen` chat-in from the owner's own account (network `telegram`: the
+  check refuses a bot's; none during a sitting: its players look again instead), counted as the
+  owner's own sitting. Both off, the check warns that it never plays. Its card shows its next
+  sitting (`follows your play` when not scheduled), its page (**Sittings**) its behaviours, its last
+  and next.
 - `playerPlugin` (`src/player.ts`): the `player`, one node per bot, in place of the turn actor
   (D134): given a sitting, it plays each of its commands that its parser says is ready
   (`state.ready`, D132) and its policy allows: its config's `commands` (each

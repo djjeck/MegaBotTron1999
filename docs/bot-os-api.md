@@ -2369,25 +2369,26 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   (`followsMyPlay`, D138): `listen`, the chats it listens to (picked in the editor among the chats
   of the account its `listen` edge reads, a `configChats` key written on that edge's `reads`, D96,
   D97), and `followDelayS` (3 by default), both shown only while it follows. Its `listen` input, a
-  chat-in from the owner's own account (a `telegram-user`), is there only while `followsMyPlay` is
-  on (`when`, §2.1, a key set to `false` setting nothing), and then required; the config refuses
-  `followsMyPlay` without `listen`, and `listen` without it. **Any message of the owner's own**
-  (`own`, or sent as the account's name), live, in a chat it listens to, command or not, starts a
-  sitting `followDelayS` seconds later (the timer `follow`), so that the owner's own typing wins a
-  race; one more message while it is pending starts no other. A message during a sitting (a player
-  still in it, `AttentionPlayer.inSitting`) starts none either: its players in it look again
-  (`again`). A sitting that follows the owner is marked `follow` and counts as the owner's own
-  sitting (`byHand` in its status), so while `scheduled` the next planned one comes a full gap after
-  it. A player asks it, through `ctx.attention`, for the person's next reaction
-  (`AttentionHandle.react({ length? })`), which it reserves, so that the players of one person act
-  one after the other. It plays while its node runs and the instance is on; its safety stop (`kill`)
-  stops its node, and its players are inactive with it. Its read `status` gives its behaviours
-  (`mode`: `scheduled`, `follows your play`, both, or `never plays`), its players, its last sitting
-  (and whether by hand) and its next (a time; not scheduled, `follows your play`, or `never: …`),
-  which its node's widget (its next sitting) and page (**Sittings**) show (D112). Each step is
-  published as `attention.step` (`planned`, `sitting`, `seen`, `busy`, `heard`, `stopped`); its
-  sittings (those that followed the owner counted apart: `3 sittings (1 following you)`), and those
-  by hand, go in the owner's summary (§4.17).
+  chat-in of network `telegram` (as a player's chat-out), so from the owner's own account (a
+  `telegram-user`; the check refuses a `telegram-bot`'s edge, whose account never hears a message of
+  the owner's own), is there only while `followsMyPlay` is on (`when`, §2.1, a key set to `false`
+  setting nothing), and then required; the config refuses `followsMyPlay` without `listen`, and
+  `listen` without it. **Any message of the owner's own** (`own`, or sent as the account's name),
+  live, in a chat it listens to, command or not, starts a sitting `followDelayS` seconds later (the
+  timer `follow`), so that the owner's own typing wins a race; one more message while it is pending
+  starts no other. A message during a sitting (a player still in it, `AttentionPlayer.inSitting`)
+  starts none either: its players in it look again (`again`). A sitting that follows the owner is
+  marked `follow` and counts as the owner's own sitting (`byHand` in its status), so while
+  `scheduled` the next planned one comes a full gap after it. A player asks it, through
+  `ctx.attention`, for the person's next reaction (`AttentionHandle.react({ length? })`), which it
+  reserves, so that the players of one person act one after the other. It plays while its node runs
+  and the instance is on; its safety stop (`kill`) stops its node, and its players are inactive with
+  it. Its read `status` gives its behaviours (`mode`: `scheduled`, `follows your play`, both, or
+  `never plays`), its players, its last sitting (and whether by hand) and its next (a time; not
+  scheduled, `follows your play`, or `never: …`), which its node's widget (its next sitting) and
+  page (**Sittings**) show (D112). Each step is published as `attention.step` (`planned`, `sitting`,
+  `seen`, `busy`, `heard`, `stopped`); its sittings (those that followed the owner counted apart:
+  `3 sittings (1 following you)`), and those by hand, go in the owner's summary (§4.17).
 - **`player`** (`packages/turns/src/player.ts`, bot-os.md D134): one plugin run as one node per game
   bot (P3, P17), in place of the turn actor, each with its own id, configuration, store, timer and
   state. Its ports: `chat`, a chat-out output on `telegram`, which sends to the private chat with

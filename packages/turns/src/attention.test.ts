@@ -226,9 +226,37 @@ describe('its listen port and its warning (D138)', () => {
     expect(check({})).toEqual({ problems: [], warnings: [] });
     const follows = { followsMyPlay: true, listen: [QUEST_CHAT] };
     expect(check(follows).problems).toEqual([
-      'node alice: input port listen (chat-in of any network) is not bound',
+      'node alice: input port listen (chat-in of telegram) is not bound',
     ]);
     expect(check(follows, true)).toEqual({ problems: [], warnings: [] });
+  });
+
+  it("listens through the owner's own account, never a bot's", () => {
+    const bot = 'telegram-bot';
+    const both = new Map(manifests);
+    const m = parseManifest(
+      fakeConnectorPlugin(bot, new FakeConnector({ account: 'telegram-bot:ExampleBot' })).manifest
+    );
+    both.set(m.id, m);
+    const g = (from: string): GraphInput => ({
+      version: 2,
+      nodes: [
+        { id: ACCOUNT, plugin: ACCOUNT },
+        { id: bot, plugin: bot },
+        { id: 'alice', plugin: ATTENTION, config: { followsMyPlay: true, listen: [QUEST_CHAT] } },
+      ],
+      edges: [{ from: `${from}.chat`, to: 'alice.listen', type: 'chat-in', reads: [QUEST_CHAT] }],
+    });
+    let refused: string[] = [];
+    try {
+      resolveGraph(g(bot), both);
+    } catch (e) {
+      refused = (e as { problems: string[] }).problems;
+    }
+    expect(refused).toEqual([
+      'node alice: input port listen: chat-in of telegram-bot cannot bind chat-in of telegram (edge telegram-bot.chat → alice.listen)',
+    ]);
+    expect(resolveGraph(g(ACCOUNT), both).warnings).toEqual([]);
   });
 
   it('warns that it never plays, neither scheduled nor following', () => {
