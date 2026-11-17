@@ -160,6 +160,8 @@ export function EdgeDetails(props: {
   input?: PortView | undefined;
   /** The connector's owner's chat, as its config names it (D97). */
   owner?: string | undefined;
+  /** A player's chat edge (D137): the node whose checklist its commands follow. */
+  follows?: string | undefined;
   change: (change: EdgeChange) => void;
   remove: () => void;
 }) {
@@ -329,22 +331,42 @@ export function EdgeDetails(props: {
               )}
             </p>
           ) : null}
-          <RowsField
-            name="commands"
-            help="The commands it may send there, by first word (/play); none: any text"
-            placeholder="/play"
-            value={edge.commands ?? []}
-            set={(commands) => {
-              // A command taken out takes its spacing with it.
-              const kept = Object.entries(edge.minIntervalS ?? {}).filter(([c]) =>
-                commands.includes(c)
-              );
-              props.change({
-                commands,
-                minIntervalS: kept.length === 0 ? undefined : Object.fromEntries(kept),
-              });
-            }}
-          />
+          {props.follows === undefined ? (
+            <RowsField
+              name="commands"
+              help="The commands it may send there, by first word (/play); none: any text"
+              placeholder="/play"
+              value={edge.commands ?? []}
+              set={(commands) => {
+                // A command taken out takes its spacing with it.
+                const kept = Object.entries(edge.minIntervalS ?? {}).filter(([c]) =>
+                  commands.includes(c)
+                );
+                props.change({
+                  commands,
+                  minIntervalS: kept.length === 0 ? undefined : Object.fromEntries(kept),
+                });
+              }}
+            />
+          ) : (
+            <p className="small" role="note" aria-label="commands it sends">
+              <code>commands</code>:{' '}
+              {(edge.commands ?? []).length === 0 ? (
+                <span className="muted">none</span>
+              ) : (
+                (edge.commands ?? []).map((c, i) => (
+                  <span key={c}>
+                    {i === 0 ? '' : ', '}
+                    <code>{c}</code>
+                  </span>
+                ))
+              )}
+              <br />
+              <span className="muted">
+                Those {props.follows} plays: they follow its checklist of commands, in its panel.
+              </span>
+            </p>
+          )}
           <Spacing
             commands={edge.commands ?? []}
             value={edge.minIntervalS ?? {}}

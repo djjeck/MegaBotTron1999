@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Graph } from '#src/ui/api.ts';
+import type { Graph, PluginView } from '#src/ui/api.ts';
 import { fakeCore } from '#test/fake-core.ts';
-import { AVAILABLE, status } from '#test/graph-view.ts';
+import { AVAILABLE, status, VIEW } from '#test/graph-view.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
 import { GraphPage } from './GraphPage.tsx';
 import { groupPlugins } from './Palette.tsx';
@@ -708,6 +708,52 @@ describe('the graph editor', () => {
     await waitFor(() => expect(within(actor).getByTestId('port in heard')).toBeDefined(), slow);
     expect(within(actor).queryByTestId('port in parser')).toBeNull();
   });
+
+  it('draws a player’s commands as a checklist of its parser’s, its chat edge following (D137)', async () => {
+    const plays = <V extends PluginView>(v: V): V =>
+      v.plugin === 'parser'
+        ? {
+            ...v,
+            botCommands: [
+              { command: '/play', turn: true as const },
+              { command: '/daily', cooldownMin: 1440 },
+              { command: '/shop', interactive: true as const },
+            ],
+          }
+        : v.plugin === 'actor'
+          ? {
+              ...v,
+              configSchema: {
+                type: 'object',
+                properties: { commands: { type: 'array', items: { type: 'object' } } },
+              },
+              configPlays: { key: 'commands', input: 'parser', output: 'chat' },
+            }
+          : v;
+
+    const core = fakeCore({ available: AVAILABLE.map(plays) });
+    core.api.routes['GET /graph/view'] = [200, { ...VIEW, nodes: VIEW.nodes.map(plays) }];
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    fireEvent.click(await screen.findByLabelText('node actor-a', {}, slow));
+    const details = await screen.findByLabelText('details of actor-a');
+    expect(within(details).getByLabelText('what it does with /shop').textContent).toBe(
+      'needs you to answer: not played by default'
+    );
+    fireEvent.click(within(details).getByLabelText('play /daily'));
+    await waitFor(() => {
+      const g = core.checked.at(-1);
+      expect(g?.nodes.find((n) => n.id === 'actor-a')?.config).toEqual({
+        commands: [{ command: '/play' }],
+      });
+      expect(g?.edges.find((e) => e.from === 'actor-a.chat')?.commands).toEqual(['/play']);
+    }, slow);
+    // Its edge's panel says so, rather than offer a list of its own.
+    fireEvent.click(screen.getByRole('button', { name: 'edge actor-a.chat → chat.chat' }));
+    const edge = await screen.findByLabelText('details of edge actor-a.chat → chat.chat');
+    expect(within(edge).getByLabelText('commands it sends').textContent).toContain(
+      'Those actor-a plays'
+    );
+  }, 20_000);
 
   it('shows an opened node’s defaults filled in, and leaves it unchanged until edited', async () => {
     const core = fakeCore();

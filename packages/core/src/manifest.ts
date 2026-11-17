@@ -45,6 +45,43 @@ const name = z.string().regex(/^[a-z][A-Za-z0-9_]*$/u, 'expected a name such as 
 export type NodeManifest = (config: Readonly<Record<string, unknown>>, id: string) => unknown;
 const nodeFn = z.custom<NodeManifest>((v) => typeof v === 'function', 'expected a function');
 
+/** A command, by its first word: `/play`. */
+const BOT_COMMAND = /^\/\w+$/u;
+const botCommandName = z.string().regex(BOT_COMMAND, 'expected a command, as /play');
+
+/**
+ * A command of a game bot, as its parser declares it (bot-os.md D132, D137): a turn (`turn`: its
+ * readiness the bot's rest), or another with its mechanics, in generic terms.
+ */
+const botCommandSchema = z.strictObject({
+  command: botCommandName,
+  /** One of the turn commands, which share one readiness: the bot's rest. */
+  turn: z.literal(true).optional(),
+  /** Held for so many minutes after a success. */
+  cooldownMin: z.number().positive().optional(),
+  /** Ready only once a message of the bot announces it (`pattern`), for `forMin` minutes. */
+  unlock: z
+    .strictObject({
+      pattern: z.string().optional(),
+      forMin: z.number().positive().optional(),
+    })
+    .optional(),
+  /** What its success does to another command's hold: ends it, or shortens it. */
+  effects: z
+    .array(
+      z.strictObject({
+        command: botCommandName,
+        clear: z.literal(true).optional(),
+        shortenMin: z.number().positive().optional(),
+      })
+    )
+    .optional(),
+  /** It needs the person to answer or choose (a minigame, a shop): never played blindly. */
+  interactive: z.literal(true).optional(),
+});
+/** A command of a game bot, with its mechanics, as its parser declares it (D137). */
+export type BotCommand = z.output<typeof botCommandSchema>;
+
 export const manifestSchema = z
   .strictObject({
     id: z
@@ -205,6 +242,26 @@ export const manifestSchema = z
         })
       )
       .default([]),
+    /**
+     * A game bot's parser's: its bot's commands it knows, in order, the turns first, each with its
+     * mechanics (bot-os.md D132, D137), so that the editor knows them without the node running: a
+     * player's checklist (`configPlays`) offers them, and says what each will do. Data only: what
+     * the parser makes of them is its own (`turnParserPlugin`).
+     */
+    botCommands: z.array(botCommandSchema).optional(),
+    /**
+     * A player's (bot-os.md D137): the key of its config that lists the commands it plays (`[{
+     * command, whileHeld?, whenReady? }]`, unset: the defaults), picked from the `botCommands` of
+     * the node its interface `input` binds; and its chat-out `output`, whose edge the editor keeps
+     * allowing the commands it plays.
+     */
+    configPlays: z
+      .strictObject({
+        key: z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key'),
+        input: z.string().min(1),
+        output: z.string().min(1),
+      })
+      .optional(),
     /**
      * It hears the owner's notices (bot-os.md D91, `ctx.notices`): what the core and the plugins
      * raise for the owner's attention, for a node that tells the owner (`owner-notice`).
@@ -375,6 +432,36 @@ export const manifestSchema = z
           message: `it has no chat-in input ${c.input}`,
         });
     }
+    if (m.configPlays !== undefined) {
+      const { key, input, output } = m.configPlays;
+      if (!Object.hasOwn(m.config?.shape ?? {}, key))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['configPlays', 'key'],
+          message: `its config has no key ${key}`,
+        });
+      if (m.inputs[input]?.type !== 'interface')
+        ctx.addIssue({
+          code: 'custom',
+          path: ['configPlays', 'input'],
+          message: `it has no interface input ${input}`,
+        });
+      if (m.outputs[output]?.type !== 'chat-out')
+        ctx.addIssue({
+          code: 'custom',
+          path: ['configPlays', 'output'],
+          message: `it has no chat-out output ${output}`,
+        });
+    }
+    const declared = (m.botCommands ?? []).map((c) => c.command.toLowerCase());
+    m.botCommands?.forEach((c, i) => {
+      if (declared.indexOf(c.command.toLowerCase()) !== i)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['botCommands', i, 'command'],
+          message: `${c.command} is declared twice`,
+        });
+    });
     if (m.requires.includes(m.id))
       ctx.addIssue({
         code: 'custom',

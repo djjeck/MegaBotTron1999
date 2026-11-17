@@ -218,6 +218,7 @@ export {
   NEEDS_LOGIN,
 } from './login.ts';
 export {
+  type BotCommand,
   type Kind,
   KINDS,
   type Manifest,

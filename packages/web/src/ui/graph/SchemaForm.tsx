@@ -96,7 +96,7 @@ interface Editing {
 export type CustomControl = (value: unknown, set: (v: unknown) => void) => ReactNode;
 
 /** A value typed as JSON, kept as typed until it reads. */
-function JsonField(props: {
+export function JsonField(props: {
   name: string;
   value: unknown;
   set: ((v: unknown) => void) | undefined;

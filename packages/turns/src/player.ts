@@ -1,20 +1,24 @@
 /**
  * The `player` (docs/bot-os-api.md §5, bot-os.md D134): one plugin, run as one node per game bot
- * that may be automated (P3, P17), in place of the turn actor. It plays the commands its config
- * names, in a simulated person's sittings, from the owner's account, in the private chat with its
- * bot. Its ports:
+ * that may be automated (P3, P17), in place of the turn actor. It plays its bot's commands, in a
+ * simulated person's sittings, from the owner's account, in the private chat with its bot: those
+ * its config names, or by default (D137) every command its parser declares (`state.commands`) but
+ * an interactive one, in its parser's order. Its ports:
  *
  * - `chat`, a chat-out output: its bot's private chat, **its edge's alone** (bot-os.md D97: the one
  *   chat its edge names, the bot's `@username`; the check refuses anything else), its commands
  *   those its edge allows; it reads no chat (D99);
- * - `parser`, a contract on its bot's parser (`state.ready`, `actions.sent`, D132), required, so
- *   that drift on the parser stops it: each command's readiness, and the sends it tells it of;
+ * - `parser`, a contract on its bot's parser (`state.ready`, `state.commands`, `actions.sent`,
+ *   D132, D137), required, so that drift on the parser stops it: each command's readiness, its
+ *   commands with their mechanics, and the sends it tells it of;
  * - `attention`, its person (bot-os.md D133), required: the sittings it plays in, and the person's
  *   reaction time.
  *
- * **Given a sitting**, it plays, one at a time, each configured command that is ready and that its
- * policy allows (`when ready`, or only while another command is held: a reset only while the turn
- * rests), in its config's order, each after the person's reaction time (its person's `react`:
+ * **Given a sitting**, it plays, one at a time, each of its commands that is ready and that its
+ * policy allows, in its order. The policy comes from the command's mechanics (D137): a turn,
+ * whenever ready; a command whose success clears another's hold (a reset), only while that other is
+ * held (cooling down); any other, whenever ready; a config's entry overrides it (`whileHeld`, or
+ * `whenReady`). Each goes after the person's reaction time (its person's `react`:
  * a glance first, then the answer read, scaled to its length); after each live send it waits for
  * the answer its parser reads (up to two minutes), then looks again, so that a command an answer
  * unlocks, or one a reset makes ready again, is taken in the same sitting. A command it sent in
@@ -44,6 +48,7 @@
  * `player.step`, with its node's id, and printed; its plays go in the owner's summary (D92).
  */
 import {
+  type BotCommand,
   counted,
   definePlugin,
   type Plugin,
@@ -68,34 +73,83 @@ export const ANSWER_WAIT_MS = ANSWER_WINDOW_MS;
 export const CONNECT_WAIT_MS = 60_000;
 /** The most sends of one sitting: a guard against two commands that reset each other forever. */
 export const MAX_SENDS_PER_SITTING = 20;
-/** The members of its parser it uses (D132). */
-export const PLAYER_PARSER_MEMBERS = ['state.ready', 'actions.sent'];
+/** The members of its parser it uses (D132, D137). */
+export const PLAYER_PARSER_MEMBERS = ['state.ready', 'state.commands', 'actions.sent'];
 
 const COMMAND = /^\/\w+$/u;
 
-/** One command it plays, and when. */
-const playSchema = z.object({
-  command: z.string().regex(COMMAND, 'expected a command, as /play').describe('The command sent'),
-  whileHeld: z
-    .string()
-    .regex(COMMAND, 'expected a command, as /play')
-    .optional()
-    .describe(
-      'Played only while this command is held (a reset, only while the turn rests); unset, whenever it is ready'
-    ),
-});
+/** One command it plays, and, to override the policy its mechanics give, when (D137). */
+const playSchema = z
+  .object({
+    command: z.string().regex(COMMAND, 'expected a command, as /play').describe('The command sent'),
+    whileHeld: z
+      .string()
+      .regex(COMMAND, 'expected a command, as /play')
+      .optional()
+      .describe(
+        'Played only while this command is held (cooling down); unset, as its mechanics say'
+      ),
+    whenReady: z
+      .literal(true)
+      .optional()
+      .describe('Played whenever it is ready, whatever its mechanics say'),
+  })
+  .refine((p) => p.whileHeld === undefined || p.whenReady === undefined, {
+    message: 'whileHeld or whenReady, not both',
+  });
 
-/** A player's configuration: the commands it plays, each with its policy, in order. */
+/**
+ * A player's configuration: the commands it plays, each with its policy, in order; unset, the
+ * defaults (D137): every command its parser declares but an interactive one, in its order.
+ */
 export const playerConfig = z.object({
   commands: z
     .array(playSchema)
-    .min(1)
-    .default(() => [{ command: '/play' }])
+    .optional()
     .describe(
-      "The commands it plays, in this order, each when its parser says it is ready and its policy allows; the chat-out edge must allow each (its bot's commands)"
+      'The commands it plays, in this order, each when its parser says it is ready and its policy allows; unset, every command its parser declares but those that need you to answer. Its chat-out edge allows those it plays (the editor keeps it so)'
     ),
 });
 export type PlayerConfig = z.output<typeof playerConfig>;
+/** A command it plays, with its policy resolved: only while `whileHeld` is held, or when ready. */
+export interface Play {
+  command: string;
+  whileHeld?: string;
+}
+
+/**
+ * The policy a command's mechanics give it (D137): a turn, whenever ready (the bot's rest over);
+ * one whose success clears another's hold (a reset), only while that other is held; any other,
+ * whenever ready.
+ */
+export function derivedWhileHeld(c: BotCommand | undefined): string | undefined {
+  if (c === undefined || c.turn === true) return undefined;
+  return c.effects?.find((e) => e.clear === true && e.command !== c.command)?.command;
+}
+
+/**
+ * What a player plays (D137), in order: its config's `commands`, each with its override or its
+ * mechanics' policy; unset, each of `declared` but the interactive ones, in their order.
+ */
+export function playsOf(
+  commands: PlayerConfig['commands'],
+  declared: readonly BotCommand[]
+): Play[] {
+  const find = (c: string): BotCommand | undefined =>
+    declared.find((d) => d.command.toLowerCase() === c.toLowerCase());
+  const play = (command: string, whileHeld: string | undefined): Play =>
+    whileHeld === undefined ? { command } : { command, whileHeld };
+  if (commands === undefined)
+    return declared
+      .filter((d) => d.interactive !== true)
+      .map((d) => play(d.command, derivedWhileHeld(d)));
+  return commands.map((p) =>
+    play(
+      p.command,
+      p.whenReady === true ? undefined : (p.whileHeld ?? derivedWhileHeld(find(p.command)))
+    )
+  );
+}
 
 /** A sitting in progress, as it keeps it. */
 interface InSitting {
@@ -150,6 +204,8 @@ export function playerPlugin(): Plugin {
       description:
         "A game bot's commands, from the owner's account, in its private chat, in a simulated person's sittings",
       config: playerConfig,
+      // Its commands, a checklist of its parser's in the editor (D137), which its chat edge follows.
+      configPlays: { key: 'commands', input: 'parser', output: 'chat' },
       summary: true,
       games: { registers: [PLAYER] },
       events: {
@@ -220,6 +276,8 @@ class Player {
   private sending = false;
   /** Told once while it waits for the account. */
   private waitingAccount = false;
+  /** Its parser's commands (D137), once read: its defaults, and its policies. */
+  private declared: BotCommand[] | undefined;
   /** The commands its parser declares none of, told once. */
   private readonly unknown = new Set<string>();
   /** Its sends by how they went (`sent <command>`, `dry-run <command>`, `failed`). */
@@ -237,6 +295,8 @@ class Player {
     return {
       start: () => {
         this.ctx.summary?.contribute((w) => this.summaryLines(w));
+        // Its parser's commands, its defaults and policies (D137), read once it runs.
+        this.played();
         this.attention = this.ctx.attention<AttentionHandle>();
         this.leave = this.attention.join({
           sitting: (s) => this.begin(s),
@@ -273,7 +333,9 @@ class Player {
     const next = step?.at ?? (this.playing() ? this.attention?.next() : undefined);
     return {
       chat: this.chat,
-      commands: this.c.commands.map((x) => x.command).join(', '),
+      commands: this.played()
+        .map((x) => x.command)
+        .join(', '),
       ...(this.state.last === undefined ? {} : { last: this.state.last }),
       ...(next === undefined ? {} : { next }),
     };
@@ -285,6 +347,21 @@ class Player {
 
   private parser(): TurnParserInterface {
     return this.ctx.use<TurnParserInterface>('parser');
+  }
+
+  /**
+   * What it plays (D137): its config's commands, or its parser's defaults, each with its policy.
+   * Its parser's commands are read once, when first needed; while its parser cannot say (not
+   * running), none.
+   */
+  private played(): Play[] {
+    if (this.declared === undefined)
+      try {
+        this.declared = this.parser().state.commands();
+      } catch {
+        return playsOf(this.c.commands, []);
+      }
+    return playsOf(this.c.commands, this.declared);
   }
 
   /** The owner's latest play by hand with its bot, as its parser read it (any command). */
@@ -340,7 +417,7 @@ class Player {
    * policy's command held, and its outbox not holding it back.
    */
   private allowed(
-    play: PlayerConfig['commands'][number],
+    play: Play,
     ready: Record<string, Readiness>,
     sitting: InSitting,
     now: number
@@ -392,7 +469,7 @@ class Player {
     const play =
       sitting.count >= MAX_SENDS_PER_SITTING
         ? undefined
-        : this.c.commands.find((p) => this.allowed(p, ready, sitting, now));
+        : this.played().find((p) => this.allowed(p, ready, sitting, now));
     if (play === undefined) {
       this.end(
         sitting.count >= MAX_SENDS_PER_SITTING
@@ -456,7 +533,7 @@ class Player {
    */
   private summaryLines(w: SummaryWindow): string[] {
     const by = (outcome: string): [string, number][] =>
-      this.c.commands
+      this.played()
         .map((p): [string, number] => [p.command, this.plays.count(`${outcome} ${p.command}`, w)])
         .filter(([, n]) => n > 0);
     const part = (outcome: string, words: string): string[] => {

@@ -2001,3 +2001,20 @@ ul.warnings {
 .login form .field input {
   width: 100%;
 }
+
+/* A player's commands as a checklist (PlaysField.tsx, D137): a row each, its sentence beside it. */
+.plays-field ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.2rem 0;
+}
+.plays-field li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem;
+  margin: 0.25rem 0;
+}
+.plays-field li select {
+  flex: 0 1 auto;
+}

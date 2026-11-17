@@ -6,6 +6,7 @@
 import type {
   AccountControl,
   AvailablePlugin,
+  BotCommand,
   CoalescedView,
   ConfigChatView,
   DiffLine,
@@ -52,6 +53,7 @@ import type {
 export type {
   AccountControl,
   AvailablePlugin,
+  BotCommand,
   CoalescedView,
   ConfigChatView,
   DiffLine,

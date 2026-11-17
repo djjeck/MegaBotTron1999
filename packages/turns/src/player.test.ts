@@ -1,5 +1,6 @@
 import { TELEGRAM_USER } from '@megabottron1999/connectors/plugins/telegram-user.ts';
 import {
+  type BotCommand,
   FakeConnector,
   fakeConnectorPlugin,
   GraphError,
@@ -14,10 +15,12 @@ import { CHAT, PLAYS, runSittings, T0 } from '#test/sittings-run.ts';
 import {
   ANSWER_WAIT_MS,
   CONNECT_WAIT_MS,
+  derivedWhileHeld,
   PLAYER,
   playerConfig,
   playerPlugin,
   playerSummary,
+  playsOf,
 } from './player.ts';
 
 const MIN = 60_000;
@@ -90,19 +93,72 @@ describe('its ports: its bot’s chat, its parser, its person (D97, D133)', () =
 });
 
 describe('playerConfig', () => {
-  it('plays the turn by default, and takes each command with its policy, in order', () => {
-    expect(playerConfig.parse({})).toEqual({ commands: [{ command: '/play' }] });
-    expect(playerConfig.parse({ commands: PLAYS }).commands[3]).toEqual({
+  it('takes no commands (the defaults), or each command with its override, in order', () => {
+    expect(playerConfig.parse({})).toEqual({});
+    expect(playerConfig.parse({ commands: PLAYS }).commands?.[3]).toEqual({
       command: '/coffee',
       whileHeld: '/play',
     });
-    expect(() => playerConfig.parse({ commands: [] })).toThrow();
+    // An empty list plays nothing; an override is one policy or the other.
+    expect(playerConfig.parse({ commands: [] })).toEqual({ commands: [] });
+    expect(playerConfig.parse({ commands: [{ command: '/a', whenReady: true }] })).toEqual({
+      commands: [{ command: '/a', whenReady: true }],
+    });
+    expect(() =>
+      playerConfig.parse({ commands: [{ command: '/a', whileHeld: '/b', whenReady: true }] })
+    ).toThrow('whileHeld or whenReady, not both');
     expect(() => playerConfig.parse({ commands: [{ command: 'play' }] })).toThrow(
       'expected a command, as /play'
     );
-    // The default is a copy each time.
-    playerConfig.parse({}).commands.push({ command: '/x' });
-    expect(playerConfig.parse({}).commands).toHaveLength(1);
+  });
+});
+
+describe('playsOf: what it plays, and when (D137)', () => {
+  const declared: BotCommand[] = [
+    { command: '/play', turn: true },
+    { command: '/shop', interactive: true },
+    { command: '/daily', cooldownMin: 1440 },
+    { command: '/coffee', effects: [{ command: '/play', clear: true }] },
+    { command: '/nap', effects: [{ command: '/daily', shortenMin: 5 }] },
+    { command: '/loop', effects: [{ command: '/loop', clear: true }] },
+  ];
+
+  it('plays by default every command but an interactive one, a reset only while held', () => {
+    expect(playsOf(undefined, declared)).toEqual([
+      { command: '/play' },
+      { command: '/daily' },
+      { command: '/coffee', whileHeld: '/play' },
+      { command: '/nap' },
+      { command: '/loop' },
+    ]);
+    expect(playsOf(undefined, [])).toEqual([]);
+  });
+
+  it('plays an explicit list in its order, each override winning over the mechanics', () => {
+    expect(
+      playsOf(
+        [
+          { command: '/SHOP' },
+          { command: '/coffee', whenReady: true },
+          { command: '/daily', whileHeld: '/play' },
+          { command: '/COFFEE' },
+          { command: '/dance' },
+        ],
+        declared
+      )
+    ).toEqual([
+      { command: '/SHOP' },
+      { command: '/coffee' },
+      { command: '/daily', whileHeld: '/play' },
+      { command: '/COFFEE', whileHeld: '/play' },
+      { command: '/dance' },
+    ]);
+  });
+
+  it('derives a policy from the mechanics alone', () => {
+    expect(derivedWhileHeld(undefined)).toBeUndefined();
+    expect(derivedWhileHeld({ command: '/go', turn: true })).toBeUndefined();
+    expect(derivedWhileHeld(declared[3])).toBe('/play');
   });
 });
 
@@ -357,6 +413,16 @@ describe('a person’s sittings, played on the dev kit (bot-os.md D134)', () => 
       'done: sitting #4 done: the sitting ended while it was down',
     ]);
     expect(r.status().last).toBe(T0 - HOUR);
+    await r.kit.stop();
+  });
+
+  it('plays its parser’s commands by default, in its order, from its read (D137)', async () => {
+    const r = await runSittings({ player: { commands: undefined } });
+    expect(r.status().commands).toBe('/play, /daily, /chest, /coffee');
+    await r.until(T0 + 2 * HOUR);
+    const sent = new Set(r.account.sent.map((s) => s.text));
+    expect(sent.has('/play')).toBe(true);
+    expect(sent.has('/daily')).toBe(true);
     await r.kit.stop();
   });
 

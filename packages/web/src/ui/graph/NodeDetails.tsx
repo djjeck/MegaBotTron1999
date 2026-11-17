@@ -25,6 +25,7 @@
 import { useState } from 'react';
 import type {
   AccountControl,
+  BotCommand,
   ConfigChatView,
   DriftCounts,
   EventTypeView,
@@ -48,6 +49,7 @@ import type { PortChange } from './draft.ts';
 import { edgeKey, endOf, instanceOf } from './draft.ts';
 import { MemberCall, NodeStatus, SettingsInForce } from './NodeControls.tsx';
 import { heardTypes, Payloads } from './Payloads.tsx';
+import { PlaysField } from './PlaysField.tsx';
 import { ConnectorQueue } from './Queue.tsx';
 import type { CustomControl } from './SchemaForm.tsx';
 import { SchemaForm } from './SchemaForm.tsx';
@@ -749,6 +751,11 @@ export function NodeDetails(props: {
     viewOf: (node: GraphNode) => PluginView | undefined;
     available: readonly PluginView[];
   };
+  /**
+   * A player's (D137): the commands of the parser its edge binds, for its checklist; undefined,
+   * none known, `missing` saying why.
+   */
+  plays?: { declared: readonly BotCommand[] | undefined; missing: string };
 }) {
   const { node, view, live, drift, account } = props;
   const running = live?.state === 'running';
@@ -969,6 +976,20 @@ export function NodeDetails(props: {
                 view.configSchema,
                 props.edges ?? []
               ),
+              // A player's commands, a checklist of its parser's (D137).
+              ...(view.configPlays === undefined || props.plays === undefined
+                ? {}
+                : {
+                    [view.configPlays.key]: ((value, set) => (
+                      <PlaysField
+                        name={(view.configPlays as { key: string }).key}
+                        value={value}
+                        set={set}
+                        declared={props.plays?.declared}
+                        missing={props.plays?.missing ?? ''}
+                      />
+                    )) satisfies CustomControl,
+                  }),
               // A sensitive value is never shown back: set or not, replaced or cleared (D124).
               ...Object.fromEntries(
                 (view.configSensitive ?? []).map((key): [string, CustomControl] => [

@@ -260,6 +260,18 @@ describe('the nodes as the graph view shows them', () => {
     // A model connector says so (D117), for its `$` mark; the others say nothing of it.
     expect(describePlugin(irc)).not.toHaveProperty('model');
     expect(describePlugin({ ...irc, model: true })).toMatchObject({ model: true });
+    // A parser's bot commands and a player's checklist (D137), as declared; none, nothing.
+    expect(describePlugin(irc)).not.toHaveProperty('botCommands');
+    expect(
+      describePlugin({
+        ...irc,
+        botCommands: [{ command: '/play', turn: true }],
+        configPlays: { key: 'commands', input: 'parser', output: 'chat' },
+      })
+    ).toMatchObject({
+      botCommands: [{ command: '/play', turn: true }],
+      configPlays: { key: 'commands', input: 'parser', output: 'chat' },
+    });
     expect(views[1]?.outputs).toMatchObject({
       // An events output lists its plugin's types there, with their descriptions (D71).
       events: {

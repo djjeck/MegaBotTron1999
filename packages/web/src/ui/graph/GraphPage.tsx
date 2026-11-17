@@ -126,6 +126,7 @@ import { layout, swimlanes } from './layout.ts';
 import { NodeDetails } from './NodeDetails.tsx';
 import { Palette } from './Palette.tsx';
 import { payloadLine } from './Payloads.tsx';
+import { boundCommands, followedBy, followPlays } from './plays.ts';
 import type { PluginNodeType } from './PluginNode.tsx';
 import { nodeHeight, PluginNode } from './PluginNode.tsx';
 import type { PortEdgeData, PortEdgeType } from './PortEdge.tsx';
@@ -581,7 +582,8 @@ export function GraphPage({
 
   const change = (next: (g: Graph) => Graph): void => {
     setRefusedApply(undefined);
-    setDraft((d) => next(d ?? EMPTY_GRAPH));
+    // A player's chat edge allows what its checklist plays, whatever changed (D137).
+    setDraft((d) => followPlays(next(d ?? EMPTY_GRAPH), pluginOf));
   };
 
   /**
@@ -884,6 +886,18 @@ export function GraphPage({
         edges={draft.edges}
         openEdge={openEdge}
         script={{ nodes: draft.nodes, viewOf: pluginOf, available: available.data ?? [] }}
+        {...(view.configPlays === undefined
+          ? {}
+          : {
+              plays: {
+                declared: boundCommands(draft, shownNode.id, view.configPlays.input, pluginOf),
+                missing: draft.edges.some(
+                  (e) => e.to === `${shownNode.id}.${view.configPlays?.input ?? ''}`
+                )
+                  ? 'Its parser declares no commands: they are typed as JSON.'
+                  : `Draw its ${view.configPlays.input} edge from its bot's parser first, to pick from its commands; until then they are typed as JSON.`,
+              },
+            })}
         cleared={clears.has(shownNode.id)}
         clearStop={(clear) => {
           setRefusedApply(undefined);
@@ -919,6 +933,9 @@ export function GraphPage({
             : nodeView(toNode).inputs[ends.to.port]
         }
         owner={connector === undefined ? undefined : ownerOf(connector, pluginOf(connector))[0]}
+        {...(shownEdge.type === 'chat-out'
+          ? { follows: followedBy(draft, shownEdge.from, pluginOf) }
+          : {})}
         change={(c) => change((g) => updateEdge(g, edgeKey(shownEdge), c))}
         remove={() => {
           change((g) => removeEdge(g, edgeKey(shownEdge)));

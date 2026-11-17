@@ -235,6 +235,43 @@ describe('parseManifest', () => {
     ).toThrow("only a connector's own key names its owner's chat");
   });
 
+  it("declares a parser's bot commands, and a player's checklist over them (D137)", () => {
+    const parser = {
+      ...base,
+      kinds: ['parser'],
+      botCommands: [
+        { command: '/play', turn: true },
+        { command: '/reset', effects: [{ command: '/play', clear: true }] },
+        { command: '/chest', unlock: { pattern: 'A chest', forMin: 30 }, interactive: true },
+      ],
+    };
+    expect(parseManifest(parser).botCommands).toEqual(parser.botCommands);
+    expect(() =>
+      parseManifest({ ...parser, botCommands: [{ command: '/a' }, { command: '/A' }] })
+    ).toThrow('/A is declared twice');
+    expect(() => parseManifest({ ...parser, botCommands: [{ command: 'play' }] })).toThrow(
+      'expected a command, as /play'
+    );
+    const player = {
+      ...base,
+      kinds: ['actor'],
+      config: z.object({ commands: z.array(z.string()).optional() }),
+      inputs: { parser: { type: 'interface', members: ['state.ready'] } },
+      outputs: { chat: { type: 'chat-out' } },
+    };
+    const plays = { key: 'commands', input: 'parser', output: 'chat' };
+    expect(parseManifest({ ...player, configPlays: plays }).configPlays).toEqual(plays);
+    expect(() => parseManifest({ ...player, configPlays: { ...plays, key: 'nope' } })).toThrow(
+      'its config has no key nope'
+    );
+    expect(() => parseManifest({ ...player, configPlays: { ...plays, input: 'chat' } })).toThrow(
+      'it has no interface input chat'
+    );
+    expect(() => parseManifest({ ...player, configPlays: { ...plays, output: 'parser' } })).toThrow(
+      'it has no chat-out output parser'
+    );
+  });
+
   it('declares the ports of one chat and of many edges (D97)', () => {
     const teller = {
       ...base,

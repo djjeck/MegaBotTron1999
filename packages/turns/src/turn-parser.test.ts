@@ -538,6 +538,40 @@ describe('each command’s readiness (bot-os.md D132)', () => {
   });
 });
 
+describe('its declared commands (bot-os.md D137)', () => {
+  it('publishes them in its manifest and its read, the turns first, in the spec’s order', async () => {
+    const plugin = turnParserPlugin({
+      id: 'quest',
+      bot: QUESTBOT,
+      description: 'x',
+      turnCommands: ['/play', '/go'],
+      commands: {
+        '/shop': { interactive: true },
+        '/coffee': { cooldownMin: 60, effects: [{ command: '/play', clear: true }] },
+        '/chest': { unlock: { pattern: 'A chest!' } },
+        '/nap': { effects: [{ command: '/coffee', shortenMin: 5 }], unlock: { forMin: 5 } },
+      },
+      read: () => undefined,
+    });
+    const declared = [
+      { command: '/play', turn: true },
+      { command: '/go', turn: true },
+      { command: '/shop', interactive: true },
+      { command: '/coffee', cooldownMin: 60, effects: [{ command: '/play', clear: true }] },
+      { command: '/chest', unlock: { pattern: 'A chest!' } },
+      { command: '/nap', unlock: { forMin: 5 }, effects: [{ command: '/coffee', shortenMin: 5 }] },
+    ];
+    expect(plugin.manifest.botCommands).toEqual(declared);
+    // Its read gives the same, for a player's defaults at run time; an interactive command is
+    // tracked as any other.
+    const p = await run(plugin);
+    const r = p.kit.core.controls.read('quest', 'commands');
+    expect('value' in r ? r.value : r).toEqual(declared);
+    expect(p.iface.ready()['/shop']).toEqual({ ready: true });
+    await p.kit.stop();
+  });
+});
+
 describe('commandOf', () => {
   it('names the command a text is, as its list spells it', () => {
     expect(commandOf('/DAILY@questbot', ['/play', '/daily'], 'QuestBot')).toBe('/daily');

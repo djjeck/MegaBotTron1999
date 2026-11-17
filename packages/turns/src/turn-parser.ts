@@ -39,6 +39,7 @@
 import { TELEGRAM_USER } from '@megabottron1999/connectors/plugins/telegram-user.ts';
 import {
   type AnswerDeclarationInput,
+  type BotCommand,
   counted,
   definePlugin,
   type Inbound,
@@ -110,6 +111,12 @@ export interface CommandMechanics {
   unlock?: { pattern?: string; forMin?: number };
   /** What its success does to other commands' holds. */
   effects?: readonly CommandEffect[];
+  /**
+   * It needs the person to answer or choose (a minigame, a shop; bot-os.md D137): a player cannot
+   * play it blindly, so it plays it only when its config names it. A fact for the editor and the
+   * player: the parser tracks it as any other.
+   */
+  interactive?: true;
 }
 
 /**
@@ -199,12 +206,20 @@ export interface TurnParserInterface {
     rest(): Rest | undefined;
     lastTurn(): LastTurn | undefined;
     ready(): Record<string, Readiness>;
+    /** Its bot's commands, the turns first, with their mechanics, as its spec declares (D137). */
+    commands(): BotCommand[];
   };
   actions: { sent(sent: SentCommand): void };
 }
 
 /** The members of the contract, as an input names them. */
-export const TURN_PARSER_MEMBERS = ['state.rest', 'state.lastTurn', 'state.ready', 'actions.sent'];
+export const TURN_PARSER_MEMBERS = [
+  'state.rest',
+  'state.lastTurn',
+  'state.ready',
+  'state.commands',
+  'actions.sent',
+];
 
 /** How long after a turn the first message of the bot in private still answers it. */
 export const ANSWER_WINDOW_MS = 2 * 60_000;
@@ -266,6 +281,36 @@ export function commandOf(
 /** Whether `text` is one of `commands`, bare or addressed to `bot`. */
 export function isTurnCommand(text: string, commands: readonly string[], bot: string): boolean {
   return commandOf(text, commands, bot) !== undefined;
+}
+
+/**
+ * A spec's commands as its manifest and its `commands` read declare them (bot-os.md D137): its turn
+ * commands first, then the others in the spec's order, each with its mechanics, copied field by
+ * field so that nothing else of the spec's leaks into the manifest.
+ */
+export function declaredCommands(spec: TurnParserSpec): BotCommand[] {
+  const others = Object.entries(spec.commands ?? {}).map(([command, m]): BotCommand => {
+    const effects = (m.effects ?? []).map((e) => ({
+      command: e.command,
+      ...(e.clear === true ? { clear: true as const } : {}),
+      ...(e.shortenMin === undefined ? {} : { shortenMin: e.shortenMin }),
+    }));
+    return {
+      command,
+      ...(m.cooldownMin === undefined ? {} : { cooldownMin: m.cooldownMin }),
+      ...(m.unlock === undefined
+        ? {}
+        : {
+            unlock: {
+              ...(m.unlock.pattern === undefined ? {} : { pattern: m.unlock.pattern }),
+              ...(m.unlock.forMin === undefined ? {} : { forMin: m.unlock.forMin }),
+            },
+          }),
+      ...(effects.length === 0 ? {} : { effects }),
+      ...(m.interactive === true ? { interactive: true as const } : {}),
+    };
+  });
+  return [...spec.turnCommands.map((command) => ({ command, turn: true as const })), ...others];
 }
 
 /** What is wrong with a spec's other commands, or undefined (bot-os.md D132). */
@@ -359,6 +404,23 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
     .literal(true)
     .optional()
     .describe('Read from history (a message missed while down), not news: act on none');
+  const declared = declaredCommands(spec);
+  const commandSchema = z.object({
+    command: z.string(),
+    turn: z.literal(true).optional(),
+    cooldownMin: z.number().optional(),
+    unlock: z.object({ pattern: z.string().optional(), forMin: z.number().optional() }).optional(),
+    effects: z
+      .array(
+        z.object({
+          command: z.string(),
+          clear: z.literal(true).optional(),
+          shortenMin: z.number().optional(),
+        })
+      )
+      .optional(),
+    interactive: z.literal(true).optional(),
+  });
   const readinessSchema = z.object({
     ready: z.boolean(),
     since: z.number().optional(),
@@ -376,6 +438,8 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       // The answers it read since the last summary, by outcome, for the owner (bot-os.md D92).
       summary: true,
       games: { registers: [spec.id] },
+      // Its bot's commands, for the editor's player checklist (D137): known without the node.
+      botCommands: declared,
       events: {
         [`${spec.id}.turn`]: z
           .object({
@@ -436,6 +500,10 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
           ready: {
             help: `Each command of @${spec.bot}'s that it knows: ready since when, or held until when and why; its last send, by hand or not, and its last answer`,
             output: z.record(z.string(), readinessSchema),
+          },
+          commands: {
+            help: `@${spec.bot}'s commands it knows, the turns first, each with its mechanics (D137): a player's defaults`,
+            output: z.array(commandSchema),
           },
         },
         actions: {
@@ -687,6 +755,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
             const now = ctx.clock.now();
             return Object.fromEntries(all.map((c) => [c, readiness(c, now)]));
           },
+          commands: () => structuredClone(declared),
         },
         // Its player sends to its bot's private chat alone (D97).
         actions: {

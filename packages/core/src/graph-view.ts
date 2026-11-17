@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { type Graph, type GraphEdge, networkOf, nodeAccount, nodeInputs } from './graph.ts';
-import { type Manifest } from './manifest.ts';
+import { type BotCommand, type Manifest } from './manifest.ts';
 import { HIDDEN, isSensitiveForm, SENSITIVE_TEXT } from './sensitive.ts';
 
 /** A config with its sensitive keys' values shown as set (D124). */
@@ -328,6 +328,13 @@ export interface PluginView {
   configInputs?: { key: string; types: ('events' | 'interface')[] };
   /** The keys of its config that name a chat, picked from a connector's chats (D96). */
   configChats?: ConfigChatView[];
+  /** A game bot's parser's: its bot's commands, the turns first, with their mechanics (D137). */
+  botCommands?: BotCommand[];
+  /**
+   * A player's (D137): the key of its config that lists the commands it plays, picked from the
+   * `botCommands` of the node its `input` binds, and its chat-out `output` that sends them.
+   */
+  configPlays?: { key: string; input: string; output: string };
   /** Its node's widget, drawn on its card, and its full page, opened from its panel (D112). */
   widget?: Widget;
   page?: WidgetPage;
@@ -507,6 +514,8 @@ export function describePlugin(m: Manifest): PluginView {
     ...(m.configChats.length === 0
       ? {}
       : { configChats: m.configChats.map((c) => structuredClone(c) as ConfigChatView) }),
+    ...(m.botCommands === undefined ? {} : { botCommands: structuredClone(m.botCommands) }),
+    ...(m.configPlays === undefined ? {} : { configPlays: { ...m.configPlays } }),
     ...(m.widget === undefined ? {} : { widget: structuredClone(m.widget) }),
     ...(m.page === undefined ? {} : { page: structuredClone(m.page) }),
   };

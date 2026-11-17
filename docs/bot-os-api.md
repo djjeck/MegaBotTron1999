@@ -69,6 +69,8 @@ instance does not start.
 | `node`            | Optional: each node's own manifest, from its config and its id, for a plugin whose ports its node's config declares (below, bot-os.md D74)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `configInputs`    | Optional, with `node`: where its nodes declare their own inputs, `{ key, types }`: the key of its `config` holding a record of input ports by name, written as a manifest's, and the types it takes there (`events`, `interface`); the editor adds one there for an edge dropped on such a node (below, bot-os.md D80)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `configChats`     | Optional: the keys of its `config` that name a chat (bot-os.md D96), `[{ key, output?, input?, kinds?, template?, owner?, sender? }]`, so that the editor picks each in its chat picker from its connector's chats instead of having the owner type an id: the connector is its own node (a connector's, no port named), or the one at the other end of the edge from its chat-out `output` or to its chat-in `input`; a string or a list holds the chats as the connector names them (`Surface.id`), a number a chat by its numeric id; `kinds` the kinds it takes (`private`, `group`, `channel`, `bot`); `template`, a `{path}` template may stand for the chat instead; `owner`, a connector's key naming its account's owner's chat (`owner()`, §4.5); `sender`, a key naming people it recognises, not chats it sends to (bot-os.md D100): its picker says nothing of reaching them, and the editor writes them on no edge. A chat picked for a key with an `output` or an `input` (not a template) is **written on that edge too** (its `sends`, or its `reads` unless `"*"`), and replaced there when the pick changes, the chats added by hand kept (bot-os.md D97): the edge is what lets it send. `telegram-bot` declares its `owner` (a person, `owner: true`), `group` and `deny` (people and bots, `sender: true`), the reactor its `chat` (or a template) and `in` |
+| `botCommands`     | Optional, a game bot's parser's (bot-os.md D137): its bot's commands it knows, in order, the turn commands first, `[{ command, turn?, cooldownMin?, unlock?: { pattern?, forMin? }, effects?: [{ command, clear?, shortenMin? }], interactive? }]` (§5, `turnParserPlugin` writes it from its spec), so that the editor knows them without the node running; data only, carried into the plugin's view (`GET /available`, `GET /graph/view`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `configPlays`     | Optional, a player's (bot-os.md D137): `{ key, input, output }`, the key of its `config` that lists the commands it plays, its interface `input` whose edge binds the parser whose `botCommands` they are picked from, and its chat-out `output` whose edge the editor keeps allowing the commands it plays. The editor draws that key as a checklist (§4.16)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `audit`           | Optional: keys of its `config` whose every change a save or rollback of the graph records in the event log (`core.config`: who, when, the value's SHA-256, never the value; §2.3, bot-os.md D75)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 A connector's manifest also names its **account** (§4.5): its network, and the account it holds in
@@ -1789,12 +1791,23 @@ connector that logs in says, above its config while it is not logged in, to log 
 being picked from those it sees once connected. A node selected shows its forms, editable, a key of
 `configSecrets` as a choice of `GET /secrets`, a list of strings or numbers as rows of plain fields
 (add, remove; an empty row written nowhere), a record of plain values as rows of a key and a value
-(its type picked where the schema allows several), JSON only for what these do not draw, and what
-each of its outputs carries, not its type, which the graph draws (bot-os.md D71): an events output,
-the event types its plugin registers in that namespace (`types` of its port in `GET /available`),
-each with its schema's description (§4.4) and its payload's JSON Schema (`schema`); a chat-out
-output that declares its commands, each with its spacing (bot-os.md D74); an interface output, its
-members' names, folded, opening on each one's signature (from its schemas:
+(its type picked where the schema allows several), **a player's commands as a checklist** (bot-os.md
+D137, `configPlays`, `PlaysField.tsx`): a row per command of the parser its `parser` edge binds (its
+`botCommands`, in its order), with a box (played or not; by default every command but an interactive
+one, and the config left unset while they stay so), a sentence saying what the player will do with
+it, composed from its mechanics and its policy (`plays.ts`: "a turn: played whenever the bot's rest
+is over", "played if /play is cooling down; ends its cool-down", "activated by “A chest appears!”,
+for 30 minutes: played while active", "played whenever ready, then cooling down for 24 hours",
+"needs you to answer: not played by default"), and, when played, its policy to pick: whenever ready,
+or if another command is cooling down; without a parser edge, or a parser that declares none, the
+list is typed as JSON, as it can be under **Edit as JSON**; and its chat-out edge follows it: each
+change of the draft sets that edge's `commands` to those it plays, which its panel shows rather than
+a list of its own. JSON only for what these do not draw, and what each of its outputs carries, not
+its type, which the graph draws (bot-os.md D71): an events output, the event types its plugin
+registers in that namespace (`types` of its port in `GET /available`), each with its schema's
+description (§4.4) and its payload's JSON Schema (`schema`); a chat-out output that declares its
+commands, each with its spacing (bot-os.md D74); an interface output, its members' names, folded,
+opening on each one's signature (from its schemas:
 `actions.sent({ chat: string, id?: string, t: number })`,
 `state.rest() → { until: number, why: string }`) and help; another output, its port in words. An
 events edge, and the events input of the node it enters, show what it carries (#3): each event type
@@ -2316,11 +2329,16 @@ those the owner played by hand; a `player` its commands, `sent` and `in a dry ru
   until an unlock) and why, its last send (`{ t, byHand }`) and the last answer read to it
   (`{ t, length }`, its length in characters); a turn command's is the rest's. An effect's holds go
   in the event (`holds`, by command), declared `holdsAtFrom` (§4.6), so that a reset ends the
-  outbox's cooldown too. A spec without `commands` is read as before. A node saved while it had one
-  (`"config": { "commands": [...] }`) still loads and runs: a plugin with no config schema ignores
-  its node's config, which the file keeps as written until the owner takes it out. It adds to the
-  owner's summary the answers it read live, by their outcome's kind (§4.17, D92). The tests play a
-  made-up @QuestBot (`packages/turns/test/quest.ts`).
+  outbox's cooldown too. A command may also be marked `interactive: true` (bot-os.md D137): it needs
+  the person to answer or choose (a minigame, a shop), so a player leaves it out by default; the
+  parser tracks it as any other. **It publishes its commands** (D137): its manifest's `botCommands`
+  and its read `commands` give them, the turn commands first (`{ command, turn: true }`), then the
+  others in the spec's order, each with its mechanics, so that the editor knows them without the
+  node running and a player derives its defaults from them at run time. A spec without `commands` is
+  read as before. A node saved while it had one (`"config": { "commands": [...] }`) still loads and
+  runs: a plugin with no config schema ignores its node's config, which the file keeps as written
+  until the owner takes it out. It adds to the owner's summary the answers it read live, by their
+  outcome's kind (§4.17, D92). The tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
 - **`attention`** (`packages/turns/src/attention.ts`, bot-os.md D134): a simulated person, one node
   per person (or account), for the players its `attention` output binds (§2.1, D133: any number; the
   players of one person share their sittings, so gameplay comes in bursts). Its configuration holds
@@ -2349,44 +2367,50 @@ those the owner played by hand; a `player` its commands, `sent` and `in a dry ru
 - **`player`** (`packages/turns/src/player.ts`, bot-os.md D134): one plugin run as one node per game
   bot (P3, P17), in place of the turn actor, each with its own id, configuration, store, timer and
   state. Its ports: `chat`, a chat-out output on `telegram`, which sends to the private chat with
-  its bot; `parser`, a contract (`state.ready`, `actions.sent`) bound to its bot's parser, required,
-  so that drift on the parser stops it; and `attention`, its person (§2.1, D133), required. **It
-  only sends** (bot-os.md D99): it reads no chat, and an edge to a chat-in of it is refused. **Its
-  bot's chat is its edge's alone** (bot-os.md D97): its chat-out edge names exactly one chat, the
-  bot's `@username` (`single`), and allows the commands it plays. Its configuration: `commands`, the
-  commands it plays in order, each `{ command, whileHeld? }` (`[{ "command": "/play" }]` by
-  default): played whenever its parser says it is ready, or, with `whileHeld`, only while that other
-  command is held (a reset, only while the turn rests). **No schedule of its own:** given a sitting,
-  it plays, one at a time, each configured command that is ready (its parser's `state.ready`),
-  allowed by its policy and not held back by its outbox (`held`, D98: the safety net), each after
-  its person's reaction time (a glance first, then the answer read, scaled to its length); after
-  each live send it waits for the answer its parser reads (looking every 5 seconds, up to two
-  minutes), then looks again, so that a command an answer unlocks, or one a reset makes ready again,
-  is taken in the same sitting. A command it sent in the sitting goes again only if it became ready
-  again since (its readiness `since` after the send), at most 20 sends a sitting; when nothing is
-  left, it sleeps until the next sitting. Its next step is the durable timer `play`, and the sitting
-  it is in is kept in its store (`state`), so a restart takes the sitting up where it was (one whose
-  step came due more than 10 minutes before is dropped). Through a live chat-out edge it sends
-  through its outbox (refused `not connected`, it waits for the account, trying each minute) and
-  tells its parser each command sent, with its message's id; through a dry-run edge (bot-os.md D64,
-  as a new one is drawn) it logs each command (`sent`, `/play (dry run)`) and sends nothing, each
-  command once a sitting since no answer comes; a send refused or failed is not tried again in that
-  sitting, and a command its parser declares none of is never played (said once). It plays while its
-  node runs and the instance is on; its safety stop (`kill`) stops its node (`ctx.stop`), which
-  drops its sitting until the owner clears the stop in the editor. It declares no chat command,
-  since two nodes would clash: the owner reaches each with `/plugins <id>` and its read `status`
-  (its chat, its commands, its last play and its next: its next step in a sitting, else its person's
-  next sitting), which its node's widget and page (**Plays**) show (D112). Each step is published as
-  `player.step` (`sitting`, `sent`, `read`, `done`, `waiting`, `failed`, `stopped`); its commands
-  sent, by command, go in the owner's summary (§4.17, D92). The image offers both (`src/main.ts`):
-  the editor adds one `attention` node per person and one player per bot, each on its own instance,
-  its `chat` edge to the owner's `telegram-user` node, its `parser` edge from its bot's parser and
-  its `attention` edge from its person. The turn parsers are not the image's: each is made from a
-  game's grammar, so a game's module offers it. **A game's module declares its commands' mechanics**
-  in its parser's spec (`commands`, D132): a cooldown (`{ "/daily": { cooldownMin: 1440 } }`), an
-  announced unlock (`{ "/chest": { unlock: { pattern: "A chest appears!" } } }`, or a reading's
-  `unlocks`) and a reset (`{ "/coffee": { effects: [{ command: "/play", clear: true }] } }`, or a
-  reading's `effects`); the player needs nothing more.
+  its bot; `parser`, a contract (`state.ready`, `state.commands`, `actions.sent`) bound to its bot's
+  parser, required, so that drift on the parser stops it; and `attention`, its person (§2.1, D133),
+  required. **It only sends** (bot-os.md D99): it reads no chat, and an edge to a chat-in of it is
+  refused. **Its bot's chat is its edge's alone** (bot-os.md D97): its chat-out edge names exactly
+  one chat, the bot's `@username` (`single`), and allows the commands it plays (the editor keeps it
+  so, D137). Its configuration: `commands`, the commands it plays in order, each
+  `{ command, whileHeld?, whenReady? }`; **unset, the defaults** (bot-os.md D137): every command its
+  parser declares (its read `commands`) but an interactive one, in its parser's order. Each
+  command's policy comes from its mechanics: a turn, whenever ready (the bot's rest over); a command
+  whose success clears another's hold (a reset), only while that other is held (cooling down); any
+  other, whenever ready. An entry overrides it: `whileHeld`, only while that command is held;
+  `whenReady`, whenever ready (not both). The editor draws `commands` as a checklist of its parser's
+  (`configPlays`, §4.16). **No schedule of its own:** given a sitting, it plays, one at a time, each
+  of its commands that is ready (its parser's `state.ready`), allowed by its policy and not held
+  back by its outbox (`held`, D98: the safety net), each after its person's reaction time (a glance
+  first, then the answer read, scaled to its length); after each live send it waits for the answer
+  its parser reads (looking every 5 seconds, up to two minutes), then looks again, so that a command
+  an answer unlocks, or one a reset makes ready again, is taken in the same sitting. A command it
+  sent in the sitting goes again only if it became ready again since (its readiness `since` after
+  the send), at most 20 sends a sitting; when nothing is left, it sleeps until the next sitting. Its
+  next step is the durable timer `play`, and the sitting it is in is kept in its store (`state`), so
+  a restart takes the sitting up where it was (one whose step came due more than 10 minutes before
+  is dropped). Through a live chat-out edge it sends through its outbox (refused `not connected`, it
+  waits for the account, trying each minute) and tells its parser each command sent, with its
+  message's id; through a dry-run edge (bot-os.md D64, as a new one is drawn) it logs each command
+  (`sent`, `/play (dry run)`) and sends nothing, each command once a sitting since no answer comes;
+  a send refused or failed is not tried again in that sitting, and a command its parser declares
+  none of is never played (said once). It plays while its node runs and the instance is on; its
+  safety stop (`kill`) stops its node (`ctx.stop`), which drops its sitting until the owner clears
+  the stop in the editor. It declares no chat command, since two nodes would clash: the owner
+  reaches each with `/plugins <id>` and its read `status` (its chat, its commands, its last play and
+  its next: its next step in a sitting, else its person's next sitting), which its node's widget and
+  page (**Plays**) show (D112). Each step is published as `player.step` (`sitting`, `sent`, `read`,
+  `done`, `waiting`, `failed`, `stopped`); its commands sent, by command, go in the owner's summary
+  (§4.17, D92). The image offers both (`src/main.ts`): the editor adds one `attention` node per
+  person and one player per bot, each on its own instance, its `chat` edge to the owner's
+  `telegram-user` node, its `parser` edge from its bot's parser and its `attention` edge from its
+  person. The turn parsers are not the image's: each is made from a game's grammar, so a game's
+  module offers it. **A game's module declares its commands' mechanics** in its parser's spec
+  (`commands`, D132): a cooldown (`{ "/daily": { cooldownMin: 1440 } }`), an announced unlock
+  (`{ "/chest": { unlock: { pattern: "A chest appears!" } } }`, or a reading's `unlocks`) and a
+  reset (`{ "/coffee": { effects: [{ command: "/play", clear: true }] } }`, or a reading's
+  `effects`), and marks a command that needs the person `interactive`; the player needs nothing
+  more.
 - **`owner-notice`** (`packages/turns/src/owner-notice.ts`, bot-os.md D91, D94): the one node that
   reports to a chat; without one, nothing is (the editor's events panel shows the notices, §4.16).
   It tells the owner what needs attention, from the notices (§4.16), through its `chat` output

@@ -15,8 +15,12 @@ the owner what needs attention.
   effect on another command's hold, such as a reset of the turn's rest; D132): it tracks each
   command's readiness and offers it (`state.ready`: ready since, or held until and why, with its
   last send and answer), publishes their answers as `<id>.answer`, and declares each an answer to
-  its own command, a reset ending the outbox's cooldown too. It resumes from what it parsed, kept in
-  its store, never by re-reading the chat (docs/bot-os.md D62).
+  its own command, a reset ending the outbox's cooldown too. A command marked `interactive: true`
+  needs the person to answer or choose (a minigame, a shop; D137): tracked as any other, left out of
+  a player's defaults. It publishes its commands, the turns first, with their mechanics, in its
+  manifest (`botCommands`, for the editor's checklist) and its read `state.commands` (for a player's
+  defaults at run time), from its spec alone (D137). It resumes from what it parsed, kept in its
+  store, never by re-reading the chat (docs/bot-os.md D62).
 - `attentionPlugin` (`src/attention.ts`): `attention`, a simulated person, one node per person
   (docs/bot-os.md D134): when they sit down to play (`src/sittings.ts`: a gap drawn from a range,
   forgotten sittings, nights off in a time zone) and how fast they act within a sitting (a reaction
@@ -25,9 +29,14 @@ the owner what needs attention.
   owner's own play by hand, as the players' parsers read it, counts as a sitting and puts the next
   simulated one back. Its card shows its next sitting, its page (**Sittings**) its last and next.
 - `playerPlugin` (`src/player.ts`): the `player`, one node per bot, in place of the turn actor
-  (D134): given a sitting, it plays each command its config names (`commands`, each
-  `{ command, whileHeld? }`) that its parser says is ready (`state.ready`, D132) and its policy
-  allows, each after its person's reaction time, looking again after each answer (so an unlock
+  (D134): given a sitting, it plays each of its commands that its parser says is ready
+  (`state.ready`, D132) and its policy allows: its config's `commands` (each
+  `{ command, whileHeld?, whenReady? }`), or, unset, every command its parser declares
+  (`state.commands`) but an interactive one, in its parser's order (D137). The policy comes from the
+  mechanics (a turn, whenever ready; a reset, only while what it clears is cooling down; any other,
+  whenever ready), an entry's `whileHeld` or `whenReady` overriding it (`playsOf`). The editor draws
+  its `commands` as a checklist of its parser's (`configPlays`) and keeps its chat edge allowing
+  them. Each goes after its person's reaction time, looking again after each answer (so an unlock
   announced, or a reset, is taken in the same sitting), until nothing is left. No schedule of its
   own: the outbox's `held` (D98) stays as the safety net. It only sends (docs/bot-os.md D99); its
   bot's chat is its edge's alone (D97). Through a dry-run chat-out edge it logs each command and
