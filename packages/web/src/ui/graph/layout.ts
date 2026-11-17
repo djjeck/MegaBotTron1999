@@ -9,7 +9,9 @@
  * A graph whose nodes name groups is drawn in swimlanes (`swimlanes`, bot-os.md D69): the same
  * global columns, each group a horizontal band holding its cards in their columns, and the
  * connectors' cards outside every band, their in cards in a column of their own at the left and
- * their out cards in the one at the right.
+ * their out cards in the one at the right. An ungrouped source that feeds the bands alone (a
+ * person's `attention`, shared by the players of several lanes, D136) is drawn in that left
+ * column too, under the in cards.
  */
 
 /** The gaps between columns and rows, in the drawing's pixels. */
@@ -114,6 +116,10 @@ export interface LaneLayout {
  * band across the inner columns, in the order of its first card, the ungrouped cards' band (no
  * name) last; within a band, cards keep the graph's order in their columns. The in and out cards
  * are stacked from the top, outside every band. A card in a band is placed relative to the band.
+ *
+ * An ungrouped card that no edge feeds and whose every edge, one at least, reaches a card in a
+ * band (a person's `attention`, D136) is no band's: it is drawn with the in cards, in their column
+ * and stacked under them, its consumers in their bands to its right.
  */
 export function swimlanes(
   ids: readonly string[],
@@ -125,23 +131,42 @@ export function swimlanes(
     groupOf: (id: string) => string | undefined;
   }
 ): LaneLayout {
-  const outside = (id: string): boolean => o.first.has(id) || o.last.has(id);
+  const links = edges
+    .map((e) => [e.from.split('.')[0] ?? '', e.to.split('.')[0] ?? ''] as const)
+    .filter(([from, to]) => from !== to);
+  const banded = (id: string): boolean =>
+    !o.first.has(id) && !o.last.has(id) && o.groupOf(id) !== undefined;
+  // The ungrouped sources that feed the bands alone, beside the in cards (D136).
+  const aside = new Set(
+    ids.filter(
+      (id) =>
+        !o.first.has(id) &&
+        !o.last.has(id) &&
+        o.groupOf(id) === undefined &&
+        !links.some(([, to]) => to === id) &&
+        links.some(([from]) => from === id) &&
+        links.every(([from, to]) => from !== id || banded(to))
+    )
+  );
+  const left = new Set([...o.first, ...aside]);
+  const outside = (id: string): boolean => left.has(id) || o.last.has(id);
   const inner = ids.filter((id) => !outside(id));
-  const floor = o.first.size > 0 ? 1 : 0;
-  const columnOf = columns(ids, edges, (id) => (o.first.has(id) ? 0 : floor));
-  const colOf = (id: string): number => (o.first.has(id) ? 0 : columnOf(id));
+  const floor = left.size > 0 ? 1 : 0;
+  const columnOf = columns(ids, edges, (id) => (left.has(id) ? 0 : floor));
+  const colOf = (id: string): number => (left.has(id) ? 0 : columnOf(id));
   const innerCols = inner.map(colOf);
   const lo = Math.min(floor, ...innerCols);
   const hi = Math.max(lo, ...innerCols);
-  const final = Math.max(hi + 1, o.first.size > 0 ? 1 : 0);
+  const final = Math.max(hi + 1, left.size > 0 ? 1 : 0);
   const placed = new Map<string, Placed & { lane?: number }>();
-  // The connectors' cards, stacked from the top in their columns.
-  for (const [set, c] of [
-    [o.first, 0],
-    [o.last, final],
+  // The connectors' cards, stacked from the top in their columns, the sources aside under the in
+  // cards.
+  for (const [column, c] of [
+    [[...ids.filter((x) => o.first.has(x)), ...ids.filter((x) => aside.has(x))], 0],
+    [ids.filter((x) => o.last.has(x)), final],
   ] as const) {
     let y = 0;
-    for (const id of ids.filter((x) => set.has(x))) {
+    for (const id of column) {
       placed.set(id, { x: c * COLUMN_GAP, y });
       y += heights(id) + ROW_GAP;
     }

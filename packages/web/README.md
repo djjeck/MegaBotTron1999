@@ -179,8 +179,10 @@ the server that guards them.
   `swimlanes`, `lanes.ts`, `LaneNode.tsx`): the same global columns, each group a tinted band with
   its name at its top left, in the order of its first node, the ungrouped nodes in an unlabelled
   band last, and the connectors' in and out cards outside every band, at the left and the right (a
-  connector's group is ignored, which its panel says). A card is its lane's child in React Flow, and
-  stays in its lane when dragged. A lane's label zooms to fit it; resting on a node dims what it
+  connector's group is ignored, which its panel says); an ungrouped node that nothing feeds and that
+  feeds only nodes in lanes (a person's `attention`, shared by the players of several lanes, D136)
+  is drawn under the connectors' in cards, at the left. A card is its lane's child in React Flow,
+  and stays in its lane when dragged. A lane's label zooms to fit it; resting on a node dims what it
   does not reach, and on a lane's label everything outside the lane but its edges and the connectors
   they reach; the minimap tints each lane. Its colour comes from a fixed palette, by a hash of its
   name, the next free one when an earlier lane has it. **Modules** (`#/modules`, `ModulesPage.tsx`,

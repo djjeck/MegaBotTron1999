@@ -48,7 +48,8 @@
  * input takes the senders' edges. Either card selects the node; removing it removes both.
  *
  * A draft whose nodes name groups is drawn in swimlanes (D69, `layout.ts`, `lanes.ts`): each group
- * a band, a React Flow group node holding its cards, the connectors' cards outside every band. A
+ * a band, a React Flow group node holding its cards, the connectors' cards outside every band, and
+ * an ungrouped source of the bands alone (a person's `attention`, D136) under the in cards. A
  * lane's label zooms to it; resting on a node or a lane's label dims what it does not reach.
  */
 import type { Connection, Edge, FinalConnectionState, Node } from '@xyflow/react';

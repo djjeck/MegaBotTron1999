@@ -158,6 +158,81 @@ describe('swimlanes', () => {
     expect(bare.lanes[0]?.x).toBe(-LANE_PAD);
     expect(bare.placed.get('p')).toEqual({ x: LANE_PAD, y: LANE_HEAD, lane: 0 });
   });
+
+  it('draws an ungrouped source that feeds the lanes alone beside the in cards (D136)', () => {
+    const groups: Record<string, string> = {
+      'quest-parser': 'Quest',
+      'quest-player': 'Quest',
+      'dice-parser': 'Dice',
+      'dice-player': 'Dice',
+      'carol-player': 'Dice',
+    };
+    const { placed, lanes } = swimlanes(
+      [
+        'alice',
+        'tg',
+        'quest-parser',
+        'quest-player',
+        'dice-parser',
+        'dice-player',
+        'carol',
+        'carol-player',
+        'clock',
+        'stats',
+        'tg::out',
+      ],
+      [
+        { from: 'alice.attention', to: 'quest-player.attention' },
+        { from: 'alice.attention', to: 'dice-player.attention' },
+        { from: 'tg.chat', to: 'quest-parser.chat' },
+        { from: 'tg.chat', to: 'dice-parser.chat' },
+        { from: 'quest-parser.interface', to: 'quest-player.parser' },
+        { from: 'dice-parser.interface', to: 'dice-player.parser' },
+        { from: 'quest-player.chat', to: 'tg::out' },
+        { from: 'dice-player.chat', to: 'tg::out' },
+        // A source that feeds one lane is beside the in cards too.
+        { from: 'carol.attention', to: 'carol-player.attention' },
+        // One that feeds an ungrouped card stays in the ungrouped band, with it.
+        { from: 'clock.events', to: 'stats.events' },
+      ],
+      () => 100,
+      { first: new Set(['tg']), last: new Set(['tg::out']), groupOf: (id) => groups[id] }
+    );
+    expect(lanes.map((l) => [l.name, l.cards])).toEqual([
+      ['Quest', ['quest-parser', 'quest-player']],
+      ['Dice', ['dice-parser', 'dice-player', 'carol-player']],
+      [undefined, ['clock', 'stats']],
+    ]);
+    // The in card first, then the sources, in the graph's order, stacked in column 0.
+    expect(placed.get('tg')).toEqual({ x: 0, y: 0 });
+    expect(placed.get('alice')).toEqual({ x: 0, y: 100 + ROW_GAP });
+    expect(placed.get('carol')).toEqual({ x: 0, y: 2 * (100 + ROW_GAP) });
+    // Their players in their lanes, to their right.
+    expect(placed.get('quest-player')).toEqual({
+      x: LANE_PAD + COLUMN_GAP,
+      y: LANE_HEAD,
+      lane: 0,
+    });
+    expect(placed.get('carol-player')?.lane).toBe(1);
+    // A grouped person stays in its lane; with no connector, the source takes column 0 alone.
+    const own = swimlanes(
+      ['bob', 'player'],
+      [{ from: 'bob.attention', to: 'player.attention' }],
+      () => 100,
+      { first: new Set(), last: new Set(), groupOf: () => 'Quest' }
+    );
+    expect(own.lanes.map((l) => l.cards)).toEqual([['bob', 'player']]);
+    const bare = swimlanes(
+      ['bob', 'player'],
+      [{ from: 'bob.attention', to: 'player.attention' }],
+      () => 100,
+      { first: new Set(), last: new Set(), groupOf: (id) => (id === 'bob' ? undefined : 'Quest') }
+    );
+    expect(bare.placed.get('bob')).toEqual({ x: 0, y: 0 });
+    expect(bare.lanes).toEqual([
+      expect.objectContaining({ name: 'Quest', x: COLUMN_GAP - LANE_PAD, cards: ['player'] }),
+    ]);
+  });
 });
 
 /** The made-up instance's graph with groups: the parser in Game, the connector's group ignored. */
