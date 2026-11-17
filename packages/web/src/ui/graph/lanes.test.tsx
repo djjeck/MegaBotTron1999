@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Graph } from '#src/ui/api.ts';
+import type { Graph, PluginView } from '#src/ui/api.ts';
 import { fakeCore } from '#test/fake-core.ts';
-import { VIEW } from '#test/graph-view.ts';
+import { AVAILABLE, VIEW } from '#test/graph-view.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
 import { GraphPage } from './GraphPage.tsx';
 import { groupsOf, hashName, isLaneId, LANE_PALETTE, laneColours, laneId, lit } from './lanes.ts';
@@ -344,6 +344,82 @@ describe('the graph editor’s lanes', () => {
     expect((within(chat).getByLabelText('group') as HTMLSelectElement).value).toBe('Ignored');
     expect(within(chat).getByText(/A connector is drawn outside the lanes/u)).toBeDefined();
   });
+
+  it('keeps a node whose gated chat-in edge is removed, and its sender whose chat-out edge is', async () => {
+    // A person (D138): its listen chat-in there only while its switch is on (`when`), its chats
+    // the config key `listen` (`configChats`), and its output feeding the lane's actor alone.
+    const person: PluginView = {
+      plugin: 'person',
+      version: '0.1.0',
+      description: 'a simulated person',
+      kinds: ['actor'],
+      inputs: { listen: { type: 'chat-in', label: 'chat-in', optional: false, when: 'follows' } },
+      outputs: {
+        events: { type: 'events', namespace: 'game', label: 'events of game', optional: false },
+      },
+      interface: { reads: [], actions: [], commands: [] },
+      secrets: [],
+      configSecrets: [],
+      events: [],
+      configChats: [{ key: 'listen', input: 'listen' }],
+    };
+    const graph: Graph = {
+      ...grouped(),
+      nodes: [
+        ...grouped().nodes.map((n) => (n.id === 'actor-a' ? { ...n, group: 'Game' } : n)),
+        { id: 'alice', plugin: 'person', config: { follows: true, listen: ['#a'] } },
+      ],
+      edges: [
+        ...grouped().edges.filter((e) => e.to !== 'actor-a.game-events'),
+        { from: 'alice.events', to: 'actor-a.game-events', type: 'events' },
+        { from: 'chat.chat', to: 'alice.listen', type: 'chat-in', reads: ['#a'] },
+      ],
+    };
+    const core = fakeCore({
+      file: graph,
+      available: [...AVAILABLE, { ...person, id: 'person', module: 'game' }],
+      routes: {
+        'GET /graph/view': [
+          200,
+          { ...VIEW, graph, nodes: [...VIEW.nodes, { ...person, id: 'alice' }] },
+        ],
+      },
+    });
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    await screen.findByLabelText('node alice', {}, slow);
+    // Read by its edge, it is in the ungrouped lane.
+    expect(screen.getByRole('group', { name: 'lane of the ungrouped nodes' })).toBeDefined();
+    const remove = async (edge: string): Promise<void> => {
+      fireEvent.click(screen.getByRole('button', { name: `edge ${edge}` }));
+      const panel = await screen.findByLabelText(`details of edge ${edge}`);
+      fireEvent.click(within(panel).getByRole('button', { name: 'Remove edge' }));
+      await waitFor(() =>
+        expect(core.checked.at(-1)?.edges.map((e) => `${e.from} → ${e.to}`)).not.toContain(edge)
+      );
+    };
+    await remove('chat.chat → alice.listen');
+    // The node stays, its config too (the switch on and its chats, for the check to say what
+    // they lack), now beside the in cards (D136), the ungrouped lane gone with its only card.
+    expect(core.checked.at(-1)?.nodes.find((n) => n.id === 'alice')).toEqual({
+      id: 'alice',
+      plugin: 'person',
+      config: { follows: true, listen: ['#a'] },
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('group', { name: 'lane of the ungrouped nodes' })).toBeNull()
+    );
+    expect(nodeOf('node alice').style.transform).toMatch(/^translate\(0px,/u);
+    // A chat-out edge removed takes no node either.
+    await remove('actor-a.chat → chat.chat');
+    expect(core.checked.at(-1)?.nodes.map((n) => n.id)).toEqual([
+      'chat',
+      'parser',
+      'actor-a',
+      'alice',
+    ]);
+    expect(screen.getByLabelText('node actor-a')).toBeDefined();
+    expect(screen.getByLabelText('node alice')).toBeDefined();
+  }, 15000);
 
   it('draws a graph without groups as before, with no lane', async () => {
     fakeCore();
