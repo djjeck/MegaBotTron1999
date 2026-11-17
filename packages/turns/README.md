@@ -9,8 +9,13 @@ a game's player state, the script node, and the node that tells the owner what n
   owner's turns (sent by hand or by the actor), which of the bot's messages answer one, publishes
   what it reads, reports to drift what it cannot read, says until when the bot rests and the owner's
   last turn, in private or in the group (`state.lastTurn`, docs/bot-os.md D99, D129), and declares
-  its turn event an answer to its turn commands (D98). It resumes from what it parsed, kept in its
-  store, never by re-reading the chat (docs/bot-os.md D62).
+  its turn event an answer to its turn commands (D98). Its spec may also declare the bot's other
+  commands with their mechanics as data (`commands`: a cooldown, an unlock the bot announces, an
+  effect on another command's hold, such as a reset of the turn's rest; D132): it tracks each
+  command's readiness and offers it (`state.ready`: ready since, or held until and why, with its
+  last send and answer), publishes their answers as `<id>.answer`, and declares each an answer to
+  its own command, a reset ending the outbox's cooldown too. It resumes from what it parsed, kept in
+  its store, never by re-reading the chat (docs/bot-os.md D62).
 - `turnActorPlugin` (`src/turn-actor.ts`): an actor that sends one bot's turn command in the private
   chat with it, at a person's pace (`src/schedule.ts`: intervals drawn from a range, skipped turns,
   nights off), waiting out the rest its parser reads and the cooldown its outbox holds its command

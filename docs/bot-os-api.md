@@ -49,7 +49,7 @@ instance does not start.
 | `requires`        | Shorthand (§2.1): the plugins it needs started first, by id, read as input ports. The load order follows them; a missing one or a cycle fails the start, naming it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `games`           | `registers`: the namespaces whose event types it defines (its game's, or its own id); `consumes`: those whose events it reads (P7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `events`          | The event types it registers, `<namespace>.<name>` → zod schema of the payload (§4.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `answers`         | Optional, a parser's: which of its own events answer which commands (bot-os.md D98), `[{ event, commands, when?, unless?, status, reason?, reasonFrom?, retryAtFrom?, holds?, withinS? }]` (§4.6, Command answers)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `answers`         | Optional, a parser's: which of its own events answer which commands (bot-os.md D98), `[{ event, commands, when?, unless?, status, reason?, reasonFrom?, retryAtFrom?, holds?, holdsAtFrom?, withinS? }]` (§4.6, Command answers)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `uses`            | Shorthand (§2.1): the other plugins' interfaces it calls, by id and member (`{ dice: ['state.game'] }`): reviewed with both (P6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `config`          | A zod object: what is set at deploy. The core validates it at load; a bad value names the plugin and the key. Every default is in the schema, per field (`.default()`, nested ones included), never merged in code after parsing, and each field says what it is (`.describe()`): the editor shows both. Two more keys, through `.meta()`, shape its form (bot-os.md D127): `choices: { value: 'label' }` on an enum draws it as radio buttons by those labels, and `shownWhen: { key: value }` on a field shows it only while a sibling key has that value (its default counted), the field taken away when a change makes it not apply                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `settings`        | A zod object: what the owner changes at runtime, each key with its default and its help (`.describe()`). Kept in the plugin's store, offered to every control surface (P11)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -330,9 +330,9 @@ that reads and sends through one account declares a chat-in input and a chat-out
 name: its `ctx.connector('channel')` and `ctx.outbox('channel')` name the two.
 
 An interface input that names no plugin is a **contract**: any node whose interface declares its
-members binds it (`interface with state.rest, state.lastTurn, actions.sent`), so each instance of
-one plugin may use another plugin's interface (each turn-actor instance its own bot's parser, §5).
-It has no default edge: the graph binds it.
+members binds it (`interface with state.rest, state.lastTurn, state.ready, actions.sent`), so each
+instance of one plugin may use another plugin's interface (each turn-actor instance its own bot's
+parser, §5). It has no default edge: the graph binds it.
 
 **An events input whose namespace its node's config names** (bot-os.md D57): a plugin that learns
 what it listens to from its node's config (the `reactor`, §5) declares
@@ -1376,9 +1376,12 @@ the node decides again from its state.
   `status` is `ok` or `refused`; `reason` a fixed one (`cooldown`, `missing`, `invalid`, or a game's
   own) and `reasonFrom` a path of the payload holding one; `retryAtFrom` the path of a time (ms)
   when the command may go again; `holds` the commands that time holds back (a group sharing a
-  cooldown; its `commands` by default); `withinS` how long the bot takes to answer (120 by default).
-  A parser of another repository declares them the same way, in its `definePlugin` manifest; the
-  turn parsers declare theirs (§5).
+  cooldown; its `commands` by default); `holdsAtFrom` the path of a map, by command, of the times
+  each may go again, set as it says, an earlier time than its cooldown's too, one past clearing it
+  (bot-os.md D132: an effect the game announces, a command that resets another's wait, ends the
+  outbox's cooldown as well as its parser's); `withinS` how long the bot takes to answer (120 by
+  default). A parser of another repository declares them the same way, in its `definePlugin`
+  manifest; the turn parsers declare theirs (§5).
 
 - **The answer** (`CommandAnswer`):
   `{ status: 'ok' | 'refused' | 'unanswered', reason?, retryAt?, event? }`, `event` the one that
@@ -2273,45 +2276,62 @@ by their outcome's kind (`unknown` for one it could not read); a `turn-actor` it
   `answers`, `replies`, `self`, and `document`, the file it carries with its text when it has one,
   such as the bot's export of the player's state, beside the caption in `text`, D82) and its
   `turnCommands`, the bot's turn commands by first word (`["/play"]`, at least one): which commands
-  are turns is a fact of the game, so it has no config (bot-os.md D70). A node saved while it had
-  one (`"config": { "commands": [...] }`) still loads and runs: a plugin with no config schema
-  ignores its node's config, which the file keeps as written until the owner takes it out. It adds
-  to the owner's summary the answers it read live, by their outcome's kind (§4.17, D92). The tests
-  play a made-up @QuestBot (`packages/turns/test/quest.ts`).
+  are turns is a fact of the game, so it has no config (bot-os.md D70). **Each command's readiness**
+  (bot-os.md D132): the spec may also declare the bot's other commands, with their mechanics as data
+  (`commands`:
+  `{ "/daily": { cooldownMin: 1440 }, "/chest": { unlock: { pattern: "A chest appears!", forMin: 30 } }, "/coffee": { cooldownMin: 60, effects: [{ command: "/play", clear: true }] } }`):
+  a `cooldownMin` holds a command that long after a success; an `unlock` holds it from the start and
+  after each success until a message of the bot (in private, or answering the owner) matches its
+  `pattern`, or a reading names it in `unlocks`, then for `forMin` minutes if given; `effects` end
+  (`clear`) or shorten (`shortenMin`) another command's hold at its success (a turn command's: the
+  rest). It knows their sends as it knows the turns' (by hand, or told by `sent` with its
+  `command`), tells the grammar which command a message answers (`BotMessage.command`), publishes
+  their answers as `<id>.answer` (`{ chat, command, outcome, retryAt?, holds?, playback? }`), each
+  declared an answer to its own command, and a reading may also say what a message announces
+  whatever it answers (`unlocks`, `effects`). Its read `ready` gives every command's readiness,
+  `{ ready, since?, until?, why?, sent?, answer? }`: ready since when, or held until when (none:
+  until an unlock) and why, its last send (`{ t, byHand }`) and the last answer read to it
+  (`{ t, length }`, its length in characters); a turn command's is the rest's. An effect's holds go
+  in the event (`holds`, by command), declared `holdsAtFrom` (§4.6), so that a reset ends the
+  outbox's cooldown too. A spec without `commands` is read as before. A node saved while it had one
+  (`"config": { "commands": [...] }`) still loads and runs: a plugin with no config schema ignores
+  its node's config, which the file keeps as written until the owner takes it out. It adds to the
+  owner's summary the answers it read live, by their outcome's kind (§4.17, D92). The tests play a
+  made-up @QuestBot (`packages/turns/test/quest.ts`).
 - **`turn-actor`** (`packages/turns/src/turn-actor.ts`): one plugin run as one instance per game bot
   (P3, P17), each with its own id, configuration, store, timer and state. Its ports: `chat`, a
   chat-out output on `telegram`, which sends to the private chat with its bot (its command only);
-  and `parser`, a contract (`state.rest`, `state.lastTurn`, `actions.sent`) bound to its bot's
-  parser, required, so that drift on the parser stops it. **It only sends** (bot-os.md D99): it
-  reads no chat, the turns the owner sends by hand coming from its parser (`state.lastTurn`), and an
-  edge to a chat-in of it is refused. **Its bot's chat is its edge's alone** (bot-os.md D97): its
-  chat-out edge names exactly one chat, the bot's `@username` (`single`); the check refuses anything
-  else, with why. Its configuration names no chat: `command` (the bot's turn command; `/play` when
-  unset), `schedule` (the planner's pace, each field with its default in the schema,
-  `DEFAULT_SCHEDULE` of `packages/turns/src/schedule.ts`: 17–20 minutes between turns, some skipped,
-  nights off: asleep from `bedtime` to the next `wake`, wall-clock times in its `timeZone`, a night
-  that may cross midnight or not, the two times never equal), `nightSalt` (the instances with one
-  salt sleep the same nights) and `seed`. It plans from the owner's last turn with the bot (kept in
-  its store; a turn sent by hand counts too: its parser's `state.lastTurn`, read at its start and
-  when its turn is due, a newer one planning afresh from it), as the durable timer `turn` (dropped
-  if it came due more than 10 minutes before a start); when it is due, it asks its parser whether
-  the bot rests, and its outbox what holds its command back (`held`, D98: the bot's cooldown as an
-  answer said, the retry-loop guard), and, if anything does, comes back a few minutes after the
-  longest; through a live chat-out edge it sends through its outbox (refused `not connected`, it
-  waits for the account, trying each minute) and tells its parser the message's id; through a
-  dry-run edge (bot-os.md D64, as a new one is drawn) it logs its turn (`sent`, `/play (dry run)`)
-  and sends nothing; a send refused as its command rests is tried again when it may go (`retryAt`),
-  any other failed send two minutes later. It plays while its node runs and the instance is on; its
-  safety stop (`kill`) stops its node (`ctx.stop`), which drops its plan until the owner clears the
-  stop in the editor. It declares no chat command, since two instances would clash: the owner
-  reaches each with `/plugins <id>` and its read `status`, which its node's widget and page show in
-  the web UI (bot-os.md D112): its next turn on its card (`Next turn: in 12m 5s`), and a page,
-  **Turns**, with its chat and command, its last turn and its next. Each step is published as
-  `turn-actor.step`; its turns (sent, in a dry run, by hand, failed) go in the owner's summary
-  (§4.17, D92). The image offers it (`src/main.ts`): the editor adds one node per bot, each on its
-  own instance, its `chat` edges from and to the owner's `telegram-user` node and its `parser` edge
-  to its bot's parser. The turn parsers are not the image's: each is made from a game's grammar, so
-  a game's module offers it.
+  and `parser`, a contract (`state.rest`, `state.lastTurn`, `state.ready`, `actions.sent`) bound to
+  its bot's parser, required, so that drift on the parser stops it. **It only sends** (bot-os.md
+  D99): it reads no chat, the turns the owner sends by hand coming from its parser
+  (`state.lastTurn`), and an edge to a chat-in of it is refused. **Its bot's chat is its edge's
+  alone** (bot-os.md D97): its chat-out edge names exactly one chat, the bot's `@username`
+  (`single`); the check refuses anything else, with why. Its configuration names no chat: `command`
+  (the bot's turn command; `/play` when unset), `schedule` (the planner's pace, each field with its
+  default in the schema, `DEFAULT_SCHEDULE` of `packages/turns/src/schedule.ts`: 17–20 minutes
+  between turns, some skipped, nights off: asleep from `bedtime` to the next `wake`, wall-clock
+  times in its `timeZone`, a night that may cross midnight or not, the two times never equal),
+  `nightSalt` (the instances with one salt sleep the same nights) and `seed`. It plans from the
+  owner's last turn with the bot (kept in its store; a turn sent by hand counts too: its parser's
+  `state.lastTurn`, read at its start and when its turn is due, a newer one planning afresh from
+  it), as the durable timer `turn` (dropped if it came due more than 10 minutes before a start);
+  when it is due, it asks its parser whether the bot rests, and its outbox what holds its command
+  back (`held`, D98: the bot's cooldown as an answer said, the retry-loop guard), and, if anything
+  does, comes back a few minutes after the longest; through a live chat-out edge it sends through
+  its outbox (refused `not connected`, it waits for the account, trying each minute) and tells its
+  parser the message's id; through a dry-run edge (bot-os.md D64, as a new one is drawn) it logs its
+  turn (`sent`, `/play (dry run)`) and sends nothing; a send refused as its command rests is tried
+  again when it may go (`retryAt`), any other failed send two minutes later. It plays while its node
+  runs and the instance is on; its safety stop (`kill`) stops its node (`ctx.stop`), which drops its
+  plan until the owner clears the stop in the editor. It declares no chat command, since two
+  instances would clash: the owner reaches each with `/plugins <id>` and its read `status`, which
+  its node's widget and page show in the web UI (bot-os.md D112): its next turn on its card
+  (`Next turn: in 12m 5s`), and a page, **Turns**, with its chat and command, its last turn and its
+  next. Each step is published as `turn-actor.step`; its turns (sent, in a dry run, by hand, failed)
+  go in the owner's summary (§4.17, D92). The image offers it (`src/main.ts`): the editor adds one
+  node per bot, each on its own instance, its `chat` edges from and to the owner's `telegram-user`
+  node and its `parser` edge to its bot's parser. The turn parsers are not the image's: each is made
+  from a game's grammar, so a game's module offers it.
 - **`owner-notice`** (`packages/turns/src/owner-notice.ts`, bot-os.md D91, D94): the one node that
   reports to a chat; without one, nothing is (the editor's events panel shows the notices, §4.16).
   It tells the owner what needs attention, from the notices (§4.16), through its `chat` output

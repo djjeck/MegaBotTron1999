@@ -12,13 +12,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runParser as run, T0 } from '#test/parser-run.ts';
-import { QUEST, QUESTBOT, questPlugin } from '#test/quest.ts';
+import { QUEST, QUESTBOT, questGamePlugin, questPlugin } from '#test/quest.ts';
 import {
   type BotMessage,
+  commandOf,
   isPrivate,
   isTurnCommand,
   PARSED_DOC,
   turnParserPlugin,
+  type TurnParserSpec,
+  type TurnReading,
 } from './turn-parser.ts';
 
 const GROUP = '-1001000000001';
@@ -328,5 +331,217 @@ describe('its turn commands, its game’s (bot-os.md D70)', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('each command’s readiness (bot-os.md D132)', () => {
+  const at = (p: Awaited<ReturnType<typeof run>>, c: string) => p.iface.ready()[c];
+
+  it('derives the turn’s from its rest, and tells the others’ from their mechanics', async () => {
+    const p = await run(questGamePlugin());
+    expect(p.iface.ready()).toEqual({
+      '/play': { ready: true },
+      '/daily': { ready: true },
+      '/chest': { ready: false, why: 'waits for an unlock' },
+      '/coffee': { ready: true },
+    });
+    // A turn by hand, whose answer announces a chest: the turn rests, the chest is ready.
+    p.hear({ ...own, chat: PRIVATE, text: '/play' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Found an apple.\nA chest appears!' });
+    expect(at(p, '/play')).toEqual({
+      ready: false,
+      until: T0 + 15 * MIN,
+      why: 'its rest after a turn',
+      sent: { t: T0, byHand: true },
+      answer: { t: T0, length: 32 },
+    });
+    expect(at(p, '/chest')).toEqual({ ready: true, since: T0 });
+    expect(p.iface.rest()).toMatchObject({ until: T0 + 15 * MIN });
+    expect(p.outcomes()).toEqual(['gain']);
+    await p.kit.stop();
+  });
+
+  it('reads another command’s answer as its own event, and holds it as its mechanics say', async () => {
+    const p = await run(questGamePlugin());
+    const outbox = p.kit.core.outbox('telegram:alice').as('anyone');
+    // The chest, unlocked, then opened by its player: used up.
+    p.hear({ ...bot, chat: PRIVATE, text: 'A chest appears!' });
+    await p.iface.sent({ chat: PRIVATE, id: '7', t: T0, command: '/chest' });
+    p.hear({ ...bot, chat: PRIVATE, replyTo: '7', text: 'The chest holds a gem.' });
+    expect(at(p, '/chest')).toEqual({
+      ready: false,
+      why: 'waits for an unlock',
+      sent: { t: T0, byHand: false },
+      answer: { t: T0, length: 22 },
+    });
+    expect(p.events.at(-1)).toMatchObject({
+      type: 'quest.answer',
+      command: '/chest',
+      outcome: { kind: 'gain', item: 'a gem' },
+    });
+    // The daily: once a day; a "come back" holds it for the wait it says, and refuses it.
+    p.hear({ ...own, chat: PRIVATE, text: '/daily' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Daily reward: 5 coins.' });
+    expect(at(p, '/daily')).toMatchObject({
+      ready: false,
+      until: T0 + 24 * 60 * MIN,
+      why: 'its cooldown',
+    });
+    expect(outbox.held(PRIVATE, '/daily')?.until).toBe(T0 + 24 * 60 * MIN);
+    p.kit.clock.advance(MIN);
+    p.hear({ ...own, chat: PRIVATE, text: '/daily' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Come back in 30 minutes.' });
+    expect(at(p, '/daily')).toMatchObject({ until: T0 + 31 * MIN, why: 'it said too soon' });
+    expect(outbox.held(PRIVATE, '/daily')).toEqual({
+      until: T0 + 24 * 60 * MIN,
+      reason: 'cooldown: rest',
+    });
+    // Neither is a turn: the turn's readiness and the owner's last turn are as they were.
+    expect(at(p, '/play')).toEqual({ ready: true });
+    expect(p.kit.core.controls.read(QUEST, 'lastTurn')).toEqual({ value: undefined });
+    // Its unlock lapses after 30 minutes.
+    p.hear({ ...bot, chat: PRIVATE, text: 'A chest appears!' });
+    p.kit.clock.advance(30 * MIN);
+    expect(at(p, '/chest')).toMatchObject({ ready: false, why: 'its unlock lapsed' });
+    await p.kit.stop();
+  });
+
+  it('ends the turn’s rest on a reset, in the outbox too, and the reset holds itself an hour', async () => {
+    const p = await run(questGamePlugin());
+    const outbox = p.kit.core.outbox('telegram:alice').as('anyone');
+    p.hear({ ...own, chat: PRIVATE, text: '/play' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Defeated.' });
+    expect(outbox.held(PRIVATE, '/play')?.until).toBe(T0 + 30 * MIN);
+    p.kit.clock.advance(MIN);
+    p.hear({ ...own, chat: PRIVATE, text: '/coffee' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'You drink a coffee: rested.' });
+    expect(at(p, '/play')).toMatchObject({ ready: true, since: T0 + MIN });
+    expect(p.iface.rest()).toBeUndefined();
+    expect(outbox.held(PRIVATE, '/play')).toBeUndefined();
+    expect(at(p, '/coffee')).toMatchObject({ ready: false, until: T0 + 61 * MIN });
+    expect(p.events.at(-1)).toMatchObject({
+      command: '/coffee',
+      holds: { '/play': T0 + MIN },
+      retryAt: T0 + 61 * MIN,
+    });
+    // An effect on a command not held does nothing.
+    p.kit.clock.advance(61 * MIN);
+    p.hear({ ...own, chat: PRIVATE, text: '/coffee' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'You drink a coffee: rested.' });
+    expect(p.events.at(-1)).not.toHaveProperty('holds');
+    await p.kit.stop();
+  });
+
+  it('takes the unlocks and effects a reading names, and an unread answer to drift', async () => {
+    const plugin = turnParserPlugin({
+      id: QUEST,
+      bot: QUESTBOT,
+      description: 'x',
+      turnCommands: ['/play'],
+      commands: { '/chest': { unlock: {} }, '/daily': { cooldownMin: 60 } },
+      read: (m): TurnReading => {
+        if (m.text === 'Found a map.')
+          return {
+            outcome: { kind: 'gain', bot: QUESTBOT },
+            restMs: 15 * MIN,
+            unlocks: ['/CHEST', '/nothing'],
+            effects: [
+              { command: '/daily', shortenMin: 20 },
+              { command: '/other', clear: true },
+            ],
+          };
+        if (m.text === 'Shortcut.')
+          return {
+            outcome: { kind: 'gain', bot: QUESTBOT },
+            effects: [{ command: '/play', shortenMin: 5 }],
+          };
+        if (m.command === '/daily' && m.text === 'Coins.')
+          return { outcome: { kind: 'gain', bot: QUESTBOT } };
+        return m.answers ? { unread: true } : undefined;
+      },
+    });
+    const p = await run(plugin);
+    p.hear({ ...own, chat: PRIVATE, text: '/daily' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Coins.' });
+    p.hear({ ...own, chat: PRIVATE, text: '/play' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Found a map.' });
+    expect(at(p, '/chest')).toEqual({ ready: true, since: T0 });
+    expect(at(p, '/daily')).toMatchObject({
+      until: T0 + 40 * MIN,
+      why: 'its cooldown, cut by /play',
+    });
+    p.hear({ ...own, chat: PRIVATE, text: '/daily' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Shortcut.' });
+    expect(at(p, '/play')).toMatchObject({ until: T0 + 10 * MIN });
+    p.hear({ ...own, chat: PRIVATE, text: '/daily' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Gibberish' });
+    expect(p.events.at(-1)).toMatchObject({
+      type: 'quest.answer',
+      command: '/daily',
+      outcome: { kind: 'unknown', text: 'Gibberish' },
+    });
+    expect(p.drift()).toMatchObject({ unread: 1 });
+    // A send told for a command it does not know is none of its business.
+    await p.iface.sent({ chat: PRIVATE, t: T0, command: '/unknown' });
+    expect(at(p, '/play')?.sent?.byHand).toBe(true);
+    await p.kit.stop();
+  });
+
+  it('keeps its commands’ state across a restart', async () => {
+    const plugin = questGamePlugin();
+    const stores: Store[] = [];
+    const first = await run({
+      ...plugin,
+      create: (ctx) => {
+        stores.push(ctx.store);
+        return plugin.create(ctx);
+      },
+    });
+    first.hear({ ...bot, chat: PRIVATE, text: 'A chest appears!' });
+    await first.kit.stop();
+    const next = await run(questGamePlugin(), {}, undefined, {
+      parsed: stores[0]?.read(PARSED_DOC),
+    });
+    expect(next.iface.ready()['/chest']).toEqual({ ready: true, since: T0 });
+    await next.kit.stop();
+  });
+
+  it('refuses a spec whose other commands are wrong', () => {
+    const spec = {
+      id: 'x',
+      bot: 'XBot',
+      description: 'x',
+      turnCommands: ['/play'],
+      read: () => undefined,
+    };
+    const problem = (commands: TurnParserSpec['commands']): string => {
+      try {
+        turnParserPlugin({ ...spec, ...(commands === undefined ? {} : { commands }) });
+        return '';
+      } catch (e) {
+        return (e as Error).message;
+      }
+    };
+    expect(problem({ '/Play': {} })).toBe(
+      "turn parser x: /Play is a turn command: its readiness is the rest's"
+    );
+    expect(problem({ daily: {} })).toBe('turn parser x: daily is not a command, as /daily');
+    expect(problem({ '/d': { cooldownMin: 0 } })).toContain('cooldownMin must be over 0');
+    expect(problem({ '/d': { unlock: { forMin: -1 } } })).toContain('forMin must be over 0');
+    expect(problem({ '/d': { unlock: { pattern: '(' } } })).toContain('unlock.pattern:');
+    expect(problem({ '/d': { effects: [{ command: '/x', clear: true }] } })).toContain(
+      'its effect names /x, not one of its commands'
+    );
+    expect(problem({ '/d': { effects: [{ command: '/play' }] } })).toContain('clears its command');
+    expect(problem({ '/d': { effects: [{ command: '/play', shortenMin: 5 }] } })).toBe('');
+    expect(problem(undefined)).toBe('');
+  });
+});
+
+describe('commandOf', () => {
+  it('names the command a text is, as its list spells it', () => {
+    expect(commandOf('/DAILY@questbot', ['/play', '/daily'], 'QuestBot')).toBe('/daily');
+    expect(commandOf('/daily@other', ['/daily'], 'QuestBot')).toBeUndefined();
+    expect(commandOf('hello', ['/daily'], 'QuestBot')).toBeUndefined();
   });
 });

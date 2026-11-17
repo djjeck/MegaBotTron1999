@@ -207,6 +207,40 @@ describe('Answers', () => {
     expect(a.held('p', '@QuestBot', '/give')).toBeUndefined();
   });
 
+  it('sets the cooldowns an answer names as they are, an earlier one too, a past one cleared (D132)', () => {
+    const { a, clock } = answers();
+    a.answered(['@QuestBot'], undefined, read('ok', { retryAt: 9000 }));
+    a.answered(['@QuestBot', '42'], undefined, {
+      ...read('ok'),
+      commands: ['/coffee'],
+      holds: ['/coffee'],
+      holdsAt: { '/give': 4000 },
+    });
+    expect(a.held('p', '@QuestBot', '/give')).toEqual({ until: 4000, reason: 'cooldown: ok' });
+    expect(a.held('p', '42', '/give')?.until).toBe(4000);
+    // The group's other command keeps its own.
+    expect(a.held('p', '@QuestBot', '/throw')?.until).toBe(9000);
+    a.answered(['@QuestBot'], undefined, { ...read('ok'), holdsAt: { '/give': 0, '/look': 6000 } });
+    expect(a.held('p', '@QuestBot', '/give')).toBeUndefined();
+    expect(a.held('p', '@QuestBot', '/look')).toEqual({ until: 6000, reason: 'cooldown: ok' });
+    clock.advance(6000);
+    expect(a.held('p', '@QuestBot', '/look')).toBeUndefined();
+  });
+
+  it('reads the cooldowns an answer sets from its payload, its other entries left out', () => {
+    const [d] = [
+      declare({ event: 'quest.answer', commands: ['/coffee'], status: 'ok', holdsAtFrom: 'holds' }),
+    ];
+    expect(
+      readAnswer([d as AnswerDeclaration], 'quest.answer', { holds: { '/give': 5, '/x': 'no' } }, 1)
+        ?.holdsAt
+    ).toEqual({ '/give': 5 });
+    for (const holds of [undefined, [], { '/x': 'no' }])
+      expect(readAnswer([d as AnswerDeclaration], 'quest.answer', { holds }, 1)).not.toHaveProperty(
+        'holdsAt'
+      );
+  });
+
   it('backs off a node refused for the same reason again and again, longer each time', () => {
     const { a, clock, notices } = answers();
     const refuse = (plugin: string, reason?: string, retryAt?: number) => {

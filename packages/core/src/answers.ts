@@ -65,6 +65,13 @@ export const answerSchema = z.strictObject({
    * by default.
    */
   holds: z.array(z.string().min(1)).min(1).optional(),
+  /**
+   * The dotted path of the payload that holds, by command (first word), when each may go again (a
+   * time in ms), set in that chat as it says (bot-os.md D132): an earlier time than its cooldown's
+   * too, so that an effect the game announces (a command that resets another's wait) ends or
+   * shortens a cooldown; one past, cleared.
+   */
+  holdsAtFrom: z.string().min(1).optional(),
   /** How long the bot takes to answer, at the most, in seconds. */
   withinS: z.number().positive().default(DEFAULT_ANSWER_WITHIN_S),
 });
@@ -86,6 +93,8 @@ export interface CommandAnswer {
 export interface ReadAnswer {
   commands: readonly string[];
   holds: readonly string[];
+  /** The cooldowns it sets as they are, earlier included, by command (`holdsAtFrom`). */
+  holdsAt?: Readonly<Record<string, number>>;
   answer: CommandAnswer;
 }
 
@@ -106,9 +115,12 @@ export function readAnswer(
   const from = d.reasonFrom === undefined ? undefined : valueAt(payload, d.reasonFrom);
   const reason = typeof from === 'string' && from !== '' ? from : d.reason;
   const at = d.retryAtFrom === undefined ? undefined : valueAt(payload, d.retryAtFrom);
+  const holdsAt =
+    d.holdsAtFrom === undefined ? undefined : timesOf(valueAt(payload, d.holdsAtFrom));
   return {
     commands: d.commands,
     holds: d.holds ?? d.commands,
+    ...(holdsAt === undefined ? {} : { holdsAt }),
     answer: {
       status: d.status,
       ...(reason === undefined ? {} : { reason }),
@@ -116,6 +128,15 @@ export function readAnswer(
       event: { ...payload, type, t },
     },
   };
+}
+
+/** A map of commands to times (ms), its other entries left out; undefined if none is one. */
+function timesOf(v: unknown): Record<string, number> | undefined {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined;
+  const out = Object.fromEntries(
+    Object.entries(v).filter(([, t]) => typeof t === 'number' && Number.isFinite(t))
+  ) as Record<string, number>;
+  return Object.keys(out).length === 0 ? undefined : out;
 }
 
 /** How long a send of `command` waits for its answer, by the declarations that answer it. */
@@ -262,6 +283,17 @@ export class Answers {
           if (was === undefined || was.until < answer.retryAt)
             this.cool.set(key, { until: answer.retryAt, reason: answer.reason ?? answer.status });
         }
+    // Set as they are, an earlier time too (D132: a reset): one past is cleared.
+    for (const [command, until] of Object.entries(read.holdsAt ?? {}))
+      for (const name of known) {
+        const key = coolKey(name, command);
+        if (until <= now) this.cool.delete(key);
+        else
+          this.cool.set(key, {
+            until,
+            reason: this.cool.get(key)?.reason ?? answer.reason ?? answer.status,
+          });
+      }
     const ours = this.pending.filter(
       (p) => known.has(lower(p.chat)) && read.commands.includes(p.command)
     );

@@ -11,7 +11,7 @@ import {
   type Heard,
   type Plugin,
 } from '@megabottron1999/core';
-import { type TurnParserInterface } from '#src/turn-parser.ts';
+import { type Readiness, type TurnParserInterface } from '#src/turn-parser.ts';
 
 export const T0 = Date.parse('2026-11-06T12:00:00Z');
 
@@ -41,7 +41,7 @@ export async function runParser(
       ),
     }),
     record: (r) => {
-      if (r.type.endsWith('.turn')) events.push(r as BusEvent);
+      if (r.type.endsWith('.turn') || r.type.endsWith('.answer')) events.push(r as BusEvent);
     },
   });
   await kit.start();
@@ -58,6 +58,10 @@ export async function runParser(
     rest: (): unknown => {
       const r = kit.core.controls.read(id, 'rest');
       return 'value' in r ? r.value : r;
+    },
+    ready: (): Record<string, Readiness> => {
+      const r = kit.core.controls.read(id, 'ready');
+      return ('value' in r ? r.value : r) as Record<string, Readiness>;
     },
     sent: (turn: Parameters<TurnParserInterface['actions']['sent']>[0]) =>
       kit.core.controls.act(id, 'sent', turn),

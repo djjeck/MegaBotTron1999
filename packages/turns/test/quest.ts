@@ -42,3 +42,61 @@ export function questPlugin(turnCommands: readonly string[] = ['/play']): Plugin
     },
   });
 }
+
+/**
+ * @QuestBot's other commands (bot-os.md D132), each a mechanic: `/daily`, once a day; `/chest`,
+ * usable once a turn's answer announces "A chest appears!", for 30 minutes; `/coffee`, once an
+ * hour, which ends the turn's rest.
+ */
+export const QUEST_COMMANDS = {
+  '/daily': { cooldownMin: 24 * 60 },
+  '/chest': { unlock: { pattern: 'A chest appears!', forMin: 30 } },
+  '/coffee': { cooldownMin: 60, effects: [{ command: '/play', clear: true as const }] },
+};
+
+/** What @QuestBot answers to its other commands, or undefined. */
+export function readQuestCommand(
+  command: string,
+  text: string
+): { outcome: TurnOutcome; restMs?: number } | undefined {
+  const bot = QUESTBOT;
+  const t = text.trim();
+  const daily = /^Daily reward: (.+)\.$/u.exec(t);
+  if (command === '/daily' && daily !== null)
+    return { outcome: { kind: 'gain', bot, item: daily[1] } as TurnOutcome };
+  const later = /^Come back in (\d+) minutes\.$/u.exec(t);
+  if (later !== null)
+    return {
+      outcome: { kind: 'nothing', bot, reason: 'cooldown' },
+      restMs: Number(later[1]) * MIN,
+    };
+  const chest = /^The chest holds (.+)\.$/u.exec(t);
+  if (command === '/chest' && chest !== null)
+    return { outcome: { kind: 'gain', bot, item: chest[1] } as TurnOutcome };
+  if (command === '/coffee' && t === 'You drink a coffee: rested.')
+    return { outcome: { kind: 'rested', bot } };
+  return undefined;
+}
+
+/**
+ * @QuestBot's parser with its other commands (`QUEST_COMMANDS`): a turn's answer read by its first
+ * line (the rest may announce a chest), another command's by `readQuestCommand`.
+ */
+export function questGamePlugin(): Plugin {
+  return turnParserPlugin({
+    id: QUEST,
+    bot: QUESTBOT,
+    description: "@QuestBot's answers to the owner's commands",
+    turnCommands: ['/play'],
+    commands: QUEST_COMMANDS,
+    read: (m): TurnReading => {
+      if (!m.answers && !(m.private && m.replies)) return undefined;
+      const read =
+        m.command === undefined || m.command === '/play'
+          ? readQuest(m.text.split('\n')[0] ?? '')
+          : readQuestCommand(m.command, m.text);
+      if (read === undefined) return m.answers ? { unread: true } : undefined;
+      return read;
+    },
+  });
+}
