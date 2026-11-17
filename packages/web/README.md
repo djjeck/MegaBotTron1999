@@ -172,35 +172,35 @@ the server that guards them.
   pages** (docs/bot-os.md D112): a node whose plugin declares a widget shows it in one line on its
   card while it runs (`Widget.tsx`'s `WidgetLine`, `widget-text.ts`: its fields, a count, a list's
   first items, a table's rows counted, an amount out of its total with a bar, or how long until a
-  time, moving with the clock), from `GET /status`'s `widget`, its card a line taller for it; one
-  that declares a page has **Open its page** in its panel while it runs, which leads to
-  `#/node/<id>` (`NodePage.tsx`, in no menu): the page's sections drawn in full (`WidgetSection`),
-  each read asked every five seconds. The map's bar heads with the instance's switches:
-  `instance on` or `off`, **Turn off** (asking first) or **Turn on**, and **Kill all** (every
-  plugin's safety stop, asking first). Select one node or several (Shift, Ctrl or Cmd with a click;
-  Shift and drag for a box) and **Kill selected** kills each: its plugin's own safety stop, then
-  stopped, kept across restarts; a stopped node's panel has **Clear stop**, a change of the draft
-  that Review lists and Apply makes (`clear-stop`, then the restart), and its forms stay editable.
-  Nodes start in columns (`layout.ts`) and can be moved. **Swimlanes** (docs/bot-os.md D69): a
-  node's panel sets its **Group** (none, one of the draft's, or **new group…**, named and set), a
-  change of the draft like any other; a draft with groups is drawn in lanes (`layout.ts`'s
-  `swimlanes`, `lanes.ts`, `LaneNode.tsx`): the same global columns, each group a tinted band with
-  its name at its top left, in the order of its first node, the ungrouped nodes in an unlabelled
-  band last, and the connectors' in and out cards outside every band, at the left and the right (a
-  connector's group is ignored, which its panel says); an ungrouped node that nothing feeds and that
-  feeds only nodes in lanes (a person's `attention`, shared by the players of several lanes, D136)
-  is drawn under the connectors' in cards, at the left. A card is its lane's child in React Flow,
-  and stays in its lane when dragged. A lane's label zooms to fit it; resting on a node dims what it
-  does not reach, and on a lane's label everything outside the lane but its edges and the connectors
-  they reach; the minimap tints each lane. Its colour comes from a fixed palette, by a hash of its
-  name, the next free one when an earlier lane has it. **Modules** (`#/modules`, `ModulesPage.tsx`,
-  docs/bot-os.md D67, D102) lists the modules installed, each with its version, its source (a folder
-  upload, a tarball, or a repository on GitHub or a self-hosted Git server, linked at its commit)
-  and when it was installed. It installs modules from a folder, chosen (**Choose folder**) or
-  dropped on the page, or from a repository's link: a public GitHub one
-  (`https://github.com/<owner>/<repo>` or `…/tree/<ref>/<path>`), or one on a Git server added under
-  **Git servers** (`GitServers.tsx`: each server with its token's Docker secret, picked from
-  `GET /modules/hosts`'s names, added with `POST /modules/hosts`, removed with
+  time, moving with the clock, a word in place of the time as it is: `follows your play`, D138),
+  from `GET /status`'s `widget`, its card a line taller for it; one that declares a page has **Open
+  its page** in its panel while it runs, which leads to `#/node/<id>` (`NodePage.tsx`, in no menu):
+  the page's sections drawn in full (`WidgetSection`), each read asked every five seconds. The map's
+  bar heads with the instance's switches: `instance on` or `off`, **Turn off** (asking first) or
+  **Turn on**, and **Kill all** (every plugin's safety stop, asking first). Select one node or
+  several (Shift, Ctrl or Cmd with a click; Shift and drag for a box) and **Kill selected** kills
+  each: its plugin's own safety stop, then stopped, kept across restarts; a stopped node's panel has
+  **Clear stop**, a change of the draft that Review lists and Apply makes (`clear-stop`, then the
+  restart), and its forms stay editable. Nodes start in columns (`layout.ts`) and can be moved.
+  **Swimlanes** (docs/bot-os.md D69): a node's panel sets its **Group** (none, one of the draft's,
+  or **new group…**, named and set), a change of the draft like any other; a draft with groups is
+  drawn in lanes (`layout.ts`'s `swimlanes`, `lanes.ts`, `LaneNode.tsx`): the same global columns,
+  each group a tinted band with its name at its top left, in the order of its first node, the
+  ungrouped nodes in an unlabelled band last, and the connectors' in and out cards outside every
+  band, at the left and the right (a connector's group is ignored, which its panel says); an
+  ungrouped node that nothing feeds and that feeds only nodes in lanes (a person's `attention`,
+  shared by the players of several lanes, D136) is drawn under the connectors' in cards, at the
+  left. A card is its lane's child in React Flow, and stays in its lane when dragged. A lane's label
+  zooms to fit it; resting on a node dims what it does not reach, and on a lane's label everything
+  outside the lane but its edges and the connectors they reach; the minimap tints each lane. Its
+  colour comes from a fixed palette, by a hash of its name, the next free one when an earlier lane
+  has it. **Modules** (`#/modules`, `ModulesPage.tsx`, docs/bot-os.md D67, D102) lists the modules
+  installed, each with its version, its source (a folder upload, a tarball, or a repository on
+  GitHub or a self-hosted Git server, linked at its commit) and when it was installed. It installs
+  modules from a folder, chosen (**Choose folder**) or dropped on the page, or from a repository's
+  link: a public GitHub one (`https://github.com/<owner>/<repo>` or `…/tree/<ref>/<path>`), or one
+  on a Git server added under **Git servers** (`GitServers.tsx`: each server with its token's Docker
+  secret, picked from `GET /modules/hosts`'s names, added with `POST /modules/hosts`, removed with
   `DELETE /modules/hosts/<host>`), a module's own folder or a repository's that holds several. The
   folder's paths, its `module.json` files and its `.gitignore` files go to `POST /modules/plan`
   (`src/ui/module-folder.ts`), a link to `POST /modules/link`; the modules found, but those under

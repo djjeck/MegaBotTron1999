@@ -219,6 +219,7 @@ export {
 } from './login.ts';
 export {
   type BotCommand,
+  type ConfigWarnings,
   type Kind,
   KINDS,
   type Manifest,

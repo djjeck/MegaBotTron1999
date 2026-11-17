@@ -1,6 +1,6 @@
 /**
  * A clone of the made-up @QuestBot on alice's faked account (bot-os.md D132–D134, #49): it answers
- * each command a second after it is sent, in @QuestBot's own words (`test/quest.ts`'s grammar reads
+ * each command a second after it is sent (`answerMs`), in @QuestBot's own words (`test/quest.ts`'s grammar reads
  * them), from a game it keeps on the clock it is given. Its game: `/play` finds an apple and rests
  * 15 minutes (a "Too soon" while it rests), every other turn announcing a chest; `/chest` opens the
  * chest announced, for 30 minutes; `/daily` gives coins once a day; `/coffee`, once an hour, ends
@@ -21,6 +21,8 @@ export class QuestClone extends FakeConnector {
   private coffeeAt = 0;
   /** It answers gibberish. */
   garble = false;
+  /** How long it takes to answer, in ms. */
+  answerMs = 1000;
   /** Every reply it gave: when, to what, and what. */
   readonly replies: { t: number; command: string; text: string }[] = [];
 
@@ -32,7 +34,7 @@ export class QuestClone extends FakeConnector {
   deliver(chat: string, text: string): Promise<{ id?: string }> {
     this.send(chat, text);
     const id = String(this.n++);
-    this.clock.setTimeout(() => this.answer(chat, text, id), 1000);
+    this.clock.setTimeout(() => this.answer(chat, text, id), this.answerMs);
     return Promise.resolve({ id });
   }
 
@@ -40,7 +42,7 @@ export class QuestClone extends FakeConnector {
   byHand(chat: string, text: string): void {
     const id = String(this.n++);
     this.hear({ chat, sender: 'alice', own: true, time: this.clock.now(), id, text });
-    this.clock.setTimeout(() => this.answer(chat, text, id), 1000);
+    this.clock.setTimeout(() => this.answer(chat, text, id), this.answerMs);
   }
 
   private answer(chat: string, command: string, replyTo: string): void {

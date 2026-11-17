@@ -488,6 +488,8 @@ describe('the draft', () => {
       chat: ports.chat,
       matched: ports.matched,
     });
+    // A key set to false sets nothing (an attention's followsMyPlay, D138).
+    expect(inputsOf(ports, { match: false })).toEqual({ heard: ports.heard, chat: ports.chat });
     // An events input there only with its config key (the reactor's on), required once there.
     const reactor = {
       events: {

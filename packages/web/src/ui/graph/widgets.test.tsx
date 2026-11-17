@@ -109,6 +109,10 @@ describe('a widget’s line on its card', () => {
     );
     expect(line({ show: 'until', read: 'status', path: 'next' })).toBe('Next turn: in 12m 5s');
     expect(line({ show: 'until', read: 'status', path: 'next' }, {})).toBe('Next turn: —');
+    // A word in place of a time, as it is (an attention that plans none, D138).
+    expect(
+      line({ show: 'until', read: 'status', path: 'next' }, { next: 'follows your play' })
+    ).toBe('Next turn: follows your play');
     expect(
       line(
         { show: 'until', read: 'status', path: 'next' },

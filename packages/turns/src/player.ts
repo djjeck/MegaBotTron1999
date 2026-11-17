@@ -23,7 +23,9 @@
  * the answer its parser reads (up to two minutes), then looks again, so that a command an answer
  * unlocks, or one a reset makes ready again, is taken in the same sitting. A command it sent in
  * the sitting goes again only if it became ready again since (its readiness `since` after the
- * send), so that a dry run, or an answer that holds nothing, plays it once. When nothing is left,
+ * send), so that a dry run, or an answer that holds nothing, plays it once. In a sitting that
+ * follows the owner's play (D138), or one they wrote during, it first waits the same way for the
+ * answer to the owner's last send by hand its parser has read none to. When nothing is left,
  * it sleeps until the next sitting. **No schedule of its own:** its person's sittings, its
  * parser's readiness, and its outbox's `held` (D98) as the safety net, are all it waits on.
  *
@@ -160,6 +162,11 @@ interface InSitting {
   count: number;
   /** A live send whose answer it waits for. */
   waiting?: { command: string; t: number };
+  /**
+   * It follows the owner's play (D138): at its next look, it first waits for the answer to the
+   * owner's last send by hand, if its parser has read none yet.
+   */
+  hand?: true;
 }
 
 export interface PlayerState {
@@ -172,7 +179,8 @@ export interface PlayerStatus {
   chat: string;
   commands: string;
   last?: number;
-  next?: number;
+  /** Its next step, else its person's next sitting, or what it does instead (D138). */
+  next?: number | string;
 }
 
 const stepSchema = z.object({
@@ -189,9 +197,10 @@ const clock = (t: number) => new Date(t).toISOString().slice(11, 16);
 export function playerSummary(id: string, state: string, s: PlayerStatus | undefined): string {
   const parts = [
     ...(s?.last === undefined ? [] : [`last ${clock(s.last)}`]),
-    ...(s?.next === undefined ? [] : [`next ${clock(s.next)}`]),
+    ...(typeof s?.next === 'number' ? [`next ${clock(s.next)}`] : []),
   ];
-  return `${s?.chat ?? id}: ${state}${parts.length > 0 ? `, ${parts.join(', ')} UTC` : ''}`;
+  const times = parts.length > 0 ? `, ${parts.join(', ')} UTC` : '';
+  return `${s?.chat ?? id}: ${state}${times}${typeof s?.next === 'string' ? `, ${s.next}` : ''}`;
 }
 
 /** The player plugin, of which the wiring makes one node per bot. */
@@ -241,7 +250,7 @@ export function playerPlugin(): Plugin {
               chat: z.string().describe('Chat'),
               commands: z.string().describe('Commands'),
               last: z.number().optional().describe('Last play'),
-              next: z.number().optional().describe('Next play'),
+              next: z.union([z.number(), z.string()]).optional().describe('Next play'),
             }),
           },
         },
@@ -301,6 +310,8 @@ class Player {
         this.leave = this.attention.join({
           sitting: (s) => this.begin(s),
           lastByHand: () => this.lastByHand(),
+          inSitting: () => this.state.sitting !== undefined,
+          again: () => this.again(),
         });
         // A sitting kept without its next step (dropped as too late): it ended with the restart.
         if (this.state.sitting !== undefined && this.ctx.scheduler.get(PLAY_TIMER) === undefined)
@@ -318,7 +329,7 @@ class Player {
       off: () => this.drop('the bot is off'),
       on: () => {
         const next = this.status().next;
-        return next === undefined ? undefined : `${this.chat}: next ${clock(next)} UTC`;
+        return typeof next === 'number' ? `${this.chat}: next ${clock(next)} UTC` : undefined;
       },
       kill: () => {
         this.ctx.stop('safety stop');
@@ -326,6 +337,30 @@ class Player {
       },
       interface: { state: { status: () => this.status() } },
     };
+  }
+
+  /**
+   * The owner wrote during its sitting (D138): it waits, at its next look, for the answer to their
+   * command, if any, then looks again at what is ready.
+   */
+  private again(): void {
+    const sitting = this.state.sitting;
+    if (sitting === undefined || !this.playing()) return;
+    sitting.hand = true;
+    this.keep();
+  }
+
+  /**
+   * The owner's last send by hand its parser has read no answer to yet, if it was sent less than
+   * `ANSWER_WAIT_MS` ago: what a sitting that follows their play waits for (D138).
+   */
+  private unanswered(ready: Record<string, Readiness>, now: number): number | undefined {
+    let last: Readiness | undefined;
+    for (const r of Object.values(ready))
+      if (r.sent?.byHand === true && (last?.sent === undefined || r.sent.t > last.sent.t)) last = r;
+    const sent = last?.sent;
+    if (sent === undefined || now - sent.t >= ANSWER_WAIT_MS) return undefined;
+    return last?.answer !== undefined && last.answer.t >= sent.t ? undefined : sent.t;
   }
 
   private status(): PlayerStatus {
@@ -385,7 +420,12 @@ class Player {
   /** A sitting starts: its first look after a glance. */
   private begin(s: Sitting): void {
     if (!this.playing() || this.state.sitting?.id === s.id) return;
-    this.state.sitting = { id: s.id, sent: {}, count: 0 };
+    this.state.sitting = {
+      id: s.id,
+      sent: {},
+      count: 0,
+      ...(s.follow === true ? { hand: true as const } : {}),
+    };
     this.keep();
     this.step('sitting', `#${s.id}`);
     this.arm(this.react());
@@ -465,6 +505,15 @@ class Player {
         this.arm(this.react());
       }
       return;
+    }
+    // Following the owner's play (D138): their command's answer first, as its parser reads it.
+    if (sitting.hand === true) {
+      if (this.unanswered(ready, now) !== undefined) {
+        this.arm(now + ANSWER_POLL_MS);
+        return;
+      }
+      delete sitting.hand;
+      this.keep();
     }
     const play =
       sitting.count >= MAX_SENDS_PER_SITTING

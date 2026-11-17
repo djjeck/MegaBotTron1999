@@ -396,7 +396,7 @@ export function namespaceOf(value: unknown): string | undefined {
  * A node's input ports, each resolved from its node's `config` when the manifest says so: an
  * events input's namespace (`{ config: key }`), the namespace the key's value names, or the event
  * type's; a chat-in or events input's presence (`when: { config: key }`), there only while the key
- * is set. An events input whose namespace key is not set is left out if it is optional or has such
+ * is set (and not false). An events input whose namespace key is not set is left out if it is optional or has such
  * a `when` (the node has no such port), and is a problem if it is required; one whose value names
  * no namespace is a problem. Each problem names the port; the caller names the node.
  */
@@ -406,7 +406,9 @@ export function resolveInputs(
 ): { ports: Record<string, InputPort>; problems: string[] } {
   const ports: Record<string, InputPort> = {};
   const problems: string[] = [];
-  const set = (key: string): boolean => config?.[key] !== undefined && config[key] !== null;
+  // A key set to false sets nothing: a switch off (an attention's followsMyPlay, D138).
+  const set = (key: string): boolean =>
+    config?.[key] !== undefined && config[key] !== null && config[key] !== false;
   for (const [name, p] of Object.entries(inputs)) {
     if (
       (p.type === 'chat-in' || p.type === 'events') &&

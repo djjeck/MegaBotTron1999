@@ -583,6 +583,25 @@ describe('the chats a connector monitors (D89)', () => {
     ]);
   });
 
+  it('warns of what a node’s config makes it do, from its manifest’s warns (D138)', () => {
+    const idle = m('idle', {
+      kinds: ['actor'],
+      config: z.object({ on: z.boolean().default(true) }),
+      warns: (c) => (c['on'] === false ? ['it does nothing'] : []),
+    });
+    const image = new Map([[idle.id, idle]]);
+    const of = (config?: Record<string, unknown>): string[] =>
+      resolveGraph(
+        {
+          version: 2,
+          nodes: [{ id: 'quiet', plugin: 'idle', ...(config === undefined ? {} : { config }) }],
+        },
+        image
+      ).warnings;
+    expect(of({ on: false })).toEqual(['node quiet: it does nothing']);
+    expect(of()).toEqual([]);
+  });
+
   it('warns of nothing for every chat: the list unset, `all` declared, or any chat read', () => {
     expect(warnings(reading('tg', undefined, ['@QuestBot']))).toEqual([]);
     expect(warnings(reading('every', undefined, ['@QuestBot']))).toEqual([]);

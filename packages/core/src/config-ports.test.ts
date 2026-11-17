@@ -130,6 +130,11 @@ describe('an events input whose namespace its node’s config names', () => {
     const plugins = new Map([...image()].map(([id, x]) => [id, x]));
     plugins.set('listener', parseManifest(when));
     expect(resolveInputs(parseManifest(when).inputs, {})).toEqual({ ports: {}, problems: [] });
+    // A key set to false sets nothing (D138).
+    expect(resolveInputs(parseManifest(when).inputs, { on: false })).toEqual({
+      ports: {},
+      problems: [],
+    });
     expect(problems({ ...graph({}), edges: [] }, plugins)).toEqual([]);
     expect(problems({ ...graph({ on: 'dice.roll' }), edges: [] }, plugins)).toEqual([
       'node ears: input port heard (events of dice) is not bound',

@@ -7,6 +7,13 @@
  * the players bound to its `attention` output (bot-os.md D133), so that the bots one person plays
  * share their sittings and gameplay comes in bursts, as a person's does.
  *
+ * **Two behaviours, each on its own** (bot-os.md D138): `scheduled`, its own sittings planned from
+ * its schedule (off: it plans none); and `followsMyPlay`, a sitting `followDelayS` after any message
+ * of the owner's own in a chat it `listen`s to, heard on its `listen` chat-in (there only while
+ * `followsMyPlay` is on), so that it types for the owner while they are there. A message during a sitting
+ * starts none: its players still in it look again. A sitting that follows counts as the owner's
+ * own, so a scheduled one still comes a full gap after it. Both off, the check warns (`warns`).
+ *
  * - Its players join it at their start (`AttentionHandle.join`, through `ctx.attention`), each
  *   with how to start a sitting and how to tell the person's last play by hand.
  * - **The owner's own play counts as a sitting by the real person:** when a sitting is due, it
@@ -27,13 +34,16 @@
  * - It plays while its node runs and the instance is on; stopped (its own safety stop, `kill`, or
  *   the owner's), it drops its plan, and its players are inactive with it (a required input).
  *
- * Its read `status` gives its players, its last sitting and its next, which its node's widget (its
+ * Its read `status` gives its behaviours, its players, its last sitting and its next (not
+ * scheduled, `follows your play`), which its node's widget (its
  * next sitting, on its card) and page (Sittings) show (D112). Each step is published as
  * `attention.step`, with its node's id. It knows no game and sends nothing.
  */
 import {
   counted,
   definePlugin,
+  type Inbound,
+  inChat,
   type Plugin,
   type PluginContext,
   type SummaryWindow,
@@ -48,12 +58,24 @@ export const ATTENTION = 'attention';
 export const SITTING_TIMER = 'sitting';
 /** How late a kept sitting may still start after a restart. */
 export const SITTING_GRACE_MS = 10 * 60_000;
+/** The timer of a sitting that follows the owner's message (D138). */
+export const FOLLOW_TIMER = 'follow';
+/** How long after the owner's message a sitting that follows it starts, by default. */
+export const DEFAULT_FOLLOW_DELAY_S = 3;
+/** Its next sitting, when it plans none of its own (D138). */
+export const FOLLOWS = 'follows your play';
+export const NEVER = 'never: neither scheduled nor following your play';
 
 /** A sitting, as its players are given it. */
 export interface Sitting {
   /** Its number, one more each sitting of this person. */
   id: number;
   start: number;
+  /**
+   * It follows the owner's message (D138): the owner may have just sent a command whose answer
+   * is not read yet, which its player waits for before it plays.
+   */
+  follow?: boolean;
 }
 
 /** A player, as it joins its person. */
@@ -62,6 +84,13 @@ export interface AttentionPlayer {
   sitting(s: Sitting): void;
   /** The person's latest play by hand it knows of (its parser's), in ms; none: undefined. */
   lastByHand(): number | undefined;
+  /** Whether it is in a sitting still (D138): a message of the owner's starts none then. */
+  inSitting(): boolean;
+  /**
+   * The owner wrote during its sitting (D138): it looks again, waiting first for the answer to
+   * their command, if any.
+   */
+  again(): void;
 }
 
 /** What a player has of its person (`ctx.attention`, bot-os.md D133). */
@@ -73,8 +102,11 @@ export interface AttentionHandle {
    * of now: that moment, reserved, so that the next one asked comes after it.
    */
   react(o?: { length?: number }): number;
-  /** The next sitting planned, if any. */
-  next(): number | undefined;
+  /**
+   * The next sitting planned, if any; when it plans none of its own (D138), what it does instead
+   * (`follows your play`, or `never`).
+   */
+  next(): number | string | undefined;
 }
 
 const D = DEFAULT_SCHEDULE;
@@ -99,45 +131,91 @@ const reactionShape = z
   })
   .refine((r) => r.maxS >= r.minS, { message: 'maxS must not be under minS', path: ['maxS'] });
 
-/** An `attention` node's configuration: the person's pace and nights, and their reactions. */
+/** Shown in the editor only while it plays on its own schedule (D127, D138). */
+const scheduleField = (description: string) => ({
+  description,
+  shownWhen: { scheduled: true },
+});
+
+/**
+ * An `attention` node's configuration (D138): its two behaviours first, each on its own, then the
+ * person's pace and nights (only while `scheduled`), the chats it follows the owner's play in (only
+ * while `followsMyPlay`), and their reactions.
+ */
 export const attentionConfig = z
   .object({
+    scheduled: z
+      .boolean()
+      .default(true)
+      .describe(
+        'Plays on its own schedule: sittings planned from the gaps, the nights and the time zone below. Off, it plans none'
+      ),
+    followsMyPlay: z
+      .boolean()
+      .default(false)
+      .describe(
+        'Follows your play: any message you send in the chats it listens to starts a sitting, a few seconds later, in which it plays what is ready for you'
+      ),
+    listen: z
+      .array(z.string().min(1))
+      .min(1)
+      .optional()
+      .meta({
+        description:
+          'The chats it listens to for your messages, picked among those of the account its listen edge reads (your own Telegram account)',
+        shownWhen: { followsMyPlay: true },
+      }),
+    followDelayS: z
+      .number()
+      .min(0)
+      .default(DEFAULT_FOLLOW_DELAY_S)
+      .meta({
+        description:
+          'How many seconds after your message it starts the sitting, so that your own typing wins a race',
+        shownWhen: { followsMyPlay: true },
+      }),
     minGapMin: z
       .number()
       .default(D.minGapMin)
-      .describe('The shortest interval between two sittings, in minutes (1 at least)'),
+      .meta(scheduleField('The shortest interval between two sittings, in minutes (1 at least)')),
     maxGapMin: z
       .number()
       .default(D.maxGapMin)
-      .describe('The longest interval between two sittings, in minutes, not under minGapMin'),
+      .meta(
+        scheduleField('The longest interval between two sittings, in minutes, not under minGapMin')
+      ),
     skipChance: z
       .number()
       .default(D.skipChance)
-      .describe('The chance that a sitting is forgotten, from 0 to under 1'),
+      .meta(scheduleField('The chance that a sitting is forgotten, from 0 to under 1')),
     wake: z
       .string()
       .default(D.wake)
-      .describe(
-        'When they wake up, HH:MM on the clock of timeZone: no sitting from bedtime until then'
+      .meta(
+        scheduleField(
+          'When they wake up, HH:MM on the clock of timeZone: no sitting from bedtime until then'
+        )
       ),
     bedtime: z
       .string()
       .default(D.bedtime)
-      .describe(
-        'When they go to sleep, HH:MM on the clock of timeZone, not equal to wake; a wake earlier than it is the next morning (wake 07:00, bedtime 23:00)'
+      .meta(
+        scheduleField(
+          'When they go to sleep, HH:MM on the clock of timeZone, not equal to wake; a wake earlier than it is the next morning (wake 07:00, bedtime 23:00)'
+        )
       ),
     jitterMin: z
       .number()
       .default(D.jitterMin)
-      .describe('How far wake and bedtime may each move, either way, in minutes'),
+      .meta(scheduleField('How far wake and bedtime may each move, either way, in minutes')),
     wakeDelayMaxMin: z
       .number()
       .default(D.wakeDelayMaxMin)
-      .describe('The most extra minutes after waking before the first sitting'),
+      .meta(scheduleField('The most extra minutes after waking before the first sitting')),
     timeZone: z
       .string()
       .default(D.timeZone)
-      .describe('The time zone of wake and bedtime, an IANA name such as Europe/Rome'),
+      .meta(scheduleField('The time zone of wake and bedtime, an IANA name such as Europe/Rome')),
     reaction: reactionShape
       .default(() => reactionShape.parse({}))
       .describe('How fast they act within a sitting'),
@@ -148,8 +226,21 @@ export const attentionConfig = z
       .describe('The seed of its draws; unset, drawn from the clock and its id'),
   })
   .superRefine((c, ctx) => {
-    const problem = scheduleProblem(c);
+    // The schedule's check applies only to a schedule it keeps.
+    const problem = c.scheduled ? scheduleProblem(c) : undefined;
     if (problem !== undefined) ctx.addIssue({ code: 'custom', message: problem });
+    if (c.followsMyPlay && c.listen === undefined)
+      ctx.addIssue({
+        code: 'custom',
+        message: 'followsMyPlay needs the chats it listens to (listen)',
+        path: ['listen'],
+      });
+    if (!c.followsMyPlay && c.listen !== undefined)
+      ctx.addIssue({
+        code: 'custom',
+        message: 'listen applies only with followsMyPlay',
+        path: ['listen'],
+      });
   });
 export type AttentionConfig = z.output<typeof attentionConfig>;
 
@@ -160,15 +251,17 @@ export interface AttentionState {
 }
 
 export interface AttentionStatus {
+  /** Its behaviours (D138): `scheduled`, `follows your play`, both, or `never plays`. */
+  mode: string;
   players: number;
   last?: number;
   byHand?: boolean;
-  next?: number;
+  next?: number | string;
 }
 
 const stepSchema = z.object({
   attention: z.string(),
-  event: z.enum(['planned', 'sitting', 'seen', 'busy', 'stopped']),
+  event: z.enum(['planned', 'sitting', 'seen', 'busy', 'heard', 'stopped']),
   detail: z.string(),
 });
 export type AttentionStep = z.infer<typeof stepSchema>;
@@ -185,12 +278,29 @@ export function attentionPlugin(): Plugin {
       description:
         'A simulated person: when they sit down to play, how fast they act, for the players bound to it',
       config: attentionConfig,
+      // The chats it follows the owner's play in, picked among its listen edge's account's (D96),
+      // written on that edge's reads (D97).
+      configChats: [{ key: 'listen', input: 'listen' }],
+      warns: (config) =>
+        config['scheduled'] === false && config['followsMyPlay'] !== true
+          ? ['it never plays: neither scheduled nor following your play']
+          : [],
       summary: true,
       games: { registers: [ATTENTION] },
       events: {
         [`${ATTENTION}.step`]: stepSchema.describe(
-          'A step of its plan: a sitting planned, started, seen played by hand, put off while busy, or its stop'
+          "A step of its plan: a sitting planned, started, seen played by hand, put off while busy, a message of the owner's heard, or its stop"
         ),
+      },
+      inputs: {
+        // There only while it follows the owner's play (D138): then required, so the check
+        // refuses one not wired; the editor draws it as soon as followsMyPlay is ticked, so that
+        // its listen chats are picked among its edge's account's.
+        listen: {
+          type: 'chat-in',
+          when: { config: 'followsMyPlay' },
+          help: 'With followsMyPlay: your own account, whose messages in the chats it listens to start a sitting',
+        },
       },
       outputs: {
         attention: {
@@ -201,12 +311,13 @@ export function attentionPlugin(): Plugin {
       interface: {
         state: {
           status: {
-            help: 'Its players, and its last and next sitting',
+            help: 'Its behaviours, its players, and its last and next sitting',
             output: z.object({
+              mode: z.string().describe('Mode'),
               players: z.number().describe('Players'),
               last: z.number().optional().describe('Last sitting'),
               byHand: z.boolean().optional().describe('By hand'),
-              next: z.number().optional().describe('Next sitting'),
+              next: z.union([z.number(), z.string()]).optional().describe('Next sitting'),
             }),
           },
         },
@@ -215,7 +326,12 @@ export function attentionPlugin(): Plugin {
       page: {
         title: 'Sittings',
         sections: [
-          { show: 'keyValue', read: 'status', label: 'Person', fields: ['players', 'byHand'] },
+          {
+            show: 'keyValue',
+            read: 'status',
+            label: 'Person',
+            fields: ['mode', 'players', 'byHand'],
+          },
           { show: 'until', read: 'status', path: 'last' },
           { show: 'until', read: 'status', path: 'next' },
         ],
@@ -259,6 +375,10 @@ class Attention {
     return {
       start: () => {
         this.ctx.summary?.contribute((w) => this.summaryLines(w));
+        if (this.c.followsMyPlay && this.c.listen !== undefined) {
+          const listen = this.ctx.connector('listen');
+          listen.onMessage((m) => this.heard(m, listen.self()));
+        }
         this.settle();
       },
       // Every player has joined: the owner's play while it was down counts.
@@ -267,17 +387,23 @@ class Attention {
       },
       onTimer: (name: string) => {
         if (name === SITTING_TIMER) this.due();
+        if (name === FOLLOW_TIMER) this.follow();
       },
       pause: (reason: string) => {
         this.stopped = true;
+        this.ctx.scheduler.cancel(FOLLOW_TIMER);
         this.drop(`stopped: ${reason}`);
       },
-      off: () => this.drop('the bot is off'),
+      off: () => {
+        this.ctx.scheduler.cancel(FOLLOW_TIMER);
+        this.drop('the bot is off');
+      },
       on: () => {
         this.settle();
-        return this.plan === undefined
+        const next = this.next();
+        return next === undefined
           ? undefined
-          : `${this.ctx.id}: next sitting ${clock(this.plan.at)} UTC`;
+          : `${this.ctx.id}: ${typeof next === 'number' ? `next sitting ${clock(next)} UTC` : next}`;
       },
       kill: () => {
         this.ctx.stop('safety stop');
@@ -291,18 +417,38 @@ class Attention {
           };
         },
         react: (o = {}) => this.react(o.length ?? 0),
-        next: () => this.plan?.at,
+        next: () => this.next(),
       }),
       interface: { state: { status: () => this.status() } },
     };
   }
 
   private status(): AttentionStatus {
+    const next = this.next();
     return {
+      mode: this.mode(),
       players: this.players.size,
       ...(this.last === undefined ? {} : { last: this.last.t, byHand: this.last.byHand }),
-      ...(this.plan === undefined ? {} : { next: this.plan.at }),
+      ...(next === undefined ? {} : { next }),
     };
+  }
+
+  /** Its behaviours, in words (D138). */
+  private mode(): string {
+    const modes = [
+      ...(this.c.scheduled ? ['scheduled'] : []),
+      ...(this.c.followsMyPlay ? [FOLLOWS] : []),
+    ];
+    return modes.length === 0 ? 'never plays' : modes.join(', ');
+  }
+
+  /**
+   * Its next sitting: the one planned; when it plans none of its own, what it does instead, while
+   * it plays (D138).
+   */
+  private next(): number | string | undefined {
+    if (this.c.scheduled || !this.playing()) return this.plan?.at;
+    return this.c.followsMyPlay ? FOLLOWS : NEVER;
   }
 
   private playing(): boolean {
@@ -311,7 +457,52 @@ class Attention {
 
   private settle(): void {
     if (!this.playing()) this.drop('stopped');
+    else if (!this.c.scheduled) this.drop('not scheduled');
     else if (this.plan === undefined) this.replan();
+  }
+
+  /**
+   * A message heard on its listen edge (D138): the owner's own, live, in a chat it listens to,
+   * starts a sitting `followDelayS` later; during a sitting, its players look again instead; while
+   * one is about to start, nothing more.
+   */
+  private heard(m: Inbound, self: string | undefined): void {
+    const own = m.own === true || (self !== undefined && m.sender === self);
+    if (!own || m.playback || !this.playing()) return;
+    if (!(this.c.listen ?? []).some((c) => inChat(m, c))) return;
+    if (this.inSitting()) {
+      this.step('heard', 'a message of yours: its players look again');
+      for (const p of [...this.players.values()]) if (p.inSitting()) p.again();
+      return;
+    }
+    if (this.ctx.scheduler.get(FOLLOW_TIMER) !== undefined) return;
+    const at = this.ctx.clock.now() + this.c.followDelayS * 1000;
+    this.ctx.scheduler.at(FOLLOW_TIMER, at, { late: 'fire', graceMs: SITTING_GRACE_MS });
+    this.step('heard', `a message of yours: a sitting at ${clock(at)} UTC`);
+  }
+
+  private inSitting(): boolean {
+    return [...this.players.values()].some((p) => p.inSitting());
+  }
+
+  /**
+   * A sitting following the owner's message (D138): their own sitting, which the bot plays for
+   * them, so the next planned one comes a full gap after it.
+   */
+  private follow(): void {
+    if (!this.playing()) return;
+    if (this.inSitting()) {
+      for (const p of [...this.players.values()]) if (p.inSitting()) p.again();
+      return;
+    }
+    const now = this.ctx.clock.now();
+    this.sittings++;
+    this.remember({ t: now, byHand: true });
+    this.tally.add('followed');
+    const sitting: Sitting = { id: this.sittings, start: now, follow: true };
+    this.step('sitting', `#${sitting.id}, ${counted(this.players.size, 'player')}, following you`);
+    for (const p of [...this.players.values()]) p.sitting(sitting);
+    if (this.playing() && this.c.scheduled) this.replan();
   }
 
   /** The person's next reaction, after reading `length` characters: reserved. */
@@ -375,7 +566,7 @@ class Attention {
   /** A sitting is due: the owner's own play puts it off, a busy person too; else it starts. */
   private due(): void {
     this.plan = undefined;
-    if (!this.playing()) return;
+    if (!this.playing() || !this.c.scheduled) return;
     if (this.byHand()) {
       this.replan();
       return;
@@ -400,12 +591,20 @@ class Attention {
     this.ctx.store.write('state', { last, sittings: this.sittings } satisfies AttentionState);
   }
 
-  /** Its sittings in a summary's window: `5 sittings, 2 by hand`; none, nothing. */
+  /**
+   * Its sittings in a summary's window: `5 sittings (2 following you), 2 by hand`; none, nothing.
+   */
   private summaryLines(w: SummaryWindow): string[] {
     const sat = this.tally.count('sat', w);
+    const followed = this.tally.count('followed', w);
     const hand = this.tally.count('by hand', w);
-    if (sat === 0 && hand === 0) return [];
-    return [[counted(sat, 'sitting'), ...(hand > 0 ? [`${hand} by hand`] : [])].join(', ')];
+    if (sat === 0 && followed === 0 && hand === 0) return [];
+    return [
+      [
+        `${counted(sat + followed, 'sitting')}${followed > 0 ? ` (${followed} following you)` : ''}`,
+        ...(hand > 0 ? [`${hand} by hand`] : []),
+      ].join(', '),
+    ];
   }
 
   private step(event: AttentionStep['event'], detail: string): void {

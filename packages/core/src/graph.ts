@@ -509,6 +509,8 @@ export function resolveGraph(
     // A node whose ports its config declares has a manifest of its own (D74).
     const { manifest, problem } = nodeManifest(base, n.id, n.config);
     if (problem !== undefined) problems.push(problem);
+    // What its config makes it do that the owner may not mean: warned of, not refused (D138).
+    for (const w of manifest.warns?.(n.config ?? {}) ?? []) warnings.push(`node ${n.id}: ${w}`);
     const instance = n.instance ?? n.id;
     const holder = instances.get(instance);
     const kept = instanceOf(instance);

@@ -150,7 +150,8 @@ const ON_CARD = 3;
 /**
  * The one line a node's card shows of its widget, from its read's output, at `now`: its fields
  * (`Gold: 40 · Who: alice`), a count (`12 Items`), a list's first items, a table's rows counted, an
- * amount out of its total (`Quest: 3/10`), or how long until a time (`Next turn: in 12m 5s`).
+ * amount out of its total (`Quest: 3/10`), or how long until a time (`Next turn: in 12m 5s`; a
+ * string that is no time, as it is).
  */
 export function widgetLine(
   w: Widget,
@@ -188,7 +189,9 @@ export function widgetLine(
       return labelled(label, `${words(v)}/${words(totalOf(w, output))}`);
     case 'until': {
       const t = timeOf(v);
-      return labelled(label, t === undefined ? '—' : relative(t, now));
+      // A word in place of a time (an `attention` that plans none, D138) is shown as it is.
+      if (t === undefined) return labelled(label, typeof v === 'string' && v !== '' ? v : '—');
+      return labelled(label, relative(t, now));
     }
   }
 }

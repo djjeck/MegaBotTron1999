@@ -44,6 +44,9 @@ const name = z.string().regex(/^[a-z][A-Za-z0-9_]*$/u, 'expected a name such as 
 /** A node's own manifest, from its config and its id (`node`, bot-os.md D74). */
 export type NodeManifest = (config: Readonly<Record<string, unknown>>, id: string) => unknown;
 const nodeFn = z.custom<NodeManifest>((v) => typeof v === 'function', 'expected a function');
+/** What a node's config makes it do that its owner may not mean (`warns`, bot-os.md D138). */
+export type ConfigWarnings = (config: Readonly<Record<string, unknown>>) => string[];
+const warnsFn = z.custom<ConfigWarnings>((v) => typeof v === 'function', 'expected a function');
 
 /** A command, by its first word: `/play`. */
 const BOT_COMMAND = /^\/\w+$/u;
@@ -180,6 +183,12 @@ export const manifestSchema = z
      * everywhere: the check, the edges, the bus, the drift, the queue and the editor.
      */
     node: nodeFn.optional(),
+    /**
+     * What a node's config makes it do that its owner may not mean (bot-os.md D138): called with
+     * the node's config as written (`{}` without one), each line returned a warning of the check
+     * (`node <id>: <line>`), which refuses nothing; the editor shows it on the node.
+     */
+    warns: warnsFn.optional(),
     /**
      * Where its nodes' own inputs are declared, for a plugin whose ports its node's config declares
      * (`node`, bot-os.md D80): the key of its config that holds them, a record of input ports by

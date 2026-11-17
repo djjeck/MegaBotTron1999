@@ -370,6 +370,67 @@ describe('a person’s sittings, played on the dev kit (bot-os.md D134)', () => 
     await r.kit.stop();
   });
 
+  it('follows your play: waits for your command’s answer, then plays the rest, the turn too (D138)', async () => {
+    const r = await runSittings({
+      attention: { scheduled: false, followsMyPlay: true, listen: [CHAT] },
+      graph: (g) => ({
+        ...g,
+        edges: [
+          ...(g.edges ?? []),
+          { from: `${TELEGRAM_USER}.chat`, to: 'alice.listen', type: 'chat-in', reads: [CHAT] },
+        ],
+      }),
+    });
+    expect(r.status().next).toBe('follows your play');
+    await r.until(T0 + 30 * MIN);
+    expect(r.account.sent).toEqual([]);
+    // A slow bot: its answer to your turn comes well after the sitting starts.
+    r.account.answerMs = 90_000;
+    const hand = T0 + 30 * MIN;
+    r.account.byHand(CHAT, '/play');
+    await r.until(hand + 85_000);
+    expect(r.sittings()).toEqual([hand + 3000]);
+    // Waiting for the answer: your turn not played again over it.
+    expect(r.account.sent).toEqual([]);
+    r.account.answerMs = 1000;
+    await r.until(hand + 5 * MIN);
+    const played = r.sends().map((s) => s.command);
+    expect(played.slice(0, 2)).toEqual(['/play', '/daily']);
+    expect(played).toContain('/coffee');
+    // The turn its reset freed, in the same sitting.
+    expect(played.filter((c) => c === '/play')).toHaveLength(2);
+    expect(r.account.replies.some((x) => x.text.startsWith('Too soon'))).toBe(false);
+    expect(r.sittings()).toHaveLength(1);
+    expect(r.steps('player.step')).toContain('done: sitting #1 done: nothing left to play');
+    expect(r.summary('alice')).toEqual(['1 sitting (1 following you)']);
+    await r.kit.stop();
+  });
+
+  it('looks again when you write during its sitting (D138)', async () => {
+    const r = await runSittings({
+      attention: { followsMyPlay: true, listen: [CHAT] },
+      graph: (g) => ({
+        ...g,
+        edges: [
+          ...(g.edges ?? []),
+          { from: `${TELEGRAM_USER}.chat`, to: 'alice.listen', type: 'chat-in', reads: [CHAT] },
+        ],
+      }),
+    });
+    const first = r.person().next as number;
+    await r.until(first + 1000);
+    r.account.byHand(CHAT, '/daily');
+    await r.until(first + 5 * MIN);
+    expect(r.steps('attention.step')).toContain(
+      'heard: a message of yours: its players look again'
+    );
+    expect(r.sittings()).toHaveLength(1);
+    // Your /daily answered: not sent again over it.
+    expect(r.account.sent.filter((s) => s.text === '/daily')).toEqual([]);
+    expect(r.steps('player.step').at(-1)).toBe('done: sitting #1 done: nothing left to play');
+    await r.kit.stop();
+  });
+
   it('shows its next play on its card and its plays on its page (D112)', async () => {
     const r = await runSittings();
     const m = parseManifest(playerPlugin().manifest);

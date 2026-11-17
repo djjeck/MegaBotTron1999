@@ -467,7 +467,8 @@ const NAMESPACE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
  * says how the core resolves them (its schema's defaults included, #6): the value's
  * namespace, or its event type's. Unresolved, an optional one is not there, and a required one is
  * left for the check to refuse. A chat-in or events input there only with a config key (`when`,
- * the reactor's `match` and `on`) is not there while the key is unset.
+ * the reactor's `match` and `on`, an attention's `followsMyPlay`) is not there while the key is
+ * unset (or false).
  */
 export function inputsOf(
   inputs: Readonly<Record<string, PortView>>,
@@ -478,7 +479,7 @@ export function inputsOf(
     if (
       (p.type === 'chat-in' || p.type === 'events') &&
       p.when !== undefined &&
-      (config?.[p.when] === undefined || config[p.when] === null)
+      (config?.[p.when] === undefined || config[p.when] === null || config[p.when] === false)
     )
       continue;
     if (p.type !== 'events' || p.config === undefined) {
