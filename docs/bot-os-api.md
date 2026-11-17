@@ -1570,6 +1570,12 @@ public API (`packages/core/src/devkit.ts`):
   that runs other plugins on a kit. It is not registered in an instance: its manifest (kind
   `simulator`) names it, the game it plays (`games.consumes`) and the plugins it runs (`requires`),
   and `run(run, options)` plays one run.
+- **Telegram exports** (`@megabottron1999/telegram-export`, bot-os.md D130): Telegram Desktop's chat
+  exports, HTML and JSON, read into one shape of message (`readExportPaths`, or the pure
+  `readHtmlExport`, `readJsonExport` and `mergeExports`), and turned into the `Inbound`s the owner's
+  account (`telegram-user`) would have delivered (`toInbounds`, by a per-replay mapping of the
+  owner, the chats and the senders), for a replay through real plugins; a command line prints either
+  as JSON Lines. The format: [telegram-export.md](telegram-export.md).
 
 ### 4.11 The owner's controls
 

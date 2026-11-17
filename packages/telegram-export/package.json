@@ -1,0 +1,23 @@
+{
+  "name": "@megabottron1999/telegram-export",
+  "version": "0.1.36",
+  "private": true,
+  "description": "MegaBotTron1999's dev kit for Telegram Desktop chat exports: the HTML and JSON readers, their messages as a connector delivers them, and a replay of them through real plugins",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*",
+    "./test/*": "./test/*"
+  },
+  "imports": {
+    "#src/*": "./src/*",
+    "#test/*": "./test/*"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@megabottron1999/core": "0.1.36",
+    "htmlparser2": "12.0.0"
+  }
+}

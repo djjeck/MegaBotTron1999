@@ -1,0 +1,126 @@
+{
+ "name": "QuestBot",
+ "type": "bot_chat",
+ "id": 1000000001,
+ "messages": [
+  {
+   "id": 99,
+   "type": "service",
+   "date": "2026-11-06T12:59:00",
+   "date_unixtime": "1793966340",
+   "actor": "Alice Liddell",
+   "actor_id": "user1000000003",
+   "action": "pin_message",
+   "message_id": 100,
+   "text": "",
+   "text_entities": []
+  },
+  {
+   "id": 100,
+   "type": "message",
+   "date": "2026-11-06T13:00:00",
+   "date_unixtime": "1793966400",
+   "from": "Alice Liddell",
+   "from_id": "user1000000003",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/play"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/play"
+    }
+   ]
+  },
+  {
+   "id": 101,
+   "type": "message",
+   "date": "2026-11-06T13:00:02",
+   "date_unixtime": "1793966402",
+   "from": "QuestBot",
+   "from_id": "user1000000001",
+   "reply_to_message_id": 100,
+   "text": "Found an apple.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Found an apple."
+    }
+   ]
+  },
+  {
+   "id": 102,
+   "type": "message",
+   "date": "2026-11-06T13:05:00",
+   "date_unixtime": "1793966700",
+   "from": "Alice Liddell",
+   "from_id": "user1000000003",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/play"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/play"
+    }
+   ]
+  },
+  {
+   "id": 103,
+   "type": "message",
+   "date": "2026-11-06T13:05:01",
+   "date_unixtime": "1793966701",
+   "from": "QuestBot",
+   "from_id": "user1000000001",
+   "reply_to_message_id": 102,
+   "text": "Too soon: 12 minutes.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Too soon: 12 minutes."
+    }
+   ]
+  },
+  {
+   "id": 104,
+   "type": "message",
+   "date": "2026-11-06T13:20:00",
+   "date_unixtime": "1793967600",
+   "from": "Alice Liddell",
+   "from_id": "user1000000003",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/play"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/play"
+    }
+   ]
+  },
+  {
+   "id": 105,
+   "type": "message",
+   "date": "2026-11-06T13:20:01",
+   "date_unixtime": "1793967601",
+   "from": "QuestBot",
+   "from_id": "user1000000001",
+   "text": "The sky is green.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "The sky is green."
+    }
+   ]
+  }
+ ]
+}

@@ -2,3 +2,5 @@
 coverage/
 # The web UI as Vite builds it.
 dist/
+# Invented Telegram exports, kept as Telegram Desktop writes them.
+packages/telegram-export/test/fixtures/

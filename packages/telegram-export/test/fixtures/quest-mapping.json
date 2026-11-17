@@ -1,0 +1,9 @@
+{
+  "account": "telegram:alice",
+  "owner": { "username": "alice", "names": ["Alice Liddell"], "ids": ["user1000000003"] },
+  "chats": {
+    "QuestBot": { "chat": "@QuestBot", "private": true },
+    "Quest Lobby": { "chat": "-1001000000002", "private": false }
+  },
+  "senders": { "QuestBot": "QuestBot", "Bob Stone": "bob" }
+}

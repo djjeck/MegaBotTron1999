@@ -1,0 +1,94 @@
+{
+ "name": "Quest Lobby",
+ "type": "private_supergroup",
+ "id": 1000000002,
+ "messages": [
+  {
+   "id": 7000,
+   "type": "message",
+   "date": "2026-11-06T13:30:00",
+   "date_unixtime": "1793968200",
+   "from": "Bob Stone",
+   "from_id": "user1000000004",
+   "text": "hello all",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "hello all"
+    }
+   ]
+  },
+  {
+   "id": 7001,
+   "type": "message",
+   "date": "2026-11-06T13:31:00",
+   "date_unixtime": "1793968260",
+   "from": "Alice Liddell",
+   "from_id": "user1000000003",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/play@QuestBot"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/play@QuestBot"
+    }
+   ]
+  },
+  {
+   "id": 7002,
+   "type": "message",
+   "date": "2026-11-06T13:31:01",
+   "date_unixtime": "1793968261",
+   "from": "QuestBot",
+   "from_id": "user1000000001",
+   "reply_to_message_id": 7001,
+   "text": "Defeated.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Defeated."
+    }
+   ]
+  },
+  {
+   "id": 7003,
+   "type": "message",
+   "date": "2026-11-06T13:32:00",
+   "date_unixtime": "1793968320",
+   "from": "Bob Stone",
+   "from_id": "user1000000004",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/play@QuestBot"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/play@QuestBot"
+    }
+   ]
+  },
+  {
+   "id": 7004,
+   "type": "message",
+   "date": "2026-11-06T13:32:01",
+   "date_unixtime": "1793968321",
+   "from": "QuestBot",
+   "from_id": "user1000000001",
+   "reply_to_message_id": 7003,
+   "text": "Found a pear.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Found a pear."
+    }
+   ]
+  }
+ ]
+}
