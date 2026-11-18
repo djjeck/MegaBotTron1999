@@ -150,33 +150,25 @@ describe('a turn parser', () => {
     p.kit.clock.advance(MIN);
     await p.iface.sent({ chat: GROUP, id: '5', t: T0 + MIN, command: `/Play@${QUESTBOT}` });
     expect(sends(p).at(-1)).toEqual([GROUP, '/play', false, '5']);
-    // Its answers hold the addressed form back as the bare one (D98).
-    expect(outbox.held(GROUP, `/play@${QUESTBOT}`)?.until).toBe(T0 + 15 * MIN);
-    expect(outbox.held(GROUP, '/play')?.until).toBe(T0 + 15 * MIN);
+    // Its answers hold back no form at the outbox (D142): the state holds the turn.
+    expect(outbox.held(GROUP, `/play@${QUESTBOT}`)).toBeUndefined();
+    expect(outbox.held(GROUP, '/play')).toBeUndefined();
     await p.kit.stop();
   });
 
-  it("answers a turn (D98): a too soon refuses it, its rest holds the bot's turns back", async () => {
+  it('answers a turn (D98): a too soon refuses it, any other reading takes it; the outbox holds nothing (D142)', async () => {
     const p = await run();
     const outbox = p.kit.core.outbox('telegram:alice').as('anyone');
     p.hear({ ...own, chat: PRIVATE, text: '/play' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Too soon: 20 minutes.' });
-    expect(outbox.held(PRIVATE, '/play')).toEqual({
-      until: T0 + 20 * MIN,
-      reason: 'cooldown: cooldown',
-    });
+    expect(outbox.held(PRIVATE, '/play')).toBeUndefined();
+    // The state holds it, from the wait the event states.
+    expect(p.iface.rest()).toMatchObject({ until: T0 + 20 * MIN });
     p.kit.clock.advance(20 * MIN);
     p.hear({ ...own, chat: PRIVATE, text: '/play' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Found a pear.' });
-    expect(outbox.held(PRIVATE, '/play')).toEqual({
-      until: T0 + 35 * MIN,
-      reason: 'cooldown: rest',
-    });
-    // Unread, it answers nothing: the rest stays as it was.
-    p.kit.clock.advance(15 * MIN);
-    p.hear({ ...own, chat: PRIVATE, text: '/play' });
-    p.hear({ ...bot, chat: PRIVATE, text: 'The sky is green.' });
     expect(outbox.held(PRIVATE, '/play')).toBeUndefined();
+    expect(p.iface.rest()).toMatchObject({ until: T0 + 35 * MIN });
     await p.kit.stop();
   });
 
@@ -238,9 +230,8 @@ describe('a turn parser', () => {
     first.hear({ ...bot, chat: PRIVATE, replyTo: '5', text: 'Too soon: 40 minutes.' });
     await first.kit.stop();
     const parsed = stores[0]?.read(PARSED_DOC);
-    expect(parsed).toMatchObject({
-      sends: [{ chat: PRIVATE, id: '5', answered: true, command: '/play', byHand: false }],
-      told: { '/play': T0 + 40 * MIN },
+    expect(parsed).toStrictEqual({
+      sends: [{ chat: PRIVATE, id: '5', t: T0, answered: true, command: '/play', byHand: false }],
     });
     // The next start: its sends kept, and a reply missed while down is read and paired.
     const next = await run(questPlugin(), undefined, stateOf(), { [QUEST]: { parsed } });
@@ -489,7 +480,7 @@ describe('its other commands, as events its state reduces (bot-os.md D132, D141)
       outcome: { kind: 'gain', item: 'a gem' },
     });
     // The daily: its cooldown is its state's; a "come back" holds it for the wait it says, in the
-    // outbox too, and refuses it.
+    // state alone (D142), and refuses it.
     p.hear({ ...own, chat: PRIVATE, text: '/daily' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Daily reward: 5 coins.' });
     expect(at(p, '/daily')).toMatchObject({
@@ -502,10 +493,7 @@ describe('its other commands, as events its state reduces (bot-os.md D132, D141)
     p.hear({ ...own, chat: PRIVATE, text: '/daily' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Come back in 30 minutes.' });
     expect(at(p, '/daily')).toMatchObject({ until: T0 + 31 * MIN, why: 'it said too soon' });
-    expect(outbox.held(PRIVATE, '/daily')).toEqual({
-      until: T0 + 31 * MIN,
-      reason: 'cooldown: cooldown',
-    });
+    expect(outbox.held(PRIVATE, '/daily')).toBeUndefined();
     // Neither is a turn: the turn's readiness is as it was.
     expect(at(p, '/play')).toEqual({ ready: true });
     // Its unlock lapses after 30 minutes.
@@ -515,12 +503,13 @@ describe('its other commands, as events its state reduces (bot-os.md D132, D141)
     await p.kit.stop();
   });
 
-  it('ends the outbox’s cooldown on an effect the bot announces, as the state ends its hold', async () => {
+  it('publishes an effect the bot announces, which the state ends its hold on', async () => {
     const p = await game();
     const outbox = p.kit.core.outbox('telegram:alice').as('anyone');
     p.hear({ ...own, chat: PRIVATE, text: '/play' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Defeated.' });
-    expect(outbox.held(PRIVATE, '/play')?.until).toBe(T0 + 30 * MIN);
+    expect(p.iface.rest()?.until).toBe(T0 + 30 * MIN);
+    expect(outbox.held(PRIVATE, '/play')).toBeUndefined();
     p.kit.clock.advance(MIN);
     p.hear({ ...own, chat: PRIVATE, text: '/coffee' });
     p.hear({ ...bot, chat: PRIVATE, text: 'You drink a coffee: rested.' });
@@ -531,12 +520,12 @@ describe('its other commands, as events its state reduces (bot-os.md D132, D141)
     expect(p.events.at(-1)).toMatchObject({
       command: '/coffee',
       effects: [{ command: '/play', clear: true }],
-      holds: { '/play': T0 + MIN, [`/play@${QUESTBOT}`]: T0 + MIN },
     });
+    expect(p.events.at(-1)).not.toHaveProperty('holds');
     await p.kit.stop();
   });
 
-  it('publishes the unlocks and effects a reading names, by name, and shortens what it told', async () => {
+  it('publishes the unlocks and effects a reading names, by name', async () => {
     const vocabulary = {
       turnCommands: ['/play'],
       commands: { '/chest': {}, '/daily': { aliases: ['/d'] } },
@@ -576,9 +565,7 @@ describe('its other commands, as events its state reduces (bot-os.md D132, D141)
     expect(p.events.at(-1)).toMatchObject({
       unlocks: ['/chest'],
       effects: [{ command: '/daily', shortenMin: 20 }],
-      holds: { '/daily': T0 + 40 * MIN, [`/d@${QUESTBOT}`]: T0 + 40 * MIN },
     });
-    expect(outbox.held(PRIVATE, '/d')?.until).toBe(T0 + 40 * MIN);
     expect(at(p, '/chest')).toEqual({ ready: true, since: T0 });
     expect(at(p, '/daily')).toMatchObject({
       until: T0 + 40 * MIN,
@@ -587,11 +574,6 @@ describe('its other commands, as events its state reduces (bot-os.md D132, D141)
     p.hear({ ...own, chat: PRIVATE, text: '/daily' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Shortcut.' });
     expect(at(p, '/play')).toMatchObject({ until: T0 + 10 * MIN });
-    // Nothing held any more: nothing to shorten in the outbox.
-    p.kit.clock.advance(11 * MIN);
-    p.hear({ ...own, chat: PRIVATE, text: '/daily' });
-    p.hear({ ...bot, chat: PRIVATE, text: 'Shortcut.' });
-    expect(p.events.at(-1)).not.toHaveProperty('holds');
     p.hear({ ...own, chat: PRIVATE, text: '/daily' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Gibberish' });
     expect(p.events.at(-1)).toMatchObject({
@@ -694,9 +676,9 @@ describe('a command’s aliases (bot-os.md D140)', () => {
       sent: { t: T0, byHand: true },
       answer: { t: T0 },
     });
-    // Its answers hold every form of the turn back, each name bare and addressed.
+    // The state holds the turn, not the outbox (D142), whichever form goes.
     for (const form of ['/play', '/quest', `/play@${QUESTBOT}`, `/quest@${QUESTBOT}`])
-      expect(outbox.held(GROUP, form)?.until).toBe(T0 + 15 * MIN);
+      expect(outbox.held(GROUP, form)).toBeUndefined();
     // The boost by its alias, addressed: the boost's state; it ends the turn's rest, every form.
     p.kit.clock.advance(MIN);
     await p.iface.sent({ chat: GROUP, id: '7', t: T0 + MIN, command: `/b@${QUESTBOT}` });

@@ -100,25 +100,19 @@ describe('replay', () => {
       sent: { t: T0 + 1860 * S, byHand: true },
       answer: { t: T0 + 1861 * S, length: 9 },
     });
-    // The group's answer holds the turn command back in the group, until the rest it states.
+    // The state holds the turn, not the outbox (D142).
     const outbox = r.kit.core.outbox('telegram:owner').as('anyone');
-    expect(outbox.held(LOBBY, '/play')).toStrictEqual({
-      until: T0 + 1861 * S + 30 * MIN,
-      reason: 'cooldown: rest',
-    });
+    expect(outbox.held(LOBBY, '/play')).toBeUndefined();
     expect(r.sent()).toStrictEqual([]);
     expect(() => r.read(QUEST, 'nothing')).toThrow(/^replay: quest\.nothing: /u);
     await r.stop();
   });
 
-  it('answers the turns as live: a "too soon" holds the next one back (D98)', async () => {
+  it('reads the turns as live: a "too soon" holds the next one back in the state (D141, D142)', async () => {
     // The chat up to the "too soon", the clock at its answer.
     const r = await replay({ plugins: plugins(), inbounds: inbounds(QUEST_HTML).slice(0, 4) });
     const outbox = r.kit.core.outbox('telegram:owner').as('anyone');
-    expect(outbox.held('@QuestBot', '/play')).toStrictEqual({
-      until: T0 + 301 * S + 12 * MIN,
-      reason: 'cooldown: cooldown',
-    });
+    expect(outbox.held('@QuestBot', '/play')).toBeUndefined();
     expect(turn(r)).toMatchObject({ until: T0 + 301 * S + 12 * MIN, why: 'it said too soon' });
     await r.stop();
   });

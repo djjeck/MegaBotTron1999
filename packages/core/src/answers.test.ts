@@ -22,8 +22,6 @@ const GIVE: AnswerDeclaration[] = [
     when: { result: 'refused', why: 'cooldown' },
     status: 'refused',
     reason: 'cooldown',
-    retryAtFrom: 'until',
-    holds: ['/give'],
   }),
   declare({
     event: 'quest.give',
@@ -48,11 +46,9 @@ describe('readAnswer', () => {
       readAnswer(GIVE, 'quest.give', { result: 'refused', why: 'cooldown', until: 9000 }, 5)
     ).toEqual({
       commands: ['/give', '/throw'],
-      holds: ['/give'],
       answer: {
         status: 'refused',
         reason: 'cooldown',
-        retryAt: 9000,
         event: { type: 'quest.give', t: 5, result: 'refused', why: 'cooldown', until: 9000 },
       },
     });
@@ -68,14 +64,16 @@ describe('readAnswer', () => {
       status: 'ok',
       event: { type: 'quest.give', t: 5, result: 'given' },
     });
-    expect(ok?.holds).toEqual(['/give', '/throw']);
-    // Not an answer: `unless` holds, another type, a retryAt that is not a time.
+    // Not an answer: `unless` holds, another type.
     expect(readAnswer(GIVE, 'quest.give', { result: 'unknown' }, 5)).toBeUndefined();
     expect(readAnswer(GIVE, 'quest.other', { result: 'given' }, 5)).toBeUndefined();
-    expect(
-      readAnswer(GIVE, 'quest.give', { result: 'refused', why: 'cooldown', until: 'soon' }, 5)
-        ?.answer.retryAt
-    ).toBeUndefined();
+  });
+
+  it('declares no cooldown: a retryAt or holds is not an answer field (D142)', () => {
+    for (const extra of [{ retryAtFrom: 'until' }, { holds: ['/give'] }, { holdsAtFrom: 'h' }])
+      expect(
+        answerSchema.safeParse({ event: 'e', commands: ['/give'], status: 'ok', ...extra }).success
+      ).toBe(false);
   });
 
   it('gives the longest window of the declarations that answer a command', () => {
@@ -85,9 +83,8 @@ describe('readAnswer', () => {
   });
 });
 
-const read = (status: 'ok' | 'refused', o: { reason?: string; retryAt?: number } = {}) => ({
+const read = (status: 'ok' | 'refused', o: { reason?: string } = {}) => ({
   commands: ['/give'],
-  holds: ['/give', '/throw'],
   answer: { status, ...o } as CommandAnswer,
 });
 
@@ -180,87 +177,34 @@ describe('Answers', () => {
     expect(notices).toHaveLength(4);
   });
 
-  it("holds a command group back until an answer's retryAt, the latest kept", () => {
-    const { a, clock } = answers();
-    a.answered(
-      ['42', '@QuestBot'],
-      undefined,
-      read('refused', { reason: 'cooldown', retryAt: 5000 })
+  it('holds nothing back for a "too soon": the state keeps cooldowns, not the outbox (D142)', () => {
+    const { a } = answers();
+    a.expect(['p'], '@QuestBot', '/give', 60_000);
+    a.answered(['@QuestBot'], undefined, read('refused', { reason: 'cooldown' }));
+    expect(a.held('p', '@QuestBot', '/give')).toBeUndefined();
+    expect(a.held('q', '@QuestBot', '/give')).toBeUndefined();
+    // Refused so again and again, the guard backs it off, as for any other reason.
+    for (let i = 0; i < 2; i++) {
+      a.expect(['p'], '@QuestBot', '/give', 60_000);
+      a.answered(['@QuestBot'], undefined, read('refused', { reason: 'cooldown' }));
+    }
+    expect(a.held('p', '@QuestBot', '/give')?.reason).toBe(
+      'backed off: refused 3 times in a row (cooldown)'
     );
-    expect(a.held('p', '@questbot', '/throw')).toEqual({
-      until: 5000,
-      reason: 'cooldown: cooldown',
-    });
-    expect(a.held('p', '42', '/give')?.until).toBe(5000);
-    a.answered(['@QuestBot'], undefined, read('ok', { retryAt: 3000 }));
-    expect(a.held('q', '@QuestBot', '/give')).toEqual({
-      until: 5000,
-      reason: 'cooldown: cooldown',
-    });
-    a.answered(['@QuestBot'], undefined, read('ok', { retryAt: 8000 }));
-    expect(a.held('q', '@QuestBot', '/give')).toEqual({ until: 8000, reason: 'cooldown: ok' });
-    // A retryAt past is none; another command, another chat: free.
-    a.answered(['#lobby'], undefined, read('ok', { retryAt: -1 }));
-    expect(a.held('p', '#lobby', '/give')).toBeUndefined();
-    expect(a.held('p', '@QuestBot', '/look')).toBeUndefined();
-    clock.advance(8000);
-    expect(a.held('p', '@QuestBot', '/give')).toBeUndefined();
-  });
-
-  it('sets the cooldowns an answer names as they are, an earlier one too, a past one cleared (D132)', () => {
-    const { a, clock } = answers();
-    a.answered(['@QuestBot'], undefined, read('ok', { retryAt: 9000 }));
-    a.answered(['@QuestBot', '42'], undefined, {
-      ...read('ok'),
-      commands: ['/coffee'],
-      holds: ['/coffee'],
-      holdsAt: { '/give': 4000 },
-    });
-    expect(a.held('p', '@QuestBot', '/give')).toEqual({ until: 4000, reason: 'cooldown: ok' });
-    expect(a.held('p', '42', '/give')?.until).toBe(4000);
-    // The group's other command keeps its own.
-    expect(a.held('p', '@QuestBot', '/throw')?.until).toBe(9000);
-    a.answered(['@QuestBot'], undefined, { ...read('ok'), holdsAt: { '/give': 0, '/look': 6000 } });
-    expect(a.held('p', '@QuestBot', '/give')).toBeUndefined();
-    expect(a.held('p', '@QuestBot', '/look')).toEqual({ until: 6000, reason: 'cooldown: ok' });
-    clock.advance(6000);
-    expect(a.held('p', '@QuestBot', '/look')).toBeUndefined();
-  });
-
-  it('reads the cooldowns an answer sets from its payload, its other entries left out', () => {
-    const [d] = [
-      declare({ event: 'quest.answer', commands: ['/coffee'], status: 'ok', holdsAtFrom: 'holds' }),
-    ];
-    expect(
-      readAnswer([d as AnswerDeclaration], 'quest.answer', { holds: { '/give': 5, '/x': 'no' } }, 1)
-        ?.holdsAt
-    ).toEqual({ '/give': 5 });
-    for (const holds of [undefined, [], { '/x': 'no' }])
-      expect(readAnswer([d as AnswerDeclaration], 'quest.answer', { holds }, 1)).not.toHaveProperty(
-        'holdsAt'
-      );
   });
 
   it('backs off a node refused for the same reason again and again, longer each time', () => {
     const { a, clock, notices } = answers();
-    const refuse = (plugin: string, reason?: string, retryAt?: number) => {
+    const refuse = (plugin: string, reason?: string) => {
       a.expect([plugin], '@QuestBot', '/give', 60_000);
-      a.answered(
-        ['@QuestBot'],
-        undefined,
-        read('refused', {
-          ...(reason === undefined ? {} : { reason }),
-          ...(retryAt === undefined ? {} : { retryAt }),
-        })
-      );
+      a.answered(['@QuestBot'], undefined, read('refused', reason === undefined ? {} : { reason }));
     };
     refuse('p', 'missing');
     refuse('p', 'missing');
     expect(a.held('p', '@QuestBot', '/give')).toBeUndefined();
-    // Another reason starts the count again; a cooldown with its retryAt counts for nothing.
+    // Another reason starts the count again.
     refuse('p', 'invalid');
     refuse('p', 'invalid');
-    refuse('p', 'invalid', 100);
     clock.advance(100);
     expect(a.backoffs('p')).toEqual([]);
     refuse('p', 'invalid');

@@ -33,8 +33,8 @@
  * its state has read none to: a bare command another sent in the group may have taken its bot's
  * turn too. Nothing ready, but a command of its due within `settleS` (D140), it waits for it rather
  * than leave. When nothing is left, it sleeps until the next sitting. **No schedule of its own:**
- * its person's sittings, its state's readiness, and its outbox's `held` (D98) as the safety net,
- * are all it waits on.
+ * its person's sittings and its state's readiness are all it waits on: its outbox holds back no
+ * game's cooldown (D142), only a node refused again and again (the retry-loop guard, D98).
  *
  * **The form, chosen by reach** (D140, `chat-group.ts`): the players of one account that send to
  * the same chat are a group. A form reaches the players of the group whose bot takes it (bare,
@@ -61,8 +61,8 @@
  *   it waits for the account to be connected (its send refused `not connected`, it tries again
  *   each minute), and tells its state each command sent with its message's id, which hands it to
  *   its parser to match the bot's reply to it; and the other players of its account, each its own
- *   state (D139, D140). A send refused (a cooldown its outbox holds, the retry-loop guard) or failed is
- *   not tried again in that sitting.
+ *   state (D139, D140). A send refused (the retry-loop guard, D98) or failed is not tried again in
+ *   that sitting.
  * - It plays while its node runs and the instance is on; stopped (bot-os.md D64: drift on its
  *   bot's parser, the owner's kill or stop, or its own safety stop, `kill`), it drops its sitting and
  *   plays no more until the owner clears the stop in the editor.
@@ -556,12 +556,6 @@ class Player {
     return playForms(play, this.declared ?? [], bot, !this.chat.startsWith('@'));
   }
 
-  /** Its outbox holds `form` back now (D98). */
-  private heldBack(form: string, now: number): boolean {
-    const held = this.ctx.outbox('chat').held(this.chat, form);
-    return held !== undefined && held.until > now;
-  }
-
   /** Itself as its group sees it (D140). */
   private member(): GroupMember {
     return {
@@ -595,7 +589,7 @@ class Player {
 
   /**
    * Whether it would play `command` now, sent as `form` (D140): in a sitting, ticked, its policy
-   * allowing it, ready, not covered by another's send, and `form` one it may send, not held back.
+   * allowing it, ready, not covered by another's send, and `form` one it may send.
    */
   private wouldPlay(command: string, form: string): boolean {
     const now = this.ctx.clock.now();
@@ -605,7 +599,7 @@ class Player {
     if (sitting === undefined || play === undefined || ready === undefined) return false;
     if (sitting.count >= MAX_SENDS_PER_SITTING || !this.goes(play, ready, sitting)) return false;
     if (this.groups.covered(this.ctx.id, play.command, now)) return false;
-    return this.formsOf(play).some((f) => same(f, form)) && !this.heldBack(form, now);
+    return this.formsOf(play).some((f) => same(f, form));
   }
 
   /**
@@ -781,7 +775,7 @@ class Player {
         soon(now + ANSWER_POLL_MS);
         continue;
       }
-      const forms = this.formsOf(play).filter((f) => !this.heldBack(f, now));
+      const forms = this.formsOf(play);
       if (forms.length === 0) continue;
       const wait = this.settle(play, forms, sitting, now);
       if (wait !== undefined) {

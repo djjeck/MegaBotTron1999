@@ -164,7 +164,8 @@ const bridge = (lines: string[]) => ({
   use: () => Promise.resolve(undefined),
   enqueue: () => {},
   cancel: () => Promise.resolve(false),
-  held: () => Promise.resolve({ until: 7, reason: 'cooldown: cooldown' }),
+  held: () =>
+    Promise.resolve({ until: 7, reason: 'backed off: refused 3 times in a row (missing)' }),
   publish: () => {},
   write: () => {},
   remove: (n: string) => void lines.push(`remove ${n}`),

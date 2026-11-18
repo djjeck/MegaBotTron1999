@@ -23,9 +23,10 @@
  *
  * **Command answers** (bot-os.md D98, #59, `answers.ts`): a live send of a command that a parser
  * reading its chat declares an answer for waits for that answer; a queued one settles with it
- * (`answer`: `ok`, `refused`, or `unanswered` past its window). An answer's `retryAt` holds the
- * command back in that chat (a queued send waits it out, an immediate one is refused), and the
- * retry-loop guard backs off a node whose command keeps being refused for the same reason.
+ * (`answer`: `ok`, `refused`, or `unanswered` past its window). The retry-loop guard backs off a
+ * node whose command keeps being refused for the same reason (a queued send waits it out, an
+ * immediate one is refused). The outbox keeps no game's cooldown (bot-os.md D142): when a command
+ * may be played is a state's readiness, which a sender that cares binds to.
  *
  * Every attempt is logged (`core.send`), with its outcome. `send` sends now or refuses, for actors
  * that time their sends to the second; `enqueue` waits its turn within the limits; `deliver` sends
@@ -86,7 +87,7 @@ export type SendResult = {
   text: string;
   outcome: 'sent' | 'dry-run' | 'refused';
   reason?: string;
-  /** Refused as the command rests (a cooldown, the guard, D98): when it may go again. */
+  /** Refused as the retry-loop guard backs its node off (D98, D142): when it may go again. */
   retryAt?: number;
 };
 
@@ -97,7 +98,7 @@ export type DeliverResult = {
   reason?: string;
   /** The network's id of the message sent. */
   id?: string;
-  /** Refused as the command rests (a cooldown, the guard, D98): when it may go again. */
+  /** Refused as the retry-loop guard backs its node off (D98, D142): when it may go again. */
   retryAt?: number;
 };
 
@@ -272,9 +273,9 @@ export interface OutboxHandle {
   /** Sends now or refuses, and waits for the network's answer: the message's id. */
   deliver(chat: string, text: string, options?: SendOptions): Promise<DeliverResult>;
   /**
-   * What holds its sends of `command` (a first word) to `chat` back now (bot-os.md D98): the
-   * bot's cooldown, as an answer's `retryAt` set it, or the retry-loop guard; until when, and why.
-   * Undefined: nothing does.
+   * What holds its sends of `command` (a first word) to `chat` back now (bot-os.md D98, D142): the
+   * retry-loop guard, until when, and why; never a game's cooldown, which is a state's. Undefined:
+   * nothing does.
    */
   held(chat: string, command: string): Hold | undefined;
   /**
@@ -325,7 +326,7 @@ export interface QueuedResult {
   text: string;
   outcome: QueueOutcome;
   reason?: string;
-  /** Refused as its command rests: when it may go again. */
+  /** Refused as the retry-loop guard backs its node off: when it may go again. */
   retryAt?: number;
   /** The event that cancelled it. */
   event?: CancelEvent;
@@ -490,7 +491,7 @@ export class Outbox {
   private readonly unanswered = new Map<string, Unanswered>();
   /** The queue is being pumped: a pump asked meanwhile (a pause dropping a node's sends) waits. */
   private pumping = false;
-  /** The sends waiting for their answers, the cooldowns and the guard (D98). */
+  /** The sends waiting for their answers, and the guard (D98). */
   private readonly answers: Answers;
 
   constructor(options: OutboxOptions) {
@@ -557,8 +558,8 @@ export class Outbox {
   }
 
   /**
-   * A send held back now (D98): its command rests in that chat (an answer's `retryAt`), or the
-   * guard backs its node off; refused with why and when it may go again.
+   * A send held back now (D98): the guard backs its node off; refused with why and when it may go
+   * again.
    */
   private resting(plugin: string, chat: string, text: string): SendResult | undefined {
     const hold = this.answers.held(plugin, chat, firstWord(text));
@@ -576,8 +577,8 @@ export class Outbox {
 
   /**
    * An answer read from a message of `chat` (by any of its names, D90), declared by the parser
-   * that read it (D98): its cooldown kept, and the send it answers settled, whose nodes' sends of
-   * the command are answered for the watchdog too (D93).
+   * that read it (D98): the send it answers settled, whose nodes' sends of the command are
+   * answered for the watchdog too (D93).
    */
   answered(
     m: { chat: string; aliases?: readonly string[] | undefined; replyTo?: string | undefined },
@@ -936,7 +937,7 @@ export class Outbox {
 
   /**
    * When a waiting send's command may go again in its chat: its interval since it last went, and
-   * what holds it back (D98: the bot's cooldown, a node's guard; for a coalesced one, the longest).
+   * what holds it back (D98: a node's guard; for a coalesced one, the longest).
    */
   private readyAt(w: Waiting): number {
     const last = this.lastSent.get(`${w.chat} ${w.command}`);

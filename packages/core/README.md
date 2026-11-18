@@ -39,9 +39,10 @@ hidden from every view of it (`src/sensitive.ts`, `hideSensitive`, D124).
   actor whose sends of a command go unanswered too many times in a row.
 - `src/answers.ts`: command answers (docs/bot-os.md D98): the parsers' declared answers (a
   manifest's `answers`), the sends waiting for theirs (`await enqueue(…)` settles with `answer`),
-  the cooldowns their `retryAt` sets per chat and command, and the retry-loop guard, which backs off
-  a node refused again and again for one reason (`GET /status`'s `backoff`, a `backoff` notice), and
-  the `unanswered` notice of a command no answer came for (D107).
+  and the retry-loop guard, which backs off a node refused again and again for one reason, by a
+  back-off of its own (`GET /status`'s `backoff`, a `backoff` notice), and the `unanswered` notice
+  of a command no answer came for (D107). No game's cooldown is kept there (D142): when a command
+  may be played is a state's readiness.
 - `src/paths.ts`: dotted paths into a payload (`valueAt`, `matches`, `holds`), as reactions, cancels
   and answers read them.
 - `src/notices.ts`: the owner's notices (docs/bot-os.md D91, D94): what needs the owner's attention,

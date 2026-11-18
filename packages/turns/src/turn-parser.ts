@@ -23,15 +23,13 @@
  *   answers a send or announces an unlock, as `<id>.reply` (marked `playback` when the message was
  *   history: missed while down, bot-os.md D83);
  * - declares its `<id>.turn` an answer to its turn (bot-os.md D98): `refused` with `cooldown` for a
- *   "too soon", `ok` for any other outcome read (not an unread one), each with its `retryAt`, so
- *   that a turn queued by any node settles with what the bot answered, and the outbox holds the
- *   next one back until the bot's rest is over; its `<id>.answer` the same way to each of its other
- *   commands, and both with the holds the effects the bot announced set (`holds`), so that a reset
- *   the bot announces ends the outbox's cooldown too.
+ *   "too soon", `ok` for any other outcome read (not an unread one), so that a turn queued by any
+ *   node settles with what the bot answered; its `<id>.answer` the same way to each of its other
+ *   commands. The outbox holds nothing back on them (bot-os.md D142): when a command may go again
+ *   is a state's readiness, reduced from these events.
  *
  * It keeps nothing in its factory's closure: everything hangs off its instance (§2.1). It resumes
- * from its own records (bot-os.md D62): the owner's recent sends and the waits it told the outbox,
- * kept in its store as they change, and never re-reads the chat; what was said while the instance
+ * from its own records (bot-os.md D62): the owner's recent sends, kept in its store as they change, and never re-reads the chat; what was said while the instance
  * was down comes from the connector's catch-up, once, as missed messages (`playback`, `missed`),
  * which it reads as any other.
  */
@@ -194,7 +192,7 @@ export const TURN_PARSER_MEMBERS = ['actions.sent'];
 export const ANSWER_WINDOW_MS = 2 * 60_000;
 /** How many of the owner's sends are kept, to match replies to. */
 const KEPT_SENDS = 100;
-/** The store's document of what it parsed: the owner's recent sends, and the waits it told. */
+/** The store's document of what it parsed: the owner's recent sends. */
 export const PARSED_DOC = 'parsed';
 
 /** What it keeps of what it parsed, to resume from at its next start. */
@@ -211,11 +209,6 @@ interface Parsed {
     command: string;
     byHand: boolean;
   }[];
-  /**
-   * The last wait it told the outbox of each command, by its name (its answers' `retryAt`): what
-   * an effect the bot announces shortens.
-   */
-  told?: Record<string, number>;
 }
 
 const outcomeSchema = z.looseObject({ kind: z.string(), bot: z.string() });
@@ -326,8 +319,6 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
     const common = {
       event,
       commands: forms,
-      retryAtFrom: 'retryAt',
-      holdsAtFrom: 'holds',
       withinS: ANSWER_WINDOW_MS / 1000,
     };
     return [
@@ -379,10 +370,6 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       .describe(
         'When the command may go again, as this answer says (ms): the bot rests until then'
       ),
-    holds: z
-      .record(z.string(), z.number())
-      .optional()
-      .describe("The outbox's holds the effects set, by form (ms): ended or shortened (D98, D132)"),
   };
   return definePlugin({
     manifest: {
@@ -431,7 +418,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
           ),
       },
       // Its turn event answers a turn (D98): a "too soon" refuses it, any other reading takes it;
-      // its answer event each of its other commands the same way, each holding back its own.
+      // its answer event each of its other commands the same way (D142: holding nothing back).
       answers: [
         ...answer(`${spec.id}.turn`, turn, undefined),
         ...others.flatMap((c) => answer(`${spec.id}.answer`, c, { command: c })),
@@ -481,8 +468,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
       const kept = ctx.store.read<Parsed>(PARSED_DOC);
       /** The owner's sends, newest last, and whether something answered each. */
       const sends: Parsed['sends'] = kept?.sends ?? [];
-      const told: Record<string, number> = kept?.told ?? {};
-      const keep = (): void => ctx.store.write(PARSED_DOC, { sends, told } satisfies Parsed);
+      const keep = (): void => ctx.store.write(PARSED_DOC, { sends } satisfies Parsed);
       /** A send counted: kept to pair its answer with, and published (D141). */
       const remember = (
         sent: Omit<Parsed['sends'][number], 'answered'>,
@@ -519,25 +505,6 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
         sent.answered = true;
         keep();
         return sent;
-      };
-      /**
-       * The outbox's holds the effects the bot announced set at `t` (D98, D132), by form: a clear
-       * ends the command's, a shortening takes its minutes off the last wait told of it.
-       */
-      const holdsOf = (effects: readonly CommandEffect[], t: number): Record<string, number> => {
-        const holds: Record<string, number> = {};
-        for (const effect of effects) {
-          const at =
-            effect.clear === true
-              ? t
-              : told[effect.command] === undefined || (told[effect.command] as number) <= t
-                ? undefined
-                : Math.max(t, (told[effect.command] as number) - (effect.shortenMin ?? 0) * 60_000);
-          if (at === undefined) continue;
-          told[effect.command] = at;
-          for (const x of formsOf(effect.command)) holds[x] = at;
-        }
-        return holds;
       };
       /** Effects by their commands' names (D140); one naming no command of its bot's, dropped. */
       const resolved = (effects: readonly CommandEffect[] | undefined): CommandEffect[] =>
@@ -627,12 +594,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
         ctx.drift.read(m.time);
         const t = m.time;
         const retryAt = reading.restMs === undefined ? undefined : t + reading.restMs;
-        const c = command ?? turn;
-        if (retryAt !== undefined)
-          told[c] = asTurn ? Math.max(told[c] ?? retryAt, retryAt) : retryAt;
         const effects = resolved(reading.effects);
-        const holds = holdsOf(effects, t);
-        keep();
         ctx.bus.publish(
           event,
           {
@@ -640,7 +602,6 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
             ...which,
             outcome: reading.outcome,
             ...(retryAt === undefined ? {} : { retryAt }),
-            ...(Object.keys(holds).length === 0 ? {} : { holds }),
             ...unlocksOf(reading.unlocks ?? []),
             ...(effects.length === 0 ? {} : { effects }),
             ...answer,

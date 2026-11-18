@@ -1719,7 +1719,8 @@ export class Core {
           const outbox = this.outboxes.get(m.account);
           if (!heard) outbox?.heard(m);
           heard = true;
-          // Before its subscribers hear it: one that sends again finds the cooldown it sets.
+          // Before its subscribers hear it: one that sends again finds its send settled, and the guard's
+          // count of its refusals.
           const read = readAnswer(entry.manifest.answers, type, payload, t ?? this.o.clock.now());
           if (read !== undefined && payload['playback'] !== true) outbox?.answered(m, read);
         }

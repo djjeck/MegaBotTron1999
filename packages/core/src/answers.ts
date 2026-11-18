@@ -5,9 +5,8 @@
  *
  * - **Declared by the parsers:** a parser's manifest lists, in `answers`, which of its own events
  *   answer which commands (by first word), when (`when`, `unless`: fields of the payload), with
- *   which status (`ok`, `refused`), reason (fixed, or read from the payload) and `retryAt` (read
- *   from the payload: when the command may go again). The shell knows no game: it reads only what
- *   the declaration names.
+ *   which status (`ok`, `refused`) and reason (fixed, or read from the payload). The shell knows no
+ *   game: it reads only what the declaration names.
  * - **Paired by the core:** an event a parser publishes while the core hands it a message of a chat
  *   (as the send-queue watchdog hears one, D93), which a declaration matches, answers the send of
  *   one of its commands to that chat that waits for an answer: the one the message replies to, else
@@ -16,9 +15,9 @@
  *   (an `unanswered` notice, D107) until that node's command is answered in that chat. A
  *   declaration names only the commands that can draw its event: the oldest waiting send of any of
  *   them takes it, a send the bot ignores included.
- * - **Kept here, per account:** the sends waiting, the cooldowns each answer's `retryAt` sets (per
- *   chat and command, for every command of its declaration, `holds`), and the retry-loop guard,
- *   which backs off a node whose command keeps being refused for the same reason.
+ * - **Kept here, per account:** the sends waiting, and the retry-loop guard, which backs off a node
+ *   whose command keeps being refused for the same reason. No game's cooldown is kept here (bot-os.md
+ *   D142): when a command may be played is a state's readiness, which a sender binds to.
  *
  * In memory, best effort: nothing is kept across a restart, where a node decides again from its
  * state.
@@ -32,7 +31,10 @@ import { holds, valueAt } from './paths.ts';
 export const DEFAULT_ANSWER_WITHIN_S = 120;
 /** How many refusals in a row, for the same reason, start the retry-loop guard. */
 export const GUARD_AT = 3;
-/** The guard's first hold, doubled at each refusal more, up to `GUARD_MAX_MS`. */
+/**
+ * The guard's first back-off, doubled at each refusal more, up to `GUARD_MAX_MS`: its own, never a
+ * game's cooldown (bot-os.md D142).
+ */
 export const GUARD_BASE_MS = 60_000;
 export const GUARD_MAX_MS = 3_600_000;
 
@@ -41,8 +43,8 @@ export const firstWord = (text: string): string => text.split(/\s/u, 1)[0] ?? ''
 
 /**
  * One of a parser's answers (its manifest's `answers`): an event of its own that answers some
- * commands, when its payload holds `when` and not `unless`, with a status, a reason and when the
- * command may go again. The first of a parser's declarations that matches an event is its answer.
+ * commands, when its payload holds `when` and not `unless`, with a status and a reason. The first
+ * of a parser's declarations that matches an event is its answer.
  */
 export const answerSchema = z.strictObject({
   /** The event type, one of its own `events`. */
@@ -58,20 +60,6 @@ export const answerSchema = z.strictObject({
   reason: z.string().min(1).optional(),
   /** The dotted path of the payload that holds its reason (a string), over `reason`. */
   reasonFrom: z.string().min(1).optional(),
-  /** The dotted path of the payload that holds when the command may go again (a time in ms). */
-  retryAtFrom: z.string().min(1).optional(),
-  /**
-   * The commands a `retryAt` holds back in that chat (a group sharing a cooldown); its `commands`
-   * by default.
-   */
-  holds: z.array(z.string().min(1)).min(1).optional(),
-  /**
-   * The dotted path of the payload that holds, by command (first word), when each may go again (a
-   * time in ms), set in that chat as it says (bot-os.md D132): an earlier time than its cooldown's
-   * too, so that an effect the game announces (a command that resets another's wait) ends or
-   * shortens a cooldown; one past, cleared.
-   */
-  holdsAtFrom: z.string().min(1).optional(),
   /** How long the bot takes to answer, at the most, in seconds. */
   withinS: z.number().positive().default(DEFAULT_ANSWER_WITHIN_S),
 });
@@ -83,8 +71,6 @@ export interface CommandAnswer {
   /** `unanswered`: no answer within its window. */
   status: 'ok' | 'refused' | 'unanswered';
   reason?: string;
-  /** When the command may go again, if the bot said. */
-  retryAt?: number;
   /** The event that answered it: `{ type, t, …payload }`. */
   event?: { type: string; t: number; [field: string]: unknown };
 }
@@ -92,9 +78,6 @@ export interface CommandAnswer {
 /** An event read as an answer: what it answers, and the answer. */
 export interface ReadAnswer {
   commands: readonly string[];
-  holds: readonly string[];
-  /** The cooldowns it sets as they are, earlier included, by command (`holdsAtFrom`). */
-  holdsAt?: Readonly<Record<string, number>>;
   answer: CommandAnswer;
 }
 
@@ -114,29 +97,14 @@ export function readAnswer(
   if (d === undefined) return undefined;
   const from = d.reasonFrom === undefined ? undefined : valueAt(payload, d.reasonFrom);
   const reason = typeof from === 'string' && from !== '' ? from : d.reason;
-  const at = d.retryAtFrom === undefined ? undefined : valueAt(payload, d.retryAtFrom);
-  const holdsAt =
-    d.holdsAtFrom === undefined ? undefined : timesOf(valueAt(payload, d.holdsAtFrom));
   return {
     commands: d.commands,
-    holds: d.holds ?? d.commands,
-    ...(holdsAt === undefined ? {} : { holdsAt }),
     answer: {
       status: d.status,
       ...(reason === undefined ? {} : { reason }),
-      ...(typeof at === 'number' && Number.isFinite(at) ? { retryAt: at } : {}),
       event: { ...payload, type, t },
     },
   };
-}
-
-/** A map of commands to times (ms), its other entries left out; undefined if none is one. */
-function timesOf(v: unknown): Record<string, number> | undefined {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined;
-  const out = Object.fromEntries(
-    Object.entries(v).filter(([, t]) => typeof t === 'number' && Number.isFinite(t))
-  ) as Record<string, number>;
-  return Object.keys(out).length === 0 ? undefined : out;
 }
 
 /** How long a send of `command` waits for its answer, by the declarations that answer it. */
@@ -160,10 +128,10 @@ export interface BackoffView {
   until: number;
 }
 
-/** What holds a send back: a cooldown (the bot's) or the guard (the node's), until when. */
+/** What holds a node's send back: the retry-loop guard (bot-os.md D142: no cooldown), until when. */
 export interface Hold {
   until: number;
-  /** `cooldown: <reason>`, or `backed off: …`. */
+  /** `backed off: refused <n> times in a row (<reason>)`. */
   reason: string;
 }
 
@@ -212,14 +180,11 @@ export interface AnswersOptions {
 const lower = (s: string): string => s.toLowerCase();
 const guardKey = (plugin: string, chat: string, command: string): string =>
   JSON.stringify([plugin, lower(chat), command]);
-const coolKey = (chat: string, command: string): string => `${lower(chat)} ${command}`;
 
-/** One account's answers: its sends waiting, its cooldowns, and its guard. */
+/** One account's answers: its sends waiting, and its guard. */
 export class Answers {
   private readonly o: AnswersOptions;
   private pending: PendingEntry[] = [];
-  /** Until when a command rests in a chat (`<chat> <command>`, the chat without case), and why. */
-  private readonly cool = new Map<string, { until: number; reason: string }>();
   private readonly guards = new Map<string, Guard>();
   /** The nodes' commands told unanswered (D107), by `guardKey`, until one of them is answered. */
   private readonly silent = new Set<string>();
@@ -263,37 +228,16 @@ export class Answers {
 
   /**
    * An answer read from a message of a chat (by any of its `names`, without case), replying to
-   * `replyTo` if it does: its `retryAt` holds its commands back in that chat; it settles the send
-   * it answers (the one it replies to, else the oldest of its commands to that chat), whose nodes
-   * the guard counts. The send it answered, if any.
+   * `replyTo` if it does: it settles the send it answers (the one it replies to, else the oldest of
+   * its commands to that chat), whose nodes the guard counts. The send it answered, if any.
    */
   answered(
     names: readonly string[],
     replyTo: string | undefined,
     read: ReadAnswer
   ): { plugins: readonly string[]; chat: string; command: string } | undefined {
-    const now = this.o.clock.now();
     const { answer } = read;
     const known = new Set(names.map(lower));
-    if (answer.retryAt !== undefined && answer.retryAt > now)
-      for (const name of known)
-        for (const command of read.holds) {
-          const key = coolKey(name, command);
-          const was = this.cool.get(key);
-          if (was === undefined || was.until < answer.retryAt)
-            this.cool.set(key, { until: answer.retryAt, reason: answer.reason ?? answer.status });
-        }
-    // Set as they are, an earlier time too (D132: a reset): one past is cleared.
-    for (const [command, until] of Object.entries(read.holdsAt ?? {}))
-      for (const name of known) {
-        const key = coolKey(name, command);
-        if (until <= now) this.cool.delete(key);
-        else
-          this.cool.set(key, {
-            until,
-            reason: this.cool.get(key)?.reason ?? answer.reason ?? answer.status,
-          });
-      }
     const ours = this.pending.filter(
       (p) => known.has(lower(p.chat)) && read.commands.includes(p.command)
     );
@@ -331,9 +275,9 @@ export class Answers {
 
   /**
    * The retry-loop guard: an `ok` clears a node's count; a refusal for the reason of the last one
-   * adds to it (a cooldown with its `retryAt` aside: the cooldown holds it back already), and from
-   * `GUARD_AT` in a row the node's sends of that command to that chat are held back, longer at
-   * each, and the owner told once.
+   * adds to it (a "too soon" too: no cooldown is kept here, D142), and from `GUARD_AT` in a row the
+   * node's sends of that command to that chat are held back, by a back-off of its own that doubles
+   * at each refusal more, and the owner told once.
    */
   private guard(plugin: string, chat: string, command: string, a: CommandAnswer): void {
     const key = guardKey(plugin, chat, command);
@@ -341,7 +285,7 @@ export class Answers {
       this.guards.delete(key);
       return;
     }
-    if (a.status !== 'refused' || a.retryAt !== undefined) return;
+    if (a.status !== 'refused') return;
     const reason = a.reason ?? 'refused';
     const was = this.guards.get(key);
     const count = was !== undefined && was.reason === reason ? was.count + 1 : 1;
@@ -365,25 +309,12 @@ export class Answers {
       });
   }
 
-  /** What holds a node's send of `command` to `chat` back now, the longest; undefined: nothing. */
+  /** What holds a node's send of `command` to `chat` back now: the guard; undefined: nothing. */
   held(plugin: string, chat: string, command: string): Hold | undefined {
-    const now = this.o.clock.now();
-    const cool = this.cool.get(coolKey(chat, command));
     const g = this.guards.get(guardKey(plugin, chat, command));
-    const holds: Hold[] = [
-      ...(cool !== undefined && cool.until > now
-        ? [{ until: cool.until, reason: `cooldown: ${cool.reason}` }]
-        : []),
-      ...(g !== undefined && g.until > now
-        ? [
-            {
-              until: g.until,
-              reason: `backed off: refused ${g.count} times in a row (${g.reason})`,
-            },
-          ]
-        : []),
-    ];
-    return holds.sort((x, y) => y.until - x.until)[0];
+    return g === undefined || g.until <= this.o.clock.now()
+      ? undefined
+      : { until: g.until, reason: `backed off: refused ${g.count} times in a row (${g.reason})` };
   }
 
   /** A node's commands the guard counts refusals of, as `GET /status` shows them. */

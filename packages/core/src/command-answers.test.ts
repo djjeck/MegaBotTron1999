@@ -54,7 +54,6 @@ const parser = definePlugin({
         when: { result: 'wait' },
         status: 'refused',
         reason: 'cooldown',
-        retryAtFrom: 'until',
       },
       {
         event: 'quest.give',
@@ -164,21 +163,18 @@ describe('command answers in the core (D98)', () => {
     await core.stop();
   });
 
-  it('holds a command back for the cooldown an answer gives', async () => {
-    const { bot, clock, core, out } = await instance();
+  it('holds no command back for a "too soon": readiness is a state\'s (D142)', async () => {
+    const { bot, core, out } = await instance();
     const q = out.enqueue('@QuestBot', '/give alice');
     await flush();
     bot('wait 30');
-    await expect(q).resolves.toMatchObject({
-      answer: { status: 'refused', reason: 'cooldown', retryAt: T0 + 30_000 },
-    });
-    expect(out.held('@QuestBot', '/give')).toEqual({
-      until: T0 + 30_000,
-      reason: 'cooldown: cooldown',
-    });
-    expect(out.send('@QuestBot', '/give alice').reason).toBe('cooldown: cooldown, 30 s more');
+    const a = await q;
+    expect(a.answer).toMatchObject({ status: 'refused', reason: 'cooldown' });
+    expect(a.answer).not.toHaveProperty('retryAt');
+    // Its wait stays in the event, for a state to reduce.
+    expect(a.answer?.event?.['until']).toBe(T0 + 30_000);
+    expect(out.held('@QuestBot', '/give')).toBeUndefined();
     const again = out.enqueue('@QuestBot', '/give alice');
-    clock.advance(30_000);
     await flush();
     bot('ok');
     await expect(again).resolves.toMatchObject({ answer: { status: 'ok' } });

@@ -396,7 +396,7 @@ interface QueuedResult {
   text: string;
   outcome: 'sent' | 'dry-run' | 'refused' | 'failed' | 'cancelled' | 'expired';
   reason?: string;
-  /** Refused as its command rests: when it may go again. */
+  /** Refused as the retry-loop guard backs it off: when it may go again. */
   retryAt?: number;
   event?: { type: string; t: number; [field: string]: unknown };
   /**
@@ -406,7 +406,6 @@ interface QueuedResult {
   answer?: {
     status: 'ok' | 'refused' | 'unanswered';
     reason?: string;
-    retryAt?: number;
     event?: { type: string; t: number; [field: string]: unknown };
   };
 }
@@ -434,7 +433,10 @@ declare function use<P extends keyof ScriptInterfaces>(port: P): ScriptInterface
 declare function outbox(port: ScriptOutput): {
   /** Queues a send, spaced and coalesced; dropped if its cancel holds before it goes. */
   enqueue(chat: string, text: string, options?: { cancel?: ScriptCancel }): QueuedSend;
-  /** What holds a command (its first word) back now: the bot's cooldown, or the retry-loop guard. */
+  /**
+   * What holds a command (its first word) back now: the retry-loop guard. Never a game's cooldown:
+   * a state's readiness says when a command may be played.
+   */
   held(chat: string, command: string): Promise<{ until: number; reason: string } | undefined>;
 };
 /** Queues a send through a chat-out output: outbox(port).enqueue(chat, text, options). */

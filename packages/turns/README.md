@@ -14,11 +14,12 @@ the owner what needs attention.
   announces unlocked and its announced effects, and whether it answers a send), and a message its
   grammar leaves that answers a send or announces an unlock (`<id>.reply`); it reports to drift what
   it cannot read. It pairs each send with its answer and declares its events answers to every form
-  of their command (D98), an effect the bot announces ending the outbox's cooldown too. A send a
-  player tells it of (`actions.sent`, its one member: its own player's, or another's of the same
-  account, D139, D140, through a readiness state) counts only if it reaches its bot: bare or
-  addressed to it, in its bot's private chat or a chat its edge reads. It resumes from what it
-  parsed, kept in its store, never by re-reading the chat (docs/bot-os.md D62).
+  of their command (D98), which hold nothing back in the outbox (D142): when a command may go again
+  is the state's readiness, reduced from these events. A send a player tells it of (`actions.sent`,
+  its one member: its own player's, or another's of the same account, D139, D140, through a
+  readiness state) counts only if it reaches its bot: bare or addressed to it, in its bot's private
+  chat or a chat its edge reads. It resumes from what it parsed, kept in its store, never by
+  re-reading the chat (docs/bot-os.md D62).
 - `attentionPlugin` (`src/attention.ts`): `attention`, a simulated person, one node per person
   (docs/bot-os.md D134): when they sit down to play (`src/sittings.ts`: a gap drawn from a range,
   forgotten sittings, nights off in a time zone) and how fast they act within a sitting (a reaction
@@ -45,11 +46,12 @@ the owner what needs attention.
   announced, or a reset, is taken in the same sitting), until nothing is left. In a sitting that
   follows the owner's play (D138), or in which another player of its account sent a command (D139,
   D140), it first waits for the answer to the last send its state has not read an answer to yet,
-  then plays its whole checklist. No schedule of its own: the outbox's `held` (D98) stays as the
-  safety net. It only sends (docs/bot-os.md D99); its one chat is its edge's alone (D97): its bot's
-  private chat or, as the owner prefers, a group its bot is in (D139). Each command goes as one of
-  its forms (D140, `src/chat-group.ts`): any of its names, bare (`/play`, which every bot in the
-  group that declares it takes) or addressed to its bot (`/play@QuestBot`), those its entry's
+  then plays its whole checklist. No schedule of its own, and nothing but its state's readiness to
+  wait on (D142: the outbox keeps no game's cooldown; its retry-loop guard backs off a node refused
+  again and again). It only sends (docs/bot-os.md D99); its one chat is its edge's alone (D97): its
+  bot's private chat or, as the owner prefers, a group its bot is in (D139). Each command goes as
+  one of its forms (D140, `src/chat-group.ts`): any of its names, bare (`/play`, which every bot in
+  the group that declares it takes) or addressed to its bot (`/play@QuestBot`), those its entry's
   `forms` allow. The players of one account sending to one chat are a group: a form is allowed only
   if every player it reaches would play that command now (in a sitting, ticked, ready, the form
   allowed), and it sends the widest allowed, the first in order on a tie, after the group has

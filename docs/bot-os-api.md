@@ -49,7 +49,7 @@ instance does not start.
 | `requires`        | Shorthand (§2.1): the plugins it needs started first, by id, read as input ports. The load order follows them; a missing one or a cycle fails the start, naming it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `games`           | `registers`: the namespaces whose event types it defines (its game's, or its own id); `consumes`: those whose events it reads (P7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `events`          | The event types it registers, `<namespace>.<name>` → zod schema of the payload (§4.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `answers`         | Optional, a parser's: which of its own events answer which commands (bot-os.md D98), `[{ event, commands, when?, unless?, status, reason?, reasonFrom?, retryAtFrom?, holds?, holdsAtFrom?, withinS? }]` (§4.6, Command answers)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `answers`         | Optional, a parser's: which of its own events answer which commands (bot-os.md D98), `[{ event, commands, when?, unless?, status, reason?, reasonFrom?, withinS? }]` (§4.6, Command answers)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `uses`            | Shorthand (§2.1): the other plugins' interfaces it calls, by id and member (`{ dice: ['state.game'] }`): reviewed with both (P6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `config`          | A zod object: what is set at deploy. The core validates it at load; a bad value names the plugin and the key. Every default is in the schema, per field (`.default()`, nested ones included), never merged in code after parsing, and each field says what it is (`.describe()`): the editor shows both. Two more keys, through `.meta()`, shape its form (bot-os.md D127): `choices: { value: 'label' }` on an enum draws it as radio buttons by those labels, and `shownWhen: { key: value }` on a field shows it only while a sibling key has that value (its default counted), the field taken away when a change makes it not apply                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `settings`        | A zod object: what the owner changes at runtime, each key with its default and its help (`.describe()`). Kept in the plugin's store, offered to every control surface (P11)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -1383,7 +1383,10 @@ q.cancel(); // true if it still waited
 whether the bot still speaks; a node that sends a command also needs to learn what the game answered
 to _its_ command (refused, and why), so that it adjusts its plan rather than retrying something the
 game will not allow. Answers are in memory and best effort: nothing is kept across a restart, where
-the node decides again from its state.
+the node decides again from its state. **The outbox keeps no game's cooldown** (bot-os.md D142): an
+answer holds nothing back; when a command may be played is a state's readiness (§5), which a player,
+or a script that cares, binds to, and the outbox only does delivery hygiene (the limits, flood
+waits, intervals, the guard and the watchdog).
 
 - **A parser declares** which of its own events answer which commands, in its manifest:
 
@@ -1391,7 +1394,7 @@ the node decides again from its state.
   answers: [
     // The first that matches an event is its answer.
     { event: 'quest.give', commands: ['/give', '/throw'], when: { result: 'wait' },
-      status: 'refused', reason: 'cooldown', retryAtFrom: 'until', holds: ['/give'] },
+      status: 'refused', reason: 'cooldown' },
     { event: 'quest.give', commands: ['/give', '/throw'], when: { result: 'no' },
       status: 'refused', reasonFrom: 'why' },
     { event: 'quest.give', commands: ['/give', '/throw'], unless: { result: 'unknown' },
@@ -1402,18 +1405,15 @@ the node decides again from its state.
   `event` is one of its `events`; `commands`, by first word; `when` (as a cancel's: dotted paths, a
   list holding a value) and `unless` (every field holding: not this answer) choose by the payload;
   `status` is `ok` or `refused`; `reason` a fixed one (`cooldown`, `missing`, `invalid`, or a game's
-  own) and `reasonFrom` a path of the payload holding one; `retryAtFrom` the path of a time (ms)
-  when the command may go again; `holds` the commands that time holds back (a group sharing a
-  cooldown; its `commands` by default); `holdsAtFrom` the path of a map, by command, of the times
-  each may go again, set as it says, an earlier time than its cooldown's too, one past clearing it
-  (bot-os.md D132: an effect the game announces, a command that resets another's wait, ends the
-  outbox's cooldown as well as its state's hold, D141); `withinS` how long the bot takes to answer
-  (120 by default). A parser of another repository declares them the same way, in its `definePlugin`
-  manifest; the turn parsers declare theirs (§5).
+  own) and `reasonFrom` a path of the payload holding one; `withinS` how long the bot takes to
+  answer (120 by default). A wait the bot states, or an effect it announces, stays in the event's
+  payload, for a state to reduce (D141), and is no field of the declaration (D142). A parser of
+  another repository declares them the same way, in its `definePlugin` manifest; the turn parsers
+  declare theirs (§5).
 
-- **The answer** (`CommandAnswer`):
-  `{ status: 'ok' | 'refused' | 'unanswered', reason?, retryAt?, event? }`, `event` the one that
-  answered (`{ type, t, …payload }`).
+- **The answer** (`CommandAnswer`): `{ status: 'ok' | 'refused' | 'unanswered', reason?, event? }`,
+  `event` the one that answered (`{ type, t, …payload }`: a wait the bot stated is there, under the
+  parser's own field).
 - **Paired by the core:** an event a node publishes while the core hands it a message of a chat
   (synchronously, as the watchdog hears an answer; the account's own messages and history, and a
   payload marked `playback`, are none, D83) that one of its declarations matches answers a live send
@@ -1432,18 +1432,16 @@ the node decides again from its state.
 - **`await enqueue(…)`** settles, for such a send, once it is answered:
   `{ outcome: 'sent', answer }`; `status()` says `sent` meanwhile. Any other send settles as it
   goes, as before. `send` and `deliver` return at once as before, but their sends wait for an answer
-  all the same, for the cooldowns, the guard and the watchdog.
-- **Cooldowns:** an answer's `retryAt` (any answer read live, paired or not: a turn the owner sent
-  by hand too) holds its `holds` back in that chat until then, the latest kept: a queued send waits
-  it out (its `waitingUntil` says so), and `send` or `deliver` is refused
-  (`cooldown: cooldown, 30 s more`, with `retryAt`). `ctx.outbox(port).held(chat, command)` says
-  what holds a command back now, `{ until, reason }`, so that a node can ask when it may send next.
-- **The retry-loop guard:** a node whose command keeps being refused for the same reason (`refused`
-  with no `retryAt`: a cooldown with one holds it back already) is held back from it in that chat
-  once it reaches `GUARD_AT` (3) refusals in a row, for `GUARD_BASE_MS` (a minute), doubled at each
-  refusal more, up to an hour; queued, it waits; sent now, it is refused
-  (`backed off: refused 3 times in a row (missing), 60 s more`). An `ok` clears its count; a refusal
-  for another reason starts it again. It is shown in `GET /status`, the node's `backoff`
+  all the same, for the guard and the watchdog.
+- **The retry-loop guard:** a node whose command keeps being refused for the same reason (any
+  `refused`, a "too soon" included: D142) is held back from it in that chat once it reaches
+  `GUARD_AT` (3) refusals in a row, for `GUARD_BASE_MS` (a minute), doubled at each refusal more, up
+  to an hour: a back-off of its own, which models no game's cooldown. Queued, it waits it out (its
+  `waitingUntil` says so); sent now (`send`, `deliver`), it is refused
+  (`backed off: refused 3 times in a row (missing), 60 s more`, with `retryAt`, when it may go
+  again). `ctx.outbox(port).held(chat, command)` says what holds a command back now,
+  `{ until, reason }`: the guard, nothing else. An `ok` clears its count; a refusal for another
+  reason starts it again. It is shown in `GET /status`, the node's `backoff`
   (`[{ account, chat, command, reason, count, until }]`, §4.11), and raised once, at the third, as a
   `backoff` notice (§4.16).
 - **The watchdog** (D93): an answer paired with a send answers that node's count of its command at
@@ -2332,8 +2330,8 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   **What it publishes:** `<id>.sent` (`{ chat, command, byHand, id?, playback? }`), each send of one
   of its commands from the owner's account it counts: by hand from any device, or a player's, told
   through its action `sent` (since the account never sees its own sends come back); `<id>.turn`
-  (`{ chat, outcome, retryAt?, holds?, unlocks?, effects?, answer?, playback? }`), what it reads of
-  a message that answers a turn, or reads as one in private; `<id>.answer` (the same, with its
+  (`{ chat, outcome, retryAt?, unlocks?, effects?, answer?, playback? }`), what it reads of a
+  message that answers a turn, or reads as one in private; `<id>.answer` (the same, with its
   `command`), what it reads of the answer to another command (declared only for a spec with other
   commands); and `<id>.reply` (`{ chat, command?, answer?, unlocks?, playback? }`), a message its
   grammar leaves that answers a send or announces an unlock. `retryAt` is the wait the message
@@ -2347,28 +2345,26 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   named by `@username`). A message it claims and cannot read goes to drift (§4.7) and is published
   with an `unknown` outcome. **Its answers** (§4.6, Command answers, bot-os.md D98): its `<id>.turn`
   answers its turn's every form, `refused` with `cooldown` for a "too soon" (`kind: nothing`,
-  `reason: cooldown`), `ok` (`rest`) for any other outcome read, not an `unknown` one, each with its
-  `retryAt`, within two minutes; its `<id>.answer` each of its other commands the same way
-  (`when: { command }`), so that a send queued by any node settles with the bot's answer, and the
-  outbox holds the command back in that chat until the wait it states is over. The effects a message
-  announces go in its event as the outbox's holds (`holds`, by form: each name of the command, bare
-  and addressed; a clear the message's time, a shortening the last wait it told of that command less
-  its minutes), declared `holdsAtFrom`, so that a reset the bot announces ends the outbox's cooldown
-  too. Its answers name each command by each of its names, bare and addressed to its bot (`/play`,
-  `/quest`, `/play@QuestBot`, `/quest@QuestBot`), so that the outbox holds every form back. **A send
-  it is told of** (its action `sent`, bot-os.md D139, D140, through a player's readiness state) is a
-  player's, or another player's of the same account, as sent (`command`: `/play`, or
-  `/play@QuestBot`; a turn when none): it counts it only if it reaches its bot, bare or addressed to
-  it (`commandOf`; addressed to another bot, not), in its bot's private chat or a chat its edge
-  reads (`ConnectorHandle.reads()`; another bot's private chat never), so that a bare turn one
-  player sent in a group, which every bot there that sees it takes, is each parser's turn, matched
-  to its bot's reply. That action is its whole interface: it offers no read. It resumes from what it
-  parsed (D62): the owner's recent sends, to pair a late answer with, and the waits it told the
-  outbox, kept in its store (`parsed`) as they change and read back at its start; it never re-reads
-  the chat, and reads missed messages as any other. A node saved while it had a config
-  (`"config": { "commands": [...] }`) still loads and runs: a plugin with no config schema ignores
-  its node's config. It adds to the owner's summary the answers to turns it read live, by their
-  outcome's kind (§4.17, D92). The tests play a made-up @QuestBot (`packages/turns/test/quest.ts`).
+  `reason: cooldown`), `ok` (`rest`) for any other outcome read, not an `unknown` one, within two
+  minutes; its `<id>.answer` each of its other commands the same way (`when: { command }`), so that
+  a send queued by any node settles with the bot's answer. Its answers name each command by each of
+  its names, bare and addressed to its bot (`/play`, `/quest`, `/play@QuestBot`, `/quest@QuestBot`),
+  so that a send of any form is paired. They hold nothing back in the outbox (bot-os.md D142): the
+  wait a message states (`retryAt`) and the effects it announces are its event's, which a readiness
+  state reduces. **A send it is told of** (its action `sent`, bot-os.md D139, D140, through a
+  player's readiness state) is a player's, or another player's of the same account, as sent
+  (`command`: `/play`, or `/play@QuestBot`; a turn when none): it counts it only if it reaches its
+  bot, bare or addressed to it (`commandOf`; addressed to another bot, not), in its bot's private
+  chat or a chat its edge reads (`ConnectorHandle.reads()`; another bot's private chat never), so
+  that a bare turn one player sent in a group, which every bot there that sees it takes, is each
+  parser's turn, matched to its bot's reply. That action is its whole interface: it offers no read.
+  It resumes from what it parsed (D62): the owner's recent sends, to pair a late answer with, and
+  the waits it told the outbox, kept in its store (`parsed`) as they change and read back at its
+  start; it never re-reads the chat, and reads missed messages as any other. A node saved while it
+  had a config (`"config": { "commands": [...] }`) still loads and runs: a plugin with no config
+  schema ignores its node's config. It adds to the owner's summary the answers to turns it read
+  live, by their outcome's kind (§4.17, D92). The tests play a made-up @QuestBot
+  (`packages/turns/test/quest.ts`).
 - **`attention`** (`packages/turns/src/attention.ts`, bot-os.md D134): a simulated person, one node
   per person (or account), for the players its `attention` output binds (§2.1, D133: any number; the
   players of one person share their sittings, so gameplay comes in bursts). **Two behaviours**, each
@@ -2438,62 +2434,63 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   other, whenever ready. An entry overrides it: `whileHeld`, only while that command is held;
   `whenReady`, whenever ready (not both). The editor draws `commands` as a checklist of its state's
   (`configPlays`, §4.16). **No schedule of its own:** given a sitting, it plays, one at a time, each
-  of its commands that is ready (its state's `state.ready`), allowed by its policy, as a form its
-  outbox does not hold back (`held`, D98: the safety net), each after its person's reaction time (a
-  glance first, then the answer read, scaled to its length); after each live send it waits for the
-  answer its state reads (looking every 5 seconds, up to two minutes), then looks again, so that a
-  command an answer unlocks, or one a reset makes ready again, is taken in the same sitting. **The
-  form, by reach** (bot-os.md D140, `chat-group.ts`): the players of one `playerPlugin` registration
-  whose chat-out edges send to the same chat from the same account are a group (a registry in
-  memory, each joining at its start under its outbox's `account` and its chat). A form reaches the
-  players of the group whose bot takes it (`commandOf` on its state's `commands`: bare, every one
-  whose bot declares that name; addressed, its bot's alone) and is allowed only if every one of them
-  would play its command now: in a sitting of its own person, the command ticked and its policy
-  allowing it, ready (and not sent in the sitting unless ready again), not covered by another's
-  claim, the form one its config allows and its outbox does not hold back. Of its forms allowed, it
-  sends the one of widest reach, the first in its order on a tie (`pickForm`); none allowed, the
-  command waits. **Settling first:** while a player its widest form reaches has a send its state
-  read no answer to, younger than two minutes, or will have that command ready within `settleS`
-  seconds, it waits (until then, or 5 seconds for an answer; at most two minutes in all, then it
-  picks with what it knows); and with nothing ready, a command of its own due within `settleS` keeps
-  it in the sitting until then. It picks and claims the players its form reaches (covered for their
-  command, until its hand-off or two minutes) in the same tick it sends, so no other sends an
-  overlapping form. **In a sitting that follows the owner's play** (D138), or one they wrote during,
-  or one in which another player of its account sent a command (D139, D140), it first waits, the
-  same way, for the answer to the last send its state knows of and has read no answer to (sent less
-  than two minutes before), so that what that answer unlocks or holds is known (a bare turn another
-  sent in the group, its bot's turn taken, is not sent again); then it plays its whole checklist,
-  the turn included. A command it sent in the sitting goes again only if it became ready again since
-  (its readiness `since` after the send), at most 20 sends a sitting; when nothing is left, it
-  sleeps until the next sitting. Its next step is the durable timer `play`, and the sitting it is in
-  is kept in its store (`state`), so a restart takes the sitting up where it was (one whose step
-  came due more than 10 minutes before is dropped). Through a live chat-out edge it sends through
-  its outbox (refused `not connected`, it waits for the account, trying each minute) and tells its
-  state each command sent, with its message's id, which hands it to its parser to pair the bot's
-  answer (D141), and hands it off to every other player of its account, whatever its chat, each
-  telling its own state (D139, D140), its claim then ending; through a dry-run edge (bot-os.md D64,
-  as a new one is drawn) it logs each command (`sent`, `/play (dry run)`) and sends nothing, each
-  command once a sitting since no answer comes; a send refused or failed is not tried again in that
-  sitting, and a command its state declares none of is never played (said once). It plays while its
-  node runs and the instance is on; its safety stop (`kill`) stops its node (`ctx.stop`), which
-  drops its sitting until the owner clears the stop in the editor. It declares no chat command,
-  since two nodes would clash: the owner reaches each with `/plugins <id>` and its read `status`
-  (its chat, its commands, its last play and its next: its next step in a sitting, else its person's
-  next sitting, or `follows your play`), which its node's widget and page (**Plays**) show (D112).
-  Each step is published as `player.step` (`sitting`, `sent`, `read`, `done`, `waiting`, `failed`,
-  `stopped`); its commands sent, by command, go in the owner's summary (§4.17, D92). The image
-  offers both (`src/main.ts`): the editor adds one `attention` node per person and one player per
-  bot, each on its own instance, its `chat` edge to the owner's `telegram-user` node, its `state`
-  edge from its bot's readiness state and its `attention` edge from its person. The turn parsers and
-  the readiness states are not the image's: each is made from a game's grammar and mechanics, so a
-  game's module offers them. **A game's module declares its commands' mechanics** on its state's
-  side (`ReadinessSpec.mechanics`, D132, D141): a cooldown (`{ "/daily": { cooldownMin: 1440 } }`),
-  an announced unlock (`{ "/chest": { unlock: { forMin: 30 } } }`, the announcement its parser's
-  `announcedBy` or a reading's `unlocks`) and a reset
+  of its commands that is ready (its state's `state.ready`), allowed by its policy (D142: its state
+  alone decides readiness; the outbox holds back no game's cooldown), each after its person's
+  reaction time (a glance first, then the answer read, scaled to its length); after each live send
+  it waits for the answer its state reads (looking every 5 seconds, up to two minutes), then looks
+  again, so that a command an answer unlocks, or one a reset makes ready again, is taken in the same
+  sitting. **The form, by reach** (bot-os.md D140, `chat-group.ts`): the players of one
+  `playerPlugin` registration whose chat-out edges send to the same chat from the same account are a
+  group (a registry in memory, each joining at its start under its outbox's `account` and its chat).
+  A form reaches the players of the group whose bot takes it (`commandOf` on its state's `commands`:
+  bare, every one whose bot declares that name; addressed, its bot's alone) and is allowed only if
+  every one of them would play its command now: in a sitting of its own person, the command ticked
+  and its policy allowing it, ready (and not sent in the sitting unless ready again), not covered by
+  another's claim, and the form one its config allows. Of its forms allowed, it sends the one of
+  widest reach, the first in its order on a tie (`pickForm`); none allowed, the command waits.
+  **Settling first:** while a player its widest form reaches has a send its state read no answer to,
+  younger than two minutes, or will have that command ready within `settleS` seconds, it waits
+  (until then, or 5 seconds for an answer; at most two minutes in all, then it picks with what it
+  knows); and with nothing ready, a command of its own due within `settleS` keeps it in the sitting
+  until then. It picks and claims the players its form reaches (covered for their command, until its
+  hand-off or two minutes) in the same tick it sends, so no other sends an overlapping form. **In a
+  sitting that follows the owner's play** (D138), or one they wrote during, or one in which another
+  player of its account sent a command (D139, D140), it first waits, the same way, for the answer to
+  the last send its state knows of and has read no answer to (sent less than two minutes before), so
+  that what that answer unlocks or holds is known (a bare turn another sent in the group, its bot's
+  turn taken, is not sent again); then it plays its whole checklist, the turn included. A command it
+  sent in the sitting goes again only if it became ready again since (its readiness `since` after
+  the send), at most 20 sends a sitting; when nothing is left, it sleeps until the next sitting. Its
+  next step is the durable timer `play`, and the sitting it is in is kept in its store (`state`), so
+  a restart takes the sitting up where it was (one whose step came due more than 10 minutes before
+  is dropped). Through a live chat-out edge it sends through its outbox (refused `not connected`, it
+  waits for the account, trying each minute) and tells its state each command sent, with its
+  message's id, which hands it to its parser to pair the bot's answer (D141), and hands it off to
+  every other player of its account, whatever its chat, each telling its own state (D139, D140), its
+  claim then ending; through a dry-run edge (bot-os.md D64, as a new one is drawn) it logs each
+  command (`sent`, `/play (dry run)`) and sends nothing, each command once a sitting since no answer
+  comes; a send refused or failed is not tried again in that sitting, and a command its state
+  declares none of is never played (said once). It plays while its node runs and the instance is on;
+  its safety stop (`kill`) stops its node (`ctx.stop`), which drops its sitting until the owner
+  clears the stop in the editor. It declares no chat command, since two nodes would clash: the owner
+  reaches each with `/plugins <id>` and its read `status` (its chat, its commands, its last play and
+  its next: its next step in a sitting, else its person's next sitting, or `follows your play`),
+  which its node's widget and page (**Plays**) show (D112). Each step is published as `player.step`
+  (`sitting`, `sent`, `read`, `done`, `waiting`, `failed`, `stopped`); its commands sent, by
+  command, go in the owner's summary (§4.17, D92). The image offers both (`src/main.ts`): the editor
+  adds one `attention` node per person and one player per bot, each on its own instance, its `chat`
+  edge to the owner's `telegram-user` node, its `state` edge from its bot's readiness state and its
+  `attention` edge from its person. The turn parsers and the readiness states are not the image's:
+  each is made from a game's grammar and mechanics, so a game's module offers them. **A game's
+  module declares its commands' mechanics** on its state's side (`ReadinessSpec.mechanics`, D132,
+  D141): a cooldown (`{ "/daily": { cooldownMin: 1440 } }`), an announced unlock
+  (`{ "/chest": { unlock: { forMin: 30 } } }`, the announcement its parser's `announcedBy` or a
+  reading's `unlocks`) and a reset
   (`{ "/coffee": { effects: [{ command: "/play", clear: true }] } }`), and marks a command that
   needs the person `interactive`; the player needs nothing more. A reset ends the command's hold in
-  the state; the outbox's cooldown, the bot's word, ends when the bot announces it (a reading's
-  `effects`, above), so a grammar reads the reset's answer so.
+  the state, which alone holds it (D142: the outbox keeps no cooldown); a grammar reads a reset's
+  answer with its `effects` only where the state needs them, for an effect the mechanics do not
+  declare.
 - **`owner-notice`** (`packages/turns/src/owner-notice.ts`, bot-os.md D91, D94): the one node that
   reports to a chat; without one, nothing is (the editor's events panel shows the notices, §4.16).
   It tells the owner what needs attention, from the notices (§4.16), through its `chat` output
@@ -2690,20 +2687,22 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
 
   A queued send's handle is awaited for its outcome (§4.6), with `status()` and `cancel()` (a
   promise); for a command a parser declares answers for, awaited it gives what the game answered too
-  (`const a = await enqueue(…)`; `a.answer?.status`: `ok`, `refused` with its `reason` and
-  `retryAt`, or `unanswered`; bot-os.md D98), and `held(chat, command)` says what holds the command
-  back now (the bot's cooldown, the retry-loop guard); its cancel takes `on`, `when`, `deadline` and
-  `withinMs`, not `test`, a function that cannot cross a thread. A member, an output or an event
-  type its ports do not declare is refused, with why (`state offers it state.count, not state.get`);
-  a handler that throws is logged, and the others go on. **It runs** in a worker thread of its own,
-  its environment empty, its heap limited (`limits.memoryMb`, 16–2048, 64 by default), and the CPU
-  it spends at a stretch limited (`limits.callMs`, 10–60000, 1000 by default): a ping from the main
-  thread unanswered for twice the limit while the worker's thread spends the limit on the CPU, as a
-  loop does in a handler's run or after an `await`, is a hang; a thread stalled with its host, not
-  running, is waited for, even in the middle of a run (bot-os.md D81, D85). It is pinged only while
-  its script is busy, from a message that may run its code until the worker says it is idle again,
-  so an idle script costs nothing (D87). Past either, or if it crashes, the worker is killed and the
-  node failed with why (`its script hung: a handler of quest.tick spent over 1000 ms of CPU`,
+  (`const a = await enqueue(…)`; `a.answer?.status`: `ok`, `refused` with its `reason`, or
+  `unanswered`; bot-os.md D98), and `held(chat, command)` says what holds the command back now (the
+  retry-loop guard; never a game's cooldown, D142: a script that would wait one out binds to a
+  state's readiness, as the player does, or a refused send counts toward the guard); its cancel
+  takes `on`, `when`, `deadline` and `withinMs`, not `test`, a function that cannot cross a thread.
+  A member, an output or an event type its ports do not declare is refused, with why
+  (`state offers it state.count, not state.get`); a handler that throws is logged, and the others go
+  on. **It runs** in a worker thread of its own, its environment empty, its heap limited
+  (`limits.memoryMb`, 16–2048, 64 by default), and the CPU it spends at a stretch limited
+  (`limits.callMs`, 10–60000, 1000 by default): a ping from the main thread unanswered for twice the
+  limit while the worker's thread spends the limit on the CPU, as a loop does in a handler's run or
+  after an `await`, is a hang; a thread stalled with its host, not running, is waited for, even in
+  the middle of a run (bot-os.md D81, D85). It is pinged only while its script is busy, from a
+  message that may run its code until the worker says it is idle again, so an idle script costs
+  nothing (D87). Past either, or if it crashes, the worker is killed and the node failed with why
+  (`its script hung: a handler of quest.tick spent over 1000 ms of CPU`,
   `its script ran out of memory (its limit is 64 MB)`), the instance up. Its calls to the main
   thread are messages: an interface's member called there, a send queued there, its store's writes
   (read from a copy beside it), its events, its log lines and its timers, armed there and told to it

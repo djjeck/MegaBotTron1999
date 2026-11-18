@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { GUARD_BASE_MS } from './answers.ts';
 import { VirtualClock } from './clock.ts';
 import { type Connector, ConnectorBase } from './connector.ts';
 import { Core } from './core.ts';
@@ -716,15 +717,10 @@ describe('a send the network refuses (D95)', () => {
 
 describe('command answers (D98)', () => {
   const flush = () => new Promise((r) => setImmediate(r));
-  const OK = { commands: ['/give'], holds: ['/give'], answer: { status: 'ok' as const } };
-  const refused = (retryAt?: number) => ({
+  const OK = { commands: ['/give'], answer: { status: 'ok' as const } };
+  const refused = () => ({
     commands: ['/give'],
-    holds: ['/give'],
-    answer: {
-      status: 'refused' as const,
-      reason: 'cooldown',
-      ...(retryAt === undefined ? {} : { retryAt }),
-    },
+    answer: { status: 'refused' as const, reason: 'cooldown' },
   });
 
   /** An outbox whose `/give` waits a minute for its answer, through a connector of `deliver`. */
@@ -809,31 +805,39 @@ describe('command answers (D98)', () => {
     clock.advance(60_000);
   });
 
-  it("holds a command back while the bot's cooldown lasts: queued, it waits; sent now, refused", async () => {
+  it('holds no command back for a "too soon"; the guard backs a node off: queued, it waits; sent now, refused (D142)', async () => {
     const { clock, connector, outbox, p } = answering();
-    outbox.answered({ chat: '@QuestBot' }, refused(30_000));
-    expect(p.held('@QuestBot', '/give alice')).toEqual({
-      until: 30_000,
-      reason: 'cooldown: cooldown',
-    });
+    const refuse = async () => {
+      const r = p.enqueue('@QuestBot', '/give alice');
+      await flush();
+      outbox.answered({ chat: '@QuestBot' }, refused());
+      await r;
+    };
+    await refuse();
+    expect(p.held('@QuestBot', '/give alice')).toBeUndefined();
+    await refuse();
+    await refuse();
+    const until = clock.now() + GUARD_BASE_MS;
+    const reason = `backed off: refused 3 times in a row (cooldown)`;
+    expect(p.held('@QuestBot', '/give alice')).toEqual({ until, reason });
     expect(p.send('@QuestBot', '/give alice')).toEqual({
       text: '/give alice',
       outcome: 'refused',
-      reason: 'cooldown: cooldown, 30 s more',
-      retryAt: 30_000,
+      reason: `${reason}, 60 s more`,
+      retryAt: until,
     });
     await expect(p.deliver('@QuestBot', '/give alice')).resolves.toMatchObject({
       outcome: 'refused',
-      retryAt: 30_000,
+      retryAt: until,
     });
     const q = p.enqueue('@QuestBot', '/give alice');
-    expect(outbox.pending()[0]?.waitingUntil).toBe(30_000);
-    clock.advance(29_999);
+    expect(outbox.pending()[0]?.waitingUntil).toBe(until);
+    clock.advance(until - clock.now() - 1);
     expect(q.status()).toBe('waiting');
     clock.advance(1);
     await flush();
     expect(q.status()).toBe('sent');
-    expect(connector.formats).toHaveLength(1);
+    expect(connector.formats).toHaveLength(4);
   });
 
   it('answers the watchdog: an answer clears the count, an answer that never came adds to it', () => {
