@@ -252,7 +252,7 @@ describe('the player’s chat edge, following its checklist (D137)', () => {
       edges: inGroup.edges.map((e) => (e.from === 'p.chat' ? { ...e, sends: ['-1001'] } : e)),
     };
     expect(playPlace(g, 'p', plays, named)).toEqual({ bot: 'QuestBot', group: true });
-    // In a group, every form of what it plays (D140), each bare then addressed.
+    // In a group, every form of what it plays (D140), its names bare, then addressed.
     expect(followPlays(g, named).edges[1]?.commands).toEqual(
       ['/play', '/coffee', '/chest', '/daily'].flatMap((c) => [c, `${c}@QuestBot`])
     );
@@ -267,9 +267,9 @@ describe('a command’s forms, its aliases bare and addressed (D140)', () => {
     effects: [{ command: '/quest', clear: true }],
   };
   const group = { bot: 'LoreBot', group: true };
-  const LORE = ['/quest', '/quest@LoreBot', '/play', '/play@LoreBot'];
+  const LORE = ['/quest', '/play', '/quest@LoreBot', '/play@LoreBot'];
 
-  it('lists each name bare, then addressed in a group alone', () => {
+  it('lists every name bare, then every name addressed in a group alone', () => {
     expect(formsOf(TURN, group)).toEqual(LORE);
     expect(formsOf(TURN, { ...group, group: false })).toEqual(['/quest', '/play']);
     expect(formsOf(TURN)).toEqual(['/quest', '/play']);
@@ -298,8 +298,8 @@ describe('a command’s forms, its aliases bare and addressed (D140)', () => {
       '/quest',
       '/play@LoreBot',
       '/boost',
-      '/boost@LoreBot',
       '/b',
+      '/boost@LoreBot',
       '/b@LoreBot',
     ]);
     expect(playedCommands(undefined, [TURN, BOOST], { ...group, group: false })).toEqual([

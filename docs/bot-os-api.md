@@ -1806,22 +1806,22 @@ for 30 minutes: played while active", "played whenever ready, then cooling down 
 "needs you to answer: not played by default"), and, when played, its policy to pick: whenever ready,
 or if another command is cooling down; and its forms (bot-os.md D139, D140), one row per command
 whatever its aliases: each of its names (its own, then its `aliases`) bare (`/play`, which every bot
-in the group that declares it takes) then, where its edge sends to a group, addressed to its bot
-(`/play@QuestBot`, its parser's `botUsername`), each with its tick, all ticked by default (the
-entry's `forms` unset), the last one ticked kept, an unticked one never sent; a single form is not
-listed, and in its bot's private chat no addressed form is (but one its entry allows already). The
-sentence says how the form is chosen ("sent as the form that plays the most ready turns at once";
-"sent as /play@QuestBot, which only @QuestBot takes"; "sent as /play, which every bot in the group
-that declares it takes"), with a note of what bare means in a group; D139's `addressed: true` reads
-as its one addressed form, written back as `forms`. Without a parser edge, or a parser that declares
-none, the list is typed as JSON, as it can be under **Edit as JSON**; and its chat-out edge follows
-it: each change of the draft sets that edge's `commands` to the forms it may send, in order, which
-its panel shows rather than a list of its own. JSON only for what these do not draw, and what each
-of its outputs carries, not its type, which the graph draws (bot-os.md D71): an events output, the
-event types its plugin registers in that namespace (`types` of its port in `GET /available`), each
-with its schema's description (§4.4) and its payload's JSON Schema (`schema`); a chat-out output
-that declares its commands, each with its spacing (bot-os.md D74); an interface output, its members'
-names, folded, opening on each one's signature (from its schemas:
+in the group that declares it takes), then, where its edge sends to a group, each of them addressed
+to its bot in the same order (`/play@QuestBot`, its parser's `botUsername`), each with its tick, all
+ticked by default (the entry's `forms` unset), the last one ticked kept, an unticked one never sent;
+a single form is not listed, and in its bot's private chat no addressed form is (but one its entry
+allows already). The sentence says how the form is chosen ("sent as the form that plays the most
+ready turns at once"; "sent as /play@QuestBot, which only @QuestBot takes"; "sent as /play, which
+every bot in the group that declares it takes"), with a note of what bare means in a group; D139's
+`addressed: true` reads as its one addressed form, written back as `forms`. Without a parser edge,
+or a parser that declares none, the list is typed as JSON, as it can be under **Edit as JSON**; and
+its chat-out edge follows it: each change of the draft sets that edge's `commands` to the forms it
+may send, in order, which its panel shows rather than a list of its own. JSON only for what these do
+not draw, and what each of its outputs carries, not its type, which the graph draws (bot-os.md D71):
+an events output, the event types its plugin registers in that namespace (`types` of its port in
+`GET /available`), each with its schema's description (§4.4) and its payload's JSON Schema
+(`schema`); a chat-out output that declares its commands, each with its spacing (bot-os.md D74); an
+interface output, its members' names, folded, opening on each one's signature (from its schemas:
 `actions.sent({ chat: string, id?: string, t: number })`,
 `state.rest() → { until: number, why: string }`) and help; another output, its port in words. An
 events edge, and the events input of the node it enters, show what it carries (#3): each event type
@@ -2430,11 +2430,12 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   reads; and it allows the forms it may send (the editor keeps it so, D137, D140). Its
   configuration: `commands`, the commands it plays in order, each
   `{ command, whileHeld?, whenReady?, forms? }` (`command` and `whileHeld` by name or alias,
-  resolved to the name; `forms`, the forms it may send it as, in order, D140: unset, every one, each
-  of its names bare then, in a group, addressed to its bot, `/play@QuestBot`, its parser's `bot`;
-  D139's `addressed: true` is read as `forms: ["/play@<bot>"]`); **unset, the defaults** (bot-os.md
-  D137), every form: every command its parser declares (its read `commands`) but an interactive one,
-  in its parser's order; and `settleS` (10 by default, below). Each command's policy comes from its
+  resolved to the name; `forms`, the forms it may send it as, in order, D140: unset, every one, all
+  its names bare, then, in a group, all of them addressed to its bot, `/play@QuestBot`, its parser's
+  `bot`, so that on a tie a bot's own bare alias goes before an addressed form; D139's
+  `addressed: true` is read as `forms: ["/play@<bot>"]`); **unset, the defaults** (bot-os.md D137),
+  every form: every command its parser declares (its read `commands`) but an interactive one, in its
+  parser's order; and `settleS` (10 by default, below). Each command's policy comes from its
   mechanics: a turn, whenever ready (the bot's rest over); a command whose success clears another's
   hold (a reset), only while that other is held (cooling down); any other, whenever ready. An entry
   overrides it: `whileHeld`, only while that command is held; `whenReady`, whenever ready (not

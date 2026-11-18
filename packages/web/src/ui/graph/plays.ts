@@ -8,8 +8,8 @@
  * `whileHeld` or `whenReady` overrides it. Its config unset, every command but an interactive one.
  *
  * One row per command, whatever its aliases (D140). Its **forms** are each of its names (its own,
- * then its `aliases`) bare (`/play`), then, in a group, addressed to its bot (`/play@QuestBot`, the
- * parser's `botUsername`, D139): in a group, a bare name reaches every bot there that declares it,
+ * then its `aliases`) bare (`/play`), then, in a group, each addressed to its bot in the same order
+ * (`/play@QuestBot`, the parser's `botUsername`, D139): in a group, a bare name reaches every bot there that declares it,
  * an addressed one only its own. Each form has its tick, all ticked by default (the entry's `forms`
  * unset); the player sends a command as the ticked form that reaches the most bots, each of which
  * would play it then, the first in order on a tie. An entry of D139's, `addressed: true`, reads as
@@ -77,11 +77,12 @@ export function namesOf(c: Pick<BotCommand, 'command' | 'aliases'>): string[] {
 const isNamed = (c: BotCommand, name: string): boolean => namesOf(c).some((n) => same(n, name));
 
 /**
- * A command's forms, in order (D140): each of its names bare, then, in a group, addressed to its
- * bot. Where it sends unknown, its names.
+ * A command's forms, in order (D140): every one of its names bare, then, in a group, every one
+ * addressed to its bot, in the same order. Where it sends unknown, its names.
  */
 export function formsOf(c: BotCommand, place?: PlayPlace): string[] {
-  return namesOf(c).flatMap((n) => (place?.group === true ? [n, `${n}@${place.bot}`] : [n]));
+  const names = namesOf(c);
+  return [...names, ...(place?.group === true ? names.map((n) => `${n}@${place.bot}`) : [])];
 }
 
 /**

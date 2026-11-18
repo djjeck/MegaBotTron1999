@@ -197,13 +197,13 @@ describe('playsOf: what it plays, and when (D137)', () => {
     ]);
   });
 
-  it('sends a command as each name, bare, then addressed in a group, or as its forms say', () => {
+  it('sends a command as every name bare, then every name addressed in a group, or as its forms say', () => {
     const aliased: BotCommand[] = [{ command: '/quest', aliases: ['/play'], turn: true }];
     const quest = { command: '/quest' };
     expect(playForms(quest, aliased, 'LoreBot', true)).toEqual([
       '/quest',
-      '/quest@LoreBot',
       '/play',
+      '/quest@LoreBot',
       '/play@LoreBot',
     ]);
     // In its bot's private chat, bare only (D139).

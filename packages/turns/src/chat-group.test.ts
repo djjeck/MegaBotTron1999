@@ -31,33 +31,34 @@ describe('reachOf and pickForm (bot-os.md D140)', () => {
   const quest = (plays: string[]) => reacher('QuestBot', turn('/play'), plays);
   const duel = (plays: string[]) => reacher('DuelBot', turn('/play'), plays);
   const lore = (plays: string[], forms?: string[]) =>
-    reacher('LoreBot', turn('/quest', '/play'), plays, forms);
-  const LORE = ['/quest', '/quest@LoreBot', '/play', '/play@LoreBot'];
+    reacher('LoreBot', turn('/play', '/quest'), plays, forms);
+  // Every name bare, then every name addressed.
+  const LORE = ['/play', '/quest', '/play@LoreBot', '/quest@LoreBot'];
 
   it('reaches every bot declaring a bare name, an addressed form its bot alone', () => {
     const all = [quest([]), duel([]), lore([])];
     expect(reachOf('/play', all)).toEqual([
       { id: 'QuestBot', command: '/play' },
       { id: 'DuelBot', command: '/play' },
-      { id: 'LoreBot', command: '/quest' },
+      { id: 'LoreBot', command: '/play' },
     ]);
-    expect(reachOf('/quest', all)).toEqual([{ id: 'LoreBot', command: '/quest' }]);
-    expect(reachOf('/play@LoreBot', all)).toEqual([{ id: 'LoreBot', command: '/quest' }]);
+    expect(reachOf('/quest', all)).toEqual([{ id: 'LoreBot', command: '/play' }]);
+    expect(reachOf('/play@LoreBot', all)).toEqual([{ id: 'LoreBot', command: '/play' }]);
     expect(reachOf('/boost', all)).toEqual([]);
     expect(widestReach(LORE, all)).toHaveLength(3);
   });
 
   it('picks the widest form every bot it reaches would play', () => {
-    const all = [quest(['/play']), duel(['/play']), lore(['/quest'])];
+    const all = [quest(['/play']), duel(['/play']), lore(['/play'])];
     expect(pickForm(LORE, all)).toEqual({ form: '/play', reach: reachOf('/play', all) });
   });
 
   it('picks a narrower form when a bot the bare one reaches would not play', () => {
-    // Its name first: on a tie, the first in order.
-    const alone = [quest([]), duel([]), lore(['/quest'])];
+    // On a tie, the first in order: its own bare alias before any addressed form.
+    const alone = [quest([]), duel([]), lore(['/play'])];
     expect(pickForm(LORE, alone)?.form).toBe('/quest');
     // A form the player may not send is not allowed.
-    const pinned = [quest([]), duel([]), lore(['/quest'], ['/play@LoreBot'])];
+    const pinned = [quest([]), duel([]), lore(['/play'], ['/play@LoreBot'])];
     expect(pickForm(LORE, pinned)?.form).toBe('/play@LoreBot');
     // Its only bare form reaches a bot that would not play: addressed, or nothing.
     const two = [quest(['/play']), duel(['/play']), lore([])];

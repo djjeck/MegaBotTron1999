@@ -1,6 +1,6 @@
 /**
  * Three bots played in one group by one person (bot-os.md D139, D140): @QuestBot and @DuelBot,
- * whose turn is `/play`, and @LoreBot, whose turn is `/quest` with the alias `/play`, and whose
+ * whose turn is `/play`, and @LoreBot, whose turn is `/play` with the alias `/quest`, and whose
  * `/boost` (alias `/b`) ends its turn's rest; each bot with its parser and its player, the players
  * sharing alice's attention and sending in the group. A bare `/play` reaches every bot; `/quest`,
  * or a command addressed to its bot, only that bot. Each player sends a command as the form that
@@ -32,13 +32,13 @@ const GROUP = '-1001000000001';
 const BOTS = [
   { id: 'quest', bot: 'QuestBot', turn: ['/play'] },
   { id: 'duel', bot: 'DuelBot', turn: ['/play'] },
-  { id: 'lore', bot: 'LoreBot', turn: ['/quest', '/play'], boost: ['/boost', '/b'] },
+  { id: 'lore', bot: 'LoreBot', turn: ['/play', '/quest'], boost: ['/boost', '/b'] },
 ] as const;
 type Bot = (typeof BOTS)[number];
 
 /**
  * A bot's parser: "Found an apple." rests it 15 minutes, "Too soon: N minutes." N, "Boosted." ends
- * the rest (its effect names the turn by its alias, `/play`).
+ * the rest (its effect names the turn by its alias, `/quest`).
  */
 function parser(b: Bot) {
   return turnParserPlugin({
@@ -52,7 +52,7 @@ function parser(b: Bot) {
             '/boost': {
               aliases: ['/b'],
               cooldownMin: 60,
-              effects: [{ command: '/play', clear: true as const }],
+              effects: [{ command: '/quest', clear: true as const }],
             },
           },
         }
@@ -251,8 +251,8 @@ describe('three bots in one group, one person: each command as the form of wides
     ]);
     for (const p of ['quest', 'duel', 'lore'] as const)
       expect(r.turn(p)).toMatchObject({ ready: false, sent: { byHand: false } });
-    // The alias shares its command's state: LoreBot's /play is its /quest.
-    expect(Object.keys(r.ready('lore'))).toEqual(['/quest', '/boost']);
+    // The alias shares its command's state: one turn, whichever name.
+    expect(Object.keys(r.ready('lore'))).toEqual(['/play', '/boost']);
     // One player sent it; the others heard, waited for its answer, and sent nothing.
     expect([...r.sent('quest-player'), ...r.sent('duel-player'), ...r.sent('lore-player')]).toEqual(
       ['/play #500']
@@ -260,10 +260,11 @@ describe('three bots in one group, one person: each command as the form of wides
     await r.kit.stop();
   });
 
-  it('one ready after a reset ended its rest: its unique alias, the others untouched', async () => {
+  it('one ready after a reset ended its rest: its own bare alias, not an addressed form', async () => {
     const r = await run({ players: { lore: {} } });
     await r.until(r.first() + 5 * MIN);
-    // The turn for all; LoreBot's boost while its turn rests; its turn again, as /quest alone.
+    // The turn for all; LoreBot's boost while its turn rests; its turn again as /quest, which only
+    // it declares: on a tie in reach, every bare alias comes before any addressed form.
     expect(r.texts()).toEqual(['/play', '/boost', '/quest']);
     expect(r.group.replies.some((x) => x.text.startsWith('Too soon'))).toBe(false);
     expect(r.ready('lore')['/boost']).toMatchObject({ ready: false });
@@ -275,14 +276,14 @@ describe('three bots in one group, one person: each command as the form of wides
       players: {
         lore: {
           commands: [
-            { command: '/quest', forms: ['/quest@LoreBot', '/play', '/play@LoreBot'] },
+            { command: '/quest', forms: ['/play', '/play@LoreBot', '/quest@LoreBot'] },
             { command: '/b' },
           ],
         },
       },
     });
     await r.until(r.first() + 5 * MIN);
-    expect(r.texts()).toEqual(['/play', '/boost', '/quest@LoreBot']);
+    expect(r.texts()).toEqual(['/play', '/boost', '/play@LoreBot']);
     await r.kit.stop();
   });
 
@@ -338,7 +339,7 @@ describe('three bots in one group, one person: each command as the form of wides
       ),
     });
     await r.until(r.first() + 5 * MIN);
-    expect(r.texts().sort()).toEqual(['/play@DuelBot', '/play@QuestBot', '/quest@LoreBot']);
+    expect(r.texts().sort()).toEqual(['/play@DuelBot', '/play@LoreBot', '/play@QuestBot']);
     await r.kit.stop();
   });
 

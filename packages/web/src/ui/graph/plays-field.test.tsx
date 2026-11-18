@@ -59,14 +59,14 @@ describe('a command’s forms, each with its tick (D140)', () => {
     const forms = screen.getByRole('group', { name: 'forms of /quest' });
     expect(forms.textContent?.trim().split(/\s+/u)).toEqual([
       '/quest',
-      '/quest@LoreBot',
       '/play',
+      '/quest@LoreBot',
       '/play@LoreBot',
     ]);
     expect(said('/quest')).toContain('sent as the form that plays the most ready turns at once');
     fireEvent.click(screen.getByLabelText('send /quest as /quest'));
     expect(state.value).toEqual([
-      { command: '/quest', forms: ['/quest@LoreBot', '/play', '/play@LoreBot'] },
+      { command: '/quest', forms: ['/play', '/quest@LoreBot', '/play@LoreBot'] },
       { command: '/daily' },
     ]);
     fireEvent.click(screen.getByLabelText('send /quest as /play'));

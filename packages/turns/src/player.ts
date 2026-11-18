@@ -40,7 +40,8 @@
  * every one whose bot declares that name; addressed, its bot's alone), and is allowed only if each
  * of them would play its command now: in a sitting, the command ticked and its policy allowing it,
  * ready, and the form one its config allows. Of the forms allowed, the widest reach, the first in
- * order on a tie (its entry's `forms`, else its parser's names in order, each bare then addressed).
+ * order on a tie (its entry's `forms`, else its parser's names in order, every one bare, then every
+ * one addressed).
  * **Before it picks, the group settles:** while a player the widest form reaches has a send no
  * answer came to yet (younger than the answer window), or its command will be ready within
  * `settleS` seconds, it waits (until then, at most the answer window in all), so that one bare
@@ -139,7 +140,7 @@ const playSchema = z
       .min(1)
       .optional()
       .describe(
-        'The forms it may send it as, in order (D140): its names bare (/play), which in a group every bot that declares it takes, or addressed to its bot (/play@QuestBot); unset, every one, each bare then addressed (addressed only in a group)'
+        'The forms it may send it as, in order (D140): its names bare (/play), which in a group every bot that declares it takes, or addressed to its bot (/play@QuestBot); unset, every one: every name bare, then every name addressed (only in a group)'
       ),
     addressed: z
       .literal(true)
@@ -234,8 +235,9 @@ export function playsOf(
 
 /**
  * The forms a player may send a play as, in order (D140): its entry's `forms` (those that are this
- * command of its bot's), else each name of the command in its parser's order, bare, then, in a
- * group, addressed to its bot; an entry from before D140 marked `addressed`, `/play@<bot>` alone.
+ * command of its bot's), else every name of the command bare, in its parser's order, then, in a
+ * group, every name addressed to its bot, in the same order (a bot's own bare alias before an
+ * addressed form); an entry from before D140 marked `addressed`, `/play@<bot>` alone.
  */
 export function playForms(
   play: Play,
@@ -250,7 +252,7 @@ export function playForms(
       (f) => commandOf(f, [{ command: names[0] as string, aliases: names }], bot) !== undefined
     );
   if (play.addressed !== undefined) return [`${play.addressed}@${bot}`];
-  return names.flatMap((n) => (group ? [n, `${n}@${bot}`] : [n]));
+  return [...names, ...(group ? names.map((n) => `${n}@${bot}`) : [])];
 }
 
 /** A sitting in progress, as it keeps it. */

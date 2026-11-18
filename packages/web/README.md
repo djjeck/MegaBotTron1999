@@ -69,54 +69,54 @@ the server that guards them.
   ("played if /play is cooling down; ends its cool-down"), and its policy to pick (whenever ready,
   or if another command is cooling down); one row per command, whatever its aliases (D140), with its
   forms, each ticked or not (all by default, the entry's `forms` unset; the last one ticked kept):
-  each of its names bare, then, where its edge sends to a group, addressed to its bot
-  (`/play@QuestBot`, its parser's `botUsername`; D139), its sentence saying how one is chosen ("sent
-  as the form that plays the most ready turns at once"), with a note that a bare command reaches
-  every bot in the group that declares it; without a parser edge the list is typed as JSON, as it
-  can be under **Edit as JSON**. Its chat edge's `commands` follow the checklist: each change of the
-  draft sets them to the forms it may send, in order (`followPlays`), and the edge's panel shows
-  them rather than a list to keep in step. Each chat shows by its name, its kind by an icon in a
-  colour of its own (a person, a bot, a group, a channel), a person's or a bot's `@username` beside
-  it, and when it was last active (`3 days ago`); the chats picked come first; a search finds a chat
-  by its name, its `@username` or its id, and an id is never shown for a chat that has a name. What
-  is kept is the name its connector sends to (`Surface.id`; a number for a key whose schema is one).
-  A chat saved otherwise (an id, a `@username`) is found by any of its names, from the lists or a
-  search for it (`useLookups`), so after a reload too, and shown as saved only when no search finds
-  it, with why. A chat its connector says it cannot reach shows why (`unreachable`), and so do the
-  chats only another connector of its network lists (`peers`: the owner's account knows people and
-  groups a bot never saw); picked, one is first asked of the connector, which lists it if it can
-  reach it, else it is picked by its id with why it cannot. A key of people to recognise rather than
-  chats to send to (`sender`, `telegram-bot`'s `onlyPeople` and `blockPeople`, D128) says nothing of
-  reaching them, picks a peer's person at once by id, and is written on no edge. A connector that
-  cannot list its chats at all is the one place a chat is typed. Once the draft changes a
-  connector's chats, a reminder beside them says that the edges which should read a chat need it
-  ticked too (P6: the edges filter again), naming the chat-in edges with a `reads` list that miss a
-  chat added or still read one removed, each a link that opens its panel. A connector not running
-  yet says to apply first. A new node starts **disabled**, each of its required ports that one port
-  of the draft alone serves already wired to it (`wireRequired`, docs/bot-os.md D135: with one
-  `attention` node, a new `player` gets its `attention` edge), and a new chat-out edge a **dry
-  run**: its rhombus hollow and its part from the rhombus to the connector greyed and dashed; its
-  panel's **Dry-run / Send for real** switch, and a node's **Enabled** switch, are changes of the
-  draft, applied with Apply. A node's config and settings are forms made from its schemas (a
-  connector's account is nothing to type: its node's id, read-only under **Advanced**,
-  docs/bot-os.md D119), each field's description as its help, a connector's shared tuning
-  (`commandIntervalS`, `unansweredAt`, `unansweredAtBy`, `liveGraceS`) folded under **Tuning**, and
-  a connector not yet logged in told to log in first (D122); a new node's config starts filled with
-  its schema's defaults, and an opened node shows its unset ones filled in, written with its first
-  change (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), an enum whose schema labels its
-  values (`choices`, docs/bot-os.md D127) as radio buttons by those labels, a field shown only while
-  a sibling has the value its `shownWhen` names, and taken away when a change makes it not apply, a
-  config key that names a secret a choice of the secrets' names, a sensitive one (docs/bot-os.md
-  D124) said set or not, replaced typed unseen or cleared, never shown (`SensitiveField.tsx`), a
-  connector's secrets listed under its config, each by name, whether it is provided (`GET /secrets`)
-  and where it comes from (a Docker secret), never its value, a list of strings or numbers as rows
-  of plain fields with add (+) and remove buttons, and a record of plain values (the reactor's
-  `when`) as rows of a key and a value, its type picked where several are allowed
-  (`ListFields.tsx`); JSON is typed only for what none of these draws. An events edge says what it
-  carries (`Payloads.tsx`, #3): each event type and its payload's fields by dotted path and type, in
-  its panel, in the title of its rhombus (a line per type), and in the panel of the node it enters,
-  under the input (narrowed to the type the reactor's `on` names), for a reaction's `when` and
-  `send` paths. Its outputs say what they carry (docs/bot-os.md D71): an events output its event
+  every one of its names bare, then, where its edge sends to a group, every one addressed to its bot
+  in the same order (`/play@QuestBot`, its parser's `botUsername`; D139), its sentence saying how
+  one is chosen ("sent as the form that plays the most ready turns at once"), with a note that a
+  bare command reaches every bot in the group that declares it; without a parser edge the list is
+  typed as JSON, as it can be under **Edit as JSON**. Its chat edge's `commands` follow the
+  checklist: each change of the draft sets them to the forms it may send, in order (`followPlays`),
+  and the edge's panel shows them rather than a list to keep in step. Each chat shows by its name,
+  its kind by an icon in a colour of its own (a person, a bot, a group, a channel), a person's or a
+  bot's `@username` beside it, and when it was last active (`3 days ago`); the chats picked come
+  first; a search finds a chat by its name, its `@username` or its id, and an id is never shown for
+  a chat that has a name. What is kept is the name its connector sends to (`Surface.id`; a number
+  for a key whose schema is one). A chat saved otherwise (an id, a `@username`) is found by any of
+  its names, from the lists or a search for it (`useLookups`), so after a reload too, and shown as
+  saved only when no search finds it, with why. A chat its connector says it cannot reach shows why
+  (`unreachable`), and so do the chats only another connector of its network lists (`peers`: the
+  owner's account knows people and groups a bot never saw); picked, one is first asked of the
+  connector, which lists it if it can reach it, else it is picked by its id with why it cannot. A
+  key of people to recognise rather than chats to send to (`sender`, `telegram-bot`'s `onlyPeople`
+  and `blockPeople`, D128) says nothing of reaching them, picks a peer's person at once by id, and
+  is written on no edge. A connector that cannot list its chats at all is the one place a chat is
+  typed. Once the draft changes a connector's chats, a reminder beside them says that the edges
+  which should read a chat need it ticked too (P6: the edges filter again), naming the chat-in edges
+  with a `reads` list that miss a chat added or still read one removed, each a link that opens its
+  panel. A connector not running yet says to apply first. A new node starts **disabled**, each of
+  its required ports that one port of the draft alone serves already wired to it (`wireRequired`,
+  docs/bot-os.md D135: with one `attention` node, a new `player` gets its `attention` edge), and a
+  new chat-out edge a **dry run**: its rhombus hollow and its part from the rhombus to the connector
+  greyed and dashed; its panel's **Dry-run / Send for real** switch, and a node's **Enabled**
+  switch, are changes of the draft, applied with Apply. A node's config and settings are forms made
+  from its schemas (a connector's account is nothing to type: its node's id, read-only under
+  **Advanced**, docs/bot-os.md D119), each field's description as its help, a connector's shared
+  tuning (`commandIntervalS`, `unansweredAt`, `unansweredAtBy`, `liveGraceS`) folded under
+  **Tuning**, and a connector not yet logged in told to log in first (D122); a new node's config
+  starts filled with its schema's defaults, and an opened node shows its unset ones filled in,
+  written with its first change (`defaults.ts`) (`SchemaForm.tsx`, `NodeDetails.tsx`), an enum whose
+  schema labels its values (`choices`, docs/bot-os.md D127) as radio buttons by those labels, a
+  field shown only while a sibling has the value its `shownWhen` names, and taken away when a change
+  makes it not apply, a config key that names a secret a choice of the secrets' names, a sensitive
+  one (docs/bot-os.md D124) said set or not, replaced typed unseen or cleared, never shown
+  (`SensitiveField.tsx`), a connector's secrets listed under its config, each by name, whether it is
+  provided (`GET /secrets`) and where it comes from (a Docker secret), never its value, a list of
+  strings or numbers as rows of plain fields with add (+) and remove buttons, and a record of plain
+  values (the reactor's `when`) as rows of a key and a value, its type picked where several are
+  allowed (`ListFields.tsx`); JSON is typed only for what none of these draws. An events edge says
+  what it carries (`Payloads.tsx`, #3): each event type and its payload's fields by dotted path and
+  type, in its panel, in the title of its rhombus (a line per type), and in the panel of the node it
+  enters, under the input (narrowed to the type the reactor's `on` names), for a reaction's `when`
+  and `send` paths. Its outputs say what they carry (docs/bot-os.md D71): an events output its event
   types, each with its description; an interface output its members, folded, each with its signature
   (`signature.ts`) and help when opened. A node up that keeps a state (docs/bot-os.md D72) has a
   **State** section, drawn from its schema alone (`StateViewer.tsx`): its pinned paths first, then
