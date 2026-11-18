@@ -156,6 +156,12 @@ export interface Inbound {
    * its text now, `time` still when it was sent. Only `onEdit` hears it, never `onMessage`.
    */
   edited?: number;
+  /**
+   * The labels of the buttons a bot set under it, row by row (bot-os.md D145): what it offers to
+   * press, a menu's choices, a page's ◀️ and ▶️. Absent when it has none, or the network has no
+   * buttons. An edit gives them as they now are.
+   */
+  buttons?: readonly (readonly string[])[];
 }
 
 export type ConnectorState = 'connecting' | 'connected' | 'closed';

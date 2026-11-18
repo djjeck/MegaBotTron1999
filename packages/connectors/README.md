@@ -54,7 +54,8 @@ config's `liveGraceS` (120 s by default, D83), so that a quick restart costs not
 edited (`telegram-user`, D144: a bot's menu that its buttons change) comes as the message it now
 reads, with when it was edited (`edited`), live only and once per edit, to the plugins that ask for
 edits (`onEdit`) alone: none hears it as a message. The catch-up gives each message as it now reads,
-and no edit made while the instance was down.
+and no edit made while the instance was down. A bot's message with inline buttons gives their
+labels, row by row (`buttons`, `telegram-user`, D145), and an edit gives them as they now are.
 
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
   structured output by a zod schema. A model connector (docs/bot-os.md D117): it logs each call

@@ -1167,6 +1167,23 @@ describe('the catch-up', () => {
     expect(edits[0]).not.toHaveProperty('missed');
   });
 
+  it('gives the labels of a message’s inline buttons, row by row, and as an edit sets them (D145)', async () => {
+    const { c, f, messages } = await connector();
+    const edits: Inbound[] = [];
+    c.onEdit((m) => edits.push(m));
+    const page = (left: string, right: string) => ({
+      rows: [{ buttons: [{ text: left }, { text: right }] }, { buttons: [] }],
+    });
+    await f.deliver(raw({ id: 8, message: 'Pagina', replyMarkup: page('🔒', '▶️') }));
+    await f.deliver(raw({ id: 9, message: 'Nessun bottone', replyMarkup: { rows: [] } }));
+    await f.edit(
+      raw({ id: 8, message: 'Pagina dopo', replyMarkup: page('◀️', '🔒'), editDate: 1_793_000_030 })
+    );
+    expect(messages.map((m) => m.buttons)).toEqual([[['🔒', '▶️']], undefined]);
+    expect(messages[1]).not.toHaveProperty('buttons');
+    expect(edits[0]?.buttons).toEqual([['◀️', '🔒']]);
+  });
+
   it('delivers once a message heard live twice', async () => {
     const f = fake({ dialogs: [group(20)] });
     const { c, clock, messages, seen } = make(f, { seen: { [GROUP]: 20 } });

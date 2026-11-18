@@ -55,6 +55,11 @@ export interface RawMessage {
   date: number;
   /** When it was last edited, in seconds; none if never. */
   editDate?: number | undefined;
+  /**
+   * The buttons a bot set under it (GramJS's `replyMarkup`, a union: an inline keyboard has `rows`
+   * of `buttons`, each with its `text`), read defensively.
+   */
+  replyMarkup?: unknown;
   out?: boolean | undefined;
   message: string;
   replyTo?: { replyToMsgId?: number | undefined } | undefined;
@@ -137,6 +142,26 @@ function field(entity: unknown, key: 'username' | 'bot' | 'migratedTo' | 'self')
 function username(entity: unknown): string | undefined {
   const u = field(entity, 'username');
   return typeof u === 'string' ? u : undefined;
+}
+
+/**
+ * The labels of a message's inline buttons, row by row (D145); none when it has no inline keyboard
+ * (a reply keyboard, which a bot sets for the person typing, is not a message's).
+ */
+function buttonsOf(m: RawMessage): { buttons?: string[][] } {
+  const list = (o: unknown, key: string): unknown[] => {
+    const v = typeof o === 'object' && o !== null ? (o as Record<string, unknown>)[key] : undefined;
+    return Array.isArray(v) ? v : [];
+  };
+  const rows = list(m.replyMarkup, 'rows')
+    .map((r) =>
+      list(r, 'buttons').map((b) => {
+        const text = typeof b === 'object' && b !== null ? (b as { text?: unknown }).text : '';
+        return typeof text === 'string' ? text : '';
+      })
+    )
+    .filter((r) => r.length > 0);
+  return rows.length === 0 ? {} : { buttons: rows };
 }
 
 /** How long a failed start waits before the next. */
@@ -773,6 +798,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       playback: false,
       own: m.out === true,
       ...(document === undefined ? {} : { document }),
+      ...buttonsOf(m),
     };
   }
 
