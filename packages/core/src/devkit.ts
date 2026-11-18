@@ -112,6 +112,14 @@ export class FakeConnector extends ConnectorBase implements Connector {
     this.received({ ...m, playback: m.playback ?? false });
   }
 
+  /**
+   * An edit of a message said on the network (D144): `id` the message's, `text` its text now,
+   * `edited` when (now, by default, on the clock of the test).
+   */
+  hearEdit(m: Heard & { edited?: number }): void {
+    this.reread({ ...m, playback: m.playback ?? false, edited: m.edited ?? m.time });
+  }
+
   send(chat: string, text: string, options?: ConnectorSendOptions): boolean {
     this.sent.push({
       chat,

@@ -2053,6 +2053,17 @@ export class Core {
                 reading = undefined;
               }
             }),
+          // Edits, to a plugin that asks for them (D144): while it is up, timed as its messages;
+          // no answer is paired from one (D98).
+          ...(handle.onEdit === undefined
+            ? {}
+            : {
+                onEdit: (h: (m: Inbound) => void) =>
+                  (handle.onEdit as NonNullable<typeof handle.onEdit>)((m) => {
+                    if (entry.up !== true) return;
+                    this.costs.time(id, () => h(m));
+                  }),
+              }),
         };
       },
       use: <T>(key: string): T => {

@@ -2,6 +2,7 @@ import { Core, definePlugin, type Inbound, NEEDS_LOGIN, VirtualClock } from '@me
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { EditedMessage } from 'telegram/events/EditedMessage.js';
 import { describe, expect, it } from 'vitest';
 import {
   type GramClient,
@@ -136,7 +137,10 @@ describe('the telegram-user plugin', () => {
     const heard: string[] = [];
     let deliver: ((e: { message: RawMessage }) => Promise<void>) | undefined;
     const c = client();
-    c.addEventHandler = (h) => (deliver = h);
+    c.addEventHandler = (h, builder) => {
+      // The messages' handler; the edits' is another (D144).
+      if (!(builder instanceof EditedMessage)) deliver = h;
+    };
     const core = new Core({
       clock: new VirtualClock(),
       documents: loggedIn('tg'),
@@ -185,7 +189,10 @@ describe('the telegram-user plugin', () => {
     const heard: string[] = [];
     let deliver: ((e: { message: RawMessage }) => Promise<void>) | undefined;
     const c = client();
-    c.addEventHandler = (h) => (deliver = h);
+    c.addEventHandler = (h, builder) => {
+      // The messages' handler; the edits' is another (D144).
+      if (!(builder instanceof EditedMessage)) deliver = h;
+    };
     c.getDialogs = () =>
       Promise.resolve([
         {

@@ -97,6 +97,28 @@ describe('FakeConnector', () => {
 });
 
 describe('DevKit', () => {
+  it('hears an edit it is told, to its listeners of edits alone, by default when it was said (D144)', () => {
+    const c = new FakeConnector({ account: 'telegram:alice' });
+    const heard: unknown[] = [];
+    const edits: unknown[] = [];
+    c.onMessage((m) => heard.push(m));
+    c.onEdit((m) => edits.push(m));
+    c.hearEdit({ chat: '@QuestBot', sender: 'QuestBot', text: 'chosen', time: 5, id: '3' });
+    c.hearEdit({
+      chat: '@QuestBot',
+      sender: 'QuestBot',
+      text: 'again',
+      time: 5,
+      id: '3',
+      edited: 9,
+    });
+    expect(heard).toEqual([]);
+    expect(edits).toMatchObject([
+      { text: 'chosen', edited: 5, playback: false },
+      { text: 'again', edited: 9 },
+    ]);
+  });
+
   it('runs a plugin on a virtual clock, with its configuration, settings and documents', async () => {
     const records: { type: string }[] = [];
     const fake = new FakeConnector({ account: 'irc:alice' });

@@ -50,7 +50,11 @@ message's file comes as its `document` (D82): both Telegram connectors download 
 most 256 KiB, in UTF-8, and give its text beside the caption; any other file, its name, type and
 size only. The catch-up downloads it as live. A message the Telegram connectors catch up on is
 `missed`, and played back (`playback`: history, which nothing acts on) only once older than their
-config's `liveGraceS` (120 s by default, D83), so that a quick restart costs nothing.
+config's `liveGraceS` (120 s by default, D83), so that a quick restart costs nothing. A message
+edited (`telegram-user`, D144: a bot's menu that its buttons change) comes as the message it now
+reads, with when it was edited (`edited`), live only and once per edit, to the plugins that ask for
+edits (`onEdit`) alone: none hears it as a message. The catch-up gives each message as it now reads,
+and no edit made while the instance was down.
 
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
   structured output by a zod schema. A model connector (docs/bot-os.md D117): it logs each call

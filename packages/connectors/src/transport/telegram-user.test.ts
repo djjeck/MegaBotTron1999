@@ -1,5 +1,6 @@
 import { FloodWait, type Inbound, type ReadFilter, VirtualClock } from '@megabottron1999/core';
 import { Api } from 'telegram';
+import { EditedMessage } from 'telegram/events/EditedMessage.js';
 import { returnBigInt } from 'telegram/Helpers.js';
 import { describe, expect, it } from 'vitest';
 import {
@@ -57,6 +58,7 @@ function fake(
   const sent: { entity: unknown; message: string }[] = [];
   let failures = o.failConnect ?? 0;
   let handler: ((event: { message: RawMessage }) => Promise<void>) | undefined;
+  let editHandler: ((event: { message: RawMessage }) => Promise<void>) | undefined;
   let handlers = 0;
   const client: GramClient = {
     connect: () => {
@@ -75,8 +77,9 @@ function fake(
       sent.push({ entity, message });
       return o.send?.() ?? Promise.resolve({ id: 99 });
     },
-    addEventHandler: (h) => {
-      handler = h;
+    addEventHandler: (h, builder) => {
+      if (builder instanceof EditedMessage) editHandler = h;
+      else handler = h;
       handlers++;
     },
     getMessages: (entity, { limit, offsetId, minId }) => {
@@ -98,7 +101,8 @@ function fake(
     },
   };
   const deliver = (message: RawMessage) => handler?.({ message }) ?? Promise.resolve();
-  return { client, calls, sent, deliver, handlers: () => handlers };
+  const edit = (message: RawMessage) => editHandler?.({ message }) ?? Promise.resolve();
+  return { client, calls, sent, deliver, edit, handlers: () => handlers };
 }
 
 const flush = () => new Promise((r) => setImmediate(r));
@@ -155,7 +159,7 @@ describe('TelegramUserConnector', () => {
   it('connects, fills the entity cache, then resolves its chats, once', async () => {
     const { c, f, logs } = await connector();
     expect(f.calls).toEqual(['connect', 'dialogs', `entity ${GROUP}`, 'entity @Quiz_bot', 'me']);
-    expect(f.handlers()).toBe(1);
+    expect(f.handlers()).toBe(2);
     expect(c.status()).toEqual({ state: 'connected', phase: 'ready' });
     expect(c.self()).toBe('alice');
     expect(logs).toEqual([`connected as alice, reading ${GROUP}, @Quiz_bot`]);
@@ -176,7 +180,7 @@ describe('TelegramUserConnector', () => {
     expect(told).toEqual([
       "the owner's Telegram session failed to start: Error: AUTH_KEY_UNREGISTERED",
     ]);
-    expect(f.handlers()).toBe(1);
+    expect(f.handlers()).toBe(2);
   });
 
   it('stops retrying, and closes, when stopped', async () => {
@@ -1137,6 +1141,30 @@ describe('the catch-up', () => {
     expect(messages.map((m) => m.chat)).toEqual([GROUP, GROUP]);
     expect(history(f)).toEqual([`history ${GROUP} <21 >18 100`]);
     expect(seen()).toEqual({ [GROUP]: 20, [PRIVATE_ID]: 9 });
+  });
+
+  it('passes on an edit, live, to the listeners of edits alone, each edit once (D144)', async () => {
+    const { c, f, messages } = await connector();
+    const edits: Inbound[] = [];
+    c.onEdit((m) => edits.push(m));
+    await f.deliver(raw({ id: 4, message: 'Scegli', replyTo: { replyToMsgId: 3 } }));
+    const changed = raw({
+      id: 4,
+      message: 'Scelto',
+      replyTo: { replyToMsgId: 3 },
+      editDate: 1_793_000_060,
+    });
+    await f.edit(changed);
+    await f.edit(changed);
+    await f.edit(raw({ id: 4, message: 'Scelto ancora', editDate: 1_793_000_090 }));
+    // Another chat's: not one of its chats.
+    await f.edit(raw({ id: 5, chatId: { toString: () => '-100999' }, editDate: 1_793_000_100 }));
+    expect(messages.map((m) => m.text)).toEqual(['Scegli']);
+    expect(edits).toMatchObject([
+      { chat: GROUP, id: '4', text: 'Scelto', replyTo: '3', time: SAID, edited: SAID + 60_000 },
+      { id: '4', text: 'Scelto ancora', edited: SAID + 90_000 },
+    ]);
+    expect(edits[0]).not.toHaveProperty('missed');
   });
 
   it('delivers once a message heard live twice', async () => {

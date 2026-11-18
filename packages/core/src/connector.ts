@@ -151,6 +151,11 @@ export interface Inbound {
   own?: boolean;
   /** The file it carries, if any (D82); `text` is then its caption, `''` without one. */
   document?: InboundDocument;
+  /**
+   * An edit of the message `id` (bot-os.md D144): when it was edited, in milliseconds; `text` is
+   * its text now, `time` still when it was sent. Only `onEdit` hears it, never `onMessage`.
+   */
+  edited?: number;
 }
 
 export type ConnectorState = 'connecting' | 'connected' | 'closed';
@@ -237,6 +242,13 @@ export interface ConnectorHandle {
   onMessage(handler: (m: Inbound) => void): () => void;
   /** Hears every change of status; returns the way to stop. */
   onStatus(handler: (s: ConnectorStatus) => void): () => void;
+  /**
+   * Hears every edit of a message, live, where the network has them (bot-os.md D144): the message as
+   * it now reads, `edited` when. Opt-in: a plugin that never calls it hears no edit, as `onMessage`
+   * never does (a command edited after it was sent is not played again, nor a bot's answer read
+   * twice). Returns the way to stop; absent on a handle of a connector that has none.
+   */
+  onEdit?(handler: (m: Inbound) => void): () => void;
   /**
    * The chats its edge reads (bot-os.md D139): `'*'`, every chat, also for a handle that reads
    * unfiltered. A send it is told of elsewhere counts only in one of these.
@@ -338,6 +350,14 @@ export function handleOf(c: Connector, filter?: ReadFilter): ConnectorHandle {
         if (filter === undefined || hears(filter, m, c.self())) h(m);
       }),
     onStatus: (h) => c.onStatus(h),
+    ...(c.onEdit === undefined
+      ? {}
+      : {
+          onEdit: (h: (m: Inbound) => void) =>
+            (c.onEdit as NonNullable<Connector['onEdit']>)((m) => {
+              if (filter === undefined || hears(filter, m, c.self())) h(m);
+            }),
+        }),
     reads: () => filter?.reads ?? '*',
     ...(c.isAdmin === undefined
       ? {}
@@ -357,6 +377,7 @@ export class ConnectorBase {
   private current: ConnectorStatus = { state: 'closed', phase: 'closed' };
   private name: string | undefined;
   private messages: ((m: Inbound) => void)[] = [];
+  private edits: ((m: Inbound) => void)[] = [];
   private statuses: ((s: ConnectorStatus) => void)[] = [];
 
   constructor(account: string, network: string) {
@@ -379,6 +400,13 @@ export class ConnectorBase {
     };
   }
 
+  onEdit(handler: (m: Inbound) => void): () => void {
+    this.edits.push(handler);
+    return () => {
+      this.edits = this.edits.filter((h) => h !== handler);
+    };
+  }
+
   onStatus(handler: (s: ConnectorStatus) => void): () => void {
     this.statuses.push(handler);
     return () => {
@@ -390,6 +418,12 @@ export class ConnectorBase {
   protected received(m: Omit<Inbound, 'account' | 'network'>): void {
     const inbound: Inbound = { account: this.account, network: this.network, ...m };
     for (const h of [...this.messages]) h(inbound);
+  }
+
+  /** An edit of a message read (D144): to every listener of edits, in order; `edited`, when. */
+  protected reread(m: Omit<Inbound, 'account' | 'network'> & { edited: number }): void {
+    const inbound: Inbound = { account: this.account, network: this.network, ...m };
+    for (const h of [...this.edits]) h(inbound);
   }
 
   /** The account's own name on the network, as it learnt it. */

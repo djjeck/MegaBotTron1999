@@ -1055,6 +1055,7 @@ interface Inbound {
   missed?: boolean; // said while the instance was down, delivered once by the connector
   own?: boolean; // sent by the account itself, from any of its devices
   document?: InboundDocument; // the file it carries; `text` is then its caption ('' without one)
+  edited?: number; // an edit of message `id` (bot-os.md D144): when, ms; `text` its text now
 }
 
 interface InboundDocument {
@@ -1078,10 +1079,22 @@ interface ConnectorHandle {
   self(): string | undefined; // the account's own name on the network, once connected
   onMessage(handler: (m: Inbound) => void): () => void;
   onStatus(handler: (s: ConnectorStatus) => void): () => void;
+  onEdit?(handler: (m: Inbound) => void): () => void; // edits, opt-in (bot-os.md D144)
   reads?(): readonly string[] | '*'; // the chats its edge reads (bot-os.md D139)
   isAdmin?(chat: string): Promise<boolean>; // where the network can say
 }
 ```
+
+**Edits** (bot-os.md D144): a message is heard once, as it was sent (`onMessage`). A plugin that
+reads what a message becomes (a bot's menu, which its buttons edit in place) asks for edits as well:
+`ctx.connector(port).onEdit(handler)` hears each edit, live, through the same edge (its chats and
+senders), as the message it now reads: its `id`, its `replyTo`, its `text` now, `time` when it was
+sent, `edited` when it was edited. Opt-in, so a plugin that never asks hears none: a command edited
+after it was sent is not played again (the bots ignore edits too), and no answer is read twice.
+`telegram-user` has them (GramJS's `EditedMessage`), once per edit; the others have none (`onEdit`
+absent, or never called). Edits are not accounted for (D66): one made while the instance was down is
+not caught up, the catch-up giving each message as it now reads. `FakeConnector.hearEdit(m)` says
+one in a test. No answer is paired from an edit (D98).
 
 **Files** (bot-os.md D82): a message that carries a file has its `document`. The Telegram connectors
 download a text file (`text/*`, `application/json`, `application/xml`, `application/csv`, or no type

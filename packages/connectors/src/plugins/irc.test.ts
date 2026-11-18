@@ -180,6 +180,8 @@ describe('the irc plugin in the core', () => {
     expect(Object.keys(got as object).sort()).toEqual([
       'account',
       'network',
+      // Every connector's handle offers edits (D144); IRC never has one.
+      'onEdit',
       'onMessage',
       'onStatus',
       'reads',

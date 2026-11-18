@@ -40,6 +40,7 @@ import {
   type TimerHandle,
 } from '@megabottron1999/core';
 import { Api, TelegramClient } from 'telegram';
+import { EditedMessage } from 'telegram/events/EditedMessage.js';
 import { NewMessage } from 'telegram/events/index.js';
 import { Logger, LogLevel } from 'telegram/extensions/Logger.js';
 import { StringSession } from 'telegram/sessions/index.js';
@@ -52,6 +53,8 @@ export interface RawMessage {
   id: number;
   /** In seconds. */
   date: number;
+  /** When it was last edited, in seconds; none if never. */
+  editDate?: number | undefined;
   out?: boolean | undefined;
   message: string;
   replyTo?: { replyToMsgId?: number | undefined } | undefined;
@@ -469,7 +472,10 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       if (!this.started) return;
       // Once, however often the start is retried; before the dialogs, so nothing falls between:
       // what is heard before the dialogs waits in `early`.
-      if (!this.listening) client.addEventHandler((e) => this.heard(e.message), new NewMessage({}));
+      if (!this.listening) {
+        client.addEventHandler((e) => this.heard(e.message), new NewMessage({}));
+        client.addEventHandler((e) => this.reheard(e.message), new EditedMessage({}));
+      }
       this.listening = true;
       const dialogs = [...(await client.getDialogs({}))];
       for (const d of dialogs) if (!migrated(d)) this.learn(d.id?.toString(), username(d.entity));
@@ -515,6 +521,26 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       this.received(inbound);
     } catch (err) {
       this.o.log(`message ${m.id} dropped: ${String(err)}`);
+    }
+  }
+
+  /**
+   * An edit the account saw (bot-os.md D144): passed on, live, to the plugins that hear edits, if
+   * in one of its chats; each edit once (a message and its edit's time). Edits are not accounted
+   * for: one missed while the instance was down is not caught up, the catch-up giving each message
+   * as it now reads.
+   */
+  private async reheard(m: RawMessage): Promise<void> {
+    if (!this.started) return;
+    try {
+      const chat = await this.chatOf(m);
+      if (chat === undefined) return;
+      const edited = (m.editDate ?? Math.floor(this.o.clock.now() / 1000)) * 1000;
+      const key = `${m.chatId?.toString() ?? chat}\n${m.id}`;
+      if (!this.remember(`${key}\nedit`, edited)) return;
+      this.reread({ ...(await this.inbound(m, chat)), edited });
+    } catch (err) {
+      this.o.log(`edit of message ${m.id} dropped: ${String(err)}`);
     }
   }
 

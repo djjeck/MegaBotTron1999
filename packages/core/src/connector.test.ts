@@ -31,6 +31,9 @@ class TestConnector extends ConnectorBase implements Connector {
       ...(own === undefined ? {} : { own }),
     });
   }
+  edit(text: string, chat = 'c', edited = 2): void {
+    this.reread({ chat, sender: 's', text, time: 1, playback: false, id: '1', edited });
+  }
   call(name: string): void {
     this.named(name);
   }
@@ -254,6 +257,71 @@ describe('connectors', () => {
     core.stopNode('b', 'enough', 'owner');
     expect(readers?.()).toEqual([{ reads: '*', senders: ['@QuestBot', 'me'] }]);
     await core.stop();
+  });
+
+  it('give an edit only to a reader that asks for edits, through its edge, as its messages (D144)', async () => {
+    const c = new TestConnector('test:me', 'test');
+    const heard: string[] = [];
+    const reader = (id: string, edits: boolean) =>
+      definePlugin({
+        manifest: {
+          id,
+          version: '0.1.0',
+          kinds: ['parser'],
+          description: id,
+          inputs: { chat: { type: 'chat-in' } },
+        },
+        create: (ctx) => {
+          const chat = ctx.connector('chat');
+          chat.onMessage((m) => heard.push(`${id} heard ${m.text}`));
+          if (edits) chat.onEdit?.((m) => heard.push(`${id} re-read ${m.text} at ${m.edited}`));
+          return {};
+        },
+      });
+    const core = new Core({
+      clock: new VirtualClock(),
+      graph: {
+        version: 2,
+        nodes: [
+          { id: 'test', plugin: 'test', account: 'test:me' },
+          { id: 'a', plugin: 'a' },
+          { id: 'b', plugin: 'b' },
+        ],
+        edges: [
+          { from: 'test.chat', to: 'a.chat', reads: ['#lobby'] },
+          { from: 'test.chat', to: 'b.chat', reads: '*' },
+        ],
+      },
+    });
+    core.register(
+      definePlugin({ manifest: manifest('test', 'test:me'), create: () => ({ connector: c }) }),
+      reader('a', true),
+      reader('b', false)
+    );
+    await core.start();
+    c.hear('menu', '#lobby');
+    c.edit('menu, chosen', '#lobby', 5);
+    c.edit('elsewhere', '#other');
+    expect(heard).toEqual(['a heard menu', 'b heard menu', 'a re-read menu, chosen at 5']);
+    // Stopped (D64: its sends refused, its reading kept), it hears edits as it hears messages.
+    core.stopNode('a', 'enough', 'owner');
+    c.hear('later', '#lobby');
+    c.edit('menu, chosen again', '#lobby', 9);
+    expect(heard.slice(3).filter((h) => h.startsWith('a '))).toEqual([
+      'a heard later',
+      'a re-read menu, chosen again at 9',
+    ]);
+    await core.stop();
+  });
+
+  it('stop giving an edit to a listener that stopped hearing them', () => {
+    const c = new TestConnector('test:me', 'test');
+    const edits: string[] = [];
+    const stop = handleOf(c).onEdit?.((m) => edits.push(m.text));
+    c.edit('one');
+    stop?.();
+    c.edit('two');
+    expect(edits).toEqual(['one']);
   });
 
   it('gives a connector the readers about to start, and none disabled', async () => {
