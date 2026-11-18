@@ -2769,7 +2769,8 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
     each command's readiness now, by name, the turn first,
     `{ ready, since?, until?, why?, sent?, answer? }` (ready since when, or held until when, none
     until an unlock, and why; its last send, `{ t, byHand }`, and the last answer read to it,
-    `{ t, length }`), a game's longest hold over any shorter; `state.commands()`, its commands
+    `{ t, length }`), a game's hold told over the command's own unless that one ends later;
+    `state.commands()`, its commands
     (`{ command, aliases?, turn?, cooldownMin?, unlock?: { pattern?, forMin? }, effects?, interactive? }`,
     the turn first, then the vocabulary's order; `pattern` the parser's `announcedBy`);
     `state.bot()`; and `actions.sent(...)`, handed to its parser. A query may not take those names,

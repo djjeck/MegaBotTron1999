@@ -325,14 +325,12 @@ export class ReadinessModel {
       const since = Math.max(s.readyAt ?? -Infinity, s.unlocked?.at ?? -Infinity);
       r = { ready: true, ...(Number.isFinite(since) ? { since } : {}), ...seen };
     }
-    // The game's holds over it (a ban): the longest wins, a hold with no end over any.
+    // The game's holds over it (a ban), told over its own hold but one that ends later: a command
+    // waiting for its unlock is held by a ban all the same, and says so.
     for (const h of Object.values(state.holds)) {
       if (h.commands !== undefined && !h.commands.includes(c)) continue;
       if (h.until !== undefined && h.until <= now) continue;
-      if (
-        !r.ready &&
-        (h.until === undefined ? r.until === undefined : (r.until ?? Infinity) >= h.until)
-      )
+      if (!r.ready && r.until !== undefined && h.until !== undefined && r.until >= h.until)
         continue;
       r = {
         ready: false,

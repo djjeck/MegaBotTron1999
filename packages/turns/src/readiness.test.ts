@@ -200,9 +200,10 @@ describe('ReadinessModel (bot-os.md D141)', () => {
     expect(s.holds['gate']).toEqual({ why: 'gated', commands: ['/daily'] });
     expect(m.ready(s, T0 + 31 * MIN)['/daily']).toEqual({ ready: false, why: 'gated' });
     expect(m.ready(s, T0 + 31 * MIN)['/play']).toMatchObject({ ready: true });
-    // Over a command waiting for its unlock, which has no end either: the unlock's why stays.
-    s = m.hold(s, 'all', { why: 'paused' });
+    // Over a command waiting for its unlock: the hold, which says why it may not go.
     expect(m.ready(s, T0 + 31 * MIN)['/chest']).toMatchObject({ why: 'waits for an unlock' });
+    s = m.hold(s, 'all', { why: 'paused' });
+    expect(m.ready(s, T0 + 31 * MIN)['/chest']).toEqual({ ready: false, why: 'paused' });
     s = m.hold(m.hold(s, 'gate', undefined), 'all', undefined);
     expect(m.hold(s, 'gate', undefined)).toBe(s);
     expect(m.ready(s, T0 + 61 * MIN)['/daily']).toMatchObject({ ready: true });
