@@ -130,9 +130,9 @@ describe('a player’s commands as a checklist (D137)', () => {
     expect(state.value).toBeUndefined();
   });
 
-  it('keeps a command its parser does not declare, and says so', () => {
+  it('keeps a command its state does not declare, and says so', () => {
     checklist([{ command: '/play' }, { command: '/dance' }]);
-    expect(screen.getByRole('note').textContent).toContain('Its parser declares none of /dance');
+    expect(screen.getByRole('note').textContent).toContain('Its state declares none of /dance');
   });
 
   it('is typed as JSON without its parser’s commands, and under Edit as JSON', () => {

@@ -53,9 +53,9 @@ const BOT_COMMAND = /^\/\w+$/u;
 const botCommandName = z.string().regex(BOT_COMMAND, 'expected a command, as /play');
 
 /**
- * A command of a game bot, as its parser declares it (bot-os.md D132, D137, D140): a turn (`turn`:
- * its readiness the bot's rest), or another with its mechanics, in generic terms; by its name, with
- * the other names the bot takes it by (`aliases`), one command whichever is sent.
+ * A command of a game bot, as its readiness state declares it (bot-os.md D132, D137, D140, D141): a
+ * turn (`turn`: its readiness the bot's rest), or another with its mechanics, in generic terms; by
+ * its name, with the other names the bot takes it by (`aliases`), one command whichever is sent.
  */
 const botCommandSchema = z.strictObject({
   command: botCommandName,
@@ -255,15 +255,16 @@ export const manifestSchema = z
       )
       .default([]),
     /**
-     * A game bot's parser's: its bot's commands it knows, in order, the turns first, each with its
-     * mechanics (bot-os.md D132, D137), so that the editor knows them without the node running: a
-     * player's checklist (`configPlays`) offers them, and says what each will do. Data only: what
-     * the parser makes of them is its own (`turnParserPlugin`).
+     * A game bot's readiness state's: its bot's commands, in order, the turns first, each with its
+     * mechanics (bot-os.md D132, D137, D141), so that the editor knows them without the node
+     * running: a player's checklist (`configPlays`) offers them, and says what each will do. Data
+     * only: what the state makes of them is its own (`statePlugin`'s `readiness`).
      */
     botCommands: z.array(botCommandSchema).optional(),
     /**
-     * A game bot's parser's: its bot's username, without `@` (bot-os.md D139), so that the editor
-     * can name a command addressed to it (`/play@QuestBot`), as a player in a group may send it.
+     * A game bot's readiness state's: its bot's username, without `@` (bot-os.md D139, D141), so
+     * that the editor can name a command addressed to it (`/play@QuestBot`), as a player in a group
+     * may send it.
      */
     botUsername: z.string().regex(/^\w+$/u, 'expected a username, without @').optional(),
     /**

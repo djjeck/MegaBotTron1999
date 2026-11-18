@@ -753,7 +753,7 @@ export function NodeDetails(props: {
     available: readonly PluginView[];
   };
   /**
-   * A player's (D137): the commands of the parser its edge binds, for its checklist; undefined,
+   * A player's (D137): the commands of the state its edge binds, for its checklist; undefined,
    * none known, `missing` saying why.
    */
   plays?: {
@@ -982,7 +982,7 @@ export function NodeDetails(props: {
                 view.configSchema,
                 props.edges ?? []
               ),
-              // A player's commands, a checklist of its parser's (D137).
+              // A player's commands, a checklist of its state's (D137, D141).
               ...(view.configPlays === undefined || props.plays === undefined
                 ? {}
                 : {

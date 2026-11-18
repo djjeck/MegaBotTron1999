@@ -27,6 +27,13 @@
  * - **Offers** its interface: `state.get({ path? })`, `state.freshness({ section? })` and the
  *   spec's queries; and its view, for the node panel's generic viewer and its card's line, from
  *   its node's `pin` (`config.pin`, dotted paths drawn first).
+ * - **Keeps a bot's commands' readiness** when its spec says so (`readiness`, bot-os.md D141): a
+ *   section `readiness`, reduced from its parser's events by the reusable `ReadinessModel`
+ *   (`src/readiness.ts`) before the spec's own reducer sees the state, which may fold more facts
+ *   in (a ban); a second input, `parser`, the contract of its parser it hands a player's sends
+ *   to; its bot's commands with their mechanics and its bot's name in its manifest (`botCommands`,
+ *   `botUsername`, for the editor's checklist, D137); and the player's contract,
+ *   `READINESS_MEMBERS`. `readinessPlugin` is such a state with nothing else, for a game with none.
  *
  * It never sends: acquiring a piece of state (a command that makes the bot list an inventory) is
  * the acting nodes' business, through their outbox's queue (§4.6).
@@ -48,6 +55,14 @@ import {
 } from '@megabottron1999/core';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
+import {
+  READINESS_SECTION,
+  type ReadinessInterface,
+  ReadinessModel,
+  type ReadinessSpec,
+  type ReadinessState,
+} from '#src/readiness.ts';
+import { TURN_PARSER_MEMBERS, type TurnParserInterface } from '#src/turn-parser.ts';
 
 /**
  * What an event says of a section's freshness: a full `snapshot` of it (its deltas counted from
@@ -76,11 +91,20 @@ export interface StateSpec<S extends Record<string, unknown>> {
   initial: S;
   /**
    * The event types it applies (`quest.inventory`), heard through a required events input per
-   * namespace.
+   * namespace: at least one, or a `readiness`.
    */
   consumes: readonly string[];
-  /** The next state, from the state and an event of its types: pure, never changing its arguments. */
+  /**
+   * The next state, from the state and an event of its types: pure, never changing its arguments.
+   * With a `readiness`, it also sees its parser's events (after the readiness section reduced
+   * them), and may fold more facts into that section with the model's steps (bot-os.md D141).
+   */
   reduce(state: S, event: BusEvent): S;
+  /**
+   * A bot's commands' readiness, kept in the section `readiness` (bot-os.md D141): its parser and
+   * its vocabulary, and the mechanics. Its parser's events are consumed too.
+   */
+  readiness?: ReadinessSpec | ReadinessModel;
   /**
    * What an event says of the freshness of the sections it touches, from the event and the
    * sections whose value it changed: by default, each changed section a `delta`. A section may be
@@ -151,6 +175,8 @@ interface Kept<S> {
 const TYPE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\.[a-z][A-Za-z0-9]*$/u;
 const ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const RESERVED = new Set(['get', 'freshness']);
+/** The reads a state with a readiness offers (D141). */
+const READINESS_READS = ['ready', 'commands', 'bot'];
 const OWN_EVENTS = new Set(['changed', 'refused']);
 const EVENT_NAME = /^[a-z][A-Za-z0-9]*$/u;
 
@@ -185,23 +211,48 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
     throw new Error(`state plugin ${spec.id}: ${why}`);
   };
   if (!ID.test(spec.id)) fail('its id is lower-case words and dashes');
-  if (spec.consumes.length === 0) fail('it consumes no event type');
-  for (const t of spec.consumes) {
+  const model =
+    spec.readiness === undefined || spec.readiness instanceof ReadinessModel
+      ? spec.readiness
+      : new ReadinessModel(spec.readiness);
+  if (spec.consumes.length === 0 && model === undefined) fail('it consumes no event type');
+  if (model !== undefined && Object.hasOwn(spec.schema.shape, READINESS_SECTION))
+    fail(`its schema cannot have a section ${READINESS_SECTION}: its readiness is kept there`);
+  const consumes = [...new Set([...spec.consumes, ...(model?.consumes ?? [])])];
+  const reserved = new Set([...RESERVED, ...(model === undefined ? [] : READINESS_READS)]);
+  for (const t of consumes) {
     if (!TYPE.test(t)) fail(`${t} is not an event type, <namespace>.<name>`);
     if (t.startsWith(`${spec.id}.`)) fail(`it cannot consume its own ${t}`);
   }
   for (const q of Object.keys(spec.queries ?? {}))
-    if (RESERVED.has(q)) fail(`a query cannot be named ${q}`);
+    if (reserved.has(q)) fail(`a query cannot be named ${q}`);
   const own = Object.entries(spec.events ?? {});
   for (const [name] of own) {
     if (!EVENT_NAME.test(name)) fail(`${name} is not an event's name, as gained`);
     if (OWN_EVENTS.has(name)) fail(`an event cannot be named ${name}`);
   }
   if (spec.announce !== undefined && own.length === 0) fail('it announces, but declares no event');
-  const initial = spec.schema.safeParse(spec.initial);
+  const schema =
+    model === undefined ? spec.schema : spec.schema.extend({ [READINESS_SECTION]: model.schema });
+  const start = (): S =>
+    model === undefined
+      ? structuredClone(spec.initial)
+      : ({ ...structuredClone(spec.initial), [READINESS_SECTION]: model.initial() } as S);
+  const initial = schema.safeParse(start());
   if (!initial.success) fail(`its initial state does not fit its schema: ${initial.error.message}`);
-  const sections = Object.keys(spec.schema.shape);
-  const viewSchema = z.toJSONSchema(spec.schema, { io: 'output', unrepresentable: 'any' });
+  const sections = Object.keys(schema.shape);
+  const viewSchema = z.toJSONSchema(schema, { io: 'output', unrepresentable: 'any' });
+  const ownTypes = new Set(spec.consumes);
+  /** The next state: its readiness first, then the spec's reducer, each for its own events. */
+  const reduce = (state: S, event: BusEvent): S => {
+    let next = state;
+    if (model?.consumes.includes(event.type) === true)
+      next = {
+        ...next,
+        [READINESS_SECTION]: model.reduce(next[READINESS_SECTION] as ReadinessState, event),
+      };
+    return ownTypes.has(event.type) || model !== undefined ? spec.reduce(next, event) : next;
+  };
   const config = z.object({
     pin: z
       .array(
@@ -225,6 +276,8 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
       // The events it applied and refused since the last summary, for the owner (bot-os.md D92).
       summary: true,
       games: { registers: [spec.id] },
+      // Its bot's commands and name, for the editor's player checklist (D137, D141).
+      ...(model === undefined ? {} : { botCommands: model.declared, botUsername: model.bot }),
       events: {
         [`${spec.id}.changed`]: z
           .object({
@@ -235,7 +288,19 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
           .describe('Its state changed: the sections whose value or freshness did, and the event'),
         ...Object.fromEntries(own.map(([name, schema]) => [`${spec.id}.${name}`, schema])),
       },
-      inputs: inputsOf(spec.consumes),
+      inputs: {
+        ...inputsOf(consumes),
+        ...(model === undefined
+          ? {}
+          : {
+              parser: {
+                type: 'interface' as const,
+                members: TURN_PARSER_MEMBERS,
+                bind: { node: model.parser },
+                help: `Its parser, ${model.parser}: a player's sends it hands on, whose answers it pairs`,
+              },
+            }),
+      },
       config,
       ...(spec.migrations === undefined ? {} : { state: { migrations: [...spec.migrations] } }),
       interface: {
@@ -260,15 +325,31 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
               },
             ])
           ),
+          ...(model === undefined ? {} : readinessReads(model)),
         },
+        ...(model === undefined
+          ? {}
+          : {
+              actions: {
+                sent: {
+                  help: "A command a player sent (its own, or another's of its account), handed to its parser, which pairs its answer: a turn when it names none",
+                  input: z.object({
+                    chat: z.string(),
+                    id: z.string().optional(),
+                    t: z.number(),
+                    command: z.string().optional(),
+                  }),
+                },
+              },
+            }),
       },
     },
     create: (ctx) => {
       const pin = (ctx.config as z.output<typeof config>).pin;
       const kept = ctx.store.read<Kept<S>>(STATE_DOC);
-      let state: S = kept?.state ?? structuredClone(spec.initial);
+      let state: S = kept?.state ?? start();
       if (kept !== undefined) {
-        const fits = spec.schema.safeParse(kept.state);
+        const fits = schema.safeParse(kept.state);
         if (!fits.success)
           fail(
             `its kept state does not fit its schema (a migration is missing): ${fits.error.message}`
@@ -357,8 +438,8 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
         dirty = true;
         let next: S;
         try {
-          next = spec.reduce(state, event);
-          const fits = spec.schema.safeParse(next);
+          next = reduce(state, event);
+          const fits = schema.safeParse(next);
           if (!fits.success) throw new Error(`a state its schema refuses: ${fits.error.message}`);
         } catch (e) {
           if (heard) tally.add('refused');
@@ -421,6 +502,18 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
         });
       };
 
+      /** The player's contract (D141): the readiness now, and a send handed to its parser. */
+      const readiness = (m: ReadinessModel): ReadinessInterface => ({
+        state: {
+          ready: () => m.ready(state[READINESS_SECTION] as ReadinessState, ctx.clock.now()),
+          commands: () => structuredClone(m.declared),
+          bot: () => m.bot,
+        },
+        actions: {
+          sent: (sent) => ctx.use<TurnParserInterface>('parser').actions.sent(sent),
+        },
+      });
+      const contract = model === undefined ? undefined : readiness(model);
       const unsubscribe: (() => void)[] = [];
       const view = (): StateView => ({
         schema: viewSchema,
@@ -436,16 +529,16 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
           // Live and the catch-up in one step: nothing is published in between, so what the log
           // holds after the cursor is read now, and everything after it is heard live.
           // By namespace: its events inputs are bound to its parsers, each of a namespace.
-          for (const ns of new Set(spec.consumes.map((t) => t.slice(0, t.indexOf('.')))))
+          for (const ns of new Set(consumes.map((t) => t.slice(0, t.indexOf('.')))))
             unsubscribe.push(
               ctx.bus.subscribe(ns, (e, at) => {
-                if (!live || !spec.consumes.includes(e.type)) return;
+                if (!live || !consumes.includes(e.type)) return;
                 if (at !== undefined && behind(at, caught)) return;
                 apply(e, at, true);
                 later();
               })
             );
-          const tail = ctx.events.after(cursor, { types: spec.consumes });
+          const tail = ctx.events.after(cursor, { types: consumes });
           for (const { entry, at } of tail.entries) apply(entry as BusEvent, at);
           cursor = tail.cursor;
           caught = tail.cursor;
@@ -485,10 +578,78 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
                 (input?: unknown) => q.run(structuredClone(state), (input ?? {}) as never),
               ])
             ),
+            ...contract?.state,
           },
+          ...(contract === undefined ? {} : { actions: contract.actions }),
         },
         view: { read: view, summary: () => summaryOf(view()) },
       };
     },
+  });
+}
+
+const readinessSchema = z.object({
+  ready: z.boolean(),
+  since: z.number().optional(),
+  until: z.number().optional(),
+  why: z.string().optional(),
+  sent: z.object({ t: z.number(), byHand: z.boolean() }).optional(),
+  answer: z.object({ t: z.number(), length: z.number() }).optional(),
+});
+const commandSchema = z.object({
+  command: z.string(),
+  aliases: z.array(z.string()).optional(),
+  turn: z.literal(true).optional(),
+  cooldownMin: z.number().optional(),
+  unlock: z.object({ pattern: z.string().optional(), forMin: z.number().optional() }).optional(),
+  effects: z
+    .array(
+      z.object({
+        command: z.string(),
+        clear: z.literal(true).optional(),
+        shortenMin: z.number().optional(),
+      })
+    )
+    .optional(),
+  interactive: z.literal(true).optional(),
+});
+
+/** The reads of the player's contract (D141), as a manifest declares them. */
+function readinessReads(m: ReadinessModel) {
+  return {
+    ready: {
+      help: `Each of @${m.bot}'s commands: ready since when, or held until when and why; its last send, by hand or not, and its last answer`,
+      output: z.record(z.string(), readinessSchema),
+    },
+    commands: {
+      help: `@${m.bot}'s commands, the turn first, each with its aliases and mechanics (D137, D140): a player's defaults`,
+      output: z.array(commandSchema),
+    },
+    bot: {
+      help: `Its bot's username, ${m.bot}: a command addressed to it is /play@${m.bot} (D139)`,
+      output: z.string(),
+    },
+  };
+}
+
+/**
+ * The generic readiness state (bot-os.md D141): for a game with no state of its own, a state that
+ * keeps its bot's commands' readiness alone, from its parser's events and the mechanics given,
+ * and offers a player its contract.
+ */
+export function readinessPlugin(
+  spec: ReadinessSpec & { id: string; description?: string }
+): Plugin {
+  const { id, description, ...readiness } = spec;
+  return statePlugin({
+    id,
+    description:
+      description ??
+      `When each of @${readiness.parser.bot}'s commands may be played, from its parser's events`,
+    schema: z.object({}),
+    initial: {},
+    consumes: [],
+    reduce: (s) => s,
+    readiness,
   });
 }

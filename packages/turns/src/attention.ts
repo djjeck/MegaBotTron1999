@@ -17,7 +17,7 @@
  * - Its players join it at their start (`AttentionHandle.join`, through `ctx.attention`), each
  *   with how to start a sitting and how to tell the person's last play by hand.
  * - **The owner's own play counts as a sitting by the real person:** when a sitting is due, it
- *   asks each of its players for the latest play by hand its parser read (`ready`'s sends marked
+ *   asks each of its players for the latest play by hand its state read (`ready`'s sends marked
  *   `byHand`: a turn, or any other command, from any device); one newer than its last sitting is a
  *   sitting of the person's own, logged `seen`, and the next simulated one is planned a gap after
  *   it, none played now. So the bot plays only once the owner has been away longer than their pace
@@ -82,7 +82,7 @@ export interface Sitting {
 export interface AttentionPlayer {
   /** A sitting starts: it plays what is ready, then waits for the next. */
   sitting(s: Sitting): void;
-  /** The person's latest play by hand it knows of (its parser's), in ms; none: undefined. */
+  /** The person's latest play by hand it knows of (its state's), in ms; none: undefined. */
   lastByHand(): number | undefined;
   /** Whether it is in a sitting still (D138): a message of the owner's starts none then. */
   inSitting(): boolean;
@@ -519,7 +519,7 @@ class Attention {
   }
 
   /**
-   * The owner's latest play by hand, as its players' parsers read it, if newer than its last
+   * The owner's latest play by hand, as its players' states read it, if newer than its last
    * sitting: a sitting of the real person's, kept as its last. Whether there was one.
    */
   private byHand(): boolean {

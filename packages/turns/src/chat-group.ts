@@ -5,7 +5,7 @@
  * point, in memory), in which each player joins under its account and its chat:
  *
  * - **its group**, the players of the same account sending to the same chat: the reach of a form
- *   (`reachOf`) is those of them whose parser takes it, a bare `/x` every one whose bot declares
+ *   (`reachOf`) is those of them whose bot takes it, a bare `/x` every one whose bot declares
  *   the name `/x`, an addressed `/x@Bot` only Bot's;
  * - **the pick** (`pickForm`): a form is allowed only if every player it reaches would play its
  *   command now; among those allowed, the widest reach, the first in order on a tie;
@@ -13,8 +13,8 @@
  *   command, in the same tick as its send, so that no other sends an overlapping form, until it
  *   hands the send off (`sent`) or the claim times out;
  * - **the hand-off**: a command sent is told to every other player of the same account, whatever
- *   its chat, each telling its own parser, which counts it if it reaches its bot (a bare command in
- *   a group its edge reads).
+ *   its chat, each telling its own state, whose parser counts it if it reaches its bot (a bare
+ *   command in a group its edge reads).
  */
 
 /** A command a player sent, as the others of its account are told (D139, D140). */
@@ -45,7 +45,7 @@ export interface GroupMember extends Reacher {
    * `now`; else undefined.
    */
   dueWithin(command: string, now: number, withinMs: number): number | undefined;
-  /** Its parser's last send that no answer came to yet, if younger than the answer window. */
+  /** Its state's last send that no answer came to yet, if younger than the answer window. */
   unanswered(now: number): number | undefined;
   /** Another player of its account sent a command. */
   heard(s: PlayerSend): void;
@@ -155,7 +155,7 @@ export class ChatGroups {
 
   /**
    * `by` sent a command: its claims end, and every other player of its account hears it, each
-   * telling its parser, which counts it if it reaches its bot.
+   * telling its state, whose parser counts it if it reaches its bot.
    */
   sent(by: string, s: PlayerSend): void {
     this.release(by);

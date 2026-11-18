@@ -10,13 +10,12 @@ import {
 } from '@megabottron1999/core';
 import { describe, expect, it } from 'vitest';
 import { attentionPlugin } from '#src/attention.ts';
-import { QUEST, questGamePlugin } from '#test/quest.ts';
+import { QUEST, QUEST_READY, questGamePlugin, questReadyPlugin } from '#test/quest.ts';
 import { CHAT, PLAYS, runSittings, T0 } from '#test/sittings-run.ts';
 import {
   ANSWER_WAIT_MS,
   CONNECT_WAIT_MS,
   derivedWhileHeld,
-  type Play,
   PLAYER,
   playerConfig,
   playerPlugin,
@@ -28,11 +27,12 @@ import {
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 
-describe('its ports: its bot’s chat, its parser, its person (D97, D133)', () => {
+describe('its ports: its bot’s chat, its readiness state, its person (D97, D133, D141)', () => {
   const manifests = new Map(
     [
       fakeConnectorPlugin(TELEGRAM_USER, new FakeConnector({ account: 'telegram:alice' })),
       questGamePlugin(),
+      questReadyPlugin(),
       attentionPlugin(),
       playerPlugin(),
     ].map((p) => {
@@ -45,13 +45,16 @@ describe('its ports: its bot’s chat, its parser, its person (D97, D133)', () =
     nodes: [
       { id: TELEGRAM_USER, plugin: TELEGRAM_USER },
       { id: QUEST, plugin: QUEST },
+      { id: QUEST_READY, plugin: QUEST_READY },
       { id: 'alice', plugin: 'attention' },
       { id: 'quest-player', plugin: PLAYER },
     ],
     edges: [
       { from: `${TELEGRAM_USER}.chat`, to: `${QUEST}.chat`, type: 'chat-in', reads: [CHAT] },
       { from: 'quest-player.chat', to: `${TELEGRAM_USER}.chat`, type: 'chat-out', sends },
-      { from: `${QUEST}.interface`, to: 'quest-player.parser', type: 'interface' },
+      { from: `${QUEST}.events`, to: `${QUEST_READY}.events`, type: 'events' },
+      { from: `${QUEST}.interface`, to: `${QUEST_READY}.parser`, type: 'interface' },
+      { from: `${QUEST_READY}.interface`, to: 'quest-player.state', type: 'interface' },
       ...(edges ?? []),
     ],
   });
@@ -69,8 +72,19 @@ describe('its ports: its bot’s chat, its parser, its person (D97, D133)', () =
     type: 'attention' as const,
   };
 
-  it('takes the one chat its edge names, its parser and its person', () => {
+  it('takes the one chat its edge names, its readiness state and its person', () => {
     expect(problems(graph([CHAT], [person]))).toEqual([]);
+  });
+
+  it('binds to a readiness state, not to a parser, which offers no readiness (D141)', () => {
+    const g = graph([CHAT], [person]);
+    const toParser = {
+      ...g,
+      edges: g.edges?.map((e) =>
+        e.to === 'quest-player.state' ? { ...e, from: `${QUEST}.interface` } : e
+      ),
+    };
+    expect(problems(toParser)[0]).toContain('state.ready');
   });
 
   it('needs a person, and refuses an edge of no chat, of two, or not a bot’s', () => {
@@ -99,7 +113,7 @@ describe('its ports: its bot’s chat, its parser, its person (D97, D133)', () =
 });
 
 describe('playerConfig', () => {
-  it('takes the forms a command may go as (D140), and reads D139’s addressed as one', () => {
+  it('takes the forms a command may go as (D140)', () => {
     const forms = ['/quest', '/play@LoreBot'];
     expect(playerConfig.parse({ commands: [{ command: '/play', forms }] })).toEqual({
       commands: [{ command: '/play', forms }],
@@ -109,12 +123,8 @@ describe('playerConfig', () => {
     expect(() =>
       playerConfig.parse({ commands: [{ command: '/play', forms: ['play@LoreBot'] }] })
     ).toThrow('expected a form, as /play or /play@QuestBot');
-    // Under the name its entry spells, which its edge allows addressed already.
     const aliased: BotCommand[] = [{ command: '/quest', aliases: ['/play'], turn: true }];
-    const [legacy] = playsOf([{ command: '/play', addressed: true }], aliased);
-    expect(legacy).toEqual({ command: '/quest', addressed: '/play' });
-    expect(playForms(legacy as Play, aliased, 'LoreBot', true)).toEqual(['/play@LoreBot']);
-    expect(playsOf([{ command: '/play', addressed: true, forms: ['/quest'] }], aliased)).toEqual([
+    expect(playsOf([{ command: '/play', forms: ['/quest'] }], aliased)).toEqual([
       { command: '/quest', forms: ['/quest'] },
     ]);
   });
@@ -385,7 +395,7 @@ describe('a person’s sittings, played on the dev kit (bot-os.md D134)', () => 
     await r.kit.stop();
   });
 
-  it('is stopped by drift on its parser, and plays no more', async () => {
+  it('is stopped by drift on its bot’s parser, through its state, and plays no more', async () => {
     const r = await runSittings();
     await r.until(T0 + 5 * MIN);
     r.account.garble = true;
@@ -542,7 +552,7 @@ describe('a person’s sittings, played on the dev kit (bot-os.md D134)', () => 
     await r.kit.stop();
   });
 
-  it('plays its parser’s commands by default, in its order, from its read (D137)', async () => {
+  it('plays its state’s commands by default, in its order, from its read (D137)', async () => {
     const r = await runSittings({ player: { commands: undefined } });
     expect(r.status().commands).toBe('/play, /daily, /chest, /coffee');
     await r.until(T0 + 2 * HOUR);
@@ -552,7 +562,7 @@ describe('a person’s sittings, played on the dev kit (bot-os.md D134)', () => 
     await r.kit.stop();
   });
 
-  it('plays nothing its parser knows not, and says so once', async () => {
+  it('plays nothing its state knows not, and says so once', async () => {
     const r = await runSittings({
       player: { commands: [{ command: '/dance' }, { command: '/play' }] },
       graph: (g) => ({
@@ -565,7 +575,7 @@ describe('a person’s sittings, played on the dev kit (bot-os.md D134)', () => 
     await r.until(T0 + HOUR);
     const steps = r.steps('player.step');
     expect(steps.filter((s) => s.startsWith('failed'))).toEqual([
-      'failed: its parser knows no /dance: never played',
+      'failed: its state knows no /dance: never played',
     ]);
     expect(r.account.sent.every((s) => s.text === '/play')).toBe(true);
     await r.kit.stop();

@@ -230,18 +230,18 @@ describe('the player’s chat edge, following its checklist (D137)', () => {
     expect(followPlays(loose, viewOf)).toBe(loose);
   });
 
-  it('allows a command addressed to its bot as it is sent, and knows where it sends (D139)', () => {
+  it('knows where it sends, and allows in a group every form of what it plays (D139, D140)', () => {
     const named = (n: GraphNode) =>
       n.plugin === 'quest'
         ? ({ botCommands: DECLARED, botUsername: 'QuestBot' } as unknown as PluginView)
         : viewOf(n);
-    const config = { commands: [{ command: '/play', addressed: true }, { command: '/daily' }] };
+    const config = {
+      commands: [{ command: '/play', forms: ['/play@QuestBot'] }, { command: '/daily' }],
+    };
     expect(followPlays(graph(config), named).edges[1]?.commands).toEqual([
       '/play@QuestBot',
       '/daily',
     ]);
-    // Its parser naming no bot: bare.
-    expect(followPlays(graph(config), viewOf).edges[1]?.commands).toEqual(['/play', '/daily']);
     const plays = { input: 'parser', output: 'chat' };
     expect(playPlace(graph(), 'p', plays, named)).toEqual({ bot: 'QuestBot', group: false });
     expect(playPlace(graph(), 'p', plays, viewOf)).toBeUndefined();
@@ -307,24 +307,6 @@ describe('a command’s forms, its aliases bare and addressed (D140)', () => {
       '/play',
       '/boost',
       '/b',
-    ]);
-  });
-
-  it('reads D139’s addressed entry as its one addressed form, kept while its bot is unknown', () => {
-    const value = [{ command: '/play', addressed: true }];
-    expect(playRows(value, [PLAY, DAILY], 'QuestBot')[0]).toMatchObject({
-      played: true,
-      forms: ['/play@QuestBot'],
-    });
-    expect(rowsValue(playRows(value, [PLAY, DAILY], 'QuestBot'))).toEqual([
-      { command: '/play', forms: ['/play@QuestBot'] },
-    ]);
-    const unknown = playRows(value, [PLAY, DAILY]);
-    expect(unknown[0]).toMatchObject({ addressed: true });
-    expect(rowsValue(unknown)).toEqual([{ command: '/play', addressed: true }]);
-    expect(playedCommands(value, [PLAY])).toEqual(['/play']);
-    expect(playedCommands(value, [PLAY], { bot: 'QuestBot', group: false })).toEqual([
-      '/play@QuestBot',
     ]);
   });
 

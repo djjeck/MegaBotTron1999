@@ -1,9 +1,11 @@
 import { TELEGRAM_USER } from '@megabottron1999/connectors/plugins/telegram-user.ts';
 import {
+  type BusEvent,
   Core,
   FakeConnector,
   fakeConnectorPlugin,
   GraphFile,
+  type Plugin,
   type Store,
   VirtualClock,
 } from '@megabottron1999/core';
@@ -11,8 +13,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { runParser as run, T0 } from '#test/parser-run.ts';
-import { QUEST, QUESTBOT, questGamePlugin, questPlugin } from '#test/quest.ts';
+import { type CommandMechanics } from '#src/readiness.ts';
+import { readinessPlugin } from '#src/state-plugin.ts';
+import { runParser, T0 } from '#test/parser-run.ts';
+import {
+  QUEST,
+  QUEST_READY,
+  QUESTBOT,
+  questGamePlugin,
+  questPlugin,
+  questReadyPlugin,
+} from '#test/quest.ts';
 import {
   type BotMessage,
   commandOf,
@@ -22,6 +33,7 @@ import {
   turnParserPlugin,
   type TurnParserSpec,
   type TurnReading,
+  vocabularyProblem,
 } from './turn-parser.ts';
 
 const GROUP = '-1001000000001';
@@ -30,6 +42,31 @@ const PRIVATE = `@${QUESTBOT}`;
 const PRIVATE_ID = '1000000001';
 const bot = { sender: QUESTBOT };
 const own = { sender: 'alice', own: true };
+
+/** A readiness state on @QuestBot's parser (bot-os.md D141), of a vocabulary and its mechanics. */
+const stateOf = (
+  spec: Pick<TurnParserSpec, 'turnCommands' | 'commands'> = { turnCommands: ['/play'] },
+  mechanics?: Record<string, CommandMechanics>
+): Plugin =>
+  readinessPlugin({
+    id: QUEST_READY,
+    parser: { id: QUEST, bot: QUESTBOT, ...spec },
+    ...(mechanics === undefined ? {} : { mechanics }),
+  });
+
+/** A turn parser of @QuestBot's on alice's account, with a readiness state on it. */
+const run = (
+  plugin: Plugin = questPlugin(),
+  group?: string,
+  state: Plugin = stateOf(),
+  documents?: Record<string, Record<string, unknown>>
+) => runParser(plugin, {}, group, documents, state);
+
+/** The sends it published (D141): chat, command, by hand, id. */
+const sends = (p: { all: BusEvent[] }) =>
+  p.all
+    .filter((e) => e.type === `${QUEST}.sent`)
+    .map((e) => [e['chat'], e['command'], e['byHand'], e['id']]);
 
 describe('isTurnCommand', () => {
   it('knows a turn command bare or addressed to its bot, in any case', () => {
@@ -52,7 +89,7 @@ describe('isPrivate', () => {
 
 describe('a turn parser', () => {
   it("reads the replies to the owner's turns in the group, by hand, and no one else's", async () => {
-    const p = await run(questPlugin(['/quest']), {}, GROUP);
+    const p = await run(questPlugin(['/quest']), GROUP, stateOf({ turnCommands: ['/quest'] }));
     const hand = p.hear({ ...own, chat: GROUP, text: `/quest@${QUESTBOT}` });
     p.hear({ ...bot, chat: GROUP, replyTo: hand, text: 'Found an apple.' });
     p.hear({ ...bot, chat: GROUP, replyTo: '1', text: 'Found a pear.' });
@@ -69,51 +106,50 @@ describe('a turn parser', () => {
         outcome: { kind: 'gain', bot: QUESTBOT, item: 'an apple' },
         // The rest it starts, when its next turn may go (D98).
         retryAt: T0 + 15 * MIN,
+        // It answers the owner's send (D141).
+        answer: { length: 15 },
       },
     ]);
+    expect(sends(p)).toEqual([[GROUP, '/quest', true, hand]]);
+    // Its state reduces them to the turn's readiness (D141).
     expect(p.iface.rest()).toMatchObject({ until: T0 + 15 * MIN, why: 'its rest after a turn' });
     expect(p.drift()).toMatchObject({ read: 1, unread: 0 });
   });
 
-  it("tells the owner's last turn, by hand or its actor's, in private or in the group (D99, D129)", async () => {
-    const p = await run(questPlugin(), {}, GROUP);
-    const last = () => {
-      const r = p.kit.core.controls.read(QUEST, 'lastTurn');
-      return 'value' in r ? r.value : r;
-    };
-    expect(last()).toBeUndefined();
+  it("publishes the owner's sends, by hand or a player's, in private or in the group (D129, D141)", async () => {
+    const p = await run(questPlugin(), GROUP);
     p.hear({ ...own, chat: PRIVATE, text: '/play' });
-    expect(last()).toEqual({ t: T0, id: '1000' });
     p.kit.clock.advance(MIN);
     const inGroup = p.hear({ ...own, chat: GROUP, text: `/play@${QUESTBOT}` });
-    expect(last()).toEqual({ t: T0 + MIN, id: inGroup });
-    p.iface.sent({ chat: PRIVATE, t: T0 + 2 * MIN });
-    expect(last()).toEqual({ t: T0 + 2 * MIN });
+    await p.iface.sent({ chat: PRIVATE, t: T0 + 2 * MIN });
+    expect(sends(p)).toEqual([
+      [PRIVATE, '/play', true, '1000'],
+      [GROUP, '/play', true, inGroup],
+      [PRIVATE, '/play', false, undefined],
+    ]);
+    expect(p.iface.ready()['/play']?.sent).toEqual({ t: T0 + 2 * MIN, byHand: false });
     await p.kit.stop();
   });
 
   it('counts a send told of it only where it reaches its bot, bare or addressed (D139)', async () => {
-    const p = await run(questPlugin(), {}, GROUP);
+    const p = await run(questPlugin(), GROUP);
     const outbox = p.kit.core.outbox('telegram:alice').as('anyone');
-    const last = () => {
-      const r = p.kit.core.controls.read(QUEST, 'lastTurn');
-      return 'value' in r ? r.value : r;
-    };
-    const bot = p.kit.core.controls.read(QUEST, 'bot');
-    expect('value' in bot ? bot.value : bot).toBe(QUESTBOT);
     // Not its bot's: another bot's private chat, a group it does not read, another bot's command.
     await p.iface.sent({ chat: '@LoreBot', id: '1', t: T0, command: '/play' });
     await p.iface.sent({ chat: '-1009999999999', id: '2', t: T0, command: '/play' });
     await p.iface.sent({ chat: GROUP, id: '3', t: T0, command: '/play@LoreBot' });
-    expect(last()).toBeUndefined();
+    expect(sends(p)).toEqual([]);
     // Bare in the group it reads, or addressed to its bot: its turn, which its bot's reply answers.
     await p.iface.sent({ chat: GROUP, id: '4', t: T0, command: '/play' });
-    expect(last()).toEqual({ t: T0, id: '4' });
+    expect(sends(p)).toEqual([[GROUP, '/play', false, '4']]);
+    // Told twice, counted once.
+    await p.iface.sent({ chat: GROUP, id: '4', t: T0, command: '/play' });
+    expect(sends(p)).toHaveLength(1);
     p.hear({ sender: QUESTBOT, chat: GROUP, replyTo: '4', text: 'Found an apple.' });
     expect(p.iface.rest()).toMatchObject({ until: T0 + 15 * MIN });
     p.kit.clock.advance(MIN);
     await p.iface.sent({ chat: GROUP, id: '5', t: T0 + MIN, command: `/Play@${QUESTBOT}` });
-    expect(last()).toEqual({ t: T0 + MIN, id: '5' });
+    expect(sends(p).at(-1)).toEqual([GROUP, '/play', false, '5']);
     // Its answers hold the addressed form back as the bare one (D98).
     expect(outbox.held(GROUP, `/play@${QUESTBOT}`)?.until).toBe(T0 + 15 * MIN);
     expect(outbox.held(GROUP, '/play')?.until).toBe(T0 + 15 * MIN);
@@ -121,7 +157,7 @@ describe('a turn parser', () => {
   });
 
   it("answers a turn (D98): a too soon refuses it, its rest holds the bot's turns back", async () => {
-    const p = await run(questPlugin());
+    const p = await run();
     const outbox = p.kit.core.outbox('telegram:alice').as('anyone');
     p.hear({ ...own, chat: PRIVATE, text: '/play' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Too soon: 20 minutes.' });
@@ -164,8 +200,8 @@ describe('a turn parser', () => {
   });
 
   it('marks what it reads of a message played back as history (D83)', async () => {
-    const p = await run(questPlugin());
-    p.hear({ ...own, chat: PRIVATE, text: '/play' });
+    const p = await run();
+    p.hear({ ...own, chat: PRIVATE, text: '/play', playback: true });
     p.hear({ ...bot, chat: PRIVATE, text: 'Found a fig.', playback: true, missed: true });
     p.hear({ ...own, chat: PRIVATE, text: '/play' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Something odd.', playback: true });
@@ -175,6 +211,11 @@ describe('a turn parser', () => {
       [{ kind: 'gain', bot: QUESTBOT, item: 'a fig' }, true],
       [{ kind: 'unknown', bot: QUESTBOT, text: 'Something odd.' }, true],
       [{ kind: 'gain', bot: QUESTBOT, item: 'a pear' }, undefined],
+    ]);
+    expect(p.all.filter((e) => e.type === 'quest.sent').map((e) => e['playback'])).toEqual([
+      true,
+      undefined,
+      undefined,
     ]);
     // The owner's summary counts the news alone (D92).
     const now = p.kit.clock.now();
@@ -198,12 +239,11 @@ describe('a turn parser', () => {
     await first.kit.stop();
     const parsed = stores[0]?.read(PARSED_DOC);
     expect(parsed).toMatchObject({
-      turns: [{ chat: PRIVATE, id: '5', answered: true }],
-      rest: { until: T0 + 40 * MIN },
+      sends: [{ chat: PRIVATE, id: '5', answered: true, command: '/play', byHand: false }],
+      told: { '/play': T0 + 40 * MIN },
     });
-    // The next start: its rest kept, its turns too, and a reply missed while down is read.
-    const next = await run(questPlugin(), {}, undefined, { parsed });
-    expect(next.iface.rest()).toMatchObject({ until: T0 + 40 * MIN, why: 'it said too soon' });
+    // The next start: its sends kept, and a reply missed while down is read and paired.
+    const next = await run(questPlugin(), undefined, stateOf(), { [QUEST]: { parsed } });
     await next.iface.sent({ chat: PRIVATE, id: '6', t: next.kit.clock.now() });
     next.hear({
       ...bot,
@@ -214,25 +254,26 @@ describe('a turn parser', () => {
       missed: true,
     });
     expect(next.outcomes()).toEqual(['gain']);
+    expect(next.events[0]).toMatchObject({ answer: { length: 15 } });
     // Another sender in the private chat is not its edge's to hear.
     next.hear({ sender: 'someone', chat: PRIVATE, replyTo: '6', text: 'Found a fig.' });
     expect(next.outcomes()).toEqual(['gain']);
   });
 
   it('reads nothing of the group without one', async () => {
-    const p = await run(questPlugin());
+    const p = await run();
     const hand = p.hear({ ...own, chat: GROUP, text: '/play' });
     p.hear({ ...bot, chat: GROUP, replyTo: hand, text: 'Found an apple.' });
     expect(p.events).toEqual([]);
   });
 
   it('matches the first message in private within two minutes, once', async () => {
-    const p = await run(questPlugin());
+    const p = await run();
     p.hear({ ...own, chat: PRIVATE, text: '/play' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Defeated.' });
     // Only the first answers the turn.
     p.hear({ ...bot, chat: PRIVATE, text: 'Something else' });
-    // A turn sent by its actor, twice told; its answer comes too late.
+    // A turn sent by its player, twice told; its answer comes too late.
     await p.iface.sent({ chat: PRIVATE, id: '77', t: p.kit.clock.now() });
     await p.iface.sent({ chat: PRIVATE, id: '77', t: p.kit.clock.now() });
     p.kit.runUntil(T0 + 3 * MIN);
@@ -242,14 +283,17 @@ describe('a turn parser', () => {
   });
 
   it('claims an answer it cannot read, reports it to drift and publishes it unknown', async () => {
-    const p = await run(questPlugin());
+    const p = await run();
     await p.iface.sent({ chat: PRIVATE, id: '5', t: p.kit.clock.now() });
     p.hear({ ...bot, chat: PRIVATE, replyTo: '5', text: ' Level 5! ' });
     expect(p.events[0]).toMatchObject({
       chat: PRIVATE,
       outcome: { kind: 'unknown', bot: QUESTBOT, text: 'Level 5!' },
+      answer: { length: 8 },
     });
     expect(p.drift()).toMatchObject({ read: 0, unread: 1 });
+    // Its state records the answer, and holds nothing.
+    expect(p.iface.ready()['/play']).toMatchObject({ ready: true, answer: { t: T0, length: 8 } });
     const now = p.kit.clock.now();
     expect(
       p.kit.core.summary({ since: now, until: now + 1 }).find((x) => x.node === QUEST)?.lines
@@ -257,10 +301,28 @@ describe('a turn parser', () => {
     expect(p.kit.core.summary({ since: now + 1, until: now + 2 })).toEqual([]);
   });
 
+  it('publishes a message its grammar leaves that answers a send, as a reply (D141)', async () => {
+    const plugin = turnParserPlugin({
+      id: QUEST,
+      bot: QUESTBOT,
+      description: 'x',
+      turnCommands: ['/play'],
+      read: () => undefined,
+    });
+    const p = await run(plugin);
+    p.hear({ ...bot, chat: PRIVATE, text: 'Hello' });
+    await p.iface.sent({ chat: PRIVATE, id: '5', t: T0 });
+    p.hear({ ...bot, chat: PRIVATE, replyTo: '5', text: 'Wait.' });
+    expect(p.all.filter((e) => e.type === 'quest.reply')).toMatchObject([
+      { chat: PRIVATE, command: '/play', answer: { length: 5 } },
+    ]);
+    expect(p.iface.ready()['/play']).toMatchObject({ ready: true, answer: { length: 5 } });
+  });
+
   it('knows a private chat named by id by what its connector says, not by its name (D90)', async () => {
     const seen: boolean[] = [];
     // The picker keeps the bot's private chat by its id: the edge reads it so.
-    const p = await run(questPlugin(), {}, PRIVATE_ID);
+    const p = await run(questPlugin(), PRIVATE_ID);
     const inPrivate = { chat: PRIVATE_ID, aliases: [PRIVATE], private: true };
     p.hear({ ...own, ...inPrivate, text: '/play' });
     // No reply-to: only a private chat's window matches it to the turn.
@@ -274,7 +336,7 @@ describe('a turn parser', () => {
       turnCommands: ['/play'],
       read: (m) => (seen.push(m.private), undefined),
     });
-    const q = await run(spy, {}, '@PublicGroup');
+    const q = await run(spy, '@PublicGroup');
     q.hear({ ...bot, chat: '@PublicGroup', private: false, text: 'Hi' });
     q.hear({ ...bot, ...inPrivate, chat: PRIVATE, aliases: [PRIVATE_ID], text: 'Hi' });
     // A connector that does not say: a `@username` is a private chat.
@@ -282,8 +344,8 @@ describe('a turn parser', () => {
     expect(seen).toEqual([false, true, true]);
   });
 
-  it('in private, reads a reply to a turn it does not know, and keeps the longest rest', async () => {
-    const p = await run(questPlugin());
+  it('in private, reads a reply to a turn it does not know; its state keeps the longest rest', async () => {
+    const p = await run();
     p.hear({ ...bot, chat: PRIVATE, replyTo: '9', text: 'Too soon: 40 minutes.' });
     p.hear({ ...bot, chat: PRIVATE, replyTo: '10', text: 'Found an apple.' });
     p.hear({ ...bot, chat: PRIVATE, replyTo: '11', text: 'Unreadable' });
@@ -291,6 +353,21 @@ describe('a turn parser', () => {
     expect(p.iface.rest()).toMatchObject({ until: T0 + 40 * MIN, why: 'it said too soon' });
     p.kit.runUntil(T0 + 41 * MIN);
     expect(p.iface.rest()).toBeUndefined();
+  });
+
+  it('offers no readiness of its own: only the sends it is told of (D141)', () => {
+    const { manifest } = questGamePlugin();
+    expect(manifest.interface?.state).toBeUndefined();
+    expect(Object.keys(manifest.interface?.actions ?? {})).toEqual(['sent']);
+    expect(manifest.botCommands).toBeUndefined();
+    expect(Object.keys(manifest.events ?? {})).toEqual([
+      'quest.sent',
+      'quest.turn',
+      'quest.answer',
+      'quest.reply',
+    ]);
+    // Turns alone, no answer event.
+    expect(Object.keys(questPlugin().manifest.events ?? {})).not.toContain('quest.answer');
   });
 });
 
@@ -362,11 +439,12 @@ describe('its turn commands, its game’s (bot-os.md D70)', () => {
   });
 });
 
-describe('each command’s readiness (bot-os.md D132)', () => {
+describe('its other commands, as events its state reduces (bot-os.md D132, D141)', () => {
+  const game = () => run(questGamePlugin(), undefined, questReadyPlugin());
   const at = (p: Awaited<ReturnType<typeof run>>, c: string) => p.iface.ready()[c];
 
-  it('derives the turn’s from its rest, and tells the others’ from their mechanics', async () => {
-    const p = await run(questGamePlugin());
+  it('publishes an answer that announces an unlock with it, which the state takes', async () => {
+    const p = await game();
     expect(p.iface.ready()).toEqual({
       '/play': { ready: true },
       '/daily': { ready: true },
@@ -376,6 +454,7 @@ describe('each command’s readiness (bot-os.md D132)', () => {
     // A turn by hand, whose answer announces a chest: the turn rests, the chest is ready.
     p.hear({ ...own, chat: PRIVATE, text: '/play' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Found an apple.\nA chest appears!' });
+    expect(p.events.at(-1)).toMatchObject({ type: 'quest.turn', unlocks: ['/chest'] });
     expect(at(p, '/play')).toEqual({
       ready: false,
       until: T0 + 15 * MIN,
@@ -384,13 +463,15 @@ describe('each command’s readiness (bot-os.md D132)', () => {
       answer: { t: T0, length: 32 },
     });
     expect(at(p, '/chest')).toEqual({ ready: true, since: T0 });
-    expect(p.iface.rest()).toMatchObject({ until: T0 + 15 * MIN });
-    expect(p.outcomes()).toEqual(['gain']);
+    // A message no grammar reads that announces it: published as a reply.
+    p.hear({ ...bot, chat: PRIVATE, text: 'A chest appears!' });
+    expect(p.all.at(-1)).toMatchObject({ type: 'quest.reply', unlocks: ['/chest'] });
+    expect(p.all.at(-1)).not.toHaveProperty('answer');
     await p.kit.stop();
   });
 
-  it('reads another command’s answer as its own event, and holds it as its mechanics say', async () => {
-    const p = await run(questGamePlugin());
+  it('reads another command’s answer as its own event, with the wait it states', async () => {
+    const p = await game();
     const outbox = p.kit.core.outbox('telegram:alice').as('anyone');
     // The chest, unlocked, then opened by its player: used up.
     p.hear({ ...bot, chat: PRIVATE, text: 'A chest appears!' });
@@ -407,7 +488,8 @@ describe('each command’s readiness (bot-os.md D132)', () => {
       command: '/chest',
       outcome: { kind: 'gain', item: 'a gem' },
     });
-    // The daily: once a day; a "come back" holds it for the wait it says, and refuses it.
+    // The daily: its cooldown is its state's; a "come back" holds it for the wait it says, in the
+    // outbox too, and refuses it.
     p.hear({ ...own, chat: PRIVATE, text: '/daily' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Daily reward: 5 coins.' });
     expect(at(p, '/daily')).toMatchObject({
@@ -415,18 +497,17 @@ describe('each command’s readiness (bot-os.md D132)', () => {
       until: T0 + 24 * 60 * MIN,
       why: 'its cooldown',
     });
-    expect(outbox.held(PRIVATE, '/daily')?.until).toBe(T0 + 24 * 60 * MIN);
+    expect(p.events.at(-1)).not.toHaveProperty('retryAt');
     p.kit.clock.advance(MIN);
     p.hear({ ...own, chat: PRIVATE, text: '/daily' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Come back in 30 minutes.' });
     expect(at(p, '/daily')).toMatchObject({ until: T0 + 31 * MIN, why: 'it said too soon' });
     expect(outbox.held(PRIVATE, '/daily')).toEqual({
-      until: T0 + 24 * 60 * MIN,
-      reason: 'cooldown: rest',
+      until: T0 + 31 * MIN,
+      reason: 'cooldown: cooldown',
     });
-    // Neither is a turn: the turn's readiness and the owner's last turn are as they were.
+    // Neither is a turn: the turn's readiness is as it was.
     expect(at(p, '/play')).toEqual({ ready: true });
-    expect(p.kit.core.controls.read(QUEST, 'lastTurn')).toEqual({ value: undefined });
     // Its unlock lapses after 30 minutes.
     p.hear({ ...bot, chat: PRIVATE, text: 'A chest appears!' });
     p.kit.clock.advance(30 * MIN);
@@ -434,8 +515,8 @@ describe('each command’s readiness (bot-os.md D132)', () => {
     await p.kit.stop();
   });
 
-  it('ends the turn’s rest on a reset, in the outbox too, and the reset holds itself an hour', async () => {
-    const p = await run(questGamePlugin());
+  it('ends the outbox’s cooldown on an effect the bot announces, as the state ends its hold', async () => {
+    const p = await game();
     const outbox = p.kit.core.outbox('telegram:alice').as('anyone');
     p.hear({ ...own, chat: PRIVATE, text: '/play' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Defeated.' });
@@ -449,32 +530,30 @@ describe('each command’s readiness (bot-os.md D132)', () => {
     expect(at(p, '/coffee')).toMatchObject({ ready: false, until: T0 + 61 * MIN });
     expect(p.events.at(-1)).toMatchObject({
       command: '/coffee',
-      holds: { '/play': T0 + MIN },
-      retryAt: T0 + 61 * MIN,
+      effects: [{ command: '/play', clear: true }],
+      holds: { '/play': T0 + MIN, [`/play@${QUESTBOT}`]: T0 + MIN },
     });
-    // An effect on a command not held does nothing.
-    p.kit.clock.advance(61 * MIN);
-    p.hear({ ...own, chat: PRIVATE, text: '/coffee' });
-    p.hear({ ...bot, chat: PRIVATE, text: 'You drink a coffee: rested.' });
-    expect(p.events.at(-1)).not.toHaveProperty('holds');
     await p.kit.stop();
   });
 
-  it('takes the unlocks and effects a reading names, and an unread answer to drift', async () => {
+  it('publishes the unlocks and effects a reading names, by name, and shortens what it told', async () => {
+    const vocabulary = {
+      turnCommands: ['/play'],
+      commands: { '/chest': {}, '/daily': { aliases: ['/d'] } },
+    };
     const plugin = turnParserPlugin({
       id: QUEST,
       bot: QUESTBOT,
       description: 'x',
-      turnCommands: ['/play'],
-      commands: { '/chest': { unlock: {} }, '/daily': { cooldownMin: 60 } },
+      ...vocabulary,
       read: (m): TurnReading => {
         if (m.text === 'Found a map.')
           return {
             outcome: { kind: 'gain', bot: QUESTBOT },
             restMs: 15 * MIN,
-            unlocks: ['/CHEST', '/nothing'],
+            unlocks: ['/CHEST', '/nothing', '/play'],
             effects: [
-              { command: '/daily', shortenMin: 20 },
+              { command: '/d', shortenMin: 20 },
               { command: '/other', clear: true },
             ],
           };
@@ -484,23 +563,35 @@ describe('each command’s readiness (bot-os.md D132)', () => {
             effects: [{ command: '/play', shortenMin: 5 }],
           };
         if (m.command === '/daily' && m.text === 'Coins.')
-          return { outcome: { kind: 'gain', bot: QUESTBOT } };
+          return { outcome: { kind: 'gain', bot: QUESTBOT }, restMs: 60 * MIN };
         return m.answers ? { unread: true } : undefined;
       },
     });
-    const p = await run(plugin);
+    const p = await run(plugin, undefined, stateOf(vocabulary, { '/chest': { unlock: {} } }));
+    const outbox = p.kit.core.outbox('telegram:alice').as('anyone');
     p.hear({ ...own, chat: PRIVATE, text: '/daily' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Coins.' });
     p.hear({ ...own, chat: PRIVATE, text: '/play' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Found a map.' });
+    expect(p.events.at(-1)).toMatchObject({
+      unlocks: ['/chest'],
+      effects: [{ command: '/daily', shortenMin: 20 }],
+      holds: { '/daily': T0 + 40 * MIN, [`/d@${QUESTBOT}`]: T0 + 40 * MIN },
+    });
+    expect(outbox.held(PRIVATE, '/d')?.until).toBe(T0 + 40 * MIN);
     expect(at(p, '/chest')).toEqual({ ready: true, since: T0 });
     expect(at(p, '/daily')).toMatchObject({
       until: T0 + 40 * MIN,
-      why: 'its cooldown, cut by /play',
+      why: 'its rest after a turn, cut by /play',
     });
     p.hear({ ...own, chat: PRIVATE, text: '/daily' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Shortcut.' });
     expect(at(p, '/play')).toMatchObject({ until: T0 + 10 * MIN });
+    // Nothing held any more: nothing to shorten in the outbox.
+    p.kit.clock.advance(11 * MIN);
+    p.hear({ ...own, chat: PRIVATE, text: '/daily' });
+    p.hear({ ...bot, chat: PRIVATE, text: 'Shortcut.' });
+    expect(p.events.at(-1)).not.toHaveProperty('holds');
     p.hear({ ...own, chat: PRIVATE, text: '/daily' });
     p.hear({ ...bot, chat: PRIVATE, text: 'Gibberish' });
     expect(p.events.at(-1)).toMatchObject({
@@ -510,107 +601,39 @@ describe('each command’s readiness (bot-os.md D132)', () => {
     });
     expect(p.drift()).toMatchObject({ unread: 1 });
     // A send told for a command it does not know is none of its business.
+    const before = p.all.length;
     await p.iface.sent({ chat: PRIVATE, t: T0, command: '/unknown' });
-    expect(at(p, '/play')?.sent?.byHand).toBe(true);
+    expect(p.all).toHaveLength(before);
     await p.kit.stop();
   });
 
-  it('keeps its commands’ state across a restart', async () => {
-    const plugin = questGamePlugin();
-    const stores: Store[] = [];
-    const first = await run({
-      ...plugin,
-      create: (ctx) => {
-        stores.push(ctx.store);
-        return plugin.create(ctx);
-      },
-    });
-    first.hear({ ...bot, chat: PRIVATE, text: 'A chest appears!' });
-    await first.kit.stop();
-    const next = await run(questGamePlugin(), {}, undefined, {
-      parsed: stores[0]?.read(PARSED_DOC),
-    });
-    expect(next.iface.ready()['/chest']).toEqual({ ready: true, since: T0 });
-    await next.kit.stop();
-  });
-
-  it('refuses a spec whose other commands are wrong', () => {
-    const spec = {
-      id: 'x',
-      bot: 'XBot',
-      description: 'x',
-      turnCommands: ['/play'],
-      read: () => undefined,
-    };
-    const problem = (commands: TurnParserSpec['commands']): string => {
-      try {
-        turnParserPlugin({ ...spec, ...(commands === undefined ? {} : { commands }) });
-        return '';
-      } catch (e) {
-        return (e as Error).message;
-      }
-    };
-    expect(problem({ '/Play': {} })).toBe(
-      "turn parser x: /Play is a turn command: its readiness is the rest's"
-    );
-    expect(problem({ daily: {} })).toBe('turn parser x: daily is not a command, as /daily');
-    expect(problem({ '/d': { cooldownMin: 0 } })).toContain('cooldownMin must be over 0');
-    expect(problem({ '/d': { unlock: { forMin: -1 } } })).toContain('forMin must be over 0');
-    expect(problem({ '/d': { unlock: { pattern: '(' } } })).toContain('unlock.pattern:');
-    expect(problem({ '/d': { effects: [{ command: '/x', clear: true }] } })).toContain(
-      'its effect names /x, not one of its commands or aliases'
-    );
-    // Aliases (D140): each a command, naming one command only.
+  it('refuses a vocabulary that is wrong (D140)', () => {
+    const problem = (commands: TurnParserSpec['commands'], turnCommands = ['/play']) =>
+      vocabularyProblem({
+        bot: 'XBot',
+        turnCommands,
+        ...(commands === undefined ? {} : { commands }),
+      });
+    expect(problem({ '/Play': {} })).toBe('/play names two commands, or one twice');
+    expect(problem({ daily: {} })).toBe('daily is not a command, as /daily');
+    expect(problem({ '/d': { announcedBy: '(' } })).toContain('announcedBy:');
     expect(problem({ '/d': { aliases: ['d'] } })).toContain('its alias d is not a command');
-    expect(problem({ '/d': { aliases: ['/PLAY'] } })).toContain(
-      'its alias /PLAY names another command too'
+    expect(problem({ '/d': { aliases: ['/PLAY'] } })).toBe(
+      '/play names two commands, or one twice'
     );
-    expect(problem({ '/d': {}, '/e': { aliases: ['/d'] } })).toContain(
-      "/d is another command's alias too"
-    );
-    expect(problem({ '/d': { aliases: ['/x'] }, '/x': {} })).toContain(
-      'its alias /x names another command too'
-    );
-    expect(() => turnParserPlugin({ ...spec, turnCommands: ['/play', '/Play'] })).toThrow(
-      'its turn names /play, /Play twice'
-    );
-    expect(problem({ '/d': { effects: [{ command: '/play' }] } })).toContain('clears its command');
-    expect(problem({ '/d': { effects: [{ command: '/play', shortenMin: 5 }] } })).toBe('');
-    expect(problem(undefined)).toBe('');
-  });
-});
-
-describe('its declared commands (bot-os.md D137)', () => {
-  it('publishes them in its manifest and its read, the turns first, in the spec’s order', async () => {
-    const plugin = turnParserPlugin({
-      id: 'quest',
-      bot: QUESTBOT,
-      description: 'x',
-      turnCommands: ['/play', '/go'],
-      commands: {
-        '/shop': { interactive: true },
-        '/coffee': { cooldownMin: 60, effects: [{ command: '/play', clear: true }] },
-        '/chest': { unlock: { pattern: 'A chest!' } },
-        '/nap': { effects: [{ command: '/coffee', shortenMin: 5 }], unlock: { forMin: 5 } },
-      },
-      read: () => undefined,
-    });
-    // Its turn commands, one turn: the first its name, the others its aliases (D140).
-    const declared = [
-      { command: '/play', aliases: ['/go'], turn: true },
-      { command: '/shop', interactive: true },
-      { command: '/coffee', cooldownMin: 60, effects: [{ command: '/play', clear: true }] },
-      { command: '/chest', unlock: { pattern: 'A chest!' } },
-      { command: '/nap', unlock: { forMin: 5 }, effects: [{ command: '/coffee', shortenMin: 5 }] },
-    ];
-    expect(plugin.manifest.botCommands).toEqual(declared);
-    // Its read gives the same, for a player's defaults at run time; an interactive command is
-    // tracked as any other.
-    const p = await run(plugin);
-    const r = p.kit.core.controls.read('quest', 'commands');
-    expect('value' in r ? r.value : r).toEqual(declared);
-    expect(p.iface.ready()['/shop']).toEqual({ ready: true });
-    await p.kit.stop();
+    expect(problem({ '/d': {}, '/e': { aliases: ['/d'] } })).toContain('/d names two');
+    expect(problem(undefined, ['/play', '/Play'])).toContain('/play names two');
+    expect(problem(undefined)).toBeUndefined();
+    expect(() =>
+      turnParserPlugin({
+        id: 'x',
+        bot: 'XBot',
+        description: 'x',
+        turnCommands: ['/play'],
+        commands: { daily: {} },
+        read: () => undefined,
+      })
+    ).toThrow('turn parser x: daily is not a command, as /daily');
   });
 });
 
@@ -630,43 +653,37 @@ describe('commandOf', () => {
 });
 
 describe('a command’s aliases (bot-os.md D140)', () => {
+  const vocabulary = {
+    turnCommands: ['/play', '/quest'],
+    commands: { '/boost': { aliases: ['/b'] } },
+  };
   const plugin = () =>
     turnParserPlugin({
       id: QUEST,
       bot: QUESTBOT,
       description: 'x',
-      turnCommands: ['/play', '/quest'],
-      commands: {
-        // Its effect names the turn by an alias: its name, resolved.
-        '/boost': {
-          aliases: ['/b'],
-          cooldownMin: 60,
-          effects: [{ command: '/quest', clear: true }],
-        },
-      },
+      ...vocabulary,
       read: (m): TurnReading => {
         if (!m.answers) return undefined;
         if (m.text === 'Found an apple.')
           return { outcome: { kind: 'gain', bot: QUESTBOT }, restMs: 15 * MIN };
-        if (m.text === 'Boosted.') return { outcome: { kind: 'boost', bot: QUESTBOT } };
+        // The bot says the turn's rest is over, naming it by an alias.
+        if (m.text === 'Boosted.')
+          return {
+            outcome: { kind: 'boost', bot: QUESTBOT },
+            effects: [{ command: '/quest', clear: true }],
+          };
         return { unread: true };
       },
     });
-
-  it('declares each command once, its aliases with it, an effect by its command’s name', () => {
-    expect(plugin().manifest.botCommands).toEqual([
-      { command: '/play', aliases: ['/quest'], turn: true },
-      {
-        command: '/boost',
-        aliases: ['/b'],
-        cooldownMin: 60,
-        effects: [{ command: '/play', clear: true }],
-      },
-    ]);
-  });
+  // Its effect names the turn by an alias: its name, resolved.
+  const state = () =>
+    stateOf(vocabulary, {
+      '/boost': { cooldownMin: 60, effects: [{ command: '/quest', clear: true }] },
+    });
 
   it('keeps one state per command, whichever alias is sent, bare or addressed', async () => {
-    const p = await run(plugin(), {}, GROUP);
+    const p = await run(plugin(), GROUP, state());
     const outbox = p.kit.core.outbox('telegram:alice').as('anyone');
     const sent = p.hear({ ...own, chat: GROUP, text: '/quest' });
     p.hear({ ...bot, chat: GROUP, replyTo: sent, text: 'Found an apple.' });
@@ -690,23 +707,12 @@ describe('a command’s aliases (bot-os.md D140)', () => {
       sent: { t: T0 + MIN, byHand: false },
     });
     expect(p.iface.ready()['/play']).toMatchObject({ ready: true, since: T0 + MIN });
-    expect(p.events.at(-1)).toMatchObject({ command: '/boost' });
+    expect(p.events.at(-1)).toMatchObject({
+      command: '/boost',
+      effects: [{ command: '/play', clear: true }],
+    });
     for (const form of ['/play', '/quest', `/play@${QUESTBOT}`, `/quest@${QUESTBOT}`])
       expect(outbox.held(GROUP, form)).toBeUndefined();
-    await p.kit.stop();
-  });
-
-  it('reads a send kept before by an alias’s name as its command’s', async () => {
-    const p = await run(plugin(), {}, undefined, {
-      [PARSED_DOC]: {
-        turns: [
-          { chat: PRIVATE, id: '9', t: T0, answered: false, private: true, command: '/quest' },
-        ],
-      },
-    });
-    p.hear({ ...bot, chat: PRIVATE, replyTo: '9', text: 'Found an apple.' });
-    expect(p.iface.ready()['/play']).toMatchObject({ ready: false, answer: { t: T0 } });
-    expect(p.kit.core.controls.read(QUEST, 'lastTurn')).toEqual({ value: { t: T0, id: '9' } });
     await p.kit.stop();
   });
 });

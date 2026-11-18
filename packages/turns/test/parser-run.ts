@@ -1,6 +1,7 @@
 /**
- * A turn parser on the owner's faked Telegram account, in a dev kit: what it publishes, drifts and
- * offers through its contract (docs/bot-os-api.md §5), for the tests of any game's parser.
+ * A turn parser on the owner's faked Telegram account, in a dev kit, with the state that keeps its
+ * bot's readiness when one is given (bot-os.md D141): what it publishes and drifts, and what the
+ * state offers through its contract (docs/bot-os-api.md §5), for the tests of any game's parser.
  */
 import { TELEGRAM_USER } from '@megabottron1999/connectors/plugins/telegram-user.ts';
 import {
@@ -11,27 +12,36 @@ import {
   type Heard,
   type Plugin,
 } from '@megabottron1999/core';
-import { type Readiness, type TurnParserInterface } from '#src/turn-parser.ts';
+import { type Readiness } from '#src/readiness.ts';
+import { type SentCommand } from '#src/turn-parser.ts';
 
 export const T0 = Date.parse('2026-11-06T12:00:00Z');
 
 /**
- * A parser on alice's faked account: what it publishes, drifts and offers. `group`: its edge reads
- * the game's group too; `documents`, what its store starts with (a restart's).
+ * A parser on alice's faked account: what it publishes, drifts and, through `state` (its readiness
+ * state, bound to it), offers. `group`: its edge reads the game's group too; `documents`, what
+ * each node's store starts with (a restart's), by node.
  */
 export async function runParser(
   plugin: Plugin,
   config: Record<string, unknown> = {},
   group?: string,
-  documents?: Record<string, unknown>
+  documents?: Record<string, Record<string, unknown>>,
+  state?: Plugin
 ) {
   const account = new FakeConnector({ account: 'telegram:alice' });
+  /** Its turns' and other commands' answers, and every event of its namespace. */
   const events: BusEvent[] = [];
+  const all: BusEvent[] = [];
   const kit = new DevKit({
     start: T0,
-    plugins: [fakeConnectorPlugin(TELEGRAM_USER, account), plugin],
+    plugins: [
+      fakeConnectorPlugin(TELEGRAM_USER, account),
+      plugin,
+      ...(state === undefined ? [] : [state]),
+    ],
     config: { [plugin.manifest.id]: config },
-    ...(documents === undefined ? {} : { documents: { [plugin.manifest.id]: documents } }),
+    ...(documents === undefined ? {} : { documents }),
     graph: (defaults) => ({
       ...defaults,
       edges: defaults.edges.map((e) =>
@@ -41,6 +51,8 @@ export async function runParser(
       ),
     }),
     record: (r) => {
+      if (!r.type.startsWith(`${plugin.manifest.id}.`)) return;
+      all.push(r as BusEvent);
       if (r.type.endsWith('.turn') || r.type.endsWith('.answer')) events.push(r as BusEvent);
     },
   });
@@ -53,20 +65,25 @@ export async function runParser(
     account.hear({ chat: '@x', sender: 'x', time: kit.clock.now(), id: msgId, ...m });
     return msgId;
   };
-  // The contract as the actor uses it, through the owner's controls (the same instance).
+  const ready = (): Record<string, Readiness> => {
+    if (state === undefined) throw new Error('runParser: no state given');
+    const r = kit.core.controls.read(state.manifest.id, 'ready');
+    return ('value' in r ? r.value : r) as Record<string, Readiness>;
+  };
+  // The contract as a player uses it, through the owner's controls (the same instances): the
+  // state's readiness, and a send told to the parser.
   const iface = {
-    rest: (): unknown => {
-      const r = kit.core.controls.read(id, 'rest');
-      return 'value' in r ? r.value : r;
+    ready,
+    /** The turn's hold (its first command's), as the state's readiness says: its rest. */
+    rest: (): { until: number; why: string } | undefined => {
+      const [turn] = Object.values(ready());
+      return turn === undefined || turn.ready || turn.until === undefined
+        ? undefined
+        : { until: turn.until, why: turn.why ?? '' };
     },
-    ready: (): Record<string, Readiness> => {
-      const r = kit.core.controls.read(id, 'ready');
-      return ('value' in r ? r.value : r) as Record<string, Readiness>;
-    },
-    sent: (turn: Parameters<TurnParserInterface['actions']['sent']>[0]) =>
-      kit.core.controls.act(id, 'sent', turn),
+    sent: (turn: SentCommand) => kit.core.controls.act(id, 'sent', turn),
   };
   const outcomes = () => events.map((e) => (e['outcome'] as { kind: string }).kind);
   const drift = () => kit.core.drift().find((d) => d.parser === id);
-  return { kit, account, hear, iface, events, outcomes, drift };
+  return { kit, account, hear, iface, events, all, outcomes, drift };
 }

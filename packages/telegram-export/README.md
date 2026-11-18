@@ -57,9 +57,10 @@ nothing of the shell, so that the wiki could import them in place of its copy.
 The tests read invented exports only (`test/fixtures/`: alice's private chat with a made-up
 @QuestBot and its group, as HTML and as JSON, a mapping, and a graph file; `test/helpers.ts` builds
 others). The replay's test runs them through the shell's own `turnParserPlugin` with @QuestBot's
-made-up grammar (`@megabottron1999/turns/test/quest.ts`, a dev dependency): turns by hand in private
-and in the group, the bot's answers, a "too soon", an unread answer, `lastTurn` and `rest` after,
-and drift. A real export never enters this repository.
+made-up grammar (`@megabottron1999/turns/test/quest.ts`, a dev dependency), with a readiness state
+on its events (`readinessPlugin`, docs/bot-os.md D141): turns by hand in private and in the group,
+the bot's answers, a "too soon", an unread answer, the turn's readiness after, and drift. A real
+export never enters this repository.
 
 Its dependencies: htmlparser2, whose tokenizer the HTML reader is built on (as the wiki
 generator's); the core and the connectors (the replay's kit, and `telegram-user`'s id and config

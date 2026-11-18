@@ -1,7 +1,8 @@
 /**
- * A player's commands as a checklist (bot-os.md D137): the commands of the parser its `parser`
- * edge binds (its `botCommands`, in its order, the turns first), which it plays, when, and a
- * sentence each saying what the player will do with it. The policy is the player's own
+ * A player's commands as a checklist (bot-os.md D137, D141): the commands of the readiness state
+ * its `state` edge binds (its `botCommands`, in its order, the turns first, with the mechanics its
+ * game declares there), which it plays, when, and a sentence each saying what the player will do
+ * with it. The policy is the player's own
  * (`packages/turns/src/player.ts`, `playsOf`), restated here since the UI imports the core's types
  * alone: a turn, whenever ready (the bot's rest over); a command whose success clears another's hold
  * (a reset), only while that other is held (cooling down); any other, whenever ready; an entry's
@@ -9,11 +10,10 @@
  *
  * One row per command, whatever its aliases (D140). Its **forms** are each of its names (its own,
  * then its `aliases`) bare (`/play`), then, in a group, each addressed to its bot in the same order
- * (`/play@QuestBot`, the parser's `botUsername`, D139): in a group, a bare name reaches every bot there that declares it,
- * an addressed one only its own. Each form has its tick, all ticked by default (the entry's `forms`
- * unset); the player sends a command as the ticked form that reaches the most bots, each of which
- * would play it then, the first in order on a tie. An entry of D139's, `addressed: true`, reads as
- * its one addressed form.
+ * (`/play@QuestBot`, the state's `botUsername`, D139): in a group, a bare name reaches every bot
+ * there that declares it, an addressed one only its own. Each form has its tick, all ticked by
+ * default (the entry's `forms` unset); the player sends a command as the ticked form that reaches
+ * the most bots, each of which would play it then, the first in order on a tie.
  *
  * The editor keeps the player's chat-out edge allowing the forms it may send (`followPlays`), so
  * that the owner never keeps a second list in step by hand.
@@ -28,8 +28,6 @@ export interface PlayEntry {
   whenReady?: true;
   /** The forms it may be sent as, in order (D140); unset, every one. */
   forms?: string[];
-  /** D139's: addressed to its bot alone, as `forms: ['/play@QuestBot']` says now. */
-  addressed?: true;
 }
 
 /** A command's policy: whenever ready (`undefined`), or only while another is held. */
@@ -64,8 +62,6 @@ export interface PlayRow {
   overridden: boolean;
   /** The forms it may be sent as, in order (D140); unset, every one. */
   forms?: string[];
-  /** D139's entry, addressed to its bot, while its bot is not known to say its form. */
-  addressed?: true;
 }
 
 /** A command's names (D140): its own, then its aliases. */
@@ -95,11 +91,11 @@ export function listedForms(row: Pick<PlayRow, 'command' | 'forms'>, place?: Pla
 }
 
 /**
- * The checklist's rows, in the parser's order: each declared command, played if the config names
+ * The checklist's rows, in the state's order: each declared command, played if the config names
  * it, by its name or an alias (unset: every one but an interactive one), with its policy and its
- * forms; D139's `addressed` read as its one addressed form where its bot is known.
+ * forms.
  */
-export function playRows(value: unknown, declared: readonly BotCommand[], bot?: string): PlayRow[] {
+export function playRows(value: unknown, declared: readonly BotCommand[]): PlayRow[] {
   const entries = entriesOf(value);
   return declared.map((command) => {
     const derived = derivedPolicy(command);
@@ -107,9 +103,7 @@ export function playRows(value: unknown, declared: readonly BotCommand[], bot?: 
       return { command, played: command.interactive !== true, policy: derived, overridden: false };
     const entry = entries.find((e) => isNamed(command, e.command));
     const policy = entry?.whenReady === true ? undefined : (entry?.whileHeld ?? derived);
-    const legacy = entry?.addressed === true && entry.forms === undefined;
-    const forms =
-      entry?.forms ?? (legacy && bot !== undefined ? [`${entry.command}@${bot}`] : undefined);
+    const forms = entry?.forms;
     return {
       command,
       played: entry !== undefined,
@@ -117,21 +111,20 @@ export function playRows(value: unknown, declared: readonly BotCommand[], bot?: 
       overridden:
         entry !== undefined && (entry.whenReady === true || entry.whileHeld !== undefined),
       ...(forms === undefined ? {} : { forms: [...forms] }),
-      ...(legacy && bot === undefined ? { addressed: true as const } : {}),
     };
   });
 }
 
-/** The entries of a config naming commands its parser declares none of: kept as they are. */
+/** The entries of a config naming commands its state declares none of: kept as they are. */
 export function unknownEntries(value: unknown, declared: readonly BotCommand[]): PlayEntry[] {
   return (entriesOf(value) ?? []).filter((e) => !declared.some((d) => isNamed(d, e.command)));
 }
 
 /**
  * The config's `commands` the rows make: unset when they are the defaults (every command but an
- * interactive one, no override), so that the player follows its parser; else the list, in the
- * parser's order, each override written only where it differs from the mechanics, with `extra`
- * (entries of commands the parser does not declare) after them.
+ * interactive one, no override), so that the player follows its state; else the list, in the
+ * state's order, each override written only where it differs from the mechanics, with `extra`
+ * (entries of commands the state does not declare) after them.
  */
 export function rowsValue(
   rows: readonly PlayRow[],
@@ -141,12 +134,7 @@ export function rowsValue(
     .filter((r) => r.played)
     .map((r): PlayEntry => {
       const derived = derivedPolicy(r.command);
-      const form =
-        r.forms !== undefined
-          ? { forms: [...r.forms] }
-          : r.addressed === true
-            ? { addressed: true as const }
-            : {};
+      const form = r.forms === undefined ? {} : { forms: [...r.forms] };
       if (samePolicy(r.policy, derived)) return { command: r.command.command, ...form };
       return r.policy === undefined
         ? { command: r.command.command, whenReady: true, ...form }
@@ -156,19 +144,14 @@ export function rowsValue(
     extra.length === 0 &&
     rows.every((r) => r.played === (r.command.interactive !== true)) &&
     entries.every(
-      (e) =>
-        e.whileHeld === undefined &&
-        e.whenReady === undefined &&
-        e.forms === undefined &&
-        e.addressed === undefined
+      (e) => e.whileHeld === undefined && e.whenReady === undefined && e.forms === undefined
     );
   return defaults ? undefined : [...entries, ...extra];
 }
 
 /**
  * The forms a player may send its commands as, in order (D140): of each command it plays (its
- * config's, or its defaults), its entry's `forms`, else every form where it sends; D139's
- * `addressed`, `/play@QuestBot`, when its parser names its bot.
+ * config's, or its defaults), its entry's `forms`, else every form where it sends.
  */
 export function playedCommands(
   value: unknown,
@@ -180,7 +163,6 @@ export function playedCommands(
     return declared.filter((d) => d.interactive !== true).flatMap((d) => formsOf(d, place));
   return entries.flatMap((e) => {
     if (e.forms !== undefined) return e.forms;
-    if (e.addressed === true && place !== undefined) return [`${e.command}@${place.bot}`];
     const d = declared.find((x) => isNamed(x, e.command));
     return d === undefined ? [e.command] : formsOf(d, place);
   });
@@ -188,7 +170,7 @@ export function playedCommands(
 
 /**
  * Where a player sends (D139): in a group, when its one chat is not its bot's private chat; and
- * its bot's name, for an addressed command. Undefined without a parser naming its bot.
+ * its bot's name, for an addressed command. Undefined without a state naming its bot.
  */
 export interface PlayPlace {
   bot: string;
@@ -289,8 +271,8 @@ export function playSentence(
 }
 
 /**
- * The commands of the parser a node's `input` binds (D137), as its plugin declares them; none
- * while no edge binds it, or its parser declares none.
+ * The commands of the readiness state a node's `input` binds (D137, D141), as its plugin declares
+ * them; none while no edge binds it, or it declares none.
  */
 export function boundCommands(
   g: Graph,
@@ -300,15 +282,15 @@ export function boundCommands(
 ): BotCommand[] | undefined {
   const edge = g.edges.find((e) => e.to === `${node}.${input}`);
   if (edge === undefined) return undefined;
-  const parser = g.nodes.find((n) => n.id === endOf(edge.from).node);
-  const commands = parser === undefined ? undefined : viewOf(parser)?.botCommands;
+  const state = g.nodes.find((n) => n.id === endOf(edge.from).node);
+  const commands = state === undefined ? undefined : viewOf(state)?.botCommands;
   return commands === undefined || commands.length === 0 ? undefined : commands;
 }
 
 /**
- * Where a node's player sends (D139): its parser's bot (that its `input` binds) and whether the
+ * Where a node's player sends (D139): its state's bot (that its `input` binds) and whether the
  * one chat of its `output`'s edge is a group (not the bot's private chat; none named yet, a
- * group's form is not offered). Undefined while its parser names no bot.
+ * group's form is not offered). Undefined while its state names no bot.
  */
 export function playPlace(
   g: Graph,
@@ -322,7 +304,7 @@ export function playPlace(
   return { bot, group: chat !== undefined && chat.toLowerCase() !== `@${bot}`.toLowerCase() };
 }
 
-/** The bot of the parser a node's `input` binds (D139), as its plugin names it. */
+/** The bot of the readiness state a node's `input` binds (D139), as its plugin names it. */
 export function boundBot(
   g: Graph,
   node: string,
@@ -330,14 +312,14 @@ export function boundBot(
   viewOf: (n: GraphNode) => PluginView | undefined
 ): string | undefined {
   const edge = g.edges.find((e) => e.to === `${node}.${input}`);
-  const parser =
+  const state =
     edge === undefined ? undefined : g.nodes.find((n) => n.id === endOf(edge.from).node);
-  return parser === undefined ? undefined : viewOf(parser)?.botUsername;
+  return state === undefined ? undefined : viewOf(state)?.botUsername;
 }
 
 /**
  * The node whose checklist a chat-out edge leaving `from` follows (D137): its own, when its plugin
- * declares one over that output and its parser's commands are known; else undefined.
+ * declares one over that output and its state's commands are known; else undefined.
  */
 export function followedBy(
   g: Graph,
@@ -353,7 +335,7 @@ export function followedBy(
 
 /**
  * The graph with each player's chat-out edges allowing exactly the commands it plays (D137), from
- * its checklist and its parser's commands; a player whose parser is unknown is left as it is. The
+ * its checklist and its state's commands; a player whose state is unknown is left as it is. The
  * same graph when nothing changes.
  */
 export function followPlays(g: Graph, viewOf: (n: GraphNode) => PluginView | undefined): Graph {

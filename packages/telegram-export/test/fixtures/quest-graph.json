@@ -7,7 +7,8 @@
       "account": "telegram:alice",
       "config": { "chats": ["@QuestBot", "-1001000000002"] }
     },
-    { "id": "quest", "plugin": "quest" }
+    { "id": "quest", "plugin": "quest" },
+    { "id": "quest-ready", "plugin": "quest-ready" }
   ],
   "edges": [
     {
@@ -16,6 +17,8 @@
       "type": "chat-in",
       "reads": ["@QuestBot", "-1001000000002"],
       "senders": ["@QuestBot", "me"]
-    }
+    },
+    { "from": "quest.events", "to": "quest-ready.events", "type": "events" },
+    { "from": "quest.interface", "to": "quest-ready.parser", "type": "interface" }
   ]
 }

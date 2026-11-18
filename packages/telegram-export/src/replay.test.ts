@@ -5,7 +5,14 @@ import {
   type GraphInput,
   type Inbound,
 } from '@megabottron1999/core';
-import { QUEST, QUESTBOT, questPlugin } from '@megabottron1999/turns/test/quest.ts';
+import { type Readiness } from '@megabottron1999/turns/readiness.ts';
+import {
+  QUEST,
+  QUEST_READY,
+  QUESTBOT,
+  questPlugin,
+  questTurnReadyPlugin,
+} from '@megabottron1999/turns/test/quest.ts';
 import { describe, expect, it } from 'vitest';
 import { LOBBY, QUEST_GRAPH, QUEST_HTML, QUEST_JSON, QUEST_MAPPING, T0 } from '#test/quest.ts';
 import { readExportPaths } from './files.ts';
@@ -14,6 +21,13 @@ import { asMonitored, replay } from './replay.ts';
 
 const S = 1000;
 const MIN = 60 * S;
+
+/** The parser, and the state that keeps its turn's readiness (D141). */
+const plugins = () => [questPlugin(), questTurnReadyPlugin()];
+
+/** The turn's readiness, as the state keeps it. */
+const turn = (r: { read(node: string, what: string): unknown }): Readiness =>
+  (r.read(QUEST_READY, 'ready') as Record<string, Readiness>)['/play'] as Readiness;
 
 const inbounds = (dir: string): Inbound[] =>
   toInbounds(readExportPaths([dir], () => {}).messages, QUEST_MAPPING);
@@ -61,12 +75,14 @@ const EXPECTED = [
 describe('replay', () => {
   it("replays an HTML export's turns through a real parser, private and group", async () => {
     const r = await replay({
-      plugins: [questPlugin()],
+      plugins: plugins(),
       inbounds: inbounds(QUEST_HTML),
       // The parser's edge also reads the game's group, as a graph would bind it.
       graph: (defaults) => ({
         ...defaults,
-        edges: defaults.edges.map((e) => ({ ...e, reads: ['@QuestBot', LOBBY] })),
+        edges: defaults.edges.map((e) =>
+          e.type === 'chat-in' ? { ...e, reads: ['@QuestBot', LOBBY] } : e
+        ),
       }),
       self: 'alice',
     });
@@ -77,10 +93,12 @@ describe('replay', () => {
     ]);
     // The clock stands at the last message: the group turn is the last, its rest still running.
     expect(r.kit.clock.now()).toBe(T0 + 1921 * S);
-    expect(r.read(QUEST, 'lastTurn')).toStrictEqual({ t: T0 + 1860 * S, id: '7001' });
-    expect(r.read(QUEST, 'rest')).toStrictEqual({
+    expect(turn(r)).toStrictEqual({
+      ready: false,
       until: T0 + 1861 * S + 30 * MIN,
       why: 'defeated',
+      sent: { t: T0 + 1860 * S, byHand: true },
+      answer: { t: T0 + 1861 * S, length: 9 },
     });
     // The group's answer holds the turn command back in the group, until the rest it states.
     const outbox = r.kit.core.outbox('telegram:owner').as('anyone');
@@ -95,26 +113,20 @@ describe('replay', () => {
 
   it('answers the turns as live: a "too soon" holds the next one back (D98)', async () => {
     // The chat up to the "too soon", the clock at its answer.
-    const r = await replay({
-      plugins: [questPlugin()],
-      inbounds: inbounds(QUEST_HTML).slice(0, 4),
-    });
+    const r = await replay({ plugins: plugins(), inbounds: inbounds(QUEST_HTML).slice(0, 4) });
     const outbox = r.kit.core.outbox('telegram:owner').as('anyone');
     expect(outbox.held('@QuestBot', '/play')).toStrictEqual({
       until: T0 + 301 * S + 12 * MIN,
       reason: 'cooldown: cooldown',
     });
-    expect(r.read(QUEST, 'rest')).toStrictEqual({
-      until: T0 + 301 * S + 12 * MIN,
-      why: 'it said too soon',
-    });
+    expect(turn(r)).toMatchObject({ until: T0 + 301 * S + 12 * MIN, why: 'it said too soon' });
     await r.stop();
   });
 
   it('runs a graph file, its telegram-user swapped, on the JSON export, live or as history', async () => {
     for (const playback of [false, true]) {
       const r = await replay({
-        plugins: [questPlugin()],
+        plugins: plugins(),
         inbounds: inbounds(QUEST_JSON),
         graph: QUEST_GRAPH,
         playback,
@@ -129,7 +141,7 @@ describe('replay', () => {
       expect(r.drift()[0]).toMatchObject({ read: 3, unread: 1 });
       // The clock ran on: every rest is over.
       expect(r.kit.clock.now()).toBe(T0 + 4 * 3600 * S);
-      expect(r.read(QUEST, 'rest')).toBeUndefined();
+      expect(turn(r)).toMatchObject({ ready: true });
       await r.stop();
     }
   });
@@ -196,9 +208,9 @@ describe('replay', () => {
   });
 
   it('acts through the contract, as the owner does', async () => {
-    const r = await replay({ plugins: [questPlugin()], inbounds: [], start: T0 });
+    const r = await replay({ plugins: plugins(), inbounds: [], start: T0 });
     await r.act(QUEST, 'sent', { chat: `@${QUESTBOT}`, t: T0 });
-    expect(r.read(QUEST, 'lastTurn')).toStrictEqual({ t: T0 });
+    expect(turn(r)).toStrictEqual({ ready: true, sent: { t: T0, byHand: false } });
     await r.stop();
   });
 });

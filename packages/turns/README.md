@@ -6,32 +6,25 @@ the owner what needs attention.
 
 - `turnParserPlugin` (`src/turn-parser.ts`): a parser of one bot's answers on a Telegram user
   account (a chat-in input: it reads, never sends), from a grammar the game provides with its bot's
-  turn (`turnCommands`, its name then its aliases: a fact of the game, not a config, docs/bot-os.md
-  D70, D140). It knows the owner's turns (sent by hand or by the player), which of the bot's
-  messages answer one, publishes what it reads, reports to drift what it cannot read, says until
-  when the bot rests and the owner's last turn, in private or in the group (`state.lastTurn`,
-  docs/bot-os.md D99, D129), and declares its turn event an answer to every form of its turn (D98).
-  Its spec may also declare the bot's other commands with their mechanics as data (`commands`: a
-  cooldown, an unlock the bot announces, an effect on another command's hold, such as a reset of the
-  turn's rest; D132) and their `aliases` (D140: one command, one state, whichever name is sent or
-  heard, bare or addressed; an effect or an unlock may name it by an alias): it tracks each
-  command's readiness and offers it (`state.ready`: ready since, or held until and why, with its
-  last send and answer), publishes their answers as `<id>.answer`, and declares each an answer to
-  its own command, a reset ending the outbox's cooldown too. A command marked `interactive: true`
-  needs the person to answer or choose (a minigame, a shop; D137): tracked as any other, left out of
-  a player's defaults. It publishes its commands, the turn first, each once with its aliases and its
-  mechanics, in its manifest (`botCommands`, for the editor's checklist) and its read
-  `state.commands` (for a player's defaults at run time), from its spec alone (D137), and its bot's
-  name (`botUsername`, `state.bot`). A send a player tells it of (`actions.sent`: its own player's,
-  or another's of the same account, D139, D140) counts only if it reaches its bot: bare or addressed
-  to it, in its bot's private chat or a chat its edge reads; its answers hold every form back. It
-  resumes from what it parsed, kept in its store, never by re-reading the chat (docs/bot-os.md D62).
+  vocabulary: its turn (`turnCommands`, its name then its aliases: a fact of the game, not a config,
+  docs/bot-os.md D70, D140) and its other commands (`commands`, each with its `aliases` and, for one
+  the bot announces, `announcedBy`, D132, D140). **It turns messages into events, nothing more**
+  (D141): each send of the owner's it counts (`<id>.sent`, by hand or a player's), what it reads of
+  each answer (`<id>.turn`, `<id>.answer`: the outcome, the wait the bot states, what the message
+  announces unlocked and its announced effects, and whether it answers a send), and a message its
+  grammar leaves that answers a send or announces an unlock (`<id>.reply`); it reports to drift what
+  it cannot read. It pairs each send with its answer and declares its events answers to every form
+  of their command (D98), an effect the bot announces ending the outbox's cooldown too. A send a
+  player tells it of (`actions.sent`, its one member: its own player's, or another's of the same
+  account, D139, D140, through a readiness state) counts only if it reaches its bot: bare or
+  addressed to it, in its bot's private chat or a chat its edge reads. It resumes from what it
+  parsed, kept in its store, never by re-reading the chat (docs/bot-os.md D62).
 - `attentionPlugin` (`src/attention.ts`): `attention`, a simulated person, one node per person
   (docs/bot-os.md D134): when they sit down to play (`src/sittings.ts`: a gap drawn from a range,
   forgotten sittings, nights off in a time zone) and how fast they act within a sitting (a reaction
   scaled to the answer read). It starts sittings for the players its `attention` output binds (a
   port type of its own, D133), which share them, so that a person's bots are played in bursts; the
-  owner's own play by hand, as the players' parsers read it, counts as a sitting and puts the next
+  owner's own play by hand, as the players' states read it, counts as a sitting and puts the next
   simulated one back. Two behaviours, each on its own (D138): `scheduled` (on by default), the
   sittings it plans from its schedule, hidden in the editor while off; and `followsMyPlay` (off by
   default), a sitting `followDelayS` (3 s) after any message of the owner's own in the chats it
@@ -41,17 +34,17 @@ the owner what needs attention.
   sitting (`follows your play` when not scheduled), its page (**Sittings**) its behaviours, its last
   and next.
 - `playerPlugin` (`src/player.ts`): the `player`, one node per bot, in place of the turn actor
-  (D134): given a sitting, it plays each of its commands that its parser says is ready
-  (`state.ready`, D132) and its policy allows: its config's `commands` (each
-  `{ command, whileHeld?, whenReady?, forms? }`), or, unset, every command its parser declares
-  (`state.commands`) but an interactive one, in its parser's order (D137). The policy comes from the
+  (D134): given a sitting, it plays each of its commands that its bot's readiness state (its `state`
+  input, D141) says is ready (`state.ready`, D132) and its policy allows: its config's `commands`
+  (each `{ command, whileHeld?, whenReady?, forms? }`), or, unset, every command its state declares
+  (`state.commands`) but an interactive one, in its order (D137). The policy comes from the
   mechanics (a turn, whenever ready; a reset, only while what it clears is cooling down; any other,
   whenever ready), an entry's `whileHeld` or `whenReady` overriding it (`playsOf`). The editor draws
-  its `commands` as a checklist of its parser's (`configPlays`) and keeps its chat edge allowing
+  its `commands` as a checklist of its state's (`configPlays`) and keeps its chat edge allowing
   them. Each goes after its person's reaction time, looking again after each answer (so an unlock
   announced, or a reset, is taken in the same sitting), until nothing is left. In a sitting that
   follows the owner's play (D138), or in which another player of its account sent a command (D139,
-  D140), it first waits for the answer to the last send its parser has not read an answer to yet,
+  D140), it first waits for the answer to the last send its state has not read an answer to yet,
   then plays its whole checklist. No schedule of its own: the outbox's `held` (D98) stays as the
   safety net. It only sends (docs/bot-os.md D99); its one chat is its edge's alone (D97): its bot's
   private chat or, as the owner prefers, a group its bot is in (D139). Each command goes as one of
@@ -61,12 +54,12 @@ the owner what needs attention.
   if every player it reaches would play that command now (in a sitting, ticked, ready, the form
   allowed), and it sends the widest allowed, the first in order on a tie, after the group has
   settled (no answer awaited, nothing about to be ready within `settleS`, 10 s), claiming those it
-  reaches in the same tick. Each command it sends live it tells its parser and hands off to every
-  other player of its account, each telling its own. Through a dry-run chat-out edge it logs each
-  command and sends nothing; through a live one it waits for the account to be connected. Its card
-  shows its next play, its page (**Plays**) its chat, commands, last and next play (D112). Its
-  safety stop (the kill switch) stops its node (`ctx.stop`, docs/bot-os.md D64), until the owner
-  clears the stop in the editor.
+  reaches in the same tick. Each command it sends live it tells its state, which hands it to its
+  parser, and hands off to every other player of its account, each telling its own. Through a
+  dry-run chat-out edge it logs each command and sends nothing; through a live one it waits for the
+  account to be connected. Its card shows its next play, its page (**Plays**) its chat, commands,
+  last and next play (D112). Its safety stop (the kill switch) stops its node (`ctx.stop`,
+  docs/bot-os.md D64), until the owner clears the stop in the editor.
 - `reactorPlugin` (`src/reactor.ts`): the `reactor`, one reaction (`react()` of the core) from its
   node's config: when an event of its `on` type is heard (on its events input, there only with `on`
   and then required: the check refuses a reactor on events that no edge binds), or a message on its
@@ -84,7 +77,14 @@ the owner what needs attention.
   restarts, announces each change (`<id>.changed`) and, in the spec's own events (`events`,
   `announce`: an item gained), what each live event did, never what the catch-up or a played-back
   event did (D83), offers `get`, `freshness` and the queries, and its view, which the web UI draws
-  from the schema alone. It never sends.
+  from the schema alone. It never sends. **With a `readiness`** (D141: its parser's id and
+  vocabulary, and the game's mechanics, `cooldownMin`, `unlock`, `effects`, `interactive`), it also
+  keeps each of the bot's commands' readiness in a section `readiness`, reduced from the parser's
+  events by the reusable `ReadinessModel` (`src/readiness.ts`); its own reducer may fold more facts
+  in (a ban: `hold`; `succeed`, `unlock`, `lock`), with no wrapper; it offers a player's contract
+  (`state.ready`, `state.commands`, `state.bot`, `actions.sent`, handed to its parser through its
+  `parser` input) and its commands and bot in its manifest (`botCommands`, `botUsername`) for the
+  editor's checklist. `readinessPlugin` is such a state with nothing else, for a game with none.
 
 - `ownerNoticePlugin` (`src/owner-notice.ts`): `owner-notice`, the one node that reports to a chat
   (docs/bot-os.md D94: the core tells none itself), which tells the owner what needs attention

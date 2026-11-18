@@ -899,8 +899,8 @@ export function GraphPage({
                 missing: draft.edges.some(
                   (e) => e.to === `${shownNode.id}.${view.configPlays?.input ?? ''}`
                 )
-                  ? 'Its parser declares no commands: they are typed as JSON.'
-                  : `Draw its ${view.configPlays.input} edge from its bot's parser first, to pick from its commands; until then they are typed as JSON.`,
+                  ? 'Its state declares no commands: they are typed as JSON.'
+                  : `Draw its ${view.configPlays.input} edge from its bot's readiness state first, to pick from its commands; until then they are typed as JSON.`,
               },
             })}
         cleared={clears.has(shownNode.id)}

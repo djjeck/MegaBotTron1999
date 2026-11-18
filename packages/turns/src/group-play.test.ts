@@ -1,8 +1,8 @@
 /**
  * Three bots played in one group by one person (bot-os.md D139, D140): @QuestBot and @DuelBot,
  * whose turn is `/play`, and @LoreBot, whose turn is `/play` with the alias `/quest`, and whose
- * `/boost` (alias `/b`) ends its turn's rest; each bot with its parser and its player, the players
- * sharing alice's attention and sending in the group. A bare `/play` reaches every bot; `/quest`,
+ * `/boost` (alias `/b`) ends its turn's rest; each bot with its parser, its readiness state (D141)
+ * and its player, the players sharing alice's attention and sending in the group. A bare `/play` reaches every bot; `/quest`,
  * or a command addressed to its bot, only that bot. Each player sends a command as the form that
  * plays the most ready turns at once.
  */
@@ -18,12 +18,9 @@ import {
 import { describe, expect, it } from 'vitest';
 import { ATTENTION, attentionPlugin, type AttentionStatus } from '#src/attention.ts';
 import { PLAYER, playerPlugin } from '#src/player.ts';
-import {
-  PARSED_DOC,
-  type Readiness,
-  turnParserPlugin,
-  type TurnReading,
-} from '#src/turn-parser.ts';
+import { type Readiness } from '#src/readiness.ts';
+import { readinessPlugin, STATE_DOC } from '#src/state-plugin.ts';
+import { turnParserPlugin, type TurnReading } from '#src/turn-parser.ts';
 
 const T0 = Date.parse('2026-11-06T12:00:00Z');
 const MIN = 60_000;
@@ -36,32 +33,31 @@ const BOTS = [
 ] as const;
 type Bot = (typeof BOTS)[number];
 
+/** A bot's vocabulary: its turn, and LoreBot's boost. */
+const vocabularyOf = (b: Bot) => ({
+  bot: b.bot,
+  turnCommands: b.turn,
+  ...('boost' in b ? { commands: { '/boost': { aliases: ['/b'] } } } : {}),
+});
+
 /**
  * A bot's parser: "Found an apple." rests it 15 minutes, "Too soon: N minutes." N, "Boosted." ends
- * the rest (its effect names the turn by its alias, `/quest`).
+ * the rest, as the bot says (its effect names the turn by its alias, `/quest`).
  */
 function parser(b: Bot) {
   return turnParserPlugin({
     id: b.id,
-    bot: b.bot,
     description: `@${b.bot}'s answers to the owner's turns`,
-    turnCommands: b.turn,
-    ...('boost' in b
-      ? {
-          commands: {
-            '/boost': {
-              aliases: ['/b'],
-              cooldownMin: 60,
-              effects: [{ command: '/quest', clear: true as const }],
-            },
-          },
-        }
-      : {}),
+    ...vocabularyOf(b),
     read: (m): TurnReading => {
       if (!m.answers) return undefined;
       if (m.text === 'Found an apple.')
         return { outcome: { kind: 'gain', bot: b.bot }, restMs: 15 * MIN };
-      if (m.text === 'Boosted.') return { outcome: { kind: 'boost', bot: b.bot } };
+      if (m.text === 'Boosted.')
+        return {
+          outcome: { kind: 'boost', bot: b.bot },
+          effects: [{ command: '/quest', clear: true }],
+        };
       const soon = /^Too soon: (\d+) minutes\.$/u.exec(m.text);
       if (soon !== null)
         return {
@@ -70,6 +66,21 @@ function parser(b: Bot) {
         };
       return { unread: true };
     },
+  });
+}
+
+/** A bot's readiness state (D141): LoreBot's boost, once an hour, ends its turn's rest. */
+function state(b: Bot) {
+  return readinessPlugin({
+    id: `${b.id}-ready`,
+    parser: { id: b.id, ...vocabularyOf(b) },
+    ...('boost' in b
+      ? {
+          mechanics: {
+            '/boost': { cooldownMin: 60, effects: [{ command: '/quest', clear: true as const }] },
+          },
+        }
+      : {}),
   });
 }
 
@@ -133,7 +144,7 @@ interface RunOptions {
   bob?: Bot['id'][];
   /** alice's attention listens to the group (D138). */
   listen?: boolean;
-  /** Each bot resting until then, as its parser and the bot know it. */
+  /** Each bot resting until then, as its state and the bot know it. */
   resting?: Partial<Record<Bot['id'], number>>;
 }
 
@@ -144,15 +155,31 @@ async function run(o: RunOptions = {}) {
     start: T0,
     documents: Object.fromEntries(
       Object.entries(o.resting ?? {}).map(([id, until]) => [
-        id,
-        { [PARSED_DOC]: { turns: [], rest: { until, why: 'its rest after a turn' } } },
+        `${id}-ready`,
+        {
+          [STATE_DOC]: {
+            state: {
+              readiness: {
+                commands: { '/play': { readyAt: until, why: 'its rest after a turn' } },
+                holds: {},
+              },
+            },
+            cursor: {},
+            freshness: {},
+            batch: 0,
+            unannounced: [],
+          },
+        },
       ])
     ),
     graph: (d): GraphInput => ({
       ...d,
       nodes: [
         ...d.nodes.filter((n) => n.id === TELEGRAM_USER),
-        ...BOTS.map((b) => ({ id: b.id, plugin: b.id })),
+        ...BOTS.flatMap((b) => [
+          { id: b.id, plugin: b.id },
+          { id: `${b.id}-ready`, plugin: `${b.id}-ready` },
+        ]),
         { id: 'alice', plugin: ATTENTION, config: { seed: 3, skipChance: 0, ...o.attention } },
         { id: 'bob', plugin: ATTENTION, config: { scheduled: false } },
         ...BOTS.map((b) => ({
@@ -169,7 +196,13 @@ async function run(o: RunOptions = {}) {
             type: 'chat-in' as const,
             reads: [`@${b.bot}`, GROUP],
           },
-          { from: `${b.id}.interface`, to: `${b.id}-player.parser`, type: 'interface' as const },
+          { from: `${b.id}.events`, to: `${b.id}-ready.events`, type: 'events' as const },
+          { from: `${b.id}.interface`, to: `${b.id}-ready.parser`, type: 'interface' as const },
+          {
+            from: `${b.id}-ready.interface`,
+            to: `${b.id}-player.state`,
+            type: 'interface' as const,
+          },
           {
             from: `${o.bob?.includes(b.id) === true ? 'bob' : 'alice'}.attention`,
             to: `${b.id}-player.attention`,
@@ -209,6 +242,7 @@ async function run(o: RunOptions = {}) {
   kit.core.register(
     fakeConnectorPlugin(TELEGRAM_USER, group),
     ...BOTS.map(parser),
+    ...BOTS.map(state),
     attentionPlugin(),
     playerPlugin()
   );
@@ -230,7 +264,7 @@ async function run(o: RunOptions = {}) {
     const r = kit.core.controls.read(node, what);
     return ('value' in r ? r.value : r) as T;
   };
-  const ready = (p: Bot['id']) => read<Record<string, Readiness>>(p, 'ready');
+  const ready = (p: Bot['id']) => read<Record<string, Readiness>>(`${p}-ready`, 'ready');
   const turn = (p: Bot['id']) => ready(p)[BOTS.find((b) => b.id === p)?.turn[0] as string];
   const sent = (player: string) =>
     steps.filter((e) => e['player'] === player && e['event'] === 'sent').map((e) => e['detail']);
@@ -329,17 +363,6 @@ describe('three bots in one group, one person: each command as the form of wides
     expect(at).toBeGreaterThan(m + 11_000);
     for (const p of ['quest', 'duel', 'lore'] as const)
       expect(r.turn(p)).toMatchObject({ ready: false, sent: { t: m + 11_000 } });
-    await r.kit.stop();
-  });
-
-  it('reads D139’s addressed entry as its one form', async () => {
-    const r = await run({
-      players: Object.fromEntries(
-        BOTS.map((b) => [b.id, { commands: [{ command: b.turn[0], addressed: true }] }])
-      ),
-    });
-    await r.until(r.first() + 5 * MIN);
-    expect(r.texts().sort()).toEqual(['/play@DuelBot', '/play@LoreBot', '/play@QuestBot']);
     await r.kit.stop();
   });
 

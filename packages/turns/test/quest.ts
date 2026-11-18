@@ -4,6 +4,7 @@
  * minutes." (nothing, the wait it states), and claims as unread whatever else answers a turn.
  */
 import { type Plugin } from '@megabottron1999/core';
+import { readinessPlugin } from '#src/state-plugin.ts';
 import { type TurnOutcome, turnParserPlugin, type TurnReading } from '#src/turn-parser.ts';
 
 export const QUEST = 'quest';
@@ -44,21 +45,44 @@ export function questPlugin(turnCommands: readonly string[] = ['/play']): Plugin
 }
 
 /**
- * @QuestBot's other commands (bot-os.md D132), each a mechanic: `/daily`, once a day; `/chest`,
- * usable once a turn's answer announces "A chest appears!", for 30 minutes; `/coffee`, once an
- * hour, which ends the turn's rest.
+ * @QuestBot's vocabulary with its other commands (bot-os.md D132, D141): `/daily`, `/chest`,
+ * announced by "A chest appears!", and `/coffee`.
  */
-export const QUEST_COMMANDS = {
+export const QUEST_VOCABULARY = {
+  bot: QUESTBOT,
+  turnCommands: ['/play'],
+  commands: { '/daily': {}, '/chest': { announcedBy: 'A chest appears!' }, '/coffee': {} },
+};
+
+/**
+ * Their mechanics, its state's (bot-os.md D132, D141): `/daily`, once a day; `/chest`, usable once
+ * announced, for 30 minutes; `/coffee`, once an hour, which ends the turn's rest.
+ */
+export const QUEST_MECHANICS = {
   '/daily': { cooldownMin: 24 * 60 },
-  '/chest': { unlock: { pattern: 'A chest appears!', forMin: 30 } },
+  '/chest': { unlock: { forMin: 30 } },
   '/coffee': { cooldownMin: 60, effects: [{ command: '/play', clear: true as const }] },
 };
 
+/** The id of @QuestBot's readiness state. */
+export const QUEST_READY = 'quest-ready';
+
+/** @QuestBot's turn's readiness state (D141), for `questPlugin`: its rest, for a player. */
+export function questTurnReadyPlugin(turnCommands: readonly string[] = ['/play']): Plugin {
+  return readinessPlugin({ id: QUEST_READY, parser: { id: QUEST, bot: QUESTBOT, turnCommands } });
+}
+
+/** @QuestBot's readiness state (D141): its commands' readiness, for a player. */
+export function questReadyPlugin(): Plugin {
+  return readinessPlugin({
+    id: QUEST_READY,
+    parser: { id: QUEST, ...QUEST_VOCABULARY },
+    mechanics: QUEST_MECHANICS,
+  });
+}
+
 /** What @QuestBot answers to its other commands, or undefined. */
-export function readQuestCommand(
-  command: string,
-  text: string
-): { outcome: TurnOutcome; restMs?: number } | undefined {
+export function readQuestCommand(command: string, text: string): TurnReading {
   const bot = QUESTBOT;
   const t = text.trim();
   const daily = /^Daily reward: (.+)\.$/u.exec(t);
@@ -73,22 +97,21 @@ export function readQuestCommand(
   const chest = /^The chest holds (.+)\.$/u.exec(t);
   if (command === '/chest' && chest !== null)
     return { outcome: { kind: 'gain', bot, item: chest[1] } as TurnOutcome };
+  // It says the turn's rest is over: the outbox's cooldown on it ends too (D98, D141).
   if (command === '/coffee' && t === 'You drink a coffee: rested.')
-    return { outcome: { kind: 'rested', bot } };
+    return { outcome: { kind: 'rested', bot }, effects: [{ command: '/play', clear: true }] };
   return undefined;
 }
 
 /**
- * @QuestBot's parser with its other commands (`QUEST_COMMANDS`): a turn's answer read by its first
- * line (the rest may announce a chest), another command's by `readQuestCommand`.
+ * @QuestBot's parser with its other commands (`QUEST_VOCABULARY`): a turn's answer read by its
+ * first line (the rest may announce a chest), another command's by `readQuestCommand`.
  */
 export function questGamePlugin(): Plugin {
   return turnParserPlugin({
     id: QUEST,
-    bot: QUESTBOT,
     description: "@QuestBot's answers to the owner's commands",
-    turnCommands: ['/play'],
-    commands: QUEST_COMMANDS,
+    ...QUEST_VOCABULARY,
     read: (m): TurnReading => {
       if (!m.answers && !(m.private && m.replies)) return undefined;
       const read =

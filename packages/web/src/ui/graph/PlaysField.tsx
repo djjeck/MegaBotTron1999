@@ -1,14 +1,14 @@
 /**
- * A player's `commands` as a checklist (bot-os.md D137, `plays.ts`): a row per command of the
- * parser its `parser` edge binds, in the parser's order, each with a checkbox (played or not; by
+ * A player's `commands` as a checklist (bot-os.md D137, D141, `plays.ts`): a row per command of
+ * the readiness state its `state` edge binds, in its order, each with a checkbox (played or not; by
  * default every one but an interactive one), a sentence saying what the player will do with it,
  * and a choice of its policy when played: whenever ready, or only while another command is cooling
  * down; and, when played, its forms, each with its tick (D140): each of its names bare (`/play`,
  * which every bot in the group that declares it takes) and, where the player sends to a group,
  * addressed to its bot (`/play@QuestBot`). All ticked by default; the last one ticked cannot be
  * unticked. A single form is not offered: it is all it sends.
- * Left as the defaults, its config names no commands, and the player follows its parser.
- * Without a parser edge, or a parser that declares no commands, the list is typed as JSON, as it
+ * Left as the defaults, its config names no commands, and the player follows its state.
+ * Without a state edge, or a state that declares no commands, the list is typed as JSON, as it
  * always can be under "Edit as JSON".
  */
 import { useState } from 'react';
@@ -30,7 +30,7 @@ export function PlaysField(props: {
   name: string;
   value: unknown;
   set: (v: unknown) => void;
-  /** The commands of its parser, in its order; undefined: none known. */
+  /** The commands of its state, in its order; undefined: none known. */
   declared: readonly BotCommand[] | undefined;
   /** Why none are known, said instead of the checklist. */
   missing: string;
@@ -48,7 +48,7 @@ export function PlaysField(props: {
         <JsonField name={props.name} value={props.value} set={props.set} />
       </>
     );
-  const rows = playRows(props.value, declared, place?.bot);
+  const rows = playRows(props.value, declared);
   const extra = unknownEntries(props.value, declared);
   const defaults = entriesOf(props.value) === undefined;
   const write = (next: PlayRow[]): void => props.set(rowsValue(next, extra));
@@ -97,7 +97,7 @@ export function PlaysField(props: {
                   row={r}
                   place={place}
                   set={(forms) => {
-                    const { forms: _, addressed: __, ...rest } = r;
+                    const { forms: _, ...rest } = r;
                     write(
                       rows.map((x, j) =>
                         j === i ? (forms === undefined ? rest : { ...rest, forms }) : x
@@ -121,12 +121,12 @@ export function PlaysField(props: {
       ) : null}
       {extra.length === 0 ? null : (
         <p className="warning small" role="note">
-          Its parser declares none of {extra.map((e) => e.command).join(', ')}: kept, never played.
+          Its state declares none of {extra.map((e) => e.command).join(', ')}: kept, never played.
         </p>
       )}
       <p className="muted small">
         {defaults
-          ? 'The defaults: it follows its parser, every command but those that need you to answer.'
+          ? 'The defaults: it follows its state, every command but those that need you to answer.'
           : 'Your choice: '}
         {defaults ? null : (
           <button type="button" className="link" onClick={() => props.set(undefined)}>

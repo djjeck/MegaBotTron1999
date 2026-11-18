@@ -202,15 +202,15 @@ export const greeter = definePlugin({
   never holds a credential: connectors do.
 - **The image offers** the connectors (`irc`, `telegram-bot`, `telegram-user`, `anthropic`),
   `attention`, a simulated person whose sittings its players share (one node per person), and the
-  `player`, one node per game bot, which plays each of the bot's commands its parser says is ready,
-  in its person's sittings (docs/bot-os.md D132–D134), and the `reactor`, one node per reaction
-  ("when this event is heard, or a message matches, send this command", from its config alone, on
-  `react()`, which any plugin may call too), the `script` node, and `owner-notice`, the one node
-  that reports to a chat: it tells the owner what needs attention (refused events, coalesced sends,
-  drift, cascades, failures, stalled sends, the graph's warnings), grouped and paced per kind, and
-  the plugins' messages (`ctx.notify`) at once with their buttons, to every chat its edges name (a
-  `telegram-bot`'s owner's private chat, an IRC channel, both at once); everything that knows a game
-  comes from a module.
+  `player`, one node per game bot, which plays each of the bot's commands its readiness state says
+  is ready, in its person's sittings (docs/bot-os.md D132–D134, D141), and the `reactor`, one node
+  per reaction ("when this event is heard, or a message matches, send this command", from its config
+  alone, on `react()`, which any plugin may call too), the `script` node, and `owner-notice`, the
+  one node that reports to a chat: it tells the owner what needs attention (refused events,
+  coalesced sends, drift, cascades, failures, stalled sends, the graph's warnings), grouped and
+  paced per kind, and the plugins' messages (`ctx.notify`) at once with their buttons, to every chat
+  its edges name (a `telegram-bot`'s owner's private chat, an IRC channel, both at once); everything
+  that knows a game comes from a module.
 - **Standard services,** implemented once by the shell (D52): SVG to PNG in every plugin's context
   (`ctx.render.svgToPng`), and asking an LLM through the `anthropic` connector (`ask`, with
   structured output), for the plugins an edge binds to it.

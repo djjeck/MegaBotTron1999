@@ -1,7 +1,8 @@
 /**
  * A person and their player on the dev kit (bot-os.md D133, D134): alice's faked account, a clone of
- * @QuestBot answering on it, @QuestBot's parser with its other commands, an `attention` node
- * (`alice`) and a `player` (`quest-player`), on a virtual clock, run step by step.
+ * @QuestBot answering on it, @QuestBot's parser with its other commands, its readiness state
+ * (`quest-ready`, D141), an `attention` node (`alice`) and a `player` (`quest-player`), on a
+ * virtual clock, run step by step.
  */
 import { TELEGRAM_USER } from '@megabottron1999/connectors/plugins/telegram-user.ts';
 import {
@@ -13,7 +14,7 @@ import {
 } from '@megabottron1999/core';
 import { ATTENTION, attentionPlugin, type AttentionStatus } from '#src/attention.ts';
 import { PLAYER, playerPlugin, type PlayerStatus } from '#src/player.ts';
-import { QUEST, QUESTBOT, questGamePlugin } from '#test/quest.ts';
+import { QUEST, QUEST_READY, QUESTBOT, questGamePlugin, questReadyPlugin } from '#test/quest.ts';
 import { QuestClone } from '#test/quest-clone.ts';
 
 export const T0 = Date.parse('2026-11-06T12:00:00Z'); // 13:00 in Rome
@@ -48,7 +49,8 @@ export function sittingsGraph(o: RunOptions = {}) {
     const g: GraphInput = {
       ...d,
       nodes: [
-        ...d.nodes.filter((n) => n.id !== ATTENTION && n.id !== PLAYER),
+        ...d.nodes.filter((n) => n.id !== ATTENTION && n.id !== PLAYER && n.id !== QUEST_READY),
+        { id: QUEST_READY, plugin: QUEST_READY },
         {
           id: 'alice',
           plugin: ATTENTION,
@@ -58,10 +60,14 @@ export function sittingsGraph(o: RunOptions = {}) {
       ],
       edges: [
         ...(d.edges ?? []).filter(
-          (e) => !/^(attention|player)\./u.test(e.from) && !/^(attention|player)\./u.test(e.to)
+          (e) =>
+            !/^(attention|player|quest-ready)\./u.test(e.from) &&
+            !/^(attention|player|quest-ready)\./u.test(e.to)
         ),
+        { from: `${QUEST}.events`, to: `${QUEST_READY}.events`, type: 'events' },
+        { from: `${QUEST}.interface`, to: `${QUEST_READY}.parser`, type: 'interface' },
         { from: 'alice.attention', to: 'quest-player.attention', type: 'attention' },
-        { from: `${QUEST}.interface`, to: 'quest-player.parser', type: 'interface' },
+        { from: `${QUEST_READY}.interface`, to: 'quest-player.state', type: 'interface' },
         {
           from: 'quest-player.chat',
           to: `${TELEGRAM_USER}.chat`,
@@ -102,6 +108,7 @@ export async function runSittings(o: RunOptions = {}) {
   kit.core.register(
     fakeConnectorPlugin(TELEGRAM_USER, account),
     keepStore(questGamePlugin()),
+    keepStore(questReadyPlugin()),
     keepStore(attentionPlugin()),
     keepStore(playerPlugin())
   );

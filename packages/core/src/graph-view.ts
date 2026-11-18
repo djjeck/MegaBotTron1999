@@ -328,9 +328,9 @@ export interface PluginView {
   configInputs?: { key: string; types: ('events' | 'interface')[] };
   /** The keys of its config that name a chat, picked from a connector's chats (D96). */
   configChats?: ConfigChatView[];
-  /** A game bot's parser's: its bot's commands, the turns first, with their mechanics (D137). */
+  /** A game bot's readiness state's: its commands, the turn first, with their mechanics (D141). */
   botCommands?: BotCommand[];
-  /** A game bot's parser's: its bot's username, without `@` (D139). */
+  /** A game bot's readiness state's: its bot's username, without `@` (D139, D141). */
   botUsername?: string;
   /**
    * A player's (D137): the key of its config that lists the commands it plays, picked from the
