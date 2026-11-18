@@ -291,11 +291,13 @@ form.inline {
 .badge.needs-login,
 .badge.connecting,
 .badge.off,
-.badge.starting {
+.badge.starting,
+.badge.loading {
   color: var(--warn);
 }
 
 .badge.failed,
+.badge.failed-to-load,
 .badge.closed,
 .badge.stopped {
   color: var(--bad);

@@ -40,7 +40,10 @@
  * selected opens beside it (below it on a phone).
  *
  * A saved graph refused at the last start (`GET /status`, `graph.refused`) runs no node: it is
- * shown first, for the owner to fix. One or several running nodes selected can be killed (D44):
+ * shown first, for the owner to fix. While the instance loads its plugins in the background
+ * (`GET /status`, `boot`, D143), a banner says so, and once the phase moves on the plugins, the
+ * saved graph and the check are read again; a package or module that failed to load is listed,
+ * with its error, and its nodes say `failed to load`. One or several running nodes selected can be killed (D44):
  * each is stopped (D64) until its stop is cleared here.
  *
  * Chats flow left to right (D60): a connector is drawn as two cards (`cards.ts`), its in card at
@@ -199,6 +202,22 @@ export function GraphPage({
     (): Record<string, PortTypeInfo> => running.data?.portTypes ?? {},
     [running.data]
   );
+  // The plugins load in the background (D143): as the start moves on, what they make is read again.
+  const phase = status.data?.boot?.phase;
+  const lastPhase = useRef<string>(undefined);
+  const [booted, setBooted] = useState(0);
+  const { reload: reloadAvailable } = available;
+  const { reload: reloadRunning } = running;
+  const { reload: reloadFile } = file;
+  useEffect(() => {
+    const was = lastPhase.current;
+    lastPhase.current = phase;
+    if (was === undefined || was === phase) return;
+    reloadAvailable();
+    reloadRunning();
+    reloadFile();
+    setBooted((n) => n + 1);
+  }, [phase, reloadAvailable, reloadRunning, reloadFile]);
 
   /** The saved file's graph, as the draft last started from it. */
   const [saved, setSaved] = useState<Graph>();
@@ -264,7 +283,7 @@ export function GraphPage({
       live = false;
       clearTimeout(timer);
     };
-  }, [draft, checkAfterMs]);
+  }, [draft, checkAfterMs, booted]);
 
   const plugins = useMemo(
     () => new Map((available.data ?? []).map((p) => [p.id, p])),
@@ -787,6 +806,7 @@ export function GraphPage({
   if (draft === undefined) return <p className="muted">{file.error ?? 'Loading…'}</p>;
   const dirty = saved === undefined || !sameGraph(draft, saved) || clears.size > 0;
   const refused = status.data?.graph?.refused ?? [];
+  const loadFailures = status.data?.boot?.failures ?? [];
   const ids = new Set(draft.nodes.map((n) => n.id));
   const usedInstances = new Set(draft.nodes.map(instanceOf));
   const oneNode =
@@ -962,6 +982,25 @@ export function GraphPage({
   return (
     <div className="graph-page">
       <div className="graph-notes">
+        {phase !== 'loading' ? null : (
+          <div role="status" className="banner warn">
+            <strong>Loading the plugins…</strong> The nodes start once their plugins are in.
+          </div>
+        )}
+        {loadFailures.length === 0 ? null : (
+          <div role="alert" className="banner bad" aria-label="not loaded">
+            <strong>Some plugins did not load: their nodes do not run.</strong> Reinstall or roll
+            back a module on the <a href="#/modules">Modules</a> page, then restart; the other nodes
+            run.
+            <ul>
+              {loadFailures.map((f) => (
+                <li key={f.source}>
+                  {f.source}: <code>{f.error}</code>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {refused.length === 0 ? null : (
           <div role="alert" className="banner bad">
             <strong>The saved graph was refused at the last start: no node runs.</strong> Fix it

@@ -3,8 +3,10 @@
  * the right, each port drawn in its type's shape and colour (`PORT_TYPE_INFO`), and its state
  * (D64): running, with its parser's drift; **disabled** in the draft, greyed; **stopped** (a safety
  * stop, drift, the owner's kill or stop), in red tones with a warning icon and its reason;
- * **inactive** for a node it needs that is down, greyed with its reason; failed, with why; or not
- * running (added, or not applied yet). An edge is dragged from an output to an input; a node or a
+ * **inactive** for a node it needs that is down, greyed with its reason; failed, with why;
+ * **loading** while the plugins load, and **failed to load** for a node whose plugin did not load,
+ * with the package or module named and its error (D143); or not running (added, or not applied
+ * yet). An edge is dragged from an output to an input; a node or a
  * port the check refuses is marked, with why; one it warns of (D89), in the warning's own colour,
  * with what. A connector is drawn as two cards, its in card and
  * its out card (`cards.ts`, D60): each is titled with its side, and shows itself selected while
@@ -144,6 +146,15 @@ export function stateOf(
     };
   if (live.state === 'disabled')
     return { look: '', badge: 'enabled', why: 'disabled until the next Apply' };
+  // Its plugin not in yet, or not loaded at all (D143): the package or module is named in why.
+  if (live.state === 'loading')
+    return { look: 'loading', badge: 'loading', why: 'its plugin is loading' };
+  if (live.state === 'unloaded')
+    return {
+      look: 'failed',
+      badge: 'failed to load',
+      ...(live.reason === undefined ? {} : { why: live.reason }),
+    };
   return {
     look: live.state === 'failed' ? 'failed' : '',
     badge: live.state,
@@ -195,7 +206,7 @@ export function PluginNode({ data, selected }: NodeProps<PluginNodeType>) {
         <div className="muted small">{view.kinds.join(', ')}</div>
         <div>
           <span
-            className={`badge ${state.badge.replace(' ', '-')}`}
+            className={`badge ${state.badge.replaceAll(' ', '-')}`}
             {...(state.why === undefined ? {} : { title: state.why })}
           >
             {state.look === 'stopped' ? (

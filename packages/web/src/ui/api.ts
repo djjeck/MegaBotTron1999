@@ -6,6 +6,7 @@
 import type {
   AccountControl,
   AvailablePlugin,
+  BootControl,
   BotCommand,
   CoalescedView,
   ConfigChatView,
@@ -53,6 +54,7 @@ import type {
 export type {
   AccountControl,
   AvailablePlugin,
+  BootControl,
   BotCommand,
   CoalescedView,
   ConfigChatView,
@@ -118,11 +120,15 @@ export interface InstanceHealth {
   accounts: Record<string, number>;
 }
 
-/** The instance and its plugins, as `GET /status` gives them; `graph.refused`, why the saved graph did not run. */
+/**
+ * The instance and its plugins, as `GET /status` gives them; `graph.refused`, why the saved graph
+ * did not run; `boot`, where the start is and what failed to load (D143).
+ */
 export interface Status {
   off: boolean;
   plugins: PluginControl[];
   graph?: { refused: GraphProblem[] };
+  boot?: BootControl;
 }
 
 /** The saved graph, as `GET /graph/file` gives it (docs/bot-os-api.md §2.3). */

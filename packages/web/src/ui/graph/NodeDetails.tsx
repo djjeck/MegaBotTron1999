@@ -9,7 +9,9 @@
  * draft changes them, a reminder names its chat-in edges to update, each opening its panel. Then
  * the interface it declares (P11) and its removal, which keeps its instance. A stopped node (D64)
  * says why, when and by what, with **Clear stop**, a change of the draft that Apply makes; a
- * running one can be killed (D44). Its forms stay editable whatever its state. Its group (D69),
+ * running one can be killed (D44). A node whose plugin did not load (D143) names each package or
+ * module that failed, with its error, and for a module where to reinstall or roll it back. Its
+ * forms stay editable whatever its state. Its group (D69),
  * the lane it is drawn in, is picked among the draft's, or named anew. Its outputs say what they
  * carry (D71): an events output its event types, an interface output its members. A node up that
  * keeps a state (D72) shows it, drawn from its schema; a running connector, its queue (D73). Its
@@ -811,9 +813,43 @@ export function NodeDetails(props: {
         </dd>
         <dt>State</dt>
         <dd>
-          {live === undefined ? 'not running' : live.state}
-          {live?.reason === undefined ? null : <span className="muted"> {live.reason}</span>}
+          {live === undefined
+            ? 'not running'
+            : live.state === 'unloaded'
+              ? 'failed to load'
+              : live.state}
+          {live?.reason === undefined || live.state === 'unloaded' ? null : (
+            <span className="muted"> {live.reason}</span>
+          )}
         </dd>
+        {live?.state !== 'unloaded' ? null : (
+          <>
+            <dt>Not loaded</dt>
+            <dd>
+              {/* What failed to load that may have offered its plugin, and where to fix it (D143). */}
+              <ul aria-label={`why ${view.id} did not load`}>
+                {(live.failures ?? []).map((f) => (
+                  <li key={f.source}>
+                    <strong>{f.source}</strong>: <code>{f.error}</code>
+                    {f.module === undefined ? null : (
+                      <>
+                        {' '}
+                        Reinstall it, or roll it back, on the <a href="#/modules">Modules</a> page,
+                        then restart.
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {(live.failures ?? []).some((f) => f.module === undefined) ? (
+                <p className="muted small">
+                  A package of the image that does not load is fixed by a release: roll back to the
+                  image before, or update to the next.
+                </p>
+              ) : null}
+            </dd>
+          </>
+        )}
         {account === undefined ? null : (
           <>
             <dt>Connection</dt>
