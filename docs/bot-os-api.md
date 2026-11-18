@@ -1056,7 +1056,7 @@ interface Inbound {
   own?: boolean; // sent by the account itself, from any of its devices
   document?: InboundDocument; // the file it carries; `text` is then its caption ('' without one)
   edited?: number; // an edit of message `id` (bot-os.md D144): when, ms; `text` its text now
-  buttons?: readonly (readonly string[])[]; // its inline buttons' labels, by row (bot-os.md D145)
+  buttons?: readonly (readonly string[])[]; // its inline buttons' labels, by row; [] none; absent unknown (D145)
 }
 
 interface InboundDocument {
@@ -1100,7 +1100,8 @@ one in a test. No answer is paired from an edit (D98).
 **Buttons** (bot-os.md D145): a bot's message with inline buttons gives their labels, row by row, as
 its `buttons` (`[['◀️', '▶️']]`), and an edit gives them as they now are: a parser reads which
 choices a menu offers, or whether a page is the first or the last (its ◀️ or ▶️ replaced). Labels
-only: pressing one is not offered. `telegram-user` has them; the others give none.
+only: pressing one is not offered. `telegram-user` has them, `[]` for a message without any (a list
+of one page); the others cannot tell, and leave `buttons` out.
 
 **Files** (bot-os.md D82): a message that carries a file has its `document`. The Telegram connectors
 download a text file (`text/*`, `application/json`, `application/xml`, `application/csv`, or no type

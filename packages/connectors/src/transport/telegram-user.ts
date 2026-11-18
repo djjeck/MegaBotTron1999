@@ -148,7 +148,7 @@ function username(entity: unknown): string | undefined {
  * The labels of a message's inline buttons, row by row (D145); none when it has no inline keyboard
  * (a reply keyboard, which a bot sets for the person typing, is not a message's).
  */
-function buttonsOf(m: RawMessage): { buttons?: string[][] } {
+function buttonsOf(m: RawMessage): { buttons: string[][] } {
   const list = (o: unknown, key: string): unknown[] => {
     const v = typeof o === 'object' && o !== null ? (o as Record<string, unknown>)[key] : undefined;
     return Array.isArray(v) ? v : [];
@@ -161,7 +161,7 @@ function buttonsOf(m: RawMessage): { buttons?: string[][] } {
       })
     )
     .filter((r) => r.length > 0);
-  return rows.length === 0 ? {} : { buttons: rows };
+  return { buttons: rows };
 }
 
 /** How long a failed start waits before the next. */

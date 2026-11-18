@@ -242,6 +242,7 @@ describe('TelegramUserConnector', () => {
         replyTo: '5',
         playback: false,
         own: true,
+        buttons: [],
       },
       // A private chat, as the network says (D90): its name may be an id.
       expect.objectContaining({ chat: '@Quiz_bot', id: '5', sender: 'quiz_bot', private: true }),
@@ -1167,7 +1168,7 @@ describe('the catch-up', () => {
     expect(edits[0]).not.toHaveProperty('missed');
   });
 
-  it('gives the labels of a message’s inline buttons, row by row, and as an edit sets them (D145)', async () => {
+  it('gives the labels of a message’s inline buttons, row by row, none as none, and as an edit sets them (D145)', async () => {
     const { c, f, messages } = await connector();
     const edits: Inbound[] = [];
     c.onEdit((m) => edits.push(m));
@@ -1179,8 +1180,8 @@ describe('the catch-up', () => {
     await f.edit(
       raw({ id: 8, message: 'Pagina dopo', replyMarkup: page('◀️', '🔒'), editDate: 1_793_000_030 })
     );
-    expect(messages.map((m) => m.buttons)).toEqual([[['🔒', '▶️']], undefined]);
-    expect(messages[1]).not.toHaveProperty('buttons');
+    // None is said (`[]`): a page without buttons is a whole list, unlike one a connector cannot tell.
+    expect(messages.map((m) => m.buttons)).toEqual([[['🔒', '▶️']], []]);
     expect(edits[0]?.buttons).toEqual([['◀️', '🔒']]);
   });
 

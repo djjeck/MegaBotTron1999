@@ -158,8 +158,9 @@ export interface Inbound {
   edited?: number;
   /**
    * The labels of the buttons a bot set under it, row by row (bot-os.md D145): what it offers to
-   * press, a menu's choices, a page's ◀️ and ▶️. Absent when it has none, or the network has no
-   * buttons. An edit gives them as they now are.
+   * press, a menu's choices, a page's ◀️ and ▶️. None (`[]`) when it has none; absent where the
+   * connector cannot tell (a network without buttons): a page whose buttons are `[]` is the whole
+   * list, one whose buttons are unknown may not be. An edit gives them as they now are.
    */
   buttons?: readonly (readonly string[])[];
 }
