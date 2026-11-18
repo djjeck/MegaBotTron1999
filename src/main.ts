@@ -3,17 +3,19 @@
  * owner's control API and the web UI, and no game. Everything it calls is tested; this file is
  * wiring, left out of coverage.
  *
- * The connectors, attention and the player, the reactor, the script node and owner-notice are registered, and so are the plugins of the modules installed under
- * `/data/modules/<id>/` (docs/bot-os.md D49, docs/bot-os-api.md §7), so the image offers them; the
- * graph is the saved one, `/data/graph.json` (D50, docs/bot-os-api.md §2.3), each node's state in
- * its instance under `/data/instances/`. No file: no node runs until the owner adds one. A file
- * refused: no node runs, and a `graph-refused` notice says why, in the editor's events panel.
+ * It serves first (docs/bot-os.md D143): the control API, the health endpoint and the web UI are up
+ * before any plugin package, module or connector is loaded, so that the owner always reaches the
+ * UI, whatever a plugin does. Then, in the background (`bootstrap`), each of the image's plugin
+ * packages is imported on its own (the connectors, attention and the player, the reactor, the
+ * script node and owner-notice), then the modules installed under `/data/modules/<id>/` (D49,
+ * docs/bot-os-api.md §7); one that fails to load is named, with why, and only the nodes of its
+ * plugins are held. The graph is the saved one, `/data/graph.json` (D50, docs/bot-os-api.md §2.3),
+ * each node's state in its instance under `/data/instances/`. No file: no node runs until the owner
+ * adds one. A file refused: no node runs, and a `graph-refused` notice says why, in the editor's
+ * events panel. An error nothing caught is told, and the process goes on (`guard`).
  */
-import { anthropicPlugin } from '@megabottron1999/connectors/plugins/anthropic.ts';
-import { ircPlugin } from '@megabottron1999/connectors/plugins/irc.ts';
-import { telegramBotPlugin } from '@megabottron1999/connectors/plugins/telegram-bot.ts';
-import { telegramUserPlugin } from '@megabottron1999/connectors/plugins/telegram-user.ts';
 import {
+  bootstrap,
   controlHandler,
   Core,
   CORE_STORE,
@@ -23,23 +25,19 @@ import {
   GitModules,
   GraphFile,
   graphFileControls,
+  guard,
   healthServer,
   KEY_SECRET,
   loadModules,
   moduleControls,
+  type ModulesLoad,
   ModuleStore,
-  type Plugin,
+  type PackageSpec,
   Secrets,
   shutdown,
-  StartError,
   Stores,
   wallClock,
 } from '@megabottron1999/core';
-import { attentionPlugin } from '@megabottron1999/turns/attention.ts';
-import { ownerNoticePlugin } from '@megabottron1999/turns/owner-notice.ts';
-import { playerPlugin } from '@megabottron1999/turns/player.ts';
-import { reactorPlugin } from '@megabottron1999/turns/reactor.ts';
-import { scriptPlugin } from '@megabottron1999/turns/script-plugin.ts';
 import { startWebUi } from '@megabottron1999/web/server/web-server.ts';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -89,61 +87,68 @@ const core = new Core({
   print: (line) => console.log(line),
   record: (r) => events.write(secrets.redactDeep(r)),
 });
-// The connectors the image offers (docs/bot-os-api.md §5), each built from its node's config alone;
-// a node gives each its own account.
-// Attention too, one node per person, and the player, as many nodes as there are bots (each on its
-// own instance), each built from its config alone (docs/bot-os.md D134); the players' parsers are a
-// game's, from the game's grammar, so they come from a module. And the reactor, one node per
-// reaction, each from its config alone.
-const image: Plugin[] = [
-  ircPlugin(),
-  telegramBotPlugin(),
-  telegramUserPlugin(),
-  anthropicPlugin(),
-  attentionPlugin(),
-  playerPlugin(),
-  reactorPlugin(),
+// The plugin packages the image offers, each imported on its own in the background (D143): one that
+// fails to load holds only the nodes of its plugins. The connectors (docs/bot-os-api.md §5), each
+// built from its node's config alone; a node gives each its own account. Attention too, one node
+// per person, and the player, as many nodes as there are bots (each on its own instance), each
+// built from its config alone (docs/bot-os.md D134); the players' parsers are a game's, from the
+// game's grammar, so they come from a module. And the reactor, one node per reaction, each from
+// its config alone.
+const packages: PackageSpec[] = [
+  {
+    name: '@megabottron1999/connectors/plugins/irc.ts',
+    load: async () => [(await import('@megabottron1999/connectors/plugins/irc.ts')).ircPlugin()],
+  },
+  {
+    name: '@megabottron1999/connectors/plugins/telegram-bot.ts',
+    load: async () => [
+      (await import('@megabottron1999/connectors/plugins/telegram-bot.ts')).telegramBotPlugin(),
+    ],
+  },
+  {
+    name: '@megabottron1999/connectors/plugins/telegram-user.ts',
+    load: async () => [
+      (await import('@megabottron1999/connectors/plugins/telegram-user.ts')).telegramUserPlugin(),
+    ],
+  },
+  {
+    name: '@megabottron1999/connectors/plugins/anthropic.ts',
+    load: async () => [
+      (await import('@megabottron1999/connectors/plugins/anthropic.ts')).anthropicPlugin(),
+    ],
+  },
+  {
+    name: '@megabottron1999/turns/attention.ts',
+    load: async () => [(await import('@megabottron1999/turns/attention.ts')).attentionPlugin()],
+  },
+  {
+    name: '@megabottron1999/turns/player.ts',
+    load: async () => [(await import('@megabottron1999/turns/player.ts')).playerPlugin()],
+  },
+  {
+    name: '@megabottron1999/turns/reactor.ts',
+    load: async () => [(await import('@megabottron1999/turns/reactor.ts')).reactorPlugin()],
+  },
   // Script nodes (docs/bot-os.md D76): the owner's code, each in a worker thread of its own.
-  scriptPlugin(),
+  {
+    name: '@megabottron1999/turns/script-plugin.ts',
+    load: async () => [(await import('@megabottron1999/turns/script-plugin.ts')).scriptPlugin()],
+  },
   // What needs the owner's attention, told through a connector (docs/bot-os.md D91).
-  ownerNoticePlugin(),
+  {
+    name: '@megabottron1999/turns/owner-notice.ts',
+    load: async () => [
+      (await import('@megabottron1999/turns/owner-notice.ts')).ownerNoticePlugin(),
+    ],
+  },
 ];
-core.register(...image);
 // The modules (docs/bot-os-api.md §7): each one refused is named, with why, and the others load.
 const modules = new ModuleStore(path.join(dataDir, 'modules'), () => clock.now());
-const loaded = await loadModules({
-  dir: modules.dir,
-  host: import.meta.url,
-  reserved: image.map((p) => p.manifest.id),
-});
-for (const m of loaded.modules)
-  console.log(
-    `megabottron1999: module ${m.id} ${m.version}: ${m.plugins.join(', ') || 'no plugins'}`
-  );
-for (const f of loaded.failures)
-  console.error(`megabottron1999: module ${f.id} refused: ${f.reason}`);
-for (const m of loaded.modules)
-  core.registerModule(
-    m.id,
-    loaded.plugins.filter((p) => p.module === m.id).map((p) => p.plugin),
-    m.version
-  );
-try {
-  core.load();
-} catch (e) {
-  if (e instanceof StartError) {
-    console.error(`megabottron1999: ${e.message}`);
-    process.exit(2);
-  }
-  throw e;
-}
-// The graph's history (D61): the file kept as a version if none holds it, marked as run or refused.
-try {
-  graphFile.started(core);
-} catch (e) {
-  console.error(`megabottron1999: the graph's history: ${String(e)}`);
-}
-await core.start();
+/** The modules loaded, once the background start has (D143). */
+let loaded: ModulesLoad | undefined;
+// An error nothing caught is told, naming the module or package its stack names, and the process
+// goes on (D143).
+guard(core, process, () => loaded?.modules ?? []);
 
 // Modules from repository links, checked for updates at the start and every 6 hours; only the
 // owner installs one (docs/bot-os.md D67, D102). GitHub is always allowed; a GitHub token is
@@ -165,7 +170,6 @@ const gitHosts = new GitHostList({
   names: () => secrets.names().filter((n) => !shellSecrets.has(n)),
 });
 const gitModules = new GitModules(modules, gitHosts.get, () => clock.now());
-gitModules.start();
 
 // The owner's control API (packages/core/src/control-server.ts): one handler, served on the
 // container's loopback, and under `/api/` by the web UI, only behind its login.
@@ -188,12 +192,18 @@ const controlApi = controlHandler({
   restart: () => void end('restart'),
   build,
   // A module is removed only while no node of the saved graph uses its plugins (D68).
-  modules: moduleControls(modules, loaded, gitModules, () => graphFile.nodes(), gitHosts),
+  modules: moduleControls(
+    modules,
+    () => loaded,
+    gitModules,
+    () => graphFile.nodes(),
+    gitHosts
+  ),
 });
 const control = http.createServer(controlApi).listen(port('CONTROL_PORT', 8081), '127.0.0.1');
-// The shell's health endpoint, for a container's healthcheck (GET /health: 200 while every enabled
-// connector is connected, 503 otherwise), on HEALTH_PORT, every interface; off unless it is set
-// (the image sets 8080).
+// The shell's health endpoint, for a container's healthcheck (GET /health: 200 as soon as it
+// serves, D143; where the start is and each connector's status as detail), on HEALTH_PORT, every
+// interface; off unless it is set (the image sets 8080).
 const healthPort = port('HEALTH_PORT', 0);
 const healthy =
   healthPort === 0 ? undefined : healthServer(core.controls).listen(healthPort, '0.0.0.0');
@@ -209,10 +219,27 @@ const web = startWebUi({
   port: port('WEB_PORT', 8082),
   print: (line) => console.log(line),
 });
-console.log(
-  `megabottron1999 ${build.version}${build.commit === undefined ? '' : ` (${build.commit.slice(0, 7)})`}: ` +
-    `started, ${core.nodes().length} plugin instance(s) in the graph`
-);
+const release = `megabottron1999 ${build.version}${build.commit === undefined ? '' : ` (${build.commit.slice(0, 7)})`}`;
+console.log(`${release}: serving; loading the plugins`);
+
+// The plugins, then the nodes, in the background (D143): each package and module on its own.
+void bootstrap({
+  core,
+  packages,
+  modules: async (reserved) =>
+    (loaded = await loadModules({ dir: modules.dir, host: import.meta.url, reserved })),
+  // The graph's history (D61): the file kept as a version if none holds it, marked as run or
+  // refused.
+  loaded: () => graphFile.started(core),
+  print: (line) => console.log(line),
+}).then((b) => {
+  console.log(
+    `${release}: started, ${core.nodes().length} plugin instance(s) in the graph` +
+      (b.failures.length === 0 ? '' : `, ${b.failures.length} failed to load`)
+  );
+  // Modules from repository links, checked for updates from now on (D67, D102).
+  gitModules.start();
+});
 
 // The end, at a signal or the owner's restart: the core stops first, its plugins' state kept, then
 // the process exits 0, for Docker's `restart: unless-stopped` to start it again after a restart.

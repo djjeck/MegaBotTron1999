@@ -22,6 +22,11 @@ hidden from every view of it (`src/sensitive.ts`, `hideSensitive`, D124).
 
 - `src/index.ts` is the public API (`@megabottron1999/core`); plugins import nothing else.
 - `src/devkit.ts`: a core on a virtual clock with fake connectors, for tests and simulators.
+- `src/boot.ts`, `src/held.ts`: the start in the background, once the wiring serves (docs/bot-os.md
+  D143): the image's plugin packages, then the modules, each loaded on its own; a package or module
+  that fails to load is told to the core, which holds the nodes of its plugins (`unloaded`) and
+  those that need them, and runs the rest; `guard` keeps the process up through an error nothing
+  caught. The health endpoint (`src/health.ts`) answers 200 as soon as it serves.
 - `src/modules.ts`, `src/module-loader.ts`, `src/module-resolve.ts`, `src/module-hooks.ts`,
   `src/module-store.ts`, `src/module-files.ts`, `src/module-git.ts`, `src/module-github.ts`,
   `src/module-gitea.ts`, `src/module-hosts.ts`: the modules of the data volume, their resolve hook,

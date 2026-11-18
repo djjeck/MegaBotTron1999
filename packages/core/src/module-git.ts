@@ -466,13 +466,15 @@ export interface HostControls {
  */
 export function moduleControls(
   store: ModuleStore,
-  load: ModulesLoad | undefined,
+  /** The modules loaded, or how to read them: none until the background load is done (D143). */
+  loaded: ModulesLoad | (() => ModulesLoad | undefined) | undefined,
   git?: GitModules,
   nodes: () => readonly GraphNodeRef[] = () => [],
   hosts?: HostControls
 ): ModuleControls {
+  const loadOf = (): ModulesLoad | undefined => (typeof loaded === 'function' ? loaded() : loaded);
   const report = (): ModulesReport => {
-    const r = store.report(load, nodes());
+    const r = store.report(loadOf(), nodes());
     return git === undefined ? r : git.decorate(r);
   };
   return {
@@ -484,7 +486,7 @@ export function moduleControls(
       return git.install(source.git);
     },
     rollback: (id) => store.rollback(id),
-    remove: (id) => store.remove(id, load, nodes()),
+    remove: (id) => store.remove(id, loadOf(), nodes()),
     plan: (listing) => store.plan(listing),
     ...(git === undefined
       ? {}

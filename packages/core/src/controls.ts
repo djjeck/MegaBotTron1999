@@ -4,7 +4,8 @@
  * surface's owner commands, the HTTP control API and the web UI on it) is made from these.
  *
  * - Each node's state (bot-os.md D64: running; disabled; stopped, with its stop; inactive, with
- *   the node it needs; failed, with why), its settings, and the state and actions its manifest's
+ *   the node it needs; failed, with why; D143: loading, while the plugins load, and unloaded, its
+ *   plugin not loaded, with what failed to load), its settings, and the state and actions its manifest's
  *   `interface` declares, which the owner reads and calls (an action's input checked against its
  *   schema). The states are raised only in the editor, applied with a restart: no control here
  *   starts a node again.
@@ -107,6 +108,35 @@ export interface ControlsHost {
   sealed?(id: string): SealedState | undefined;
   /** Logs a login's step in the event log (`core.login`, D116): never what was typed. */
   recordLogin?(fields: Record<string, unknown>): void;
+  /**
+   * The nodes of the saved graph that do not run for their plugin (D143): every one while the
+   * plugins load, then those whose plugin did not load and those that need them.
+   */
+  held?(): HeldControl[];
+  /** Where the instance's start is, and what failed to load (D143). */
+  boot?(): BootControl;
+}
+
+/** A package or module that failed to load (D143): what, its module's id for a module, and why. */
+export interface LoadFailureView {
+  source: string;
+  module?: string;
+  error: string;
+}
+
+/** A node the core does not run for its plugin (D143), as `ControlsHost.held` gives it. */
+export interface HeldControl {
+  id: string;
+  plugin: string;
+  state: string;
+  reason?: string;
+  failures?: LoadFailureView[];
+}
+
+/** Where the instance's start is (D143): its plugins loading, its nodes starting, or started. */
+export interface BootControl {
+  phase: 'loading' | 'starting' | 'started';
+  failures: LoadFailureView[];
 }
 
 /** What the controls read of a running connector. */
@@ -193,6 +223,11 @@ export interface PluginControl {
    * for the same reason; none, when nothing is.
    */
   backoff?: BackoffView[];
+  /**
+   * For a node whose plugin did not load (`unloaded`, D143): what failed to load that may have
+   * offered it, each package or module named, with its error.
+   */
+  failures?: LoadFailureView[];
 }
 
 /** An action's outcome: its output, or why not (`refused`: the plugin's own refusal). */
@@ -227,51 +262,81 @@ export class Controls {
     return this.offNow;
   }
 
-  /** The instance and each plugin, in load order. */
-  status(): { off: boolean; plugins: PluginControl[] } {
+  /** Where the instance's start is, and what failed to load (D143); none from a host that cannot tell. */
+  boot(): BootControl | undefined {
+    return this.host.boot?.();
+  }
+
+  /**
+   * The instance and each plugin, in load order, then the nodes held for their plugin (D143); and
+   * where the start is.
+   */
+  status(): { off: boolean; plugins: PluginControl[]; boot?: BootControl } {
     const current = this.host.settings.current();
+    const boot = this.host.boot?.();
+    const held = (this.host.held?.() ?? []).map((h): PluginControl => ({
+      id: h.id,
+      plugin: h.plugin,
+      description: '',
+      kinds: [],
+      state: h.state,
+      ...(h.reason === undefined ? {} : { reason: h.reason }),
+      settings: {},
+      reads: [],
+      actions: [],
+      ...(h.failures === undefined ? {} : { failures: h.failures }),
+    }));
     return {
       off: this.offNow,
-      plugins: this.host.nodes().map(({ id, manifest: m, version }) => {
-        const s = this.host.status(id);
-        const settings: Record<string, SettingValue | undefined> = {};
-        for (const key of this.host.settings.of(id)?.keys() ?? []) {
-          const name = this.host.settings.owner(key) === id ? key : `${id}.${key}`;
-          settings[name] = current[name];
-        }
-        const reads = Object.keys(m.interface.state ?? {});
-        const status = reads.includes('status') ? this.read(id, 'status') : undefined;
-        const w = m.widget;
-        // Its status, read already, is not read again for a widget that shows it.
-        const widget =
-          w === undefined
-            ? undefined
-            : w.read === 'status' && w.input === undefined && status !== undefined
-              ? status
-              : this.read(id, w.read, w.input);
-        const summary = this.summary(id);
-        const cost = this.host.cost?.(id);
-        const backoff = this.host.backoffs?.(id) ?? [];
-        return {
-          id,
-          plugin: m.id,
-          description: m.description,
-          kinds: [...m.kinds],
-          ...(version === undefined ? {} : { version }),
-          state: s?.state ?? 'unknown',
-          ...(s?.reason === undefined ? {} : { reason: s.reason }),
-          ...(s?.stop === undefined ? {} : { stop: { ...s.stop } }),
-          settings,
-          reads,
-          actions: Object.keys(m.interface.actions ?? {}),
-          ...(status !== undefined && 'value' in status ? { status: status.value } : {}),
-          ...(widget !== undefined && 'value' in widget ? { widget: widget.value } : {}),
-          ...(summary === undefined ? {} : { summary }),
-          ...(cost === undefined ? {} : { cost }),
-          ...(backoff.length === 0 ? {} : { backoff }),
-        };
-      }),
+      ...(boot === undefined ? {} : { boot }),
+      plugins: [
+        ...this.running(current),
+        ...held.filter((h) => !this.host.nodes().some((n) => n.id === h.id)),
+      ],
     };
+  }
+
+  /** Each node the core runs, as the owner sees it. */
+  private running(current: Record<string, SettingValue | undefined>): PluginControl[] {
+    return this.host.nodes().map(({ id, manifest: m, version }) => {
+      const s = this.host.status(id);
+      const settings: Record<string, SettingValue | undefined> = {};
+      for (const key of this.host.settings.of(id)?.keys() ?? []) {
+        const name = this.host.settings.owner(key) === id ? key : `${id}.${key}`;
+        settings[name] = current[name];
+      }
+      const reads = Object.keys(m.interface.state ?? {});
+      const status = reads.includes('status') ? this.read(id, 'status') : undefined;
+      const w = m.widget;
+      // Its status, read already, is not read again for a widget that shows it.
+      const widget =
+        w === undefined
+          ? undefined
+          : w.read === 'status' && w.input === undefined && status !== undefined
+            ? status
+            : this.read(id, w.read, w.input);
+      const summary = this.summary(id);
+      const cost = this.host.cost?.(id);
+      const backoff = this.host.backoffs?.(id) ?? [];
+      return {
+        id,
+        plugin: m.id,
+        description: m.description,
+        kinds: [...m.kinds],
+        ...(version === undefined ? {} : { version }),
+        state: s?.state ?? 'unknown',
+        ...(s?.reason === undefined ? {} : { reason: s.reason }),
+        ...(s?.stop === undefined ? {} : { stop: { ...s.stop } }),
+        settings,
+        reads,
+        actions: Object.keys(m.interface.actions ?? {}),
+        ...(status !== undefined && 'value' in status ? { status: status.value } : {}),
+        ...(widget !== undefined && 'value' in widget ? { widget: widget.value } : {}),
+        ...(summary === undefined ? {} : { summary }),
+        ...(cost === undefined ? {} : { cost }),
+        ...(backoff.length === 0 ? {} : { backoff }),
+      };
+    });
   }
 
   /**

@@ -167,6 +167,7 @@ describe('Controls', () => {
     await core.start();
     expect(core.controls.status()).toEqual({
       off: false,
+      boot: { phase: 'started', failures: [] },
       plugins: [
         expect.objectContaining({ id: 'chat', state: 'running', settings: {}, reads: [] }),
         {

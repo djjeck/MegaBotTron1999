@@ -140,9 +140,11 @@ with its own authentication, rather than publishing the port.
   `git.example.lan: the server's certificate isn't trusted (…): mount its CA and set NODE_EXTRA_CA_CERTS`.
 
 - **Ports:** 8082 is the web UI. 8080 is the health endpoint (`HEALTH_PORT`): `GET /health` answers
-  200 while every enabled connector is connected (one waiting for its login, D125, is left out), 503
-  otherwise, and the image's `HEALTHCHECK` probes it; set `HEALTH_PORT` empty to turn it off, and
-  disable the healthcheck with it. The control API listens on the container's loopback (8081) only.
+  200 as soon as the process serves, before any plugin has loaded, saying where the start is and
+  each connector's connection as detail (D143: a plugin, a module or a connector that fails or waits
+  never takes the web UI away), and the image's `HEALTHCHECK` probes it; set `HEALTH_PORT` empty to
+  turn it off, and disable the healthcheck with it. The control API listens on the container's
+  loopback (8081) only.
 - The container runs as the `node` user, from `/app`, with `node src/main.ts`.
 
 To build the image yourself:
@@ -255,10 +257,11 @@ export const greeter = definePlugin({
 Games and their automation come as _modules_ in the data volume (`/data/modules/<id>/`, a directory
 of `.ts` files and a `module.json`), installed by the owner through the control API (from a folder,
 a tarball, a GitHub link or a link on a self-hosted Git server, the previous version kept for a
-rollback), removed the same way, and loaded at start ([docs/bot-os.md](docs/bot-os.md) D49, D53,
-D67, D68). A module repository develops and tests against this one vendored as a git submodule
-([docs/bot-os-api.md](docs/bot-os-api.md) §7). The full API is
-[docs/bot-os-api.md](docs/bot-os-api.md).
+rollback), removed the same way, and loaded at start, in the background once the web UI serves, each
+on its own: one that fails to load holds only its own nodes, which say why in the editor
+([docs/bot-os.md](docs/bot-os.md) D49, D53, D67, D68, D143). A module repository develops and tests
+against this one vendored as a git submodule ([docs/bot-os-api.md](docs/bot-os-api.md) §7). The full
+API is [docs/bot-os-api.md](docs/bot-os-api.md).
 
 ## Layout
 

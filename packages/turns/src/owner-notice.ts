@@ -117,7 +117,8 @@ const reportHelp: Record<Reported, string> = {
   unreachable:
     'Sends the network refused: a chat the connector cannot reach, such as a person who never started the bot (D95)',
   warning: "The graph's warnings at the load (D89)",
-  other: 'Notices of any other kind, raised by plugins',
+  other:
+    'Notices of any other kind: a package or module that failed to load, an error nothing caught (D143), a plugin’s own',
   told: 'The plugins’ messages for the owner (`ctx.notify`), each at once, with its buttons where the chat can run them',
 };
 

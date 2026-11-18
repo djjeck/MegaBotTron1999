@@ -27,6 +27,8 @@ describe('health', () => {
       ok: true,
       uptimeS: 12,
       on: true,
+      phase: 'started',
+      connected: true,
       connectors: [
         { id: 'a', plugin: 'chat', status: 'connected', counted: true },
         { id: 'b', plugin: 'chat', status: 'connected', counted: true },
@@ -36,15 +38,18 @@ describe('health', () => {
     expect(health(source([]), 0).ok).toBe(true);
   });
 
-  it('is not ok with a connector connecting, closed or failed', () => {
+  it('is ok all the same with a connector connecting, closed or failed: detail, not a failure (D143)', () => {
     const connecting: AccountControl = {
       ...connected('b'),
       connection: { state: 'connecting', phase: 'dialing' },
     };
-    expect(health(source([connected('a'), connecting]), 1).ok).toBe(false);
+    const waiting = health(source([connected('a'), connecting]), 1);
+    expect(waiting.ok).toBe(true);
+    expect(waiting.connected).toBe(false);
     const failed: AccountControl = { id: 'c', plugin: 'chat', state: 'failed', reason: 'no token' };
     const h = health(source([failed]), 1);
-    expect(h.ok).toBe(false);
+    expect(h.ok).toBe(true);
+    expect(h.connected).toBe(false);
     expect(h.connectors).toEqual([{ id: 'c', plugin: 'chat', status: 'failed', counted: true }]);
   });
 
@@ -57,6 +62,7 @@ describe('health', () => {
     };
     const h = health(source([connected('a'), disabled, stopped], true), 1);
     expect(h.ok).toBe(true);
+    expect(h.connected).toBe(true);
     expect(h.on).toBe(false);
     expect(h.connectors.map((c) => [c.id, c.status, c.counted])).toEqual([
       ['a', 'connected', true],
@@ -73,7 +79,7 @@ describe('health of a connector waiting for its login', () => {
       connection: { state: 'closed', phase: 'needs login', detail: 'log in from its node' },
     };
     const h = health(source([connected('a'), waiting]), 1);
-    expect(h.ok).toBe(true);
+    expect(h.connected).toBe(true);
     expect(h.connectors).toContainEqual({
       id: 't',
       plugin: 'chat',
@@ -90,7 +96,7 @@ describe('healthServer', () => {
     server = undefined;
   });
 
-  it('answers GET /health from the core: 503 until the connector connects, then 200', async () => {
+  it('answers GET /health from the core with 200, the connector connected or not (D143)', async () => {
     const chat = new FakeConnector({ account: 'chat:me' });
     const core = new Core({ clock: new VirtualClock(1000) });
     core.register(fakeConnectorPlugin('chat', chat));
@@ -102,18 +108,20 @@ describe('healthServer', () => {
     const base = `http://127.0.0.1:${port}`;
     chat.close();
     const down = await fetch(`${base}/health`);
-    expect(down.status).toBe(503);
+    expect(down.status).toBe(200);
     expect(down.headers.get('cache-control')).toBe('no-store');
     expect(await down.json()).toEqual({
-      ok: false,
+      ok: true,
       uptimeS: 7,
       on: true,
+      phase: 'started',
+      connected: false,
       connectors: [{ id: 'chat', plugin: 'chat', status: 'closed', counted: true }],
     });
     chat.open();
     const up = await fetch(`${base}/health?probe=1`);
     expect(up.status).toBe(200);
-    expect(((await up.json()) as { ok: boolean }).ok).toBe(true);
+    expect(((await up.json()) as { connected: boolean }).connected).toBe(true);
     const head = await fetch(`${base}/health`, { method: 'HEAD' });
     expect(head.status).toBe(200);
     expect(await head.text()).toBe('');

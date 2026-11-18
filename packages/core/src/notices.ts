@@ -33,6 +33,8 @@ export const NOTICE_KINDS = [
   'graph-refused',
   'backoff',
   'unanswered',
+  'load-failed',
+  'uncaught',
 ] as const;
 export type CoreNoticeKind = (typeof NOTICE_KINDS)[number];
 
@@ -52,7 +54,8 @@ export interface Notice {
    * message for the owner (`told`, `ctx.notify`, D94), the saved graph refused at the load, no node
    * running (`graph-refused`, D94), a send the network refused (`unreachable`, D95), a node the
    * retry-loop guard holds back (`backoff`, D98), a command no answer came for (`unanswered`,
-   * D107), or a plugin's own kind.
+   * D107), a package or module that failed to load (`load-failed`, D143), an error nothing caught
+   * (`uncaught`, D143), or a plugin's own kind.
    */
   kind: string;
   /** When, in ms. */

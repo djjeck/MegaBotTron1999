@@ -731,12 +731,14 @@ No agent grant ever includes these (P11): they are the control API's, which no a
 ## 3. The lifecycle
 
 ```text
+loading ─ its plugin's package or module loads ─▶ registered
+loading ─ it does not load ─▶ unloaded (with why), and the nodes requiring it inactive
 registered ─ manifests, graph and config valid ─▶ starting ─ create(), start() ─▶ running
    running ─ every plugin started: ready() ─▶ running
    running ─ a safety stop, drift, the owner's kill or stop ─▶ stopped (kept in its instance)
    running, stopped ─ serialise(), stop() ─▶ stopping ─▶ stopped
-   create(), start(), ready() or a migration fails, or ctx.fail() ─▶ failed (with why), and so
-   do the plugins requiring it
+   create(), start(), ready() or a migration fails, or does not settle within 60 s, or
+   ctx.fail() ─▶ failed (with why), and so do the plugins requiring it
    at load: disabled in the graph, stopped in its instance, or inactive ─▶ never started
 ```
 
@@ -756,25 +758,48 @@ stopped. What goes wrong in them is still logged node by node: a node `failed` (
 (`stopped`, its `reason` `stop failed: …`). A node's change at runtime (a stop, a cascade, a
 failure, a cleared stop) is logged as it happens.
 
-- **Errors of the deployment** fail the whole instance at load, before any plugin runs, naming the
+- **The start in the background** (bot-os.md D143, `packages/core/src/boot.ts`): the entry point
+  serves first (the control API, the health endpoint and the web UI), then `bootstrap` imports each
+  of the image's plugin packages on its own, side by side, then the modules (§7.3), then loads the
+  graph and starts its nodes. Until the load, the saved graph's nodes are `loading` in
+  `GET /status`, with `boot.phase: "loading"` (then `starting`, then `started`), and a graph is not
+  checked (`POST /graph/check` says the plugins are still loading). A package whose import throws (a
+  SyntaxError of Node's type stripping, a top-level error), does not settle within 30 s, or whose
+  factory throws is a failure of that package alone, as a module's is of that module; each is told
+  to the core (`core.failedToLoad`): printed, logged (`core.load`, `event: "failed"`, `source`,
+  `error`) and raised as a `load-failed` notice (§4.16), and listed in `GET /status`'s
+  `boot.failures` (`{ source, module?, error }`, `source` `package <specifier>` or `module <id>`).
+  The nodes of a plugin not offered then are held out of the graph the core runs (`unloaded`, its
+  `reason` naming the failure that took it, and `failures`), and so is each node a required port of
+  which it binds (`inactive`, `needs dice (unloaded)`); the rest runs. Which failure took a plugin
+  is read from where each plugin came from at the last start that loaded it (the core's
+  `plugin-sources` document); a plugin never loaded names every failure. With nothing failed to
+  load, a plugin not offered refuses the graph, as below.
+- **Errors of the deployment** fail the whole graph at load, before any plugin runs, naming the
   plugin and what is wrong: a bad manifest, two plugins with one id, a bad graph, a cycle, a bad
   configuration value, a secret declared but not provided, an archived plugin in the graph (unless
-  `CoreOptions.allowArchived`).
-- **Errors at runtime** fail one plugin: `create` or `start` throws, a migration fails, or the
+  `CoreOptions.allowArchived`). The saved graph refused, no node runs and the owner is told (§2.3);
+  the process serves on.
+- **Errors at runtime** fail one plugin: `create` or `start` throws or does not settle within 60 s
+  (`CoreOptions.startTimeoutMs`; what a late `create` makes is stopped), a migration fails, or the
   plugin fails its node itself (`ctx.fail(reason)`, for what it cannot run on: a script that hung or
   ran out of memory, bot-os.md D28; its events, messages and timers cut at once, its sends refused,
   then its `stop` called). That plugin is `failed`, with why; the plugins that require it (a
   required edge, §2.1) are `failed` too; every other plugin starts. A `failed` notice is raised
   (§4.16), for `owner-notice` to tell, and the failure is logged (`core.plugin`).
 - **Start** runs in load order (requirements first), each plugin's `start` awaited before the next
-  begins. **Stop** runs in the reverse order, at `SIGTERM` or the owner's restart (§2.3), each
-  plugin's `stop` awaited for up to 5 seconds (a stop that fails or takes longer is logged, and the
-  next plugin stops). The process exits 0 once the core has stopped, or after 30 seconds however far
-  it got (`packages/core/src/shutdown.ts`).
+  begins, for up to 60 s; a connector connects in the background, retrying, and its `start` does not
+  wait for it (§4.5). An error nothing caught (an unhandled rejection, an uncaught exception) stops
+  nothing: it is printed, logged (`core.uncaught`) and raised as an `uncaught` notice, naming the
+  module or package its stack names (`guard`). **Stop** runs in the reverse order, at `SIGTERM` or
+  the owner's restart (§2.3), each plugin's `stop` awaited for up to 5 seconds (a stop that fails or
+  takes longer is logged, and the next plugin stops). The process exits 0 once the core has stopped,
+  or after 30 seconds however far it got (`packages/core/src/shutdown.ts`).
 - **Ready:** once every plugin has started, each running one hears `ready`, in load order, before
   the core's `start` resolves. It is for the work that needs the plugins that use this one in place
   (a parser replaying recent history to the plugins that listen to it). A `ready` that throws fails
-  its plugin, which is stopped, and those that require it.
+  its plugin, which is stopped, and those that require it; so does one that does not settle within
+  60 s.
 - **Stopped** by exception is the core's (§2.1, Node states): a plugin stopped by its own safety
   stop, by drift (§4.7) or by the owner. Its sends are refused by the outbox from then on; its
   `pause` hook is called so that it can stop planning, and its stop is kept in its instance, so the
@@ -1622,12 +1647,14 @@ control API, the web UI and later the agents, whose grants will be subsets of it
 - **Each plugin:** the `version` it runs (its module's, as loaded, `GET /modules`; the release's,
   `GET /instance`, for one of the image's own; bot-os.md D113), its state (bot-os.md D64, §2.1:
   `running`; `disabled`; `stopped`, with its `stop`, `{ reason, time, source }`; `inactive`, its
-  `reason` the node it needs, `needs tg (disabled)`; `failed` with why), its settings with the
-  values in force, the names of the reads and actions its `interface` declares, its own account of
-  itself if it declares a read named `status`, the output of the read its widget names (`widget`,
-  bot-os.md D112), for its card, and, if it keeps a state (its instance's `view`, bot-os.md D72),
-  one line of it (`summary`), for its card; a connector whose queue coalesced sends since the start
-  says so there too (`2 sends coalesced: a + b (2)`, D73).
+  `reason` the node it needs, `needs tg (disabled)`; `failed` with why; bot-os.md D143: `loading`
+  while the plugins load, and `unloaded` for a node whose plugin did not load, its `reason` and its
+  `failures` naming each package or module and its error, after the nodes the core runs), its
+  settings with the values in force, the names of the reads and actions its `interface` declares,
+  its own account of itself if it declares a read named `status`, the output of the read its widget
+  names (`widget`, bot-os.md D112), for its card, and, if it keeps a state (its instance's `view`,
+  bot-os.md D72), one line of it (`summary`), for its card; a connector whose queue coalesced sends
+  since the start says so there too (`2 sends coalesced: a + b (2)`, D73).
 - **What holds a node back** (bot-os.md D98), its `backoff` in `GET /status`, while there is any:
   each command the retry-loop guard holds back (§4.6, Command answers),
   `{ account, chat, command, reason, count, until }`.
@@ -1680,16 +1707,16 @@ its config (`ChatSurface.home`, a `telegram-bot`'s `home`, bot-os.md D105), else
 
 **The HTTP control API** (`packages/core/src/control-server.ts`), one request handler
 (`controlHandler`) that the entry point serves twice: on the container's loopback (`CONTROL_PORT`,
-8081), and under `/api/` on the web UI's listener, only behind its login. `GET /status`;
-`GET /instance` (off or on, the release it runs as `version` and the commit its image was built from
-as `commit`, absent when unknown, the process's uptime, Node's version and memory, the plugins and
-the accounts counted by state); `GET /accounts`;
-`GET /accounts/<id>/surfaces?search=&limit=50&peers=1` (a connector's surfaces, §4.5:
-`{ running, listed, surfaces, peers? }`, `running` false until it runs, `listed` false for a
-connector that cannot list its chats, 409 with why when it cannot tell now, such as not connected,
-404 for a node that is not a connector; with `peers=1`, `peers`: for each other running connector of
-its network, the chats it lists for the same query that this one does not by any name, nor its own
-account's chat (a chat with itself), bot-os.md D96); `GET /drift`;
+8081), and under `/api/` on the web UI's listener, only behind its login. `GET /status` (with
+`boot`, `{ phase, failures }`: where the start is, and what failed to load, D143); `GET /instance`
+(off or on, the release it runs as `version` and the commit its image was built from as `commit`,
+absent when unknown, the process's uptime, Node's version and memory, the plugins and the accounts
+counted by state); `GET /accounts`; `GET /accounts/<id>/surfaces?search=&limit=50&peers=1` (a
+connector's surfaces, §4.5: `{ running, listed, surfaces, peers? }`, `running` false until it runs,
+`listed` false for a connector that cannot list its chats, 409 with why when it cannot tell now,
+such as not connected, 404 for a node that is not a connector; with `peers=1`, `peers`: for each
+other running connector of its network, the chats it lists for the same query that this one does not
+by any name, nor its own account's chat (a chat with itself), bot-os.md D96); `GET /drift`;
 `GET /events?limit=100&type=<prefix>&hours=24` (the event log's latest records, newest first);
 `POST /off`, `/on`, `/kill`; `GET` and `POST /settings`; `GET /graph` and `GET /graph/view` (§4.12);
 `POST /plugins/<id>/kill` and `POST /plugins/<id>/clear-stop` (409 with why when refused, such as
@@ -1720,15 +1747,17 @@ no agent installs a module (P1).
 
 **The health endpoint** (`packages/core/src/health.ts`), for a container's healthcheck, apart from
 the control API: on `HEALTH_PORT` (every interface; off unless set, and the image sets 8080; an irc
-connector's `healthPort` must be another), `GET /health` (or `HEAD`) answers 200 while every enabled
-connector is connected and 503 otherwise, with
-`{ ok, uptimeS, on, connectors: [{ id, plugin, status, counted }] }`: `on` the owner's switch (said,
-not counted: off is the owner's choice), each connector's `status` its connection's (`connected`,
-`connecting`, `closed`), `needs login` for one waiting for its login, or, without one, its node's
-(`failed`), and `counted` false for one the owner disabled or stopped, or waiting for its login (it
-logs in from the web UI, which a proxy leaving unhealthy containers out would take away; bot-os.md
-D125), which the verdict leaves out. It reveals no config, account, chat or secret. The image's
-`HEALTHCHECK` probes it (every 30 s, after a start period of 60 s).
+connector's `healthPort` must be another), `GET /health` (or `HEAD`) answers 200 as soon as the
+process serves, before any plugin has loaded (bot-os.md D143: a proxy that leaves unhealthy
+containers out would take away the web UI, the only place the owner fixes what is wrong from), with
+`{ ok, uptimeS, on, phase, connected, connectors: [{ id, plugin, status, counted }] }`: `ok` always
+true, `on` the owner's switch, `phase` where the start is (`loading`, `starting`, `started`),
+`connected` whether every counted connector is connected, each connector's `status` its connection's
+(`connected`, `connecting`, `closed`), `needs login` for one waiting for its login, or, without one,
+its node's (`failed`), and `counted` false for one the owner disabled or stopped, or waiting for its
+login (D125). What it says of the graph and the connectors is detail, never a failure. It reveals no
+config, account, chat or secret. The image's `HEALTHCHECK` probes it (every 30 s, after a start
+period of 15 s).
 
 **The web UI's login** (`packages/web/src/server/auth.ts`, bot-os.md D45) is meant for a trusted
 network: behind it the owner installs modules and edits script nodes (§5), code that runs with the
@@ -2110,18 +2139,21 @@ node the retry-loop guard holds back, its command refused for the same reason th
 once until that node's command is answered in that chat, §4.6, D107, about that node; `detail`:
 `account`, `chat`, `command`, `withinS`; told among the `other` kinds), `graph-refused` (the saved
 graph refused at the load, so that no node runs, D94; `detail.problems`; no node hears it, the
-events panel shows it). **A plugin raises** its own through `ctx.notice(kind, text, detail?)`, about
-its node: a state node raises `refused` for each event it refuses (D72; `detail`: `event`, `at`,
-`reason`); and `told` through `ctx.notify(text, buttons?)` (§4.8, D94; `detail.buttons`, which
-`buttonsOf(notice)` reads). A kind is lower-case words and dashes; raising one sends nothing. **A
-plugin whose manifest declares `notices: true`** gets `ctx.notices`: `subscribe(handler)` hears the
-notices raised since the instance started first (the newest `NOTICES_KEPT`, 200), so that the load's
-warnings and a node failed at its start reach a node started after them, then each as it is raised,
-while its node is up; the time its handler takes is its node's (D77). The notices live in memory
-(`core.notices()` lists them), and **each is recorded** as it is raised (`core.notice`: `kind`,
-`node?`, `text`, `detail?`), so that the editor's events panel shows every notice whether a node
-tells it or not (D94), beside the records it was raised with (`core.plugin`, `core.drift`,
-`core.queue`, `<id>.refused`).
+events panel shows it), `load-failed` (a package or module that failed to load, before the load,
+D143; `detail`: `source`, `module`, `error`; told among the `other` kinds), `uncaught` (an error
+nothing caught, the process going on, D143; `detail`: `error`, `from`, the module or package its
+stack names; told among the `other` kinds). **A plugin raises** its own through
+`ctx.notice(kind, text, detail?)`, about its node: a state node raises `refused` for each event it
+refuses (D72; `detail`: `event`, `at`, `reason`); and `told` through `ctx.notify(text, buttons?)`
+(§4.8, D94; `detail.buttons`, which `buttonsOf(notice)` reads). A kind is lower-case words and
+dashes; raising one sends nothing. **A plugin whose manifest declares `notices: true`** gets
+`ctx.notices`: `subscribe(handler)` hears the notices raised since the instance started first (the
+newest `NOTICES_KEPT`, 200), so that the load's warnings and a node failed at its start reach a node
+started after them, then each as it is raised, while its node is up; the time its handler takes is
+its node's (D77). The notices live in memory (`core.notices()` lists them), and **each is recorded**
+as it is raised (`core.notice`: `kind`, `node?`, `text`, `detail?`), so that the editor's events
+panel shows every notice whether a node tells it or not (D94), beside the records it was raised with
+(`core.plugin`, `core.drift`, `core.queue`, `<id>.refused`).
 
 `owner-notice` (§5) tells a kind it does not name as `other`. Its view (`GET /plugins/<id>/view`,
 D72) shows the notices waiting by kind with when each is due, when each kind was last told, whether
@@ -2944,7 +2976,8 @@ that types a graph as `GraphInput` writes `version: 2`, and its chat edges each 
 
 ### 7.3 Loading
 
-At start (`src/main.ts`), before the core loads, `loadModules` reads `/data/modules/` (the data
+At start (`src/main.ts`), in the background once the servers are up and the image's packages have
+loaded (bot-os.md D143, §3), before the core loads, `loadModules` reads `/data/modules/` (the data
 directory's `modules/`, `LOG_DIR`), the hidden directories aside (`.previous/`, `.staging/`), and:
 
 1. reads and checks each `module.json`, and that its plugin entries exist;
@@ -2954,8 +2987,8 @@ directory's `modules/`, `LOG_DIR`), the hidden directories aside (`.previous/`, 
 4. registers the resolve hook (`module.register`, run on Node's hooks thread) with the table of the
    modules that load: their `provides` names and directories, and the host's file to resolve
    `@megabottron1999/*` and `zod` from;
-5. imports each module's plugin entries, in that order, and checks what they export and their
-   manifests.
+5. imports each module's plugin entries, in that order, each import given 30 s to settle, and checks
+   what they export and their manifests.
 
 A module that fails any step is refused, by name and with why, and so is every module that imports
 it, directly or not; the others load. The reasons read as:
@@ -2964,8 +2997,12 @@ it, directly or not; the others load. The reasons read as:
 `it imports @example/nowhere, which no module provides`,
 `it imports @example/old, which is refused`, `its imports form a cycle: a → b → a`,
 `@example/same is provided by a and b`, `src/p.ts failed to load: …`,
-`src/p.ts exports no plugins array`, `its plugin irc is offered by the image already`. The entry
-point prints each module loaded and each refused.
+`src/p.ts exports no plugins array`, `its plugin irc is offered by the image already`; a top-level
+error or a SyntaxError of Node's type stripping reads `src/p.ts failed to load: <its message>`, one
+that does not settle `src/p.ts failed to load: it did not load within 30 s`. The entry point prints
+each module loaded, and each refused is told to the core as a failed load (§3, D143): its nodes are
+`unloaded` in the editor, naming the module, for the owner to reinstall or roll it back on the
+Modules page; the rest of the graph runs.
 
 The plugins loaded are registered with the core beside the image's (`core.registerModule`), and
 `core.available()` lists them all, each with its module: the plugins the instance offers, which the

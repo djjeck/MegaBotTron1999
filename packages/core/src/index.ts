@@ -16,6 +16,17 @@ export {
   type ReadAnswer,
   readAnswer,
 } from './answers.ts';
+export {
+  blame,
+  bootstrap,
+  type BootstrapOptions,
+  type Bootstrapped,
+  guard,
+  type Guarded,
+  loadPackages,
+  type PackagesLoad,
+  type PackageSpec,
+} from './boot.ts';
 export { type BusEvent, type BusHandle, type EventHandler } from './bus.ts';
 export { type Clock, type TimerHandle, VirtualClock, wallClock } from './clock.ts';
 export {
@@ -68,9 +79,12 @@ export {
 export {
   type AccountControl,
   type ActResult,
+  type BootControl,
   type Connection,
   Controls,
+  type HeldControl,
   KILLED,
+  type LoadFailureView,
   OFF_REFUSAL,
   type PluginControl,
   POWER_DOC,
@@ -82,9 +96,12 @@ export {
 } from './controls.ts';
 export {
   type AvailablePlugin,
+  type BootView,
   Core,
   type CoreOptions,
   type CoreRecord,
+  type HeldNode,
+  type LoadFailure,
   type PluginState,
   type PluginStatus,
   StartError,
@@ -262,6 +279,7 @@ export {
   SERVERS_DOC,
 } from './module-hosts.ts';
 export {
+  IMPORT_TIMEOUT_MS,
   type LoadedModule,
   loadModules,
   type LoadModulesOptions,

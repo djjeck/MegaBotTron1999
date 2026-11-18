@@ -5,7 +5,10 @@
  * order of their imports. What they export is checked: each entry exports `plugins`, an array of
  * plugins (`definePlugin`), whose manifests must be valid and whose ids must be new. A module that
  * fails is refused, by name and with why, and so are the modules that import it; the others load.
- * The plugins loaded are what the instance offers beside the image's (`Core.registerModule`).
+ * A module fails as well when an entry's import throws (a SyntaxError of Node's type stripping, a
+ * top-level error) or does not settle within `timeoutMs` (bot-os.md D143). The plugins loaded are
+ * what the instance offers beside the image's (`Core.registerModule`); the wiring loads them in
+ * the background, once its servers are up (`boot.ts`).
  */
 import fs from 'node:fs';
 import { register as registerHooks } from 'node:module';
@@ -35,6 +38,25 @@ export interface LoadModulesOptions {
   register?: (table: ResolveTable) => void;
   /** Imports a plugin entry by its file URL: `import()` by default. */
   importer?: (url: string) => Promise<unknown>;
+  /** How long an entry's import may take before its module is refused (D143): 30 s by default. */
+  timeoutMs?: number;
+}
+
+/** How long a module's entry may take to import by default (D143). */
+export const IMPORT_TIMEOUT_MS = 30_000;
+
+/**
+ * What `work` settles to, or a rejection saying it did not settle within `ms` (D143); the timer
+ * keeps no process alive.
+ */
+export function settleWithin<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`it did not load within ${ms / 1000} s`)), ms);
+    timer.unref?.();
+  });
+  work.catch(() => {});
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
 }
 
 export interface LoadedModule {
@@ -110,7 +132,7 @@ export async function loadModules(o: LoadModulesOptions): Promise<ModulesLoad> {
         const url = pathToFileURL(path.join(m.dir, entry)).href;
         let exported: unknown;
         try {
-          exported = await importer(url);
+          exported = await settleWithin(importer(url), o.timeoutMs ?? IMPORT_TIMEOUT_MS);
         } catch (e) {
           throw new Error(`${entry} failed to load: ${(e as Error).message}`, { cause: e });
         }

@@ -1,12 +1,14 @@
 /**
  * The shell's health endpoint (docs/bot-os-api.md §4.11), for a container's healthcheck: `GET
- * /health` (and `HEAD`) answers 200 while every enabled connector is connected, 503 otherwise,
- * with the process's uptime, whether the instance is on and each connector's status as JSON; 404
- * elsewhere. It reveals no config, chat, account or secret: a connector is named by its node's id
- * and its plugin. A connector the owner disabled or stopped does not count, nor one waiting for its
- * login (bot-os.md D125: it is logged in from the web UI, which a failing check would take off the
- * proxy); one failed, or not yet connected, does. The instance being off is the owner's choice,
- * said but not counted.
+ * /health` (and `HEAD`) answers 200 as soon as the process serves (bot-os.md D143: a proxy that
+ * leaves unhealthy containers out would take the web UI away, the only place the owner fixes what
+ * is wrong from), with the process's uptime, whether the instance is on, where its start is
+ * (`phase`: its plugins `loading`, its nodes `starting`, or `started`), whether every counted
+ * connector is connected (`connected`) and each connector's status as JSON; 404 elsewhere. What it
+ * says of the graph is detail, never a failure. It reveals no config, chat, account or secret: a
+ * connector is named by its node's id and its plugin. A connector the owner disabled or stopped
+ * does not count, nor one waiting for its login (D125); one failed, or not yet connected, does.
+ * The instance being off is the owner's choice, said but not counted.
  */
 import http from 'node:http';
 import { type AccountControl } from './controls.ts';
@@ -16,6 +18,8 @@ import { NEEDS_LOGIN } from './login.ts';
 export interface HealthSource {
   readonly off: boolean;
   accounts(): AccountControl[];
+  /** Where the instance's start is (D143); none: started. */
+  boot?(): { phase: string } | undefined;
 }
 
 export interface ConnectorHealth {
@@ -31,11 +35,15 @@ export interface ConnectorHealth {
 }
 
 export interface Health {
-  /** Up, and every counted connector connected. */
-  ok: boolean;
+  /** Up: the process serves (D143). Always true: a process that does not serve does not answer. */
+  ok: true;
   uptimeS: number;
   /** Whether the instance is on (the owner's switch). */
   on: boolean;
+  /** Where the start is: its plugins `loading`, its nodes `starting`, or `started` (D143). */
+  phase: string;
+  /** Every counted connector connected: detail, never a failure (D143). */
+  connected: boolean;
   connectors: ConnectorHealth[];
 }
 
@@ -54,9 +62,11 @@ export function health(source: HealthSource, uptimeS: number): Health {
     };
   });
   return {
-    ok: connectors.every((c) => !c.counted || c.status === 'connected'),
+    ok: true,
     uptimeS,
     on: !source.off,
+    phase: source.boot?.()?.phase ?? 'started',
+    connected: connectors.every((c) => !c.counted || c.status === 'connected'),
     connectors,
   };
 }
@@ -74,7 +84,7 @@ export function healthHandler(
       return;
     }
     const h = health(source, uptimeS());
-    res.writeHead(h.ok ? 200 : 503, {
+    res.writeHead(200, {
       'content-type': 'application/json',
       'cache-control': 'no-store',
     });

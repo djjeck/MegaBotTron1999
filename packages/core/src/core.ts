@@ -18,6 +18,12 @@
  *   is not started, nor is one whose required ports bind a node down (`inactive`, derived at the
  *   load). A stop made while it runs holds it until the owner clears it in the editor and applies,
  *   and shuts down at once every node it makes inactive by that same rule (#29).
+ * - The plugins load in the background, once the servers are up (bot-os.md D143, `boot.ts`): a
+ *   package or module that failed to load is told to the core (`failedToLoad`), and the nodes of
+ *   its plugins are held out of the graph it runs (`unloaded`, with why), with those that need
+ *   them (`inactive`), rather than refusing the whole graph. Until the load, the saved graph's
+ *   nodes are `loading`. A node's `create`, `start` or `ready` that does not settle within
+ *   `startTimeoutMs` fails that node alone, and the start goes on.
  */
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -68,6 +74,7 @@ import {
   type PortView,
   stableJson,
 } from './graph-view.ts';
+import { holdUnloaded, type Unloaded } from './held.ts';
 import { type InstanceInfo, InstanceRegistry } from './instance-registry.ts';
 import { type Manifest, parseManifest, SECRET_NAME } from './manifest.ts';
 import { type Notice, Notices } from './notices.ts';
@@ -123,6 +130,41 @@ export interface PluginStatus {
   reason?: string;
   /** Its stop, kept in its instance, while it is stopped by exception. */
   stop?: StopRecord;
+}
+
+/**
+ * A package or module of plugins that failed to load (bot-os.md D143): its import threw (a
+ * SyntaxError of Node's type stripping, a top-level error), never settled, or what it exports is
+ * not plugins.
+ */
+export interface LoadFailure {
+  /** What failed: `package <its specifier>`, or `module <its id>`. */
+  source: string;
+  /** The module's id, for a module: the owner reinstalls or rolls it back on the Modules page. */
+  module?: string;
+  error: string;
+}
+
+/**
+ * A node of the saved graph that the core does not run (bot-os.md D143): `loading` while the
+ * plugins load; `unloaded`, its plugin not loaded (`failures`, what failed to load that may have
+ * offered it); `inactive`, it needs a node that is unloaded; `disabled` in the graph.
+ */
+export interface HeldNode {
+  id: string;
+  plugin: string;
+  state: 'loading' | 'unloaded' | 'inactive' | 'disabled';
+  reason?: string;
+  failures?: LoadFailure[];
+}
+
+/**
+ * Where the instance's start is (bot-os.md D143): its plugins `loading`, its nodes `starting`, or
+ * `started`; and what failed to load.
+ */
+export interface BootView {
+  phase: 'loading' | 'starting' | 'started';
+  failures: LoadFailure[];
 }
 
 /** A record the core writes to the event log. */
@@ -203,6 +245,11 @@ export interface CoreOptions {
   /** How long a plugin's `stop` may take before the next one stops. */
   stopTimeoutMs?: number;
   /**
+   * How long a node's `create` and `start`, then its `ready`, may take before it fails, alone, and
+   * the start goes on (bot-os.md D143): 60 s by default.
+   */
+  startTimeoutMs?: number;
+  /**
    * Whether a plugin whose manifest is `archived` (bot-os.md D32) may run: never in an instance,
    * whose wiring leaves this unset; only in a test, the dev kit or a manual-test tool that says so.
    */
@@ -245,6 +292,8 @@ interface Compiled {
   bus: Bus;
   /** What the graph's check warns of (bot-os.md D89): it refuses nothing. */
   warnings: string[];
+  /** The nodes held out, their plugin not loaded, or needing one that is not (D143). */
+  held: Unloaded[];
 }
 
 interface Entry {
@@ -292,6 +341,16 @@ const SWEEP_MS = 86_400_000;
 const RESTORE = '_restore';
 /** The core's document, in each plugin's store, of its timers. */
 const TIMERS = '_timers';
+/**
+ * The core's document of the package or module that last offered each plugin, by its id (D143):
+ * a node of a plugin that did not load is told which failure took it.
+ */
+const SOURCES_DOC = 'plugin-sources';
+/** How long a node's start may take by default (D143). */
+const START_TIMEOUT_MS = 60_000;
+
+/** A start that did not settle in time (D143). */
+class StartTimeout extends Error {}
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -300,6 +359,18 @@ export class Core {
   private readonly plugins: Plugin[] = [];
   /** The module each plugin registered from a module came from, and its version. */
   private readonly origins = new Map<Plugin, { module: string; version?: string }>();
+  /** Where each plugin registered came from (D143): `package <name>` or `module <id>`. */
+  private readonly sources = new Map<Plugin, string>();
+  /** The packages and modules that failed to load at this start (D143). */
+  private readonly failures: LoadFailure[] = [];
+  /** The nodes of the saved graph the core does not run, the load held back (D143). */
+  private heldNodes: HeldNode[] = [];
+  /** The wiring loads the plugins in the background (D143): `booting` until the load. */
+  private bootPending = false;
+  /** Every node has been started (or failed to), and heard `ready`. */
+  private startedAll = false;
+  /** The instance stops: a start under way starts no more nodes. */
+  private stopping = false;
   /** By id, in load order once started. */
   private entries = new Map<string, Entry>();
   /** The graph as loaded, every edge written out (§2.1). */
@@ -432,6 +503,8 @@ export class Core {
       sealed: (id) => this.sealedStores.get(id)?.state(),
       recordLogin: (fields) =>
         this.o.record?.({ type: 'core.login', t: this.o.clock.now(), ...fields }),
+      held: () => this.held(),
+      boot: () => this.boot(),
     });
     this.driftMonitor = new DriftMonitor({
       clock: options.clock,
@@ -480,8 +553,105 @@ export class Core {
    */
   registerModule(module: string, plugins: readonly Plugin[], version?: string): void {
     this.register(...plugins);
-    for (const p of plugins)
+    for (const p of plugins) {
       this.origins.set(p, { module, ...(version === undefined ? {} : { version }) });
+      this.sources.set(p, `module ${module}`);
+    }
+  }
+
+  /** Adds the plugins one of the image's packages offers, remembering which (D143). */
+  registerPackage(name: string, plugins: readonly Plugin[]): void {
+    this.register(...plugins);
+    for (const p of plugins) this.sources.set(p, `package ${name}`);
+  }
+
+  /**
+   * The wiring loads the plugins in the background (D143): until the load, the saved graph's nodes
+   * are `loading`, and a graph is not checked (the plugins it names may not be in yet).
+   */
+  booting(): void {
+    this.bootPending = true;
+  }
+
+  /**
+   * Packages or modules that failed to load (D143), before the load: each printed, logged
+   * (`core.load`) and raised as a notice (`load-failed`); the nodes of the plugins they would have
+   * offered are held out of the graph, not the whole graph refused.
+   */
+  failedToLoad(...failures: LoadFailure[]): void {
+    if (this.loaded) throw new Error('a failed load is told before the core loads');
+    for (const f of failures) {
+      const failure = { ...f, error: this.o.secrets?.redact(f.error) ?? f.error };
+      this.failures.push(failure);
+      (this.o.print ?? (() => {}))(`core: ${failure.source} failed to load: ${failure.error}`);
+      this.o.record?.({
+        type: 'core.load',
+        t: this.o.clock.now(),
+        event: 'failed',
+        source: failure.source,
+        error: failure.error,
+      });
+      this.notice({
+        kind: 'load-failed',
+        text: `${failure.source} failed to load: ${failure.error}`,
+        detail: { ...failure },
+      });
+    }
+  }
+
+  /** Where the start is, and what failed to load (D143). */
+  boot(): BootView {
+    return {
+      phase: !this.loaded ? 'loading' : this.startedAll ? 'started' : 'starting',
+      failures: this.failures.map((f) => ({ ...f })),
+    };
+  }
+
+  /**
+   * The nodes of the saved graph the core does not run (D143): while the plugins load, every one
+   * (`loading`, or `disabled`); then those the load held back, their plugin not loaded.
+   */
+  held(): HeldNode[] {
+    if (this.loaded) return structuredClone(this.heldNodes);
+    if (!this.bootPending) return [];
+    const raw = this.o.graph === undefined ? this.savedGraph() : undefined;
+    const nodes = isObject(raw) && Array.isArray(raw['nodes']) ? (raw['nodes'] as unknown[]) : [];
+    return nodes.flatMap((n): HeldNode[] =>
+      isObject(n) && typeof n['id'] === 'string' && typeof n['plugin'] === 'string'
+        ? [
+            {
+              id: n['id'],
+              plugin: n['plugin'],
+              state: n['disabled'] === true ? 'disabled' : 'loading',
+            },
+          ]
+        : []
+    );
+  }
+
+  /**
+   * An error nothing caught (D143): an unhandled rejection or an uncaught exception, from a plugin
+   * most likely. The process goes on: it is printed, logged (`core.uncaught`) and raised as a
+   * notice (`uncaught`), naming where it came from when the wiring can tell (`from`).
+   */
+  uncaught(error: unknown, from?: string): void {
+    const text = this.o.secrets?.redact(message(error)) ?? message(error);
+    const where = from === undefined ? '' : ` (${from})`;
+    const stack = error instanceof Error ? error.stack : undefined;
+    (this.o.print ?? (() => {}))(
+      `core: uncaught error${where}: ${this.o.secrets?.redact(stack ?? text) ?? stack ?? text}`
+    );
+    this.o.record?.({
+      type: 'core.uncaught',
+      t: this.o.clock.now(),
+      error: text,
+      ...(from === undefined ? {} : { from }),
+    });
+    this.notice({
+      kind: 'uncaught',
+      text: `an error nothing caught${where}: ${text}`,
+      detail: { error: text, ...(from === undefined ? {} : { from }) },
+    });
   }
 
   /**
@@ -970,10 +1140,14 @@ export class Core {
     this.load();
     this.folding = true;
     try {
-      for (const entry of this.entries.values()) await this.startOne(entry);
+      for (const entry of this.entries.values()) {
+        if (this.stopping) break;
+        await this.startOne(entry);
+      }
     } finally {
       this.folding = false;
     }
+    if (this.stopping) return;
     // Every plugin has started: each hears it, in load order (§3).
     for (const entry of this.entries.values()) await this.readyOne(entry);
     // The chat surfaces answer the commands their edges serve from now on (D109), each with its
@@ -988,6 +1162,7 @@ export class Core {
       }
     }
     this.recordStarted(from);
+    this.startedAll = true;
     this.sweepDaily();
   }
 
@@ -1031,7 +1206,7 @@ export class Core {
     const { raw, fromFile } = this.graphSource();
     let compiled: Compiled;
     try {
-      compiled = this.compile(raw);
+      compiled = this.compile(raw, this.failures.length > 0);
     } catch (e) {
       // A saved graph refused never stops the instance: it starts with no nodes, the file kept as
       // it is, and the owner is told why, to fix it in the UI (§2.3).
@@ -1068,6 +1243,8 @@ export class Core {
     this.entries = compiled.entries;
     this.loadedGraph = compiled.graph;
     this.bus = compiled.bus;
+    this.heldNodes = this.heldOf(compiled.held);
+    this.keepSources();
     if (this.o.settings !== undefined)
       this.settings.add(new PluginSettings(CORE, this.o.settings, this.stores.internal(CORE)));
     for (const { id, manifest, node } of this.entries.values()) {
@@ -1157,6 +1334,7 @@ export class Core {
    * what they serialise; a node stopped by exception stays so in its instance.
    */
   async stop(why?: string): Promise<void> {
+    this.stopping = true;
     const from = this.o.clock.now();
     this.o.clock.clearTimeout(this.sweepTimer);
     // What waits in the queues goes no further: a queued send does not outlive the process (D73).
@@ -1359,6 +1537,12 @@ export class Core {
    * would hold it, or its problems, each located where it can be. Nothing starts, nothing is kept.
    */
   check(raw: unknown): GraphCheck {
+    // The plugins the graph names may not be in yet (D143): nothing is checked until they are.
+    if (this.bootPending && !this.loaded)
+      return {
+        ok: false,
+        problems: [{ text: 'the instance is still loading its plugins: check again in a moment' }],
+      };
     try {
       const { graph, warnings } = this.compile(raw);
       return { ok: true, graph, warnings: warnings.map((w) => locateProblem(w, raw)) };
@@ -1524,7 +1708,7 @@ export class Core {
    * The manifests checked, the graph checked against them (§2.1), and the instances in the order
    * their required edges make, with the bus their event types are registered on.
    */
-  private compile(raw: unknown): Compiled {
+  private compile(raw: unknown, tolerate = false): Compiled {
     const bus = this.newBus();
     const problems: string[] = [];
     const plugins = new Map<string, { plugin: Plugin; manifest: Manifest }>();
@@ -1552,6 +1736,10 @@ export class Core {
       this.savedGraph()
     );
     raw = opened.raw;
+    // A package or module failed to load (D143): the nodes of the plugins not offered are held out,
+    // with those that need them, and the rest runs.
+    let held: Unloaded[] = [];
+    if (tolerate) ({ raw, held } = holdUnloaded(raw, manifests));
     let resolved: ReturnType<typeof resolveGraph> | undefined;
     let ordered: ResolvedNode[];
     try {
@@ -1627,7 +1815,7 @@ export class Core {
     problems.push(...commandProblems([...entries.values()]));
     const warnings = [...opened.warnings, ...resolved.warnings];
     if (problems.length > 0) throw new StartError(problems.join('\n'), warnings);
-    return { entries, graph: resolved.graph, bus, warnings };
+    return { entries, graph: resolved.graph, bus, warnings, held };
   }
 
   private async startOne(entry: Entry): Promise<void> {
@@ -1640,12 +1828,18 @@ export class Core {
       return;
     }
     this.set(entry, 'starting');
-    try {
+    /** Its start was given up on (D143): what its `create` makes late is stopped. */
+    let late = false;
+    const work = async (): Promise<void> => {
       await this.stores.migrate(
         entry.node.instance,
         entry.manifest.state.migrations as Migration[]
       );
       const instance = await entry.plugin.create(this.contextFor(entry));
+      if (late) {
+        await this.withTimeout(() => instance.stop?.(), id).catch(() => {});
+        return;
+      }
       entry.instance = instance;
       entry.up = true;
       if (instance.settings !== undefined) this.settings.serveFor(id, instance.settings);
@@ -1661,8 +1855,14 @@ export class Core {
         if (typeof instance.commands?.[name]?.run !== 'function')
           throw new Error(`it declares the command ${name}, and offers no handler for it`);
       await instance.start?.();
+    };
+    try {
+      await this.within(work(), 'its start did not finish');
     } catch (e) {
-      this.fail(entry, message(e));
+      late = true;
+      // Given up on while it runs: stopped, as a failure at runtime is.
+      if (e instanceof StartTimeout && entry.up === true) this.failAtRuntime(entry, e.message);
+      else this.fail(entry, message(e));
       return;
     }
     // A plugin that stopped itself as it started stays stopped.
@@ -1674,7 +1874,10 @@ export class Core {
     const { instance } = entry;
     if (instance?.ready === undefined || entry.up !== true) return;
     try {
-      await instance.ready();
+      await this.within(
+        Promise.resolve().then(() => instance.ready?.()),
+        'its ready did not finish'
+      );
     } catch (e) {
       await this.failRunning(entry, message(e));
     }
@@ -2148,6 +2351,71 @@ export class Core {
       warn: (line) => print(`${id}: warning: ${line}`),
       error: (line) => print(`${id}: error: ${line}`),
     };
+  }
+
+  /**
+   * What `work` settles to, or a `StartTimeout` once the start timeout has passed (D143); a late
+   * rejection of `work` is then left unheard.
+   */
+  private within<T>(work: Promise<T>, why: string): Promise<T> {
+    const ms = this.o.startTimeoutMs ?? START_TIMEOUT_MS;
+    work.catch(() => {});
+    let timer: ReturnType<Clock['setTimeout']> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = this.o.clock.setTimeout(
+        () => reject(new StartTimeout(`${why} within ${ms / 1000} s`)),
+        ms
+      );
+    });
+    return Promise.race([work, timeout]).finally(() => this.o.clock.clearTimeout(timer));
+  }
+
+  /** The nodes the load held back (D143), with why: each failure that may have taken its plugin. */
+  private heldOf(unloaded: readonly Unloaded[]): HeldNode[] {
+    const kept = this.stores.open(CORE).read<Record<string, string>>(SOURCES_DOC) ?? {};
+    const states = new Map<string, HeldNode['state']>();
+    return unloaded.map((u): HeldNode => {
+      if (u.needs !== undefined) {
+        states.set(u.id, 'inactive');
+        return {
+          id: u.id,
+          plugin: u.plugin,
+          state: 'inactive',
+          reason: `needs ${u.needs} (${states.get(u.needs) ?? 'unloaded'})`,
+        };
+      }
+      const source = kept[u.plugin];
+      const theirs = this.failures.filter((f) => f.source === source);
+      const failures = theirs.length > 0 ? theirs : this.failures;
+      const state = u.disabled ? 'disabled' : 'unloaded';
+      states.set(u.id, state);
+      return {
+        id: u.id,
+        plugin: u.plugin,
+        state,
+        reason:
+          `its plugin ${u.plugin} did not load: ` +
+          failures.map((f) => `${f.source} failed: ${f.error}`).join('; '),
+        failures: failures.map((f) => ({ ...f })),
+      };
+    });
+  }
+
+  /** Where each plugin registered came from, kept for a later start's failed load (D143). */
+  private keepSources(): void {
+    const store = this.stores.open(CORE);
+    const kept = store.read<Record<string, string>>(SOURCES_DOC) ?? {};
+    const now = { ...kept };
+    for (const p of this.plugins) {
+      const source = this.sources.get(p);
+      if (source === undefined) continue;
+      try {
+        now[parseManifest(p.manifest).id] = source;
+      } catch {
+        // Its manifest does not read: the load says why.
+      }
+    }
+    if (stableJson(now) !== stableJson(kept)) store.write(SOURCES_DOC, now);
   }
 
   /** What `work` returns, or a rejection once the stop timeout has passed. */

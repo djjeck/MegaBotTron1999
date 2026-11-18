@@ -51,14 +51,15 @@ ARG BUILD_COMMIT=""
 ENV BUILD_COMMIT=${BUILD_COMMIT}
 
 ENV NODE_ENV=production LOG_DIR=/data HEALTH_PORT=8080 WEB_PORT=8082
-# The shell's health endpoint (GET /health on HEALTH_PORT: 200 while every enabled connector is
-# connected, 503 otherwise), and the web UI (only with its password, the web_ui_password secret),
+# The shell's health endpoint (GET /health on HEALTH_PORT: 200 as soon as the process serves, before
+# any plugin loads; where the start is and each connector's connection as detail, docs/bot-os.md
+# D143), and the web UI (only with its password, the web_ui_password secret),
 # for a proxy or a monitor on the container's network.
 EXPOSE 8080 8082
-# Docker's own probe of that endpoint (busybox's wget fails on a 503). A connector takes a moment
-# to connect at a start, hence the start period; with HEALTH_PORT unset there is no endpoint, so
+# Docker's own probe of that endpoint: it fails only while the process does not serve, its first
+# second or so, hence the short start period; with HEALTH_PORT unset there is no endpoint, so
 # disable the healthcheck too (Compose's `healthcheck: disable: true`).
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget -q -O /dev/null "http://127.0.0.1:${HEALTH_PORT}/health" || exit 1
 VOLUME ["/data"]
 CMD ["node", "src/main.ts"]
