@@ -283,13 +283,17 @@ the web UI's, by Vite.
 ```sh
 nvm use
 npm ci
-npm run validate   # tests with coverage, types, lint (with fixes), formatting, the web UI's build
+npm run validate   # tests with coverage, types, type stripping, lint (with fixes), formatting, the web UI's build
 ```
 
-CI runs `npm run ci` (the same checks, fixing nothing) on every push and pull request to `main`
-(`.github/workflows/ci.yml`), and publishes the image to ghcr.io (`.github/workflows/publish.yml`):
-`edge` on every push to `main`, and `<version>` and `latest` on every pushed tag `v<version>`. The
-rules for contributing are in [CLAUDE.md](CLAUDE.md).
+The type-stripping check (`npm run check:strip`) has Node parse every source the image can run,
+stripped as the image strips it, without running any: Vitest's esbuild accepts syntax Node refuses.
+
+CI runs `npm run ci` (the same checks, fixing nothing), then the type-stripping check again on the
+image's exact Node version, on every push and pull request to `main` (`.github/workflows/ci.yml`),
+and publishes the image to ghcr.io (`.github/workflows/publish.yml`): `edge` on every push to
+`main`, and `<version>` and `latest` on every pushed tag `v<version>`. The rules for contributing
+are in [CLAUDE.md](CLAUDE.md).
 
 ## Licence
 

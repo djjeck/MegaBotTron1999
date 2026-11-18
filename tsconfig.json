@@ -19,7 +19,7 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "packages", "vitest.config.ts"],
+  "include": ["src", "packages", "scripts", "vitest.config.ts"],
   // The web UI's React app has its own (DOM, JSX): packages/web/tsconfig.json.
   "exclude": ["**/node_modules", "packages/web/src/ui", "packages/web/dist"]
 }

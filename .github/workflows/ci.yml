@@ -25,7 +25,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Formatting, lint, types, the tests with the coverage rule for each package, and the web UI's
-      # Vite build: the same checks as `npm run validate`, without fixing anything.
+      # Formatting, lint, types, Node's type stripping, the tests with the coverage rule for each
+      # package, and the web UI's Vite build: the same checks as `npm run validate`, without fixing
+      # anything.
       - name: Check
         run: npm run ci
+
+      # The type-stripping check again, on the image's own Node (the Dockerfile's base image), so
+      # that a source Node would refuse fails here rather than at the container's start.
+      - name: Read the image's Node version
+        id: image-node
+        run: echo "version=$(sed -nE 's/^FROM node:([0-9.]+)-.* AS base$/\1/p' Dockerfile)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup the image's Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: ${{ steps.image-node.outputs.version }}
+
+      - name: Check type stripping on the image's Node
+        run: npm run check:strip -- --exact

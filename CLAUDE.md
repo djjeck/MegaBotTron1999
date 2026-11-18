@@ -31,9 +31,18 @@ knows no game. See [README.md](README.md) for the overview.
 source ~/.nvm/nvm.sh && nvm use && npm run validate
 ```
 
-`validate` runs the tests with coverage, the type check, ESLint with its autofixes, the formatting
-check and the web UI's build. It is for local use; CI (`.github/workflows/ci.yml`) runs
-`npm run ci`, the same checks without fixing anything. Run `npm run format` to fix formatting.
+`validate` runs the tests with coverage, the type check, the type-stripping check, ESLint with its
+autofixes, the formatting check and the web UI's build. It is for local use; CI
+(`.github/workflows/ci.yml`) runs `npm run ci`, the same checks without fixing anything, then the
+type-stripping check again on the image's exact Node version (the Dockerfile's base image).
+
+The type-stripping check (`npm run check:strip`, `scripts/check-type-stripping.ts`) parses, without
+running them, every non-test `.ts` file under `src/` and `packages/` as the image's Node does:
+`node:module`'s `stripTypeScriptTypes` in strip-only mode (the image's `node src/main.ts` has no
+flag), then `vm.SourceTextModule` on the output. Vitest compiles with esbuild, which accepts more:
+`private declare(v)` passed the tests, but Node read `declare` as the modifier and 0.1.42 failed to
+start. The check fails too if the Dockerfile's start command gains a flag or `NODE_OPTIONS`; locally
+it only warns when your Node differs from the image's. Run `npm run format` to fix formatting.
 Address every error before marking a sub-task complete.
 
 ## Rules
@@ -74,7 +83,8 @@ Address every error before marking a sub-task complete.
   TypeScript syntax is allowed (`erasableSyntaxOnly`: no enums, namespaces or constructor parameter
   properties). The exception is the web UI's React app (`packages/web/src/ui/`, `.tsx`): Vite
   bundles it into `packages/web/dist/` (`npm run build`, git-ignored); it has its own
-  `tsconfig.json` (DOM, JSX), which `npm run typecheck` checks too.
+  `tsconfig.json` (DOM, JSX), which `npm run typecheck` checks too. `npm run check:strip` checks
+  that Node itself parses every source (see "Validate after every edit").
 - **Strict TypeScript,** including `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
 - **Workspaces:** npm workspaces under `packages/<name>/`, each `@megabottron1999/<name>`. A package
   has its sources in `src/`, its test helpers in `test/`, its runtime dependencies in its own

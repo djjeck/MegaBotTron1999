@@ -17,11 +17,12 @@
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
     "typecheck": "tsc && tsc -p packages/web",
+    "check:strip": "node --experimental-vm-modules --disable-warning=ExperimentalWarning scripts/check-type-stripping.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "build": "npm run build --workspace @megabottron1999/web",
-    "ci": "npm run format:check && npm run lint && npm run typecheck && npm run test:coverage && npm run build",
-    "validate": "npm run test:coverage && npm run typecheck && npm run lint:fix && npm run lint && npm run format:check && npm run build"
+    "ci": "npm run format:check && npm run lint && npm run typecheck && npm run check:strip && npm run test:coverage && npm run build",
+    "validate": "npm run test:coverage && npm run typecheck && npm run check:strip && npm run lint:fix && npm run lint && npm run format:check && npm run build"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
