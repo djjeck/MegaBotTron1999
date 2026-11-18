@@ -3,9 +3,10 @@
  * parser its `parser` edge binds, in the parser's order, each with a checkbox (played or not; by
  * default every one but an interactive one), a sentence saying what the player will do with it,
  * and a choice of its policy when played: whenever ready, or only while another command is cooling
- * down; and, where the player sends to a group (D139), or a command is addressed already, its form:
- * bare (`/play`, which every bot in the group that sees it takes) or addressed to its bot
- * (`/play@QuestBot`). In its bot's private chat the form is not offered: bare is all it needs.
+ * down; and, when played, its forms, each with its tick (D140): each of its names bare (`/play`,
+ * which every bot in the group that declares it takes) and, where the player sends to a group,
+ * addressed to its bot (`/play@QuestBot`). All ticked by default; the last one ticked cannot be
+ * unticked. A single form is not offered: it is all it sends.
  * Left as the defaults, its config names no commands, and the player follows its parser.
  * Without a parser edge, or a parser that declares no commands, the list is typed as JSON, as it
  * always can be under "Edit as JSON".
@@ -13,7 +14,14 @@
 import { useState } from 'react';
 import type { BotCommand } from '#src/ui/api.ts';
 import type { PlayPlace, PlayRow, Policy } from './plays.ts';
-import { entriesOf, playRows, playSentence, rowsValue, unknownEntries } from './plays.ts';
+import {
+  entriesOf,
+  listedForms,
+  playRows,
+  playSentence,
+  rowsValue,
+  unknownEntries,
+} from './plays.ts';
 import { JsonField } from './SchemaForm.tsx';
 
 const READY = '';
@@ -40,7 +48,7 @@ export function PlaysField(props: {
         <JsonField name={props.name} value={props.value} set={props.set} />
       </>
     );
-  const rows = playRows(props.value, declared);
+  const rows = playRows(props.value, declared, place?.bot);
   const extra = unknownEntries(props.value, declared);
   const defaults = entriesOf(props.value) === undefined;
   const write = (next: PlayRow[]): void => props.set(rowsValue(next, extra));
@@ -84,18 +92,19 @@ export function PlaysField(props: {
                   ))}
                 </select>
               ) : null}
-              {r.played && place !== undefined && (place.group || r.addressed === true) ? (
-                <select
-                  aria-label={`how it sends ${c}`}
-                  className="small"
-                  value={r.addressed === true ? 'addressed' : 'bare'}
-                  onChange={(e) => change(i, { addressed: e.target.value === 'addressed' })}
-                >
-                  <option value="bare">bare: {c}</option>
-                  <option value="addressed">
-                    addressed: {c}@{place.bot}
-                  </option>
-                </select>
+              {r.played ? (
+                <Forms
+                  row={r}
+                  place={place}
+                  set={(forms) => {
+                    const { forms: _, addressed: __, ...rest } = r;
+                    write(
+                      rows.map((x, j) =>
+                        j === i ? (forms === undefined ? rest : { ...rest, forms }) : x
+                      )
+                    );
+                  }}
+                />
               ) : null}
             </li>
           );
@@ -103,9 +112,11 @@ export function PlaysField(props: {
       </ul>
       {place?.group === true ? (
         <p className="muted small" role="note" aria-label="bare or addressed">
-          In a group, a bare command reaches every bot there that sees it (one that is an admin, or
-          whose privacy mode is off), so one send plays them all; addressed, only @{place.bot} takes
-          it, wherever it is.
+          In a group, a bare command reaches every bot there that declares it and sees it (one that
+          is an admin, or whose privacy mode is off), so one send plays them all; addressed, only @
+          {place.bot} takes it. Each command goes as the ticked form that reaches the most bots,
+          each of which would play it then, the first in order on a tie; an unticked form is never
+          sent.
         </p>
       ) : null}
       {extra.length === 0 ? null : (
@@ -138,5 +149,44 @@ export function PlaysField(props: {
         <JsonField name={`${props.name} as JSON`} value={props.value} set={props.set} />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * A played command's forms, each with its tick (D140), when it has more than one: unticking one
+ * writes the rest, all ticked again writes none (every one); the last one ticked stays.
+ */
+function Forms(props: {
+  row: PlayRow;
+  place: PlayPlace | undefined;
+  set: (forms: string[] | undefined) => void;
+}) {
+  const { row, place } = props;
+  const listed = listedForms(row, place);
+  if (listed.length < 2) return null;
+  const on = row.forms ?? listed;
+  const c = row.command.command;
+  return (
+    <span className="small" role="group" aria-label={`forms of ${c}`}>
+      {listed.map((f) => {
+        const ticked = on.includes(f);
+        return (
+          <label key={f}>
+            {' '}
+            <input
+              type="checkbox"
+              aria-label={`send ${c} as ${f}`}
+              checked={ticked}
+              disabled={ticked && on.length === 1}
+              onChange={(e) => {
+                const next = listed.filter((x) => (x === f ? e.target.checked : on.includes(x)));
+                props.set(next.length === listed.length ? undefined : next);
+              }}
+            />{' '}
+            <code>{f}</code>
+          </label>
+        );
+      })}
+    </span>
   );
 }

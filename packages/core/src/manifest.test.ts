@@ -254,6 +254,24 @@ describe('parseManifest', () => {
     expect(() =>
       parseManifest({ ...parser, botCommands: [{ command: '/a' }, { command: '/A' }] })
     ).toThrow('/A is declared twice');
+    // A command's aliases (D140): each names it alone.
+    const aliased = [
+      { command: '/play', turn: true as const, aliases: ['/quest'] },
+      { command: '/boost', aliases: ['/b'] },
+    ];
+    expect(parseManifest({ ...parser, botCommands: aliased }).botCommands).toEqual(aliased);
+    expect(() =>
+      parseManifest({
+        ...parser,
+        botCommands: [
+          { command: '/play', aliases: ['/b'] },
+          { command: '/boost', aliases: ['/B'] },
+        ],
+      })
+    ).toThrow('/B is declared twice');
+    expect(() =>
+      parseManifest({ ...parser, botCommands: [{ command: '/play', aliases: ['/play@Bot'] }] })
+    ).toThrow('expected a command, as /play');
     expect(() => parseManifest({ ...parser, botCommands: [{ command: 'play' }] })).toThrow(
       'expected a command, as /play'
     );

@@ -6,11 +6,16 @@
  * alone: a turn, whenever ready (the bot's rest over); a command whose success clears another's hold
  * (a reset), only while that other is held (cooling down); any other, whenever ready; an entry's
  * `whileHeld` or `whenReady` overrides it. Its config unset, every command but an interactive one.
- * Each is sent bare (`/play`) or, as its entry's `addressed` says, addressed to its bot
- * (`/play@QuestBot`, the parser's `botUsername`, D139): in a group, a bare command reaches every bot
- * there that sees it, an addressed one only its own.
  *
- * The editor keeps the player's chat-out edge allowing the commands it plays (`followPlays`), so
+ * One row per command, whatever its aliases (D140). Its **forms** are each of its names (its own,
+ * then its `aliases`) bare (`/play`), then, in a group, addressed to its bot (`/play@QuestBot`, the
+ * parser's `botUsername`, D139): in a group, a bare name reaches every bot there that declares it,
+ * an addressed one only its own. Each form has its tick, all ticked by default (the entry's `forms`
+ * unset); the player sends a command as the ticked form that reaches the most bots, each of which
+ * would play it then, the first in order on a tie. An entry of D139's, `addressed: true`, reads as
+ * its one addressed form.
+ *
+ * The editor keeps the player's chat-out edge allowing the forms it may send (`followPlays`), so
  * that the owner never keeps a second list in step by hand.
  */
 import type { BotCommand, Graph, GraphNode, PluginView } from '#src/ui/api.ts';
@@ -21,7 +26,9 @@ export interface PlayEntry {
   command: string;
   whileHeld?: string;
   whenReady?: true;
-  /** Sent addressed to its bot, `/play@QuestBot` (D139); unset, bare. */
+  /** The forms it may be sent as, in order (D140); unset, every one. */
+  forms?: string[];
+  /** D139's: addressed to its bot alone, as `forms: ['/play@QuestBot']` says now. */
   addressed?: true;
 }
 
@@ -47,7 +54,7 @@ export function entriesOf(value: unknown): PlayEntry[] | undefined {
   );
 }
 
-/** One row of the checklist: its command, whether it is played, and its policy. */
+/** One row of the checklist: its command, whether it is played, its policy, and its forms. */
 export interface PlayRow {
   command: BotCommand;
   played: boolean;
@@ -55,36 +62,68 @@ export interface PlayRow {
   policy: Policy;
   /** Its policy overridden by its entry. */
   overridden: boolean;
-  /** Sent addressed to its bot (D139). */
-  addressed?: boolean;
+  /** The forms it may be sent as, in order (D140); unset, every one. */
+  forms?: string[];
+  /** D139's entry, addressed to its bot, while its bot is not known to say its form. */
+  addressed?: true;
+}
+
+/** A command's names (D140): its own, then its aliases. */
+export function namesOf(c: Pick<BotCommand, 'command' | 'aliases'>): string[] {
+  return [c.command, ...(c.aliases ?? [])];
+}
+
+/** Whether a command, of its names, is `name` (D140). */
+const isNamed = (c: BotCommand, name: string): boolean => namesOf(c).some((n) => same(n, name));
+
+/**
+ * A command's forms, in order (D140): each of its names bare, then, in a group, addressed to its
+ * bot. Where it sends unknown, its names.
+ */
+export function formsOf(c: BotCommand, place?: PlayPlace): string[] {
+  return namesOf(c).flatMap((n) => (place?.group === true ? [n, `${n}@${place.bot}`] : [n]));
+}
+
+/**
+ * The forms a row lists, each with its tick (D140): its command's forms, and any other its entry
+ * allows (an addressed one in its bot's private chat).
+ */
+export function listedForms(row: Pick<PlayRow, 'command' | 'forms'>, place?: PlayPlace): string[] {
+  const all = formsOf(row.command, place);
+  return [...all, ...(row.forms ?? []).filter((f) => !all.some((a) => same(a, f)))];
 }
 
 /**
  * The checklist's rows, in the parser's order: each declared command, played if the config names
- * it (unset: every one but an interactive one), with its policy.
+ * it, by its name or an alias (unset: every one but an interactive one), with its policy and its
+ * forms; D139's `addressed` read as its one addressed form where its bot is known.
  */
-export function playRows(value: unknown, declared: readonly BotCommand[]): PlayRow[] {
+export function playRows(value: unknown, declared: readonly BotCommand[], bot?: string): PlayRow[] {
   const entries = entriesOf(value);
   return declared.map((command) => {
     const derived = derivedPolicy(command);
     if (entries === undefined)
       return { command, played: command.interactive !== true, policy: derived, overridden: false };
-    const entry = entries.find((e) => same(e.command, command.command));
+    const entry = entries.find((e) => isNamed(command, e.command));
     const policy = entry?.whenReady === true ? undefined : (entry?.whileHeld ?? derived);
+    const legacy = entry?.addressed === true && entry.forms === undefined;
+    const forms =
+      entry?.forms ?? (legacy && bot !== undefined ? [`${entry.command}@${bot}`] : undefined);
     return {
       command,
       played: entry !== undefined,
       policy,
       overridden:
         entry !== undefined && (entry.whenReady === true || entry.whileHeld !== undefined),
-      ...(entry?.addressed === true ? { addressed: true } : {}),
+      ...(forms === undefined ? {} : { forms: [...forms] }),
+      ...(legacy && bot === undefined ? { addressed: true as const } : {}),
     };
   });
 }
 
 /** The entries of a config naming commands its parser declares none of: kept as they are. */
 export function unknownEntries(value: unknown, declared: readonly BotCommand[]): PlayEntry[] {
-  return (entriesOf(value) ?? []).filter((e) => !declared.some((d) => same(d.command, e.command)));
+  return (entriesOf(value) ?? []).filter((e) => !declared.some((d) => isNamed(d, e.command)));
 }
 
 /**
@@ -101,7 +140,12 @@ export function rowsValue(
     .filter((r) => r.played)
     .map((r): PlayEntry => {
       const derived = derivedPolicy(r.command);
-      const form = r.addressed === true ? { addressed: true as const } : {};
+      const form =
+        r.forms !== undefined
+          ? { forms: [...r.forms] }
+          : r.addressed === true
+            ? { addressed: true as const }
+            : {};
       if (samePolicy(r.policy, derived)) return { command: r.command.command, ...form };
       return r.policy === undefined
         ? { command: r.command.command, whenReady: true, ...form }
@@ -111,26 +155,34 @@ export function rowsValue(
     extra.length === 0 &&
     rows.every((r) => r.played === (r.command.interactive !== true)) &&
     entries.every(
-      (e) => e.whileHeld === undefined && e.whenReady === undefined && e.addressed === undefined
+      (e) =>
+        e.whileHeld === undefined &&
+        e.whenReady === undefined &&
+        e.forms === undefined &&
+        e.addressed === undefined
     );
   return defaults ? undefined : [...entries, ...extra];
 }
 
 /**
- * The commands a player plays, in order, as it sends them: its config's, or its defaults; one
- * addressed to its bot as `/play@QuestBot` (D139), when its parser names its `bot`.
+ * The forms a player may send its commands as, in order (D140): of each command it plays (its
+ * config's, or its defaults), its entry's `forms`, else every form where it sends; D139's
+ * `addressed`, `/play@QuestBot`, when its parser names its bot.
  */
 export function playedCommands(
   value: unknown,
   declared: readonly BotCommand[],
-  bot?: string
+  place?: PlayPlace
 ): string[] {
   const entries = entriesOf(value);
   if (entries === undefined)
-    return declared.filter((d) => d.interactive !== true).map((d) => d.command);
-  return entries.map((e) =>
-    e.addressed === true && bot !== undefined ? `${e.command}@${bot}` : e.command
-  );
+    return declared.filter((d) => d.interactive !== true).flatMap((d) => formsOf(d, place));
+  return entries.flatMap((e) => {
+    if (e.forms !== undefined) return e.forms;
+    if (e.addressed === true && place !== undefined) return [`${e.command}@${place.bot}`];
+    const d = declared.find((x) => isNamed(x, e.command));
+    return d === undefined ? [e.command] : formsOf(d, place);
+  });
 }
 
 /**
@@ -142,10 +194,25 @@ export interface PlayPlace {
   group: boolean;
 }
 
-/** A play's form, in words, for its sentence (D139): addressed, or bare in a group. */
-export function formWords(c: string, addressed: boolean, place: PlayPlace): string | undefined {
-  if (addressed) return `sent as ${c}@${place.bot}, which only @${place.bot} takes`;
-  return place.group ? 'sent bare, which every bot in the group that sees it takes' : undefined;
+/**
+ * How a command is sent, in words, for its sentence (D139, D140): of its forms allowed, the one
+ * that plays it for the most ready bots at once; its one form, which bots take it; bare under its
+ * own name in its bot's private chat, nothing.
+ */
+export function formWords(
+  row: Pick<PlayRow, 'command' | 'forms'>,
+  place: PlayPlace
+): string | undefined {
+  const forms = row.forms ?? formsOf(row.command, place);
+  const [form] = forms;
+  if (form === undefined) return undefined;
+  if (forms.length > 1)
+    return place.group
+      ? `sent as the form that plays ${row.command.turn === true ? 'the most ready turns' : 'it for the most ready bots'} at once`
+      : `sent as ${form}`;
+  if (form.includes('@')) return `sent as ${form}, which only @${place.bot} takes`;
+  if (place.group) return `sent as ${form}, which every bot in the group that declares it takes`;
+  return same(form, row.command.command) ? undefined : `sent as ${form}`;
 }
 
 /** A number of minutes in words: `30 minutes`, `1 hour`, `24 hours`, `90 minutes`. */
@@ -172,7 +239,7 @@ export function duration(min: number): string {
  * - `/shop`, interactive, by default: "needs you to answer: not played by default"
  */
 export function playSentence(
-  row: Pick<PlayRow, 'command' | 'played' | 'policy' | 'addressed'>,
+  row: Pick<PlayRow, 'command' | 'played' | 'policy' | 'forms'>,
   /** The config is unset: what is not played is left out by default. */
   defaults = false,
   /** Where it sends, to say how a command goes (D139); unknown, nothing said. */
@@ -214,8 +281,7 @@ export function playSentence(
       return [];
     });
     if (effects.length > 0) how += `; ${effects.join(' and ')}`;
-    const form =
-      place === undefined ? undefined : formWords(c.command, row.addressed === true, place);
+    const form = place === undefined ? undefined : formWords(row, place);
     if (form !== undefined) how += `; ${form}`;
   }
   return what.length === 0 ? how : `${what.join(', ')}: ${how}`;
@@ -296,8 +362,8 @@ export function followPlays(g: Graph, viewOf: (n: GraphNode) => PluginView | und
     if (plays === undefined) continue;
     const declared = boundCommands(g, n.id, plays.input, viewOf);
     if (declared === undefined) continue;
-    const bot = boundBot(g, n.id, plays.input, viewOf);
-    const commands = playedCommands(n.config?.[plays.key], declared, bot);
+    const place = playPlace(g, n.id, plays, viewOf);
+    const commands = playedCommands(n.config?.[plays.key], declared, place);
     const from = `${n.id}.${plays.output}`;
     if (
       !out.edges.some(

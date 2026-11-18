@@ -4,16 +4,16 @@
  * simulated person's sittings, from the owner's account, in the private chat with its bot or in a
  * group its bot is in, as its edge names (D139): those its config names, or by default (D137)
  * every command its parser declares (`state.commands`) but an interactive one, in its parser's
- * order, each bare (`/play`) or addressed to its bot (`/play@QuestBot`) as its entry says. Its
- * ports:
+ * order, each sent as one of its forms (D140): any of its names, bare (`/play`, `/quest`) or, in a
+ * group, addressed to its bot (`/play@QuestBot`), those its entry's `forms` allow. Its ports:
  *
  * - `chat`, a chat-out output: one chat, **its edge's alone** (bot-os.md D97, D139: the one chat
  *   its edge names, the bot's `@username` or a group's id; the check refuses anything else), its
  *   commands those its edge allows; it reads no chat (D99);
  * - `parser`, a contract on its bot's parser (`state.ready`, `state.commands`, `state.bot`,
  *   `actions.sent`, D132, D137, D139), required, so that drift on the parser stops it: each
- *   command's readiness, its commands with their mechanics, its bot's name, and the sends it tells
- *   it of;
+ *   command's readiness, its commands with their aliases and mechanics (D140), its bot's name, and
+ *   the sends it tells it of;
  * - `attention`, its person (bot-os.md D133), required: the sittings it plays in, and the person's
  *   reaction time.
  *
@@ -28,11 +28,26 @@
  * the sitting goes again only if it became ready again since (its readiness `since` after the
  * send), so that a dry run, or an answer that holds nothing, plays it once. In a sitting that
  * follows the owner's play (D138), or one they wrote during, or one in which another player of its
- * person sent a command (D139), it first waits the same way for the answer to the last send its
- * parser has read none to: a bare command another sent in the group may have taken its bot's turn
- * too. When nothing is left,
- * it sleeps until the next sitting. **No schedule of its own:** its person's sittings, its
- * parser's readiness, and its outbox's `held` (D98) as the safety net, are all it waits on.
+ * account sent a command (D139, D140), it first waits the same way for the answer to the last send
+ * its parser has read none to: a bare command another sent in the group may have taken its bot's
+ * turn too. Nothing ready, but a command of its due within `settleS` (D140), it waits for it rather
+ * than leave. When nothing is left, it sleeps until the next sitting. **No schedule of its own:**
+ * its person's sittings, its parser's readiness, and its outbox's `held` (D98) as the safety net,
+ * are all it waits on.
+ *
+ * **The form, chosen by reach** (D140, `chat-group.ts`): the players of one account that send to
+ * the same chat are a group. A form reaches the players of the group whose parser takes it (bare,
+ * every one whose bot declares that name; addressed, its bot's alone), and is allowed only if each
+ * of them would play its command now: in a sitting, the command ticked and its policy allowing it,
+ * ready, and the form one its config allows. Of the forms allowed, the widest reach, the first in
+ * order on a tie (its entry's `forms`, else its parser's names in order, each bare then addressed).
+ * **Before it picks, the group settles:** while a player the widest form reaches has a send no
+ * answer came to yet (younger than the answer window), or its command will be ready within
+ * `settleS` seconds, it waits (until then, at most the answer window in all), so that one bare
+ * send covers them. It then picks and claims the players its form reaches in the same tick as its
+ * send, so that none of them sends an overlapping form, and, sent, hands the send off to every
+ * other player of its account, each telling its parser; those its form reached wait for their
+ * bot's answer and send nothing over it.
  *
  * - Its person asks it, when a sitting is due, for the owner's latest play by hand its parser read
  *   (`ready`'s sends marked `byHand`, any command): the person's own sitting, which pushes the next
@@ -43,9 +58,9 @@
  * - Through a dry-run chat-out edge (D64) each command is logged, nothing sent; through a live one,
  *   it waits for the account to be connected (its send refused `not connected`, it tries again
  *   each minute), and tells its parser each command sent with its message's id, so that the parser
- *   matches the bot's reply to it; and its person, which tells the other players, each its own
- *   parser (D139). A send refused (a cooldown its outbox holds, the retry-loop
- *   guard) or failed is not tried again in that sitting.
+ *   matches the bot's reply to it; and the other players of its account, each its own parser
+ *   (D139, D140). A send refused (a cooldown its outbox holds, the retry-loop guard) or failed is
+ *   not tried again in that sitting.
  * - It plays while its node runs and the instance is on; stopped (bot-os.md D64: drift on its
  *   parser, the owner's kill or stop, or its own safety stop, `kill`), it drops its sitting and
  *   plays no more until the owner clears the stop in the editor.
@@ -65,8 +80,20 @@ import {
   Tally,
 } from '@megabottron1999/core';
 import { z } from 'zod';
-import { type AttentionHandle, type PlayerSend, type Sitting } from '#src/attention.ts';
-import { ANSWER_WINDOW_MS, type Readiness, type TurnParserInterface } from './turn-parser.ts';
+import { type AttentionHandle, type Sitting } from '#src/attention.ts';
+import {
+  ChatGroups,
+  type GroupMember,
+  pickForm,
+  type PlayerSend,
+  widestReach,
+} from '#src/chat-group.ts';
+import {
+  ANSWER_WINDOW_MS,
+  commandOf,
+  type Readiness,
+  type TurnParserInterface,
+} from './turn-parser.ts';
 
 export const PLAYER = 'player';
 /** The timer of its next step in a sitting. */
@@ -85,8 +112,12 @@ export const MAX_SENDS_PER_SITTING = 20;
 export const PLAYER_PARSER_MEMBERS = ['state.ready', 'state.commands', 'state.bot', 'actions.sent'];
 /** The one chat it sends to (D97, D139): its bot's private chat, or a group's id. */
 export const PLAYER_CHAT = String.raw`^(@\w{4,}|-\d+)$`;
+/** How many seconds it waits by default for the group to settle before it picks a form (D140). */
+export const DEFAULT_SETTLE_S = 10;
 
 const COMMAND = /^\/\w+$/u;
+const FORM = /^\/\w+(?:@\w+)?$/u;
+const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 
 /** One command it plays, and, to override the policy its mechanics give, when (D137). */
 const playSchema = z
@@ -103,12 +134,17 @@ const playSchema = z
       .literal(true)
       .optional()
       .describe('Played whenever it is ready, whatever its mechanics say'),
+    forms: z
+      .array(z.string().regex(FORM, 'expected a form, as /play or /play@QuestBot'))
+      .min(1)
+      .optional()
+      .describe(
+        'The forms it may send it as, in order (D140): its names bare (/play), which in a group every bot that declares it takes, or addressed to its bot (/play@QuestBot); unset, every one, each bare then addressed (addressed only in a group)'
+      ),
     addressed: z
       .literal(true)
       .optional()
-      .describe(
-        'Sent addressed to its bot (/play@QuestBot), which only its bot takes; unset, bare (/play), which in a group every bot that sees it takes'
-      ),
+      .describe('Before D140: sent addressed to its bot alone; read as forms: [/play@<bot>]'),
   })
   .refine((p) => p.whileHeld === undefined || p.whenReady === undefined, {
     message: 'whileHeld or whenReady, not both',
@@ -123,16 +159,29 @@ export const playerConfig = z.object({
     .array(playSchema)
     .optional()
     .describe(
-      'The commands it plays, in this order, each when its parser says it is ready and its policy allows; unset, every command its parser declares but those that need you to answer. Its chat-out edge allows those it plays (the editor keeps it so)'
+      'The commands it plays, in this order, each when its parser says it is ready and its policy allows; unset, every command its parser declares but those that need you to answer. Its chat-out edge allows the forms it may send them as (the editor keeps it so)'
+    ),
+  settleS: z
+    .number()
+    .min(0)
+    .default(DEFAULT_SETTLE_S)
+    .describe(
+      'How many seconds ahead it waits for a command of its, or of another player sending to the same chat, about to be ready, so that one bare command covers them all (D140)'
     ),
 });
 export type PlayerConfig = z.output<typeof playerConfig>;
 /** A command it plays, with its policy resolved: only while `whileHeld` is held, or when ready. */
 export interface Play {
+  /** By its name in its parser's, when it declares it (an alias resolved, D140). */
   command: string;
   whileHeld?: string;
-  /** Sent addressed to its bot: `/play@QuestBot` (D139). */
-  addressed?: true;
+  /** The forms it may send it as, in order (D140); unset, all. */
+  forms?: string[];
+  /**
+   * Before D140: addressed to its bot alone, under this name as its entry spells it (`/play`, sent
+   * as `/play@QuestBot`), as `forms` would say.
+   */
+  addressed?: string;
 }
 
 /**
@@ -147,18 +196,24 @@ export function derivedWhileHeld(c: BotCommand | undefined): string | undefined 
 
 /**
  * What a player plays (D137), in order: its config's `commands`, each with its override or its
- * mechanics' policy; unset, each of `declared` but the interactive ones, in their order.
+ * mechanics' policy and its forms; unset, each of `declared` but the interactive ones, in their
+ * order. A command, or a policy's, named by an alias is named by its command's name (D140).
  */
 export function playsOf(
   commands: PlayerConfig['commands'],
   declared: readonly BotCommand[]
 ): Play[] {
-  const find = (c: string): BotCommand | undefined =>
-    declared.find((d) => d.command.toLowerCase() === c.toLowerCase());
-  const play = (command: string, whileHeld: string | undefined, addressed?: true): Play => ({
+  const name = (c: string): string => commandOf(c, declared, '') ?? c;
+  const find = (c: string): BotCommand | undefined => declared.find((d) => d.command === name(c));
+  const play = (
+    command: string,
+    whileHeld: string | undefined,
+    p?: { command: string; forms?: string[] | undefined; addressed?: true | undefined }
+  ): Play => ({
     command,
     ...(whileHeld === undefined ? {} : { whileHeld }),
-    ...(addressed === true ? { addressed } : {}),
+    ...(p?.forms === undefined ? {} : { forms: [...p.forms] }),
+    ...(p?.addressed === true && p.forms === undefined ? { addressed: p.command } : {}),
   });
   if (commands === undefined)
     return declared
@@ -166,11 +221,36 @@ export function playsOf(
       .map((d) => play(d.command, derivedWhileHeld(d)));
   return commands.map((p) =>
     play(
-      p.command,
-      p.whenReady === true ? undefined : (p.whileHeld ?? derivedWhileHeld(find(p.command))),
-      p.addressed
+      name(p.command),
+      p.whenReady === true
+        ? undefined
+        : p.whileHeld === undefined
+          ? derivedWhileHeld(find(p.command))
+          : name(p.whileHeld),
+      p
     )
   );
+}
+
+/**
+ * The forms a player may send a play as, in order (D140): its entry's `forms` (those that are this
+ * command of its bot's), else each name of the command in its parser's order, bare, then, in a
+ * group, addressed to its bot; an entry from before D140 marked `addressed`, `/play@<bot>` alone.
+ */
+export function playForms(
+  play: Play,
+  declared: readonly BotCommand[],
+  bot: string,
+  group: boolean
+): string[] {
+  const d = declared.find((x) => same(x.command, play.command));
+  const names = d === undefined ? [play.command] : [d.command, ...(d.aliases ?? [])];
+  if (play.forms !== undefined)
+    return play.forms.filter(
+      (f) => commandOf(f, [{ command: names[0] as string, aliases: names }], bot) !== undefined
+    );
+  if (play.addressed !== undefined) return [`${play.addressed}@${bot}`];
+  return names.flatMap((n) => (group ? [n, `${n}@${bot}`] : [n]));
 }
 
 /** A sitting in progress, as it keeps it. */
@@ -182,10 +262,12 @@ interface InSitting {
   count: number;
   /** A live send whose answer it waits for. */
   waiting?: { command: string; t: number };
+  /** Waiting for the group to settle before it picks a form for this command, since then (D140). */
+  settling?: { command: string; since: number };
   /**
-   * It follows the owner's play (D138), or another player of its person sent (D139): at its next
-   * look, it first waits for the answer to the last send its parser knows of, if it has read none
-   * yet.
+   * It follows the owner's play (D138), or another player of its account sent (D139, D140): at its
+   * next look, it first waits for the answer to the last send its parser knows of, if it has read
+   * none yet.
    */
   hand?: true;
 }
@@ -226,6 +308,9 @@ export function playerSummary(id: string, state: string, s: PlayerStatus | undef
 
 /** The player plugin, of which the wiring makes one node per bot. */
 export function playerPlugin(): Plugin {
+  // Its nodes' groups, by account and chat (D140): where they meet to pick a form and hand off a
+  // send, in memory, for the instances of this registration alone.
+  const groups = new ChatGroups();
   return definePlugin({
     manifest: {
       id: PLAYER,
@@ -288,7 +373,7 @@ export function playerPlugin(): Plugin {
         ],
       },
     },
-    create: (ctx) => new Player(ctx).instance(),
+    create: (ctx) => new Player(ctx, groups).instance(),
   });
 }
 
@@ -301,6 +386,9 @@ class Player {
   private state: PlayerState;
   private attention: AttentionHandle | undefined;
   private leave: (() => void) | undefined;
+  /** Its account's players, by chat (D140). */
+  private readonly groups: ChatGroups;
+  private leaveGroup: (() => void) | undefined;
   /** Its node was stopped (D64): it plays no more until a restart after the owner clears it. */
   private stopped = false;
   private sending = false;
@@ -308,15 +396,16 @@ class Player {
   private waitingAccount = false;
   /** Its parser's commands (D137), once read: its defaults, and its policies. */
   private declared: BotCommand[] | undefined;
-  /** Its bot's username (D139), once read: an addressed command's suffix. */
+  /** Its bot's username (D139), once read: an addressed form's suffix. */
   private bot: string | undefined;
   /** The commands its parser declares none of, told once. */
   private readonly unknown = new Set<string>();
   /** Its sends by how they went (`sent <command>`, `dry-run <command>`, `failed`). */
   private readonly plays: Tally;
 
-  constructor(ctx: PluginContext) {
+  constructor(ctx: PluginContext, groups: ChatGroups) {
     this.ctx = ctx;
+    this.groups = groups;
     this.c = ctx.config as PlayerConfig;
     this.chat = ctx.outbox('chat').chats()[0] ?? '';
     this.plays = new Tally(ctx.clock);
@@ -335,13 +424,21 @@ class Player {
           lastByHand: () => this.lastByHand(),
           inSitting: () => this.state.sitting !== undefined,
           again: () => this.again(),
-          heard: (s) => this.heard(s),
         });
+        this.leaveGroup = this.groups.join(
+          this.ctx.id,
+          this.ctx.outbox('chat').account,
+          this.chat,
+          this.member()
+        );
         // A sitting kept without its next step (dropped as too late): it ended with the restart.
         if (this.state.sitting !== undefined && this.ctx.scheduler.get(PLAY_TIMER) === undefined)
           this.end('the sitting ended while it was down');
       },
-      stop: () => this.leave?.(),
+      stop: () => {
+        this.leave?.();
+        this.leaveGroup?.();
+      },
       onTimer: (name: string) => {
         if (name === PLAY_TIMER) void this.next();
       },
@@ -375,9 +472,9 @@ class Player {
   }
 
   /**
-   * Another player of its person sent a command (D139): its parser is told, and counts it if it
-   * reaches its bot (a bare command in a group its bot is in); in a sitting, it waits at its next
-   * look for that send's answer, so that it does not send its own over a turn just taken.
+   * Another player of its account sent a command (D139, D140): its parser is told, and counts it
+   * if it reaches its bot (a bare command in a group its bot is in); in a sitting, it waits at its
+   * next look for that send's answer, so that it does not send its own over a turn just taken.
    */
   private heard(s: PlayerSend): void {
     try {
@@ -443,11 +540,99 @@ class Player {
     return playsOf(this.c.commands, this.declared);
   }
 
-  /** A play as it is sent (D139): bare, or addressed to its bot (`/play@QuestBot`). */
-  private textOf(play: Play): string {
-    if (play.addressed !== true) return play.command;
-    this.bot ??= this.parser().state.bot();
-    return `${play.command}@${this.bot}`;
+  /** Its bot's username (D139), read once from its parser; undefined while it cannot say. */
+  private botName(): string | undefined {
+    try {
+      this.bot ??= this.parser().state.bot();
+    } catch {
+      return undefined;
+    }
+    return this.bot;
+  }
+
+  /** Its parser's readiness of each command; undefined while it cannot say. */
+  private readyNow(): Record<string, Readiness> | undefined {
+    try {
+      return this.parser().state.ready();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The forms it may send `play` as, in order (D140): in a group, addressed ones too. */
+  private formsOf(play: Play): string[] {
+    const bot = this.botName();
+    if (bot === undefined) return [];
+    return playForms(play, this.declared ?? [], bot, !this.chat.startsWith('@'));
+  }
+
+  /** Its outbox holds `form` back now (D98). */
+  private heldBack(form: string, now: number): boolean {
+    const held = this.ctx.outbox('chat').held(this.chat, form);
+    return held !== undefined && held.until > now;
+  }
+
+  /** Itself as its group sees it (D140). */
+  private member(): GroupMember {
+    return {
+      id: this.ctx.id,
+      takes: (form) => {
+        const bot = this.botName();
+        this.played();
+        return bot === undefined ? undefined : commandOf(form, this.declared ?? [], bot);
+      },
+      wouldPlay: (command, form) => this.wouldPlay(command, form),
+      dueWithin: (command, now, withinMs) => {
+        const play = this.inPlay(command);
+        const ready = this.readyNow();
+        return play === undefined || ready === undefined
+          ? undefined
+          : this.due(play, ready, now, withinMs);
+      },
+      unanswered: (now) => {
+        const ready = this.readyNow();
+        return ready === undefined ? undefined : this.unanswered(ready, now);
+      },
+      heard: (s) => this.heard(s),
+    };
+  }
+
+  /** Its play of `command`, if it is in a sitting and plays it (ticked). */
+  private inPlay(command: string): Play | undefined {
+    if (!this.playing() || this.state.sitting === undefined) return undefined;
+    return this.played().find((p) => same(p.command, command));
+  }
+
+  /**
+   * Whether it would play `command` now, sent as `form` (D140): in a sitting, ticked, its policy
+   * allowing it, ready, not covered by another's send, and `form` one it may send, not held back.
+   */
+  private wouldPlay(command: string, form: string): boolean {
+    const now = this.ctx.clock.now();
+    const sitting = this.state.sitting;
+    const play = this.inPlay(command);
+    const ready = this.readyNow();
+    if (sitting === undefined || play === undefined || ready === undefined) return false;
+    if (sitting.count >= MAX_SENDS_PER_SITTING || !this.goes(play, ready, sitting)) return false;
+    if (this.groups.covered(this.ctx.id, play.command, now)) return false;
+    return this.formsOf(play).some((f) => same(f, form)) && !this.heldBack(form, now);
+  }
+
+  /**
+   * When `play`, not ready now, will be, if its policy allows it and that is within `withinMs`;
+   * else undefined (D140).
+   */
+  private due(
+    play: Play,
+    ready: Record<string, Readiness>,
+    now: number,
+    withinMs: number
+  ): number | undefined {
+    const r = ready[play.command];
+    if (r === undefined || r.ready || r.until === undefined || r.until - now > withinMs)
+      return undefined;
+    if (play.whileHeld !== undefined && ready[play.whileHeld]?.ready !== false) return undefined;
+    return r.until;
   }
 
   /** The owner's latest play by hand with its bot, as its parser read it (any command). */
@@ -504,29 +689,41 @@ class Player {
   }
 
   /**
-   * Whether `play` goes now: its command ready, sent in this sitting only if ready again since, its
-   * policy's command held, and its outbox not holding it back.
+   * Whether `play` goes now, whatever its form: its command ready, sent in this sitting only if
+   * ready again since, and its policy's command held.
    */
-  private allowed(
-    play: Play,
-    ready: Record<string, Readiness>,
-    sitting: InSitting,
-    now: number
-  ): boolean {
+  private goes(play: Play, ready: Record<string, Readiness>, sitting: InSitting): boolean {
     const r = ready[play.command];
-    if (r === undefined) {
-      if (!this.unknown.has(play.command)) {
-        this.unknown.add(play.command);
-        this.step('failed', `its parser knows no ${play.command}: never played`);
-      }
-      return false;
-    }
-    if (!r.ready) return false;
+    if (r === undefined || !r.ready) return false;
     const sent = sitting.sent[play.command];
     if (sent !== undefined && !(r.since !== undefined && r.since > sent)) return false;
-    if (play.whileHeld !== undefined && ready[play.whileHeld]?.ready !== false) return false;
-    const held = this.ctx.outbox('chat').held(this.chat, this.textOf(play));
-    return held === undefined || held.until <= now;
+    return play.whileHeld === undefined || ready[play.whileHeld]?.ready === false;
+  }
+
+  /**
+   * Whether to wait before picking `play`'s form (D140): until when, while a player its widest
+   * form reaches has a send not answered yet, or its command will be ready within `settleS`; at
+   * most the answer window from the first wait. Undefined: it picks now.
+   */
+  private settle(play: Play, forms: string[], sitting: InSitting, now: number): number | undefined {
+    const group = this.groups.group(this.ctx.id);
+    const others = widestReach(forms, group).filter((r) => r.id !== this.ctx.id);
+    let at: number | undefined;
+    for (const r of others) {
+      const m = group.find((x) => x.id === r.id) as GroupMember;
+      const due = [
+        m.unanswered(now) === undefined ? undefined : now + ANSWER_POLL_MS,
+        m.dueWithin(r.command, now, this.c.settleS * 1000),
+      ];
+      for (const t of due) if (t !== undefined && (at === undefined || t < at)) at = t;
+    }
+    if (at === undefined) return undefined;
+    if (sitting.settling?.command !== play.command)
+      sitting.settling = { command: play.command, since: now };
+    const until = sitting.settling.since + ANSWER_WAIT_MS;
+    if (now >= until) return undefined;
+    this.keep();
+    return Math.min(Math.max(at, now + 1), until);
   }
 
   /** Its next step in a sitting: the answer awaited, else the next command ready, else done. */
@@ -566,26 +763,60 @@ class Player {
       delete sitting.hand;
       this.keep();
     }
-    const play =
-      sitting.count >= MAX_SENDS_PER_SITTING
-        ? undefined
-        : this.played().find((p) => this.allowed(p, ready, sitting, now));
-    if (play === undefined) {
-      this.end(
-        sitting.count >= MAX_SENDS_PER_SITTING
-          ? `${MAX_SENDS_PER_SITTING} sends, the most in one`
-          : 'nothing left to play'
-      );
+    if (sitting.count >= MAX_SENDS_PER_SITTING) {
+      this.end(`${MAX_SENDS_PER_SITTING} sends, the most in one`);
       return;
     }
-    await this.send(play, sitting);
+    /** When to look again, if nothing goes now: a command due soon, or one another covers. */
+    let later: number | undefined;
+    const soon = (t: number): void => {
+      if (later === undefined || t < later) later = t;
+    };
+    for (const play of this.played()) {
+      if (ready[play.command] === undefined) {
+        if (!this.unknown.has(play.command)) {
+          this.unknown.add(play.command);
+          this.step('failed', `its parser knows no ${play.command}: never played`);
+        }
+        continue;
+      }
+      if (!this.goes(play, ready, sitting)) {
+        // About to be ready (D140): it waits for it rather than leave.
+        const due = this.due(play, ready, now, this.c.settleS * 1000);
+        if (due !== undefined) soon(due);
+        continue;
+      }
+      // Another player's send covers it (D140): its hand-off comes, then its answer.
+      if (this.groups.covered(this.ctx.id, play.command, now)) {
+        soon(now + ANSWER_POLL_MS);
+        continue;
+      }
+      const forms = this.formsOf(play).filter((f) => !this.heldBack(f, now));
+      if (forms.length === 0) continue;
+      const wait = this.settle(play, forms, sitting, now);
+      if (wait !== undefined) {
+        this.arm(wait);
+        return;
+      }
+      const pick = pickForm(forms, this.groups.group(this.ctx.id));
+      if (pick === undefined) continue;
+      // Picked and claimed in the tick it is sent in: no other player sends over it.
+      delete sitting.settling;
+      this.groups.claim(this.ctx.id, pick.reach, now + ANSWER_WAIT_MS);
+      await this.send(play, pick.form, sitting);
+      return;
+    }
+    if (later !== undefined) {
+      this.arm(Math.max(later, now + 1));
+      return;
+    }
+    this.end('nothing left to play');
   }
 
-  private async send(play: Play, sitting: InSitting): Promise<void> {
+  private async send(play: Play, text: string, sitting: InSitting): Promise<void> {
     const { command } = play;
     this.sending = true;
     try {
-      const text = this.textOf(play);
       const r = await this.ctx.outbox('chat').deliver(this.chat, text);
       const t = this.ctx.clock.now();
       // The account not connected (a dry run never waits for it, D64): it tries again shortly.
@@ -604,8 +835,8 @@ class Player {
         if (r.outcome === 'sent') {
           const id = r.id === undefined ? {} : { id: r.id };
           this.parser().actions.sent({ chat: this.chat, ...id, t, command: text });
-          // The other players of its person hear it, each its own parser (D139).
-          this.attention?.sent({ chat: this.chat, text, ...id, t });
+          // The other players of its account hear it, each its own parser (D139, D140).
+          this.groups.sent(this.ctx.id, { chat: this.chat, text, ...id, t });
           sitting.waiting = { command, t };
         }
         this.keep();
@@ -624,6 +855,7 @@ class Player {
       }
     } finally {
       this.sending = false;
+      this.groups.release(this.ctx.id);
     }
   }
 

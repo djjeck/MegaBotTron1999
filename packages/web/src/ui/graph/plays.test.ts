@@ -7,6 +7,8 @@ import {
   entriesOf,
   followedBy,
   followPlays,
+  formsOf,
+  listedForms,
   playedCommands,
   playPlace,
   playRows,
@@ -250,37 +252,109 @@ describe('the player’s chat edge, following its checklist (D137)', () => {
       edges: inGroup.edges.map((e) => (e.from === 'p.chat' ? { ...e, sends: ['-1001'] } : e)),
     };
     expect(playPlace(g, 'p', plays, named)).toEqual({ bot: 'QuestBot', group: true });
+    // In a group, every form of what it plays (D140), each bare then addressed.
+    expect(followPlays(g, named).edges[1]?.commands).toEqual(
+      ['/play', '/coffee', '/chest', '/daily'].flatMap((c) => [c, `${c}@QuestBot`])
+    );
   });
 });
 
-describe('a command’s form, bare or addressed (D139)', () => {
-  it('reads and writes it per command, and says it in the sentence', () => {
-    const rows = playRows([{ command: '/play', addressed: true }], [PLAY, DAILY]);
-    expect(rows[0]).toMatchObject({ played: true, addressed: true });
-    expect(rowsValue(rows)).toEqual([{ command: '/play', addressed: true }]);
-    // Addressed with an override, both kept; the defaults with one addressed are no longer them.
+describe('a command’s forms, its aliases bare and addressed (D140)', () => {
+  const TURN: BotCommand = { command: '/quest', aliases: ['/play'], turn: true };
+  const BOOST: BotCommand = {
+    command: '/boost',
+    aliases: ['/b'],
+    effects: [{ command: '/quest', clear: true }],
+  };
+  const group = { bot: 'LoreBot', group: true };
+  const LORE = ['/quest', '/quest@LoreBot', '/play', '/play@LoreBot'];
+
+  it('lists each name bare, then addressed in a group alone', () => {
+    expect(formsOf(TURN, group)).toEqual(LORE);
+    expect(formsOf(TURN, { ...group, group: false })).toEqual(['/quest', '/play']);
+    expect(formsOf(TURN)).toEqual(['/quest', '/play']);
+    // An addressed form its entry allows in private is listed too, to untick.
     expect(
-      rowsValue([
-        { command: DAILY, played: true, policy: '/play', overridden: true, addressed: true },
-      ])
-    ).toEqual([{ command: '/daily', whileHeld: '/play', addressed: true }]);
-    expect(
-      rowsValue([
-        { command: PLAY, played: true, policy: undefined, overridden: false, addressed: true },
-      ])
-    ).toEqual([{ command: '/play', addressed: true }]);
-    const group = { bot: 'QuestBot', group: true };
-    const row = { command: PLAY, played: true, policy: undefined };
-    expect(playSentence({ ...row, addressed: true }, false, group)).toBe(
-      "a turn: played whenever the bot's rest is over; sent as /play@QuestBot, which only @QuestBot takes"
-    );
+      listedForms({ command: TURN, forms: ['/quest@LoreBot'] }, { ...group, group: false })
+    ).toEqual(['/quest', '/play', '/quest@LoreBot']);
+  });
+
+  it('gives one row per command, an entry by an alias its, with its forms', () => {
+    const value = [{ command: '/play', forms: ['/quest', '/play@LoreBot'] }, { command: '/b' }];
+    const rows = playRows(value, [TURN, BOOST]);
+    expect(rows.map((r) => [r.command.command, r.played, r.forms])).toEqual([
+      ['/quest', true, ['/quest', '/play@LoreBot']],
+      ['/boost', true, undefined],
+    ]);
+    expect(rowsValue(rows)).toEqual([
+      { command: '/quest', forms: ['/quest', '/play@LoreBot'] },
+      { command: '/boost' },
+    ]);
+    expect(unknownEntries(value, [TURN, BOOST])).toEqual([]);
+    // Every form ticked: the defaults again.
+    expect(rowsValue(rows.map(({ forms: _, ...r }) => r))).toBeUndefined();
+    // The edge allows the forms it may send, in order.
+    expect(playedCommands(value, [TURN, BOOST], group)).toEqual([
+      '/quest',
+      '/play@LoreBot',
+      '/boost',
+      '/boost@LoreBot',
+      '/b',
+      '/b@LoreBot',
+    ]);
+    expect(playedCommands(undefined, [TURN, BOOST], { ...group, group: false })).toEqual([
+      '/quest',
+      '/play',
+      '/boost',
+      '/b',
+    ]);
+  });
+
+  it('reads D139’s addressed entry as its one addressed form, kept while its bot is unknown', () => {
+    const value = [{ command: '/play', addressed: true }];
+    expect(playRows(value, [PLAY, DAILY], 'QuestBot')[0]).toMatchObject({
+      played: true,
+      forms: ['/play@QuestBot'],
+    });
+    expect(rowsValue(playRows(value, [PLAY, DAILY], 'QuestBot'))).toEqual([
+      { command: '/play', forms: ['/play@QuestBot'] },
+    ]);
+    const unknown = playRows(value, [PLAY, DAILY]);
+    expect(unknown[0]).toMatchObject({ addressed: true });
+    expect(rowsValue(unknown)).toEqual([{ command: '/play', addressed: true }]);
+    expect(playedCommands(value, [PLAY])).toEqual(['/play']);
+    expect(playedCommands(value, [PLAY], { bot: 'QuestBot', group: false })).toEqual([
+      '/play@QuestBot',
+    ]);
+  });
+
+  it('says in the sentence how the form is chosen', () => {
+    const row = { command: TURN, played: true, policy: undefined };
     expect(playSentence(row, false, group)).toBe(
-      "a turn: played whenever the bot's rest is over; sent bare, which every bot in the group that sees it takes"
+      "a turn: played whenever the bot's rest is over; sent as the form that plays the most ready turns at once"
     );
-    // In its bot's private chat, bare goes unsaid.
-    expect(playSentence(row, false, { ...group, group: false })).toBe(
+    expect(playSentence({ ...row, command: BOOST, policy: '/quest' }, false, group)).toBe(
+      'played if /quest is cooling down; ends its cool-down; sent as the form that plays it for the most ready bots at once'
+    );
+    expect(playSentence({ ...row, forms: ['/play@LoreBot'] }, false, group)).toBe(
+      "a turn: played whenever the bot's rest is over; sent as /play@LoreBot, which only @LoreBot takes"
+    );
+    expect(playSentence({ ...row, forms: ['/play'] }, false, group)).toBe(
+      "a turn: played whenever the bot's rest is over; sent as /play, which every bot in the group that declares it takes"
+    );
+    // In its bot's private chat: its first name, or nothing for its own alone.
+    const solo = { ...group, group: false };
+    expect(playSentence(row, false, solo)).toBe(
+      "a turn: played whenever the bot's rest is over; sent as /quest"
+    );
+    expect(playSentence({ ...row, forms: ['/play'] }, false, solo)).toBe(
+      "a turn: played whenever the bot's rest is over; sent as /play"
+    );
+    expect(playSentence({ ...row, command: PLAY }, false, solo)).toBe(
       "a turn: played whenever the bot's rest is over"
     );
-    expect(playedCommands([{ command: '/play', addressed: true }], [PLAY])).toEqual(['/play']);
+    expect(playSentence({ ...row, forms: [] }, false, solo)).toBe(
+      "a turn: played whenever the bot's rest is over"
+    );
   });
 });

@@ -16,10 +16,12 @@ import {
   ANSWER_WAIT_MS,
   CONNECT_WAIT_MS,
   derivedWhileHeld,
+  type Play,
   PLAYER,
   playerConfig,
   playerPlugin,
   playerSummary,
+  playForms,
   playsOf,
 } from './player.ts';
 
@@ -97,25 +99,37 @@ describe('its ports: its bot’s chat, its parser, its person (D97, D133)', () =
 });
 
 describe('playerConfig', () => {
-  it('takes a command addressed to its bot (D139)', () => {
-    expect(playerConfig.parse({ commands: [{ command: '/play', addressed: true }] })).toEqual({
-      commands: [{ command: '/play', addressed: true }],
+  it('takes the forms a command may go as (D140), and reads D139’s addressed as one', () => {
+    const forms = ['/quest', '/play@LoreBot'];
+    expect(playerConfig.parse({ commands: [{ command: '/play', forms }] })).toEqual({
+      commands: [{ command: '/play', forms }],
+      settleS: 10,
     });
-    expect(playsOf([{ command: '/play', addressed: true }], [])).toEqual([
-      { command: '/play', addressed: true },
+    expect(() => playerConfig.parse({ commands: [{ command: '/play', forms: [] }] })).toThrow();
+    expect(() =>
+      playerConfig.parse({ commands: [{ command: '/play', forms: ['play@LoreBot'] }] })
+    ).toThrow('expected a form, as /play or /play@QuestBot');
+    // Under the name its entry spells, which its edge allows addressed already.
+    const aliased: BotCommand[] = [{ command: '/quest', aliases: ['/play'], turn: true }];
+    const [legacy] = playsOf([{ command: '/play', addressed: true }], aliased);
+    expect(legacy).toEqual({ command: '/quest', addressed: '/play' });
+    expect(playForms(legacy as Play, aliased, 'LoreBot', true)).toEqual(['/play@LoreBot']);
+    expect(playsOf([{ command: '/play', addressed: true, forms: ['/quest'] }], aliased)).toEqual([
+      { command: '/quest', forms: ['/quest'] },
     ]);
   });
 
   it('takes no commands (the defaults), or each command with its override, in order', () => {
-    expect(playerConfig.parse({})).toEqual({});
+    expect(playerConfig.parse({})).toEqual({ settleS: 10 });
     expect(playerConfig.parse({ commands: PLAYS }).commands?.[3]).toEqual({
       command: '/coffee',
       whileHeld: '/play',
     });
     // An empty list plays nothing; an override is one policy or the other.
-    expect(playerConfig.parse({ commands: [] })).toEqual({ commands: [] });
+    expect(playerConfig.parse({ commands: [] })).toEqual({ commands: [], settleS: 10 });
     expect(playerConfig.parse({ commands: [{ command: '/a', whenReady: true }] })).toEqual({
       commands: [{ command: '/a', whenReady: true }],
+      settleS: 10,
     });
     expect(() =>
       playerConfig.parse({ commands: [{ command: '/a', whileHeld: '/b', whenReady: true }] })
@@ -160,12 +174,50 @@ describe('playsOf: what it plays, and when (D137)', () => {
         declared
       )
     ).toEqual([
-      { command: '/SHOP' },
+      // By its parser's name, in its spelling (D140).
+      { command: '/shop' },
       { command: '/coffee' },
       { command: '/daily', whileHeld: '/play' },
-      { command: '/COFFEE', whileHeld: '/play' },
+      { command: '/coffee', whileHeld: '/play' },
       { command: '/dance' },
     ]);
+  });
+
+  it('names a command or a policy given by an alias by its command’s name (D140)', () => {
+    const aliased: BotCommand[] = [
+      { command: '/play', aliases: ['/quest'], turn: true },
+      { command: '/boost', aliases: ['/b'], effects: [{ command: '/play', clear: true }] },
+    ];
+    expect(playsOf([{ command: '/b' }, { command: '/QUEST' }], aliased)).toEqual([
+      { command: '/boost', whileHeld: '/play' },
+      { command: '/play' },
+    ]);
+    expect(playsOf([{ command: '/b', whileHeld: '/quest' }], aliased)).toEqual([
+      { command: '/boost', whileHeld: '/play' },
+    ]);
+  });
+
+  it('sends a command as each name, bare, then addressed in a group, or as its forms say', () => {
+    const aliased: BotCommand[] = [{ command: '/quest', aliases: ['/play'], turn: true }];
+    const quest = { command: '/quest' };
+    expect(playForms(quest, aliased, 'LoreBot', true)).toEqual([
+      '/quest',
+      '/quest@LoreBot',
+      '/play',
+      '/play@LoreBot',
+    ]);
+    // In its bot's private chat, bare only (D139).
+    expect(playForms(quest, aliased, 'LoreBot', false)).toEqual(['/quest', '/play']);
+    // Its forms, in their order, those that are this command of its bot's.
+    expect(
+      playForms(
+        { ...quest, forms: ['/play@LoreBot', '/quest', '/play@QuestBot', '/boost'] },
+        aliased,
+        'LoreBot',
+        true
+      )
+    ).toEqual(['/play@LoreBot', '/quest']);
+    expect(playForms({ command: '/dance' }, aliased, 'LoreBot', false)).toEqual(['/dance']);
   });
 
   it('derives a policy from the mechanics alone', () => {

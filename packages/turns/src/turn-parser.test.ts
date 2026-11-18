@@ -558,7 +558,21 @@ describe('each command’s readiness (bot-os.md D132)', () => {
     expect(problem({ '/d': { unlock: { forMin: -1 } } })).toContain('forMin must be over 0');
     expect(problem({ '/d': { unlock: { pattern: '(' } } })).toContain('unlock.pattern:');
     expect(problem({ '/d': { effects: [{ command: '/x', clear: true }] } })).toContain(
-      'its effect names /x, not one of its commands'
+      'its effect names /x, not one of its commands or aliases'
+    );
+    // Aliases (D140): each a command, naming one command only.
+    expect(problem({ '/d': { aliases: ['d'] } })).toContain('its alias d is not a command');
+    expect(problem({ '/d': { aliases: ['/PLAY'] } })).toContain(
+      'its alias /PLAY names another command too'
+    );
+    expect(problem({ '/d': {}, '/e': { aliases: ['/d'] } })).toContain(
+      "/d is another command's alias too"
+    );
+    expect(problem({ '/d': { aliases: ['/x'] }, '/x': {} })).toContain(
+      'its alias /x names another command too'
+    );
+    expect(() => turnParserPlugin({ ...spec, turnCommands: ['/play', '/Play'] })).toThrow(
+      'its turn names /play, /Play twice'
     );
     expect(problem({ '/d': { effects: [{ command: '/play' }] } })).toContain('clears its command');
     expect(problem({ '/d': { effects: [{ command: '/play', shortenMin: 5 }] } })).toBe('');
@@ -581,9 +595,9 @@ describe('its declared commands (bot-os.md D137)', () => {
       },
       read: () => undefined,
     });
+    // Its turn commands, one turn: the first its name, the others its aliases (D140).
     const declared = [
-      { command: '/play', turn: true },
-      { command: '/go', turn: true },
+      { command: '/play', aliases: ['/go'], turn: true },
       { command: '/shop', interactive: true },
       { command: '/coffee', cooldownMin: 60, effects: [{ command: '/play', clear: true }] },
       { command: '/chest', unlock: { pattern: 'A chest!' } },
@@ -605,5 +619,94 @@ describe('commandOf', () => {
     expect(commandOf('/DAILY@questbot', ['/play', '/daily'], 'QuestBot')).toBe('/daily');
     expect(commandOf('/daily@other', ['/daily'], 'QuestBot')).toBeUndefined();
     expect(commandOf('hello', ['/daily'], 'QuestBot')).toBeUndefined();
+  });
+
+  it('names an alias’s command by its name (D140)', () => {
+    const commands = [{ command: '/play', aliases: ['/quest'] }, { command: '/boost' }];
+    expect(commandOf('/Quest@QuestBot', commands, 'QuestBot')).toBe('/play');
+    expect(commandOf('/boost', commands, 'QuestBot')).toBe('/boost');
+    expect(commandOf('/b', commands, 'QuestBot')).toBeUndefined();
+  });
+});
+
+describe('a command’s aliases (bot-os.md D140)', () => {
+  const plugin = () =>
+    turnParserPlugin({
+      id: QUEST,
+      bot: QUESTBOT,
+      description: 'x',
+      turnCommands: ['/play', '/quest'],
+      commands: {
+        // Its effect names the turn by an alias: its name, resolved.
+        '/boost': {
+          aliases: ['/b'],
+          cooldownMin: 60,
+          effects: [{ command: '/quest', clear: true }],
+        },
+      },
+      read: (m): TurnReading => {
+        if (!m.answers) return undefined;
+        if (m.text === 'Found an apple.')
+          return { outcome: { kind: 'gain', bot: QUESTBOT }, restMs: 15 * MIN };
+        if (m.text === 'Boosted.') return { outcome: { kind: 'boost', bot: QUESTBOT } };
+        return { unread: true };
+      },
+    });
+
+  it('declares each command once, its aliases with it, an effect by its command’s name', () => {
+    expect(plugin().manifest.botCommands).toEqual([
+      { command: '/play', aliases: ['/quest'], turn: true },
+      {
+        command: '/boost',
+        aliases: ['/b'],
+        cooldownMin: 60,
+        effects: [{ command: '/play', clear: true }],
+      },
+    ]);
+  });
+
+  it('keeps one state per command, whichever alias is sent, bare or addressed', async () => {
+    const p = await run(plugin(), {}, GROUP);
+    const outbox = p.kit.core.outbox('telegram:alice').as('anyone');
+    const sent = p.hear({ ...own, chat: GROUP, text: '/quest' });
+    p.hear({ ...bot, chat: GROUP, replyTo: sent, text: 'Found an apple.' });
+    expect(Object.keys(p.iface.ready())).toEqual(['/play', '/boost']);
+    expect(p.iface.ready()['/play']).toMatchObject({
+      ready: false,
+      until: T0 + 15 * MIN,
+      sent: { t: T0, byHand: true },
+      answer: { t: T0 },
+    });
+    // Its answers hold every form of the turn back, each name bare and addressed.
+    for (const form of ['/play', '/quest', `/play@${QUESTBOT}`, `/quest@${QUESTBOT}`])
+      expect(outbox.held(GROUP, form)?.until).toBe(T0 + 15 * MIN);
+    // The boost by its alias, addressed: the boost's state; it ends the turn's rest, every form.
+    p.kit.clock.advance(MIN);
+    await p.iface.sent({ chat: GROUP, id: '7', t: T0 + MIN, command: `/b@${QUESTBOT}` });
+    p.hear({ ...bot, chat: GROUP, replyTo: '7', text: 'Boosted.' });
+    expect(p.iface.ready()['/boost']).toMatchObject({
+      ready: false,
+      until: T0 + 61 * MIN,
+      sent: { t: T0 + MIN, byHand: false },
+    });
+    expect(p.iface.ready()['/play']).toMatchObject({ ready: true, since: T0 + MIN });
+    expect(p.events.at(-1)).toMatchObject({ command: '/boost' });
+    for (const form of ['/play', '/quest', `/play@${QUESTBOT}`, `/quest@${QUESTBOT}`])
+      expect(outbox.held(GROUP, form)).toBeUndefined();
+    await p.kit.stop();
+  });
+
+  it('reads a send kept before by an alias’s name as its command’s', async () => {
+    const p = await run(plugin(), {}, undefined, {
+      [PARSED_DOC]: {
+        turns: [
+          { chat: PRIVATE, id: '9', t: T0, answered: false, private: true, command: '/quest' },
+        ],
+      },
+    });
+    p.hear({ ...bot, chat: PRIVATE, replyTo: '9', text: 'Found an apple.' });
+    expect(p.iface.ready()['/play']).toMatchObject({ ready: false, answer: { t: T0 } });
+    expect(p.kit.core.controls.read(QUEST, 'lastTurn')).toEqual({ value: { t: T0, id: '9' } });
+    await p.kit.stop();
   });
 });

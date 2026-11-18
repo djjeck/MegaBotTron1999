@@ -15,8 +15,12 @@ const DECLARED: BotCommand[] = [
 ];
 
 /** The checklist, keeping its value as the editor's draft does, seen in `state.value`. */
-function checklist(start: unknown, known = true, place?: { bot: string; group: boolean }) {
-  const declared = known ? DECLARED : undefined;
+function checklist(
+  start: unknown,
+  known: boolean | BotCommand[] = true,
+  place?: { bot: string; group: boolean }
+) {
+  const declared = known === true ? DECLARED : known === false ? undefined : known;
   const state = { value: start };
   function Field() {
     const [value, setValue] = useState(start);
@@ -41,34 +45,59 @@ function checklist(start: unknown, known = true, place?: { bot: string; group: b
 const said = (c: string): string | null =>
   screen.getByLabelText(`what it does with ${c}`).textContent;
 
-describe('a command’s form in a group (D139)', () => {
-  it('offers bare or addressed in a group, says it, and writes it', () => {
-    const state = checklist(undefined, true, { bot: 'QuestBot', group: true });
+describe('a command’s forms, each with its tick (D140)', () => {
+  const ALIASED: BotCommand[] = [
+    { command: '/quest', aliases: ['/play'], turn: true },
+    { command: '/daily', cooldownMin: 1440 },
+  ];
+
+  it('lists each form in a group, all ticked, says how one is chosen, and writes the unticked', () => {
+    const state = checklist(undefined, ALIASED, { bot: 'LoreBot', group: true });
     expect(screen.getByRole('note', { name: 'bare or addressed' }).textContent).toContain(
-      'only @QuestBot takes it'
+      'only @LoreBot takes it'
     );
-    expect(said('/play')).toContain('sent bare, which every bot in the group that sees it takes');
-    fireEvent.change(screen.getByLabelText('how it sends /play'), {
-      target: { value: 'addressed' },
-    });
+    const forms = screen.getByRole('group', { name: 'forms of /quest' });
+    expect(forms.textContent?.trim().split(/\s+/u)).toEqual([
+      '/quest',
+      '/quest@LoreBot',
+      '/play',
+      '/play@LoreBot',
+    ]);
+    expect(said('/quest')).toContain('sent as the form that plays the most ready turns at once');
+    fireEvent.click(screen.getByLabelText('send /quest as /quest'));
     expect(state.value).toEqual([
-      { command: '/play', addressed: true },
-      { command: '/coffee' },
+      { command: '/quest', forms: ['/quest@LoreBot', '/play', '/play@LoreBot'] },
       { command: '/daily' },
     ]);
-    expect(said('/play')).toContain('sent as /play@QuestBot');
-    fireEvent.change(screen.getByLabelText('how it sends /play'), { target: { value: 'bare' } });
+    fireEvent.click(screen.getByLabelText('send /quest as /play'));
+    fireEvent.click(screen.getByLabelText('send /quest as /play@LoreBot'));
+    expect(said('/quest')).toContain('sent as /quest@LoreBot, which only @LoreBot takes');
+    // The last one ticked stays.
+    expect(screen.getByLabelText<HTMLInputElement>('send /quest as /quest@LoreBot').disabled).toBe(
+      true
+    );
+    for (const f of ['/quest', '/play', '/play@LoreBot'])
+      fireEvent.click(screen.getByLabelText(`send /quest as ${f}`));
     expect(state.value).toBeUndefined();
   });
 
-  it('offers no form in its bot’s private chat, unless one is addressed already', () => {
-    checklist([{ command: '/play' }, { command: '/daily', addressed: true }], true, {
-      bot: 'QuestBot',
+  it('lists only its names in its bot’s private chat, a single one not at all', () => {
+    checklist([{ command: '/quest' }, { command: '/daily', forms: ['/daily@LoreBot'] }], ALIASED, {
+      bot: 'LoreBot',
       group: false,
     });
-    expect(screen.queryByLabelText('how it sends /play')).toBeNull();
-    expect(screen.getByLabelText('how it sends /daily')).not.toBeNull();
+    const text = (c: string) =>
+      screen
+        .getByRole('group', { name: `forms of ${c}` })
+        .textContent?.trim()
+        .split(/\s+/u);
+    expect(text('/quest')).toEqual(['/quest', '/play']);
+    // An addressed form its entry allows is listed, to untick.
+    expect(text('/daily')).toEqual(['/daily', '/daily@LoreBot']);
     expect(screen.queryByRole('note', { name: 'bare or addressed' })).toBeNull();
+    cleanup();
+    checklist(undefined);
+    expect(screen.queryByRole('group', { name: 'forms of /play' })).toBeNull();
   });
 });
 

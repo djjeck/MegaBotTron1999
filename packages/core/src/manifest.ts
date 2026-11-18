@@ -53,12 +53,15 @@ const BOT_COMMAND = /^\/\w+$/u;
 const botCommandName = z.string().regex(BOT_COMMAND, 'expected a command, as /play');
 
 /**
- * A command of a game bot, as its parser declares it (bot-os.md D132, D137): a turn (`turn`: its
- * readiness the bot's rest), or another with its mechanics, in generic terms.
+ * A command of a game bot, as its parser declares it (bot-os.md D132, D137, D140): a turn (`turn`:
+ * its readiness the bot's rest), or another with its mechanics, in generic terms; by its name, with
+ * the other names the bot takes it by (`aliases`), one command whichever is sent.
  */
 const botCommandSchema = z.strictObject({
   command: botCommandName,
-  /** One of the turn commands, which share one readiness: the bot's rest. */
+  /** Its other names, in the order its parser declares them (D140): never addressed (`/x@Bot`). */
+  aliases: z.array(botCommandName).optional(),
+  /** The bot's turn, whose readiness is the bot's rest. */
   turn: z.literal(true).optional(),
   /** Held for so many minutes after a success. */
   cooldownMin: z.number().positive().optional(),
@@ -264,10 +267,10 @@ export const manifestSchema = z
      */
     botUsername: z.string().regex(/^\w+$/u, 'expected a username, without @').optional(),
     /**
-     * A player's (bot-os.md D137): the key of its config that lists the commands it plays (`[{
-     * command, whileHeld?, whenReady? }]`, unset: the defaults), picked from the `botCommands` of
-     * the node its interface `input` binds; and its chat-out `output`, whose edge the editor keeps
-     * allowing the commands it plays.
+     * A player's (bot-os.md D137, D140): the key of its config that lists the commands it plays
+     * (`[{ command, whileHeld?, whenReady?, forms? }]`, unset: the defaults), picked from the
+     * `botCommands` of the node its interface `input` binds; and its chat-out `output`, whose edge
+     * the editor keeps allowing the forms it may send them as.
      */
     configPlays: z
       .strictObject({
@@ -467,14 +470,18 @@ export const manifestSchema = z
           message: `it has no chat-out output ${output}`,
         });
     }
-    const declared = (m.botCommands ?? []).map((c) => c.command.toLowerCase());
+    // A name, or an alias (D140), names one command only.
+    const names = new Set<string>();
     m.botCommands?.forEach((c, i) => {
-      if (declared.indexOf(c.command.toLowerCase()) !== i)
-        ctx.addIssue({
-          code: 'custom',
-          path: ['botCommands', i, 'command'],
-          message: `${c.command} is declared twice`,
-        });
+      [c.command, ...(c.aliases ?? [])].forEach((name, j) => {
+        if (names.has(name.toLowerCase()))
+          ctx.addIssue({
+            code: 'custom',
+            path: j === 0 ? ['botCommands', i, 'command'] : ['botCommands', i, 'aliases', j - 1],
+            message: `${name} is declared twice`,
+          });
+        names.add(name.toLowerCase());
+      });
     });
     if (m.requires.includes(m.id))
       ctx.addIssue({
