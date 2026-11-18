@@ -200,7 +200,7 @@ export class ReadinessModel {
     for (const [command, w] of Object.entries(v.commands ?? {}))
       if (w.announcedBy !== undefined && this.mechanics[command]?.unlock === undefined)
         fail(`${command} is announced (announcedBy), but its mechanics have no unlock`);
-    this.declared = this.declare(v);
+    this.declared = this.commandsOf(v);
     this.consumes = ['sent', 'turn', 'answer', 'reply'].map((t) => `${v.id}.${t}`);
   }
 
@@ -397,7 +397,7 @@ export class ReadinessModel {
    * each with its aliases and mechanics, copied field by field; an effect naming an alias names its
    * command.
    */
-  private declare(v: BotVocabulary): BotCommand[] {
+  private commandsOf(v: BotVocabulary): BotCommand[] {
     const aliasesOf = (a: readonly string[]) => (a.length === 0 ? {} : { aliases: [...a] });
     const [turn, ...others] = this.names;
     return [
