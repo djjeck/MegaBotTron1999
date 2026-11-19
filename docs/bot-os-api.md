@@ -1191,9 +1191,10 @@ skipped on purpose (`packages/connectors/src/transport/seen-ledger.ts`):
 - `last-seen`, `{ "<the chat's marked id>": <message id> }`: every message up to that id is
   accounted for. It never moves past a gap that is not filled.
 - `seen-above`, `{ "<the chat's marked id>": [[<from>, <to>], …] }`: the ids accounted for above it,
-  while a gap below is open: what was heard live (every message from the connection's first live id
-  on comes live) and what the account sent itself. A range that meets `last-seen` folds into it; at
-  most 100 a chat, past which the lowest gap is given up (and warned of).
+  while a gap below is open: what was heard live and what the account sent itself. In a private chat
+  or a basic group, every message from the connection's first live id on is taken to come live; in a
+  supergroup or a channel, only the ids seen (D147, below). A range that meets `last-seen` folds
+  into it; at most 100 a chat, past which the lowest gap is given up (and warned of).
 
 A message is accounted for before it is delivered, so that a stop in between never delivers it
 twice. One heard live twice (or live after the catch-up delivered it) is delivered once.
@@ -1222,6 +1223,29 @@ twice. One heard live twice (or live after the catch-up delivered it) is deliver
 - **The account's own messages**: those it sends through the outbox are never heard back live from
   its own session, so each is accounted for as it is sent: the catch-up does not deliver it as
   missed. Those sent from the owner's other devices come live, and are delivered as any (`own`).
+
+**A GramJS workaround: the updates not pushed, looked for** (bot-os.md D147; to revisit when GramJS
+keeps update state). While connected, GramJS 2.26.22 keeps no update state either: an update
+Telegram does not push to the session (it does not promise every one of a supergroup's) is lost
+without a trace. A supergroup's or a channel's message ids (`-100…`) grow by one per message, so:
+
+- **A gap, by id**: a live message more than one past the last id known of its chat (heard, sent,
+  fetched, or the dialog's latest at connection) shows ids not pushed. A **look** follows a second
+  later (`GAP_LOOK_MS`): one request for the chat's messages after the last id known before it, at
+  most 100 (`LOOK_LIMIT`), each not yet delivered given oldest first, marked `missed` (news within
+  its grace: `playback` only past it), the ids between accounted for when the page held them all (a
+  deleted message is none). Looks planned in one chat are merged, from the lowest id asked.
+- **After a send**: the answer to it may be its chat's last message, which no later one would show
+  missing, so each send to such a chat is looked after, 4 and 15 seconds later
+  (`LOOK_AFTER_SEND_MS`).
+- **Only what was seen** is accounted for in those chats (a live id, a send, a look's), so a gap no
+  look filled (a failed look is logged; a larger one than a page) is fetched at the next connection.
+
+**The raw log** (D147, `packages/connectors/src/transport/raw-log.ts`): the last 8 hours of what the
+connector heard live, fetched (a catch-up, a look), sent and found missing (a gap), each entry with
+when (`at`), how (`via`), the chat and the message as delivered, in its store's `raw-log` document
+(`/data/instances/<connector>/raw-log.json`), written at most 30 seconds after an entry and at a
+stop, older entries dropped. Shown nowhere: for debugging on the volume. It holds the chats' text.
 
 **A login from its node** (bot-os.md D116, `packages/core/src/login.ts`): a connector whose manifest
 says `login` keeps its credentials in its own store (`login`, a document of mode 600 like the rest),

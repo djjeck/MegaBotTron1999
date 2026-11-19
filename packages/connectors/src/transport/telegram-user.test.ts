@@ -3,14 +3,18 @@ import { Api } from 'telegram';
 import { EditedMessage } from 'telegram/events/EditedMessage.js';
 import { returnBigInt } from 'telegram/Helpers.js';
 import { describe, expect, it } from 'vitest';
+import { RAW_LOG_DOC, RAW_LOG_FLUSH_MS, RAW_LOG_MS } from './raw-log.ts';
 import {
   CATCH_UP_CAP,
   CATCH_UP_PAUSE_MS,
   CATCH_UP_RETRY_MAX_MS,
   createTelegramClient,
   DIALOGS_TTL_MS,
+  GAP_LOOK_MS,
   type GramClient,
   LAST_SEEN_DOC,
+  LOOK_AFTER_SEND_MS,
+  LOOK_LIMIT,
   type RawDialog,
   type RawMessage,
   RETRY_MS,
@@ -1277,6 +1281,149 @@ describe('the catch-up', () => {
     expect(messages[0]?.id).toBe('501');
     expect(warnings).toHaveLength(1);
     expect(seen()).toEqual({ [GROUP]: 1600 });
+  });
+});
+
+describe('a GramJS workaround: the updates it was not pushed, looked for (D147)', () => {
+  const group: RawDialog = {
+    id: { toString: () => GROUP },
+    title: 'The Lobby',
+    isGroup: true,
+    inputEntity: { peer: GROUP },
+    message: { id: 20 },
+  };
+  const said = (from: number, to: number): RawMessage[] =>
+    Array.from({ length: to - from + 1 }, (_, i) => raw({ id: from + i, message: `m${from + i}` }));
+
+  async function connected(f: ReturnType<typeof fake>, docs = new Map<string, unknown>()) {
+    if (!docs.has(LAST_SEEN_DOC)) docs.set(LAST_SEEN_DOC, { [GROUP]: 20 });
+    const clock = new VirtualClock(SAID);
+    const messages: Inbound[] = [];
+    const logs: string[] = [];
+    const c = new TelegramUserConnector({
+      account: 'telegram:alice',
+      client: f.client,
+      chats: [GROUP],
+      clock,
+      log: (l) => logs.push(l),
+      store: {
+        read: <T>(name: string) => docs.get(name) as T | undefined,
+        write: (name, value) => docs.set(name, structuredClone(value)),
+      },
+      readers: () => [{ reads: [GROUP] }],
+    });
+    c.onMessage((m) => messages.push(m));
+    c.start();
+    await settle(clock, 3);
+    return { c, clock, messages, logs, docs };
+  }
+  const looks = (f: ReturnType<typeof fake>) => f.calls.filter((x) => x.startsWith('history'));
+  /** Runs the clock `ms` on, letting each look end. */
+  const run = async (clock: VirtualClock, ms: number) => {
+    for (let t = 0; t < ms; t += 500) {
+      clock.advance(500);
+      await flush();
+      await flush();
+    }
+  };
+
+  it('fetches the ids a live message skipped, a second later, as caught up but news', async () => {
+    const f = fake({ dialogs: [group], history: { [GROUP]: said(21, 24) } });
+    const { c, clock, messages, docs } = await connected(f);
+    await f.deliver(raw({ id: 21, message: 'm21' }));
+    expect(looks(f)).toEqual([]);
+    // 22 and 23 never pushed.
+    await f.deliver(raw({ id: 24, message: 'm24' }));
+    await run(clock, GAP_LOOK_MS);
+    expect(looks(f)).toEqual([`history ${GROUP} <0 >21 ${LOOK_LIMIT}`]);
+    expect(messages.map((m) => [m.id, m.missed === true, m.playback])).toEqual([
+      ['21', false, false],
+      ['24', false, false],
+      ['22', true, false],
+      ['23', true, false],
+    ]);
+    expect(docs.get(LAST_SEEN_DOC)).toEqual({ [GROUP]: 24 });
+    // In order, nothing is looked for.
+    await f.deliver(raw({ id: 25, message: 'm25' }));
+    await run(clock, 5000);
+    expect(looks(f)).toHaveLength(1);
+    await c.stop();
+  });
+
+  it('looks after its own send, twice, for an answer no later message would show', async () => {
+    const f = fake({
+      dialogs: [group],
+      history: {
+        [GROUP]: [
+          ...said(21, 21),
+          raw({ id: 22, message: 'Troppo presto', replyTo: { replyToMsgId: 21 } }),
+        ],
+      },
+      send: () => Promise.resolve({ id: 21, chatId: { toString: () => GROUP } }),
+    });
+    const { c, clock, messages, docs } = await connected(f);
+    await c.deliver(GROUP, '/play');
+    // Its own id alone is accounted for (no range assumed).
+    expect(docs.get(LAST_SEEN_DOC)).toEqual({ [GROUP]: 21 });
+    await run(clock, LOOK_AFTER_SEND_MS[0] as number);
+    expect(looks(f)).toEqual([`history ${GROUP} <0 >20 ${LOOK_LIMIT}`]);
+    expect(messages.map((m) => [m.id, m.replyTo, m.missed])).toEqual([['22', '21', true]]);
+    await run(clock, LOOK_AFTER_SEND_MS[1] as number);
+    expect(looks(f)).toHaveLength(2);
+    expect(messages).toHaveLength(1);
+    expect(docs.get(LAST_SEEN_DOC)).toEqual({ [GROUP]: 22 });
+    await c.stop();
+  });
+
+  it('leaves a gap no look filled to the next connection, and logs a failed look', async () => {
+    const f = fake({
+      dialogs: [group],
+      history: { [GROUP]: said(21, 23) },
+      historyFails: [new Error('CHANNEL_PRIVATE')],
+    });
+    const docs = new Map<string, unknown>();
+    const first = await connected(f, docs);
+    await f.deliver(raw({ id: 23, message: 'm23' }));
+    await run(first.clock, GAP_LOOK_MS);
+    expect(first.logs).toContain(`look in ${GROUP} failed: Error: CHANNEL_PRIVATE`);
+    expect(docs.get(LAST_SEEN_DOC)).toEqual({ [GROUP]: 20 });
+    expect(docs.get(SEEN_ABOVE_DOC)).toEqual({ [GROUP]: [[23, 23]] });
+    await first.c.stop();
+    const second = await connected(
+      fake({ dialogs: [{ ...group, message: { id: 23 } }], history: { [GROUP]: said(21, 23) } }),
+      docs
+    );
+    expect(second.messages.map((m) => [m.id, m.missed])).toEqual([
+      ['21', true],
+      ['22', true],
+    ]);
+    expect(docs.get(LAST_SEEN_DOC)).toEqual({ [GROUP]: 23 });
+    await second.c.stop();
+  });
+
+  it('keeps 8 hours of what it heard, sent and found missing, raw, in its store', async () => {
+    const f = fake({
+      dialogs: [group],
+      history: { [GROUP]: said(21, 22) },
+      send: () => Promise.resolve({ id: 23, chatId: { toString: () => GROUP } }),
+    });
+    const { c, clock, docs } = await connected(f);
+    await f.deliver(raw({ id: 22, message: 'm22' }));
+    await run(clock, GAP_LOOK_MS);
+    await c.deliver(GROUP, '/play');
+    await run(clock, RAW_LOG_FLUSH_MS);
+    const log = docs.get(RAW_LOG_DOC) as { via: string; id?: unknown; text?: unknown }[];
+    expect(log.map((e) => [e.via, e.id ?? null, e.text ?? null])).toEqual([
+      ['gap', null, null],
+      ['live', '22', 'm22'],
+      ['look', '21', 'm21'],
+      ['sent', 23, '/play'],
+    ]);
+    // Past 8 hours, gone at the next write.
+    clock.advance(RAW_LOG_MS);
+    await f.deliver(raw({ id: 24, message: 'm24' }));
+    await c.stop();
+    expect((docs.get(RAW_LOG_DOC) as { via: string }[]).map((e) => e.via)).toEqual(['live']);
   });
 });
 

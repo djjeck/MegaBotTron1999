@@ -20,6 +20,20 @@
  * the connection and at the next one, until it is filled. A chat no running reader reads is not
  * fetched: its gap is skipped, and what is heard there live is accounted for all the same.
  *
+ * **A GramJS workaround: gaps found by id** (docs/bot-os.md D147). GramJS 2.26.22 keeps no update
+ * state while connected either: an update Telegram does not push (it does not promise every one of
+ * a supergroup's to a user session) is lost, silently. A supergroup's (or a channel's) message ids
+ * grow by one per message, so a live message more than one past the last id known of its chat shows
+ * a gap: the ids between are fetched, a second later (a **look**), and delivered as caught up
+ * (`missed`, news within their grace). A send to such a chat is looked after twice
+ * (`LOOK_AFTER_SEND_MS`), so that the answer to it is recovered within seconds when it is the
+ * chat's last message, where no later one would show the gap. Its ledger accounts in those chats
+ * only for the ids seen, never for a range assumed to have come live, so that a gap no look filled
+ * is fetched at the next connection. To revisit when GramJS keeps update state (`catchUp`).
+ *
+ * **The raw log** (D147): the last 8 hours of what it heard, fetched, sent and found missing, raw,
+ * in its store (`raw-log.ts`), for debugging.
+ *
  * The session string gives full access to the account: it comes from the connector's store (a login
  * from its node, `user-login.ts`, D116) or the deployment's secrets,
  * never from this repository, and is never printed by this module.
@@ -44,6 +58,7 @@ import { EditedMessage } from 'telegram/events/EditedMessage.js';
 import { NewMessage } from 'telegram/events/index.js';
 import { Logger, LogLevel } from 'telegram/extensions/Logger.js';
 import { StringSession } from 'telegram/sessions/index.js';
+import { RawLog } from './raw-log.ts';
 import { LAST_SEEN_DOC, type LedgerStore, SEEN_ABOVE_DOC, SeenLedger } from './seen-ledger.ts';
 
 export { LAST_SEEN_DOC, SEEN_ABOVE_DOC };
@@ -185,6 +200,18 @@ export const CATCH_UP_PAUSE_MS = 1000;
 export const CATCH_UP_RETRY_MAX_MS = 3_600_000;
 /** How many of each chat's latest ids it remembers having delivered, against a second delivery. */
 const RECENT = 200;
+/** How long after a gap is found its look comes (D147): the missing updates may still arrive. */
+export const GAP_LOOK_MS = 1000;
+/** When, after a send to a supergroup, it looks for what came after (D147). */
+export const LOOK_AFTER_SEND_MS: readonly number[] = [4000, 15_000];
+/** The most messages one look fetches (D147); a larger gap waits for the next connection. */
+export const LOOK_LIMIT = 100;
+
+/**
+ * Whether a chat's message ids grow by one per message (D147): a supergroup's or a channel's
+ * (`-100…`). A private chat's and a basic group's are the account's, shared with its other chats.
+ */
+const sequential = (key: string): boolean => key.startsWith('-100');
 
 /** The wait GramJS asks for (its `FloodWaitError` and kin carry `seconds`), in ms. */
 function floodMs(e: unknown): number | undefined {
@@ -296,10 +323,19 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
   private readonly retries = new Set<TimerHandle>();
   /** Each connection's own, so that a catch-up stopped or superseded ends. */
   private generation = 0;
+  /** The highest id known of each sequential chat, by its marked id (D147). */
+  private readonly top = new Map<string, number>();
+  /** Each sequential chat's looks planned: from which id, when, and its timer (D147). */
+  private readonly looks = new Map<
+    string,
+    { chat: string; minId: number; at: number[]; timer: TimerHandle | undefined }
+  >();
+  private readonly raw: RawLog;
 
   constructor(options: UserConnectorOptions) {
     super(options.account, 'telegram');
     this.o = options;
+    this.raw = new RawLog(options.clock, options.store);
     this.ledger = new SeenLedger(options.store, (key, after, before) =>
       this.warn(
         `catch-up of ${key}: too many gaps kept, the one after ${after} up to ${before} skipped`
@@ -330,6 +366,10 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     this.liveFrom = undefined;
     this.early = new Map();
     this.recent.clear();
+    for (const l of this.looks.values()) this.o.clock.clearTimeout(l.timer);
+    this.looks.clear();
+    this.top.clear();
+    this.raw.flush();
     this.o.clock.clearTimeout(this.retry);
     this.peers.clear();
     this.changed({ state: 'closed', phase: 'closed' });
@@ -366,7 +406,12 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       // Its own message, never heard back live from this session: accounted for, so that the
       // catch-up does not deliver it as missed (D66).
       const key = sent.chatId?.toString() ?? (/^-?\d+$/u.test(chat) ? chat : undefined);
-      if (key !== undefined) this.accountLive(key, sent.id);
+      this.raw.add({ via: 'sent', chat, id: sent.id, text });
+      if (key !== undefined) {
+        this.accountLive(key, sent.id);
+        // The answer to it may be the chat's last message: no later one would show its gap (D147).
+        if (sequential(key)) this.look(key, chat, this.known(key, sent.id), LOOK_AFTER_SEND_MS);
+      }
       return { id: String(sent.id) };
     } catch (e) {
       const ms = floodMs(e);
@@ -537,12 +582,22 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       if (chat === undefined) return;
       const key = m.chatId?.toString();
       if (key !== undefined && !this.remember(key, m.id)) return;
+      if (key !== undefined && sequential(key)) {
+        // Past the last id known of its chat by more than one: the ids between were not pushed
+        // (D147), and are looked for.
+        const was = this.known(key, m.id);
+        if (m.id > was + 1) {
+          this.raw.add({ via: 'gap', chat, after: was, before: m.id });
+          this.look(key, chat, was, [GAP_LOOK_MS]);
+        }
+      }
       let inbound: Omit<Inbound, 'account' | 'network'>;
       try {
         inbound = await this.inbound(m, chat);
       } finally {
         if (key !== undefined) this.accountLive(key, m.id);
       }
+      this.raw.add({ via: 'live', ...inbound });
       this.received(inbound);
     } catch (err) {
       this.o.log(`message ${m.id} dropped: ${String(err)}`);
@@ -563,7 +618,9 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       const edited = (m.editDate ?? Math.floor(this.o.clock.now() / 1000)) * 1000;
       const key = `${m.chatId?.toString() ?? chat}\n${m.id}`;
       if (!this.remember(`${key}\nedit`, edited)) return;
-      this.reread({ ...(await this.inbound(m, chat)), edited });
+      const inbound = { ...(await this.inbound(m, chat)), edited };
+      this.raw.add({ via: 'edit', ...inbound });
+      this.reread(inbound);
     } catch (err) {
       this.o.log(`edit of message ${m.id} dropped: ${String(err)}`);
     }
@@ -596,8 +653,115 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       this.liveFrom.set(key, from);
     }
     if (this.ledger.last(key) === undefined) this.ledger.advance(key, id);
-    else if (id >= from) this.ledger.mark(key, from, id);
-    else this.ledger.mark(key, id);
+    // A sequential chat's: only the id seen, for an update may not come (D147); a gap below it
+    // stays open for a look, or the next connection.
+    else if (sequential(key) || id < from) this.ledger.mark(key, id);
+    else this.ledger.mark(key, from, id);
+  }
+
+  /**
+   * The highest id known of a sequential chat before `id`, which becomes known (D147): the one
+   * before it the first time.
+   */
+  private known(key: string, id: number): number {
+    const was = this.top.get(key) ?? id - 1;
+    this.top.set(key, Math.max(was, id));
+    return was;
+  }
+
+  /**
+   * Looks for a sequential chat's messages after `minId`, after each of `delays` (D147): planned
+   * with those already planned there, from the lowest id asked.
+   */
+  private look(key: string, chat: string, minId: number, delays: readonly number[]): void {
+    const now = this.o.clock.now();
+    const was = this.looks.get(key);
+    const at = [...new Set([...(was?.at ?? []), ...delays.map((d) => now + d)])].sort(
+      (a, b) => a - b
+    );
+    this.looks.set(key, {
+      chat,
+      minId: Math.min(was?.minId ?? minId, minId),
+      at,
+      timer: was?.timer,
+    });
+    this.armLook(key);
+  }
+
+  private armLook(key: string): void {
+    const l = this.looks.get(key);
+    if (l === undefined) return;
+    this.o.clock.clearTimeout(l.timer);
+    const next = l.at[0];
+    if (next === undefined) {
+      this.looks.delete(key);
+      return;
+    }
+    const generation = this.generation;
+    l.timer = this.o.clock.setTimeout(
+      () => void this.lookNow(key, generation),
+      Math.max(0, next - this.o.clock.now())
+    );
+  }
+
+  /**
+   * A look (D147): the chat's latest messages after its `minId`, one request, each not yet
+   * delivered given now as caught up, oldest first; the ids between accounted for when the page
+   * holds them all. A flood wait or a failure is logged, and the next look, or the next
+   * connection, tries again.
+   */
+  private async lookNow(key: string, generation: number): Promise<void> {
+    const l = this.looks.get(key);
+    if (l === undefined || generation !== this.generation || !this.connected) return;
+    l.timer = undefined;
+    l.at.shift();
+    const { chat, minId } = l;
+    try {
+      const page = [
+        ...(await this.o.client.getMessages((await this.peer(chat)) as never, {
+          limit: LOOK_LIMIT,
+          offsetId: 0,
+          minId,
+        })),
+      ]
+        .filter((m) => m.id > minId)
+        .sort((a, b) => a.id - b.id);
+      if (generation !== this.generation) return;
+      for (const m of page) {
+        this.known(key, m.id);
+        if (this.ledger.covered(key, m.id)) continue;
+        let inbound: Omit<Inbound, 'account' | 'network'> | undefined;
+        if (isText(m))
+          try {
+            inbound = await this.inbound(m, chat);
+          } catch (err) {
+            this.o.log(`message ${m.id} dropped: ${String(err)}`);
+          }
+        if (generation !== this.generation) return;
+        this.ledger.mark(key, m.id);
+        if (inbound === undefined || !this.remember(key, m.id)) continue;
+        const grace = this.o.liveGraceMs ?? LIVE_GRACE_S * 1000;
+        const delivered = {
+          ...inbound,
+          playback: this.o.clock.now() - inbound.time > grace,
+          missed: true,
+        };
+        this.raw.add({ via: 'look', ...delivered });
+        this.received(delivered);
+      }
+      const newest = page.at(-1)?.id;
+      // The whole gap was in the page: what it does not hold is gone (deleted), accounted for.
+      if (newest !== undefined && page.length < LOOK_LIMIT)
+        this.ledger.mark(key, minId + 1, newest);
+    } catch (err) {
+      const ms = floodMs(err);
+      this.o.log(
+        ms === undefined
+          ? `look in ${chat} failed: ${String(err)}`
+          : `look in ${chat}: Telegram asks to wait ${ms / 1000} s`
+      );
+    }
+    if (generation === this.generation) this.armLook(key);
   }
 
   /**
@@ -626,6 +790,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       const upTo = dialog.message?.id;
       if (chat === undefined || key === undefined || upTo === undefined) continue;
       liveFrom.set(key, upTo + 1);
+      if (sequential(key)) this.known(key, upTo);
       if (this.ledger.last(key) === undefined) this.ledger.advance(key, upTo);
       chats.push({ dialog, chat, key, upTo, failures: 0 });
     }
@@ -737,6 +902,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       // News still within its grace (D83): a quick restart costs nothing.
       const grace = this.o.liveGraceMs ?? LIVE_GRACE_S * 1000;
       const old = this.o.clock.now() - inbound.time > grace;
+      this.raw.add({ via: 'catch-up', ...inbound, playback: old });
       this.received({ ...inbound, playback: old, missed: true });
     }
     this.ledger.advance(gap.key, gap.upTo);
