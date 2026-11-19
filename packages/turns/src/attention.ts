@@ -3,7 +3,7 @@
  * per account). It holds, once, what every turn actor held on its own: when the person comes back
  * (a gap between a minimum and a maximum, a chance to forget, nights off in a time zone, a seed:
  * packages/turns/src/sittings.ts), and how fast they act within a sitting (their reaction time:
- * reading an answer, scaled to its length, now and then longer). It starts **sittings**, given to
+ * reading an answer, scaled to its length up to a cap, now and then longer). It starts **sittings**, given to
  * the players bound to its `attention` output (bot-os.md D133), so that the bots one person plays
  * share their sittings and gameplay comes in bursts, as a person's does.
  *
@@ -122,6 +122,13 @@ const reactionShape = z
       .min(0)
       .default(40)
       .describe('Milliseconds more per character of the answer read (40: 25 characters a second)'),
+    readMaxS: z
+      .number()
+      .min(0)
+      .default(4)
+      .describe(
+        'The most seconds reading an answer adds, however long: a person skims a long story they have seen the like of (D146)'
+      ),
     longChance: z
       .number()
       .min(0)
@@ -515,7 +522,8 @@ class Attention {
    */
   private react(length: number, after?: number): number {
     const r = this.c.reaction;
-    let ms = (r.minS + this.rng.next() * (r.maxS - r.minS)) * 1000 + length * r.perCharMs;
+    const reading = Math.min(length * r.perCharMs, r.readMaxS * 1000);
+    let ms = (r.minS + this.rng.next() * (r.maxS - r.minS)) * 1000 + reading;
     if (this.rng.chance(r.longChance)) ms += this.rng.next() * r.longMaxS * 1000;
     const at = Math.max(this.ctx.clock.now(), after ?? 0, this.busyUntil) + Math.round(ms);
     this.busyUntil = at;

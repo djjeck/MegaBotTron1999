@@ -138,7 +138,14 @@ describe('attentionConfig', () => {
   it('carries every default, the reaction’s too, and refuses a pace it cannot keep', () => {
     const c = attentionConfig.parse({});
     expect(c).toMatchObject({ ...DEFAULT_SCHEDULE });
-    expect(c.reaction).toEqual({ minS: 2, maxS: 8, perCharMs: 40, longChance: 0.1, longMaxS: 60 });
+    expect(c.reaction).toEqual({
+      minS: 2,
+      maxS: 8,
+      perCharMs: 40,
+      readMaxS: 4,
+      longChance: 0.1,
+      longMaxS: 60,
+    });
     expect(() => attentionConfig.parse({ minGapMin: 0 })).toThrow('minGapMin must be at least 1');
     expect(() => attentionConfig.parse({ reaction: { minS: 9 } })).toThrow(
       'maxS must not be under minS'
@@ -303,6 +310,20 @@ describe('attention', () => {
       'a reacts at 2000',
       'a reacts at 4000',
       'b reacts at 6000',
+    ]);
+    await r.kit.stop();
+  });
+
+  it('caps the reading of a long answer (D146)', async () => {
+    const log: string[] = [];
+    const r = await run([fakePlayer('a', log, { react: 2 })], {
+      config: { reaction: { minS: 1, maxS: 1, perCharMs: 100, readMaxS: 3, longChance: 0 } },
+    });
+    r.kit.runUntil(T0 + 5 * MIN);
+    // 100 characters at 100 ms would be 10 s: 3 s at most, and 1 s more each.
+    expect(log.filter((l) => l.includes('reacts'))).toEqual([
+      'a reacts at 4000',
+      'a reacts at 8000',
     ]);
     await r.kit.stop();
   });
