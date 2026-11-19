@@ -2494,30 +2494,31 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   of its commands that is ready (its state's `state.ready`), allowed by its policy (D142: its state
   alone decides readiness; the outbox holds back no game's cooldown), each after its person's
   reaction time (a glance first, then the answer read, scaled to its length); after each live send
-  it waits for the answer its state reads (looking every 5 seconds, up to two minutes), then looks
-  again, so that a command an answer unlocks, or one a reset makes ready again, is taken in the same
-  sitting. **The form, by reach** (bot-os.md D140, `chat-group.ts`): the players of one
-  `playerPlugin` registration whose chat-out edges send to the same chat from the same account are a
-  group (a registry in memory, each joining at its start under its outbox's `account` and its chat).
-  A form reaches the players of the group whose bot takes it (`commandOf` on its state's `commands`:
-  bare, every one whose bot declares that name; addressed, its bot's alone) and is allowed only if
-  every one of them would play its command now: in a sitting of its own person, the command ticked
-  and its policy allowing it, ready (and not sent in the sitting unless ready again), not covered by
-  another's claim, and the form one its config allows. Of its forms allowed, it sends the one of
-  widest reach, the first in its order on a tie (`pickForm`); none allowed, the command waits.
-  **Settling first:** while a player its widest form reaches has a send its state read no answer to,
-  younger than two minutes, or will have that command ready within `settleS` seconds, it waits
-  (until then, or 5 seconds for an answer; at most two minutes in all, then it picks with what it
-  knows); and with nothing ready, a command of its own due within `settleS` keeps it in the sitting
-  until then. It picks and claims the players its form reaches (covered for their command, until its
-  hand-off or two minutes) in the same tick it sends, so no other sends an overlapping form. **In a
-  sitting that follows the owner's play** (D138), or one they wrote during, or one in which another
-  player of its account sent a command (D139, D140), it first waits, the same way, for the answer to
-  the last send its state knows of and has read no answer to (sent less than two minutes before), so
-  that what that answer unlocks or holds is known (a bare turn another sent in the group, its bot's
-  turn taken, is not sent again); then it plays its whole checklist, the turn included. A command it
-  sent in the sitting goes again only if it became ready again since (its readiness `since` after
-  the send), at most 20 sends a sitting; when nothing is left, it sleeps until the next sitting. Its
+  it waits for the answer its state reads (looking every 5 seconds, up to two minutes; one dated in
+  the second of the send counts, a message's date being the whole second), then looks again, so that
+  a command an answer unlocks, or one a reset makes ready again, is taken in the same sitting. **The
+  form, by reach** (bot-os.md D140, `chat-group.ts`): the players of one `playerPlugin` registration
+  whose chat-out edges send to the same chat from the same account are a group (a registry in
+  memory, each joining at its start under its outbox's `account` and its chat). A form reaches the
+  players of the group whose bot takes it (`commandOf` on its state's `commands`: bare, every one
+  whose bot declares that name; addressed, its bot's alone) and is allowed only if every one of them
+  would play its command now: in a sitting of its own person, the command ticked and its policy
+  allowing it, ready (and not sent in the sitting unless ready again), not covered by another's
+  claim, and the form one its config allows. Of its forms allowed, it sends the one of widest reach,
+  the first in its order on a tie (`pickForm`); none allowed, the command waits. **Settling first:**
+  while a player its widest form reaches has a send its state read no answer to, younger than two
+  minutes, or will have that command ready within `settleS` seconds, it waits (until then, or 5
+  seconds for an answer; at most two minutes in all, then it picks with what it knows); and with
+  nothing ready, a command of its own due within `settleS` keeps it in the sitting until then. It
+  picks and claims the players its form reaches (covered for their command, until its hand-off or
+  two minutes) in the same tick it sends, so no other sends an overlapping form. **In a sitting that
+  follows the owner's play** (D138), or one they wrote during, or one in which another player of its
+  account sent a command (D139, D140), it first waits, the same way, for the answer to the last send
+  its state knows of and has read no answer to (sent less than two minutes before), so that what
+  that answer unlocks or holds is known (a bare turn another sent in the group, its bot's turn
+  taken, is not sent again); then it plays its whole checklist, the turn included. A command it sent
+  in the sitting goes again only if it became ready again since (its readiness `since` after the
+  send), at most 20 sends a sitting; when nothing is left, it sleeps until the next sitting. Its
   next step is the durable timer `play`, and the sitting it is in is kept in its store (`state`), so
   a restart takes the sitting up where it was (one whose step came due more than 10 minutes before
   is dropped). Through a live chat-out edge it sends through its outbox (refused `not connected`, it

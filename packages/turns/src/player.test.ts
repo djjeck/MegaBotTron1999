@@ -14,6 +14,7 @@ import { QUEST, QUEST_READY, questGamePlugin, questReadyPlugin } from '#test/que
 import { CHAT, PLAYS, runSittings, T0 } from '#test/sittings-run.ts';
 import {
   ANSWER_WAIT_MS,
+  answers,
   CONNECT_WAIT_MS,
   derivedWhileHeld,
   PLAYER,
@@ -463,6 +464,26 @@ describe('a person’s sittings, played on the dev kit (bot-os.md D134)', () => 
       'sent: /play #500',
       'done: sitting #1 done: nothing left to play',
     ]);
+    await r.kit.stop();
+  });
+
+  it('reads an answer dated to the second of its send, before it, as its answer', async () => {
+    const r = await runSittings();
+    // Telegram dates a message to the whole second: an answer 200 ms after its send is dated
+    // before it, unless the send was on the second.
+    r.account.answerMs = 200;
+    r.account.wholeSeconds = true;
+    const first = r.person().next as number;
+    await r.until(first + 3 * MIN);
+    const steps = r.steps('player.step');
+    expect(steps.filter((s) => s.startsWith('sent: '))).toHaveLength(5);
+    expect(steps.filter((s) => s.startsWith('read: '))).toHaveLength(5);
+    expect(
+      answers(Date.parse('2026-11-19T00:34:07.000Z'), Date.parse('2026-11-19T00:34:07.127Z'))
+    ).toBe(true);
+    expect(
+      answers(Date.parse('2026-11-19T00:34:06.000Z'), Date.parse('2026-11-19T00:34:07.127Z'))
+    ).toBe(false);
     await r.kit.stop();
   });
 

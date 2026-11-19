@@ -23,6 +23,8 @@ export class QuestClone extends FakeConnector {
   garble = false;
   /** How long it takes to answer, in ms. */
   answerMs = 1000;
+  /** Its replies dated to the whole second, as Telegram's are: one within a second dated before. */
+  wholeSeconds = false;
   /** Every reply it gave: when, to what, and what. */
   readonly replies: { t: number; command: string; text: string }[] = [];
 
@@ -49,7 +51,8 @@ export class QuestClone extends FakeConnector {
     const t = this.clock.now();
     const text = this.garble ? 'Gibberish' : this.reply(command, t);
     this.replies.push({ t, command, text });
-    this.hear({ chat, sender: QUESTBOT, time: t, id: String(this.n++), replyTo, text });
+    const time = this.wholeSeconds ? Math.floor(t / 1000) * 1000 : t;
+    this.hear({ chat, sender: QUESTBOT, time, id: String(this.n++), replyTo, text });
   }
 
   private reply(command: string, t: number): string {

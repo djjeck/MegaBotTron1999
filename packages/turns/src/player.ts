@@ -120,6 +120,14 @@ export const DEFAULT_SETTLE_S = 10;
  */
 export const DEFAULT_MARGIN_S = 5;
 
+/**
+ * Whether an answer dated `answer` may answer a send at `sent`: a message's date is the whole
+ * second, so an answer in the second of the send is dated before it.
+ */
+export function answers(answer: number, sent: number): boolean {
+  return answer >= Math.floor(sent / 1000) * 1000;
+}
+
 const COMMAND = /^\/\w+$/u;
 const FORM = /^\/\w+(?:@\w+)?$/u;
 const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
@@ -505,7 +513,7 @@ class Player {
       if (r.sent !== undefined && (last?.sent === undefined || r.sent.t > last.sent.t)) last = r;
     const sent = last?.sent;
     if (sent === undefined || now - sent.t >= ANSWER_WAIT_MS) return undefined;
-    return last?.answer !== undefined && last.answer.t >= sent.t ? undefined : sent.t;
+    return last?.answer !== undefined && answers(last.answer.t, sent.t) ? undefined : sent.t;
   }
 
   private status(): PlayerStatus {
@@ -757,7 +765,7 @@ class Player {
     const w = sitting.waiting;
     if (w !== undefined) {
       const answer = ready[w.command]?.answer;
-      if (answer !== undefined && answer.t >= w.t) {
+      if (answer !== undefined && answers(answer.t, w.t)) {
         delete sitting.waiting;
         this.keep();
         this.step('read', `${w.command}: ${answer.length} characters`);
