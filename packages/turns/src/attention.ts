@@ -99,9 +99,10 @@ export interface AttentionHandle {
   join(player: AttentionPlayer): () => void;
   /**
    * When the person acts next, after reading `length` characters (an answer; none: a glance), as
-   * of now: that moment, reserved, so that the next one asked comes after it.
+   * of now, or of `after` if later (a moment awaited, D146): that moment, reserved, so that the
+   * next one asked comes after it.
    */
-  react(o?: { length?: number }): number;
+  react(o?: { length?: number; after?: number }): number;
   /**
    * The next sitting planned, if any; when it plans none of its own (D138), what it does instead
    * (`follows your play`, or `never`).
@@ -419,7 +420,7 @@ class Attention {
             if (this.players.get(node) === player) this.players.delete(node);
           };
         },
-        react: (o = {}) => this.react(o.length ?? 0),
+        react: (o = {}) => this.react(o.length ?? 0, o.after),
         next: () => this.next(),
       }),
       interface: { state: { status: () => this.status() } },
@@ -508,12 +509,15 @@ class Attention {
     if (this.playing() && this.c.scheduled) this.replan();
   }
 
-  /** The person's next reaction, after reading `length` characters: reserved. */
-  private react(length: number): number {
+  /**
+   * The person's next reaction, after reading `length` characters, from now or `after` if later:
+   * reserved.
+   */
+  private react(length: number, after?: number): number {
     const r = this.c.reaction;
     let ms = (r.minS + this.rng.next() * (r.maxS - r.minS)) * 1000 + length * r.perCharMs;
     if (this.rng.chance(r.longChance)) ms += this.rng.next() * r.longMaxS * 1000;
-    const at = Math.max(this.ctx.clock.now(), this.busyUntil) + Math.round(ms);
+    const at = Math.max(this.ctx.clock.now(), after ?? 0, this.busyUntil) + Math.round(ms);
     this.busyUntil = at;
     return at;
   }

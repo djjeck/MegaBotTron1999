@@ -2431,36 +2431,38 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   `packages/turns/src/sittings.ts`, its nights drawn from their date and the node's id, so that a
   restart keeps them), `seed`; and `reaction`, how fast they act within a sitting (`minS` to `maxS`
   seconds, plus `perCharMs` per character of the answer read, and with `longChance` up to `longMaxS`
-  more). It starts each **sitting** at its durable timer `sitting` (dropped if it came due more than
-  10 minutes before a start), planned a gap after the last (kept in its store, `state`), for every
-  player at once. **The owner's own play counts as a sitting** by the real person: when a sitting is
-  due, and once every node has started, it asks each player for the owner's latest play by hand its
-  parser read (any command, from any device: `ready`'s sends marked `byHand`); one newer than its
-  last sitting is kept as its last (`seen`), and the next simulated sitting is planned a gap after
-  it, so the bot plays only once the owner has been away longer than their pace. A sitting due while
-  the person is still busy (a reaction reserved past now) waits a gap after that (`busy`). Not
-  `scheduled`, it plans none, and drops one kept from before. **Following the owner's play**
-  (`followsMyPlay`, D138): `listen`, the chats it listens to (picked in the editor among the chats
-  of the account its `listen` edge reads, a `configChats` key written on that edge's `reads`, D96,
-  D97), and `followDelayS` (3 by default), both shown only while it follows. Its `listen` input, a
-  chat-in of network `telegram` (as a player's chat-out), so from the owner's own account (a
-  `telegram-user`; the check refuses a `telegram-bot`'s edge, whose account never hears a message of
-  the owner's own), is there only while `followsMyPlay` is on (`when`, §2.1, a key set to `false`
-  setting nothing), and then required; the config refuses `followsMyPlay` without `listen`, and
-  `listen` without it. **Any message of the owner's own** (`own`, or sent as the account's name),
-  live, in a chat it listens to, command or not, starts a sitting `followDelayS` seconds later (the
-  timer `follow`), so that the owner's own typing wins a race; one more message while it is pending
-  starts no other. A message during a sitting (a player still in it, `AttentionPlayer.inSitting`)
-  starts none either: its players in it look again (`again`). A sitting that follows the owner is
-  marked `follow` and counts as the owner's own sitting (`byHand` in its status), so while
-  `scheduled` the next planned one comes a full gap after it. A player asks it, through
-  `ctx.attention`, for the person's next reaction (`AttentionHandle.react({ length? })`), which it
-  reserves, so that the players of one person act one after the other. It plays while its node runs
-  and the instance is on; its safety stop (`kill`) stops its node, and its players are inactive with
-  it. Its read `status` gives its behaviours (`mode`: `scheduled`, `follows your play`, both, or
-  `never plays`), its players, its last sitting (and whether by hand) and its next (a time; not
-  scheduled, `follows your play`, or `never: …`), which its node's widget (its next sitting) and
-  page (**Sittings**) show (D112). Each step is published as `attention.step` (`planned`, `sitting`,
+  more). A player asks it with `react({ length?, after? })`: the moment the person acts, from now,
+  or from `after` if later (a moment awaited, D146), each reservation after the last. It starts each
+  **sitting** at its durable timer `sitting` (dropped if it came due more than 10 minutes before a
+  start), planned a gap after the last (kept in its store, `state`), for every player at once. **The
+  owner's own play counts as a sitting** by the real person: when a sitting is due, and once every
+  node has started, it asks each player for the owner's latest play by hand its parser read (any
+  command, from any device: `ready`'s sends marked `byHand`); one newer than its last sitting is
+  kept as its last (`seen`), and the next simulated sitting is planned a gap after it, so the bot
+  plays only once the owner has been away longer than their pace. A sitting due while the person is
+  still busy (a reaction reserved past now) waits a gap after that (`busy`). Not `scheduled`, it
+  plans none, and drops one kept from before. **Following the owner's play** (`followsMyPlay`,
+  D138): `listen`, the chats it listens to (picked in the editor among the chats of the account its
+  `listen` edge reads, a `configChats` key written on that edge's `reads`, D96, D97), and
+  `followDelayS` (3 by default), both shown only while it follows. Its `listen` input, a chat-in of
+  network `telegram` (as a player's chat-out), so from the owner's own account (a `telegram-user`;
+  the check refuses a `telegram-bot`'s edge, whose account never hears a message of the owner's
+  own), is there only while `followsMyPlay` is on (`when`, §2.1, a key set to `false` setting
+  nothing), and then required; the config refuses `followsMyPlay` without `listen`, and `listen`
+  without it. **Any message of the owner's own** (`own`, or sent as the account's name), live, in a
+  chat it listens to, command or not, starts a sitting `followDelayS` seconds later (the timer
+  `follow`), so that the owner's own typing wins a race; one more message while it is pending starts
+  no other. A message during a sitting (a player still in it, `AttentionPlayer.inSitting`) starts
+  none either: its players in it look again (`again`). A sitting that follows the owner is marked
+  `follow` and counts as the owner's own sitting (`byHand` in its status), so while `scheduled` the
+  next planned one comes a full gap after it. A player asks it, through `ctx.attention`, for the
+  person's next reaction (`AttentionHandle.react({ length? })`), which it reserves, so that the
+  players of one person act one after the other. It plays while its node runs and the instance is
+  on; its safety stop (`kill`) stops its node, and its players are inactive with it. Its read
+  `status` gives its behaviours (`mode`: `scheduled`, `follows your play`, both, or `never plays`),
+  its players, its last sitting (and whether by hand) and its next (a time; not scheduled,
+  `follows your play`, or `never: …`), which its node's widget (its next sitting) and page
+  (**Sittings**) show (D112). Each step is published as `attention.step` (`planned`, `sitting`,
   `seen`, `busy`, `heard`, `stopped`); its sittings (those that followed the owner counted apart:
   `3 sittings (1 following you)`), and those by hand, go in the owner's summary (§4.17).
 - **`player`** (`packages/turns/src/player.ts`, bot-os.md D134): one plugin run as one node per game
@@ -2480,11 +2482,14 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   one, all its names bare, then, in a group, all of them addressed to its bot, `/play@QuestBot`, its
   state's `bot`, so that on a tie a bot's own bare alias goes before an addressed form); **unset,
   the defaults** (bot-os.md D137), every form: every command its state declares (its read
-  `commands`) but an interactive one, in its order; and `settleS` (10 by default, below). Each
-  command's policy comes from its mechanics: a turn, whenever ready (the bot's rest over); a command
-  whose success clears another's hold (a reset), only while that other is held (cooling down); any
-  other, whenever ready. An entry overrides it: `whileHeld`, only while that command is held;
-  `whenReady`, whenever ready (not both). The editor draws `commands` as a checklist of its state's
+  `commands`) but an interactive one, in its order; `settleS` (10 by default, below); and `marginS`
+  (5 by default, D146): it sends a command no sooner than that many seconds after it became ready (a
+  bot's answers are dated to the whole second, and its clock may run behind), and a wait for a
+  command due ends in its person's reaction from that moment (`react({ after })`). Each command's
+  policy comes from its mechanics: a turn, whenever ready (the bot's rest over); a command whose
+  success clears another's hold (a reset), only while that other is held (cooling down); any other,
+  whenever ready. An entry overrides it: `whileHeld`, only while that command is held; `whenReady`,
+  whenever ready (not both). The editor draws `commands` as a checklist of its state's
   (`configPlays`, §4.16). **No schedule of its own:** given a sitting, it plays, one at a time, each
   of its commands that is ready (its state's `state.ready`), allowed by its policy (D142: its state
   alone decides readiness; the outbox holds back no game's cooldown), each after its person's

@@ -32,7 +32,9 @@
  * account sent a command (D139, D140), it first waits the same way for the answer to the last send
  * its state has read none to: a bare command another sent in the group may have taken its bot's
  * turn too. Nothing ready, but a command of its due within `settleS` (D140), it waits for it rather
- * than leave. When nothing is left, it sleeps until the next sitting. **No schedule of its own:**
+ * than leave. **Never to the second** (D146): a command goes no sooner than `marginS` seconds after
+ * it became ready (a bot's answers are dated to the whole second, its clock may run behind), and a
+ * wait for one ends in its person's reaction, not at the instant. When nothing is left, it sleeps until the next sitting. **No schedule of its own:**
  * its person's sittings and its state's readiness are all it waits on: its outbox holds back no
  * game's cooldown (D142), only a node refused again and again (the retry-loop guard, D98).
  *
@@ -112,6 +114,11 @@ export const PLAYER_STATE_MEMBERS = READINESS_MEMBERS;
 export const PLAYER_CHAT = String.raw`^(@\w{4,}|-\d+)$`;
 /** How many seconds it waits by default for the group to settle before it picks a form (D140). */
 export const DEFAULT_SETTLE_S = 10;
+/**
+ * How long after a command becomes ready it waits at least, by default (D146): a bot's answers are
+ * dated to the whole second, and its clock runs a few seconds behind at times.
+ */
+export const DEFAULT_MARGIN_S = 5;
 
 const COMMAND = /^\/\w+$/u;
 const FORM = /^\/\w+(?:@\w+)?$/u;
@@ -161,6 +168,13 @@ export const playerConfig = z.object({
     .default(DEFAULT_SETTLE_S)
     .describe(
       'How many seconds ahead it waits for a command of its, or of another player sending to the same chat, about to be ready, so that one bare command covers them all (D140)'
+    ),
+  marginS: z
+    .number()
+    .min(0)
+    .default(DEFAULT_MARGIN_S)
+    .describe(
+      "How many seconds after a command becomes ready it waits at least before sending it, so that it never comes a second too soon (D146): the bot's answers are dated to the whole second, and its clock may run behind"
     ),
 });
 export type PlayerConfig = z.output<typeof playerConfig>;
@@ -613,10 +627,24 @@ class Player {
     withinMs: number
   ): number | undefined {
     const r = ready[play.command];
-    if (r === undefined || r.ready || r.until === undefined || r.until - now > withinMs)
-      return undefined;
+    const from =
+      r === undefined
+        ? undefined
+        : r.ready
+          ? this.inMargin(r, now)
+            ? r.since
+            : undefined
+          : r.until;
+    if (from === undefined) return undefined;
+    const at = from + this.c.marginS * 1000;
+    if (at - now > withinMs) return undefined;
     if (play.whileHeld !== undefined && ready[play.whileHeld]?.ready !== false) return undefined;
-    return r.until;
+    return at;
+  }
+
+  /** Whether `r`, ready, became so less than `marginS` before `now` (D146). */
+  private inMargin(r: Readiness, now: number): boolean {
+    return r.ready && r.since !== undefined && now < r.since + this.c.marginS * 1000;
   }
 
   /** The owner's latest play by hand with its bot, as its state read it (any command). */
@@ -651,8 +679,12 @@ class Player {
     this.arm(this.react());
   }
 
-  private react(length?: number): number {
-    return (this.attention as AttentionHandle).react(length === undefined ? {} : { length });
+  /** Its person's next reaction, after reading `length` characters, from now or `after` (D146). */
+  private react(length?: number, after?: number): number {
+    return (this.attention as AttentionHandle).react({
+      ...(length === undefined ? {} : { length }),
+      ...(after === undefined ? {} : { after }),
+    });
   }
 
   private arm(at: number): void {
@@ -678,7 +710,7 @@ class Player {
    */
   private goes(play: Play, ready: Record<string, Readiness>, sitting: InSitting): boolean {
     const r = ready[play.command];
-    if (r === undefined || !r.ready) return false;
+    if (r === undefined || !r.ready || this.inMargin(r, this.ctx.clock.now())) return false;
     const sent = sitting.sent[play.command];
     if (sent !== undefined && !(r.since !== undefined && r.since > sent)) return false;
     return play.whileHeld === undefined || ready[play.whileHeld]?.ready === false;
@@ -753,8 +785,13 @@ class Player {
     }
     /** When to look again, if nothing goes now: a command due soon, or one another covers. */
     let later: number | undefined;
-    const soon = (t: number): void => {
-      if (later === undefined || t < later) later = t;
+    /** Whether `later` is a command's readiness, awaited: a person reacts to it (D146). */
+    let awaited = false;
+    const soon = (t: number, due = false): void => {
+      if (later === undefined || t < later) {
+        later = t;
+        awaited = due;
+      }
     };
     for (const play of this.played()) {
       if (ready[play.command] === undefined) {
@@ -767,7 +804,7 @@ class Player {
       if (!this.goes(play, ready, sitting)) {
         // About to be ready (D140): it waits for it rather than leave.
         const due = this.due(play, ready, now, this.c.settleS * 1000);
-        if (due !== undefined) soon(due);
+        if (due !== undefined) soon(due, true);
         continue;
       }
       // Another player's send covers it (D140): its hand-off comes, then its answer.
@@ -791,7 +828,7 @@ class Player {
       return;
     }
     if (later !== undefined) {
-      this.arm(Math.max(later, now + 1));
+      this.arm(awaited ? this.react(undefined, later) : Math.max(later, now + 1));
       return;
     }
     this.end('nothing left to play');

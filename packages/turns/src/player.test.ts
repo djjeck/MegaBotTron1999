@@ -118,6 +118,7 @@ describe('playerConfig', () => {
     expect(playerConfig.parse({ commands: [{ command: '/play', forms }] })).toEqual({
       commands: [{ command: '/play', forms }],
       settleS: 10,
+      marginS: 5,
     });
     expect(() => playerConfig.parse({ commands: [{ command: '/play', forms: [] }] })).toThrow();
     expect(() =>
@@ -130,16 +131,17 @@ describe('playerConfig', () => {
   });
 
   it('takes no commands (the defaults), or each command with its override, in order', () => {
-    expect(playerConfig.parse({})).toEqual({ settleS: 10 });
+    expect(playerConfig.parse({})).toEqual({ settleS: 10, marginS: 5 });
     expect(playerConfig.parse({ commands: PLAYS }).commands?.[3]).toEqual({
       command: '/coffee',
       whileHeld: '/play',
     });
     // An empty list plays nothing; an override is one policy or the other.
-    expect(playerConfig.parse({ commands: [] })).toEqual({ commands: [], settleS: 10 });
+    expect(playerConfig.parse({ commands: [] })).toEqual({ commands: [], settleS: 10, marginS: 5 });
     expect(playerConfig.parse({ commands: [{ command: '/a', whenReady: true }] })).toEqual({
       commands: [{ command: '/a', whenReady: true }],
       settleS: 10,
+      marginS: 5,
     });
     expect(() =>
       playerConfig.parse({ commands: [{ command: '/a', whileHeld: '/b', whenReady: true }] })
@@ -339,6 +341,25 @@ describe('a person’s sittings, played on the dev kit (bot-os.md D134)', () => 
     // Asleep from about 01:30 to 08:30 in Rome, give or take 45 minutes: nothing in between.
     expect(sends.filter((s) => romeHour(s.t) >= 2.15 && romeHour(s.t) < 7.45)).toEqual([]);
     expect(r.steps('attention.step').some((s) => s.includes('(after the night)'))).toBe(true);
+    await r.kit.stop();
+  });
+
+  it('sends a command no sooner than its margin after it is ready, a reaction after (D146)', async () => {
+    // A sitting each minute, and a glance of no time: only the margin keeps it back.
+    const r = await runSittings({
+      attention: { minGapMin: 1, maxGapMin: 1, reaction: { minS: 0, maxS: 0, longChance: 0 } },
+      player: { commands: [{ command: '/play' }] },
+    });
+    await r.until(T0 + 3 * HOUR);
+    const plays = r.sends().filter((s) => s.command === '/play');
+    expect(plays.length).toBeGreaterThan(5);
+    for (let i = 1; i < plays.length; i++) {
+      const was = plays[i - 1] as { t: number; text: string };
+      const ready = was.t + (was.text.startsWith('Defeated') ? 30 : 15) * MIN;
+      // Ready within a sitting: it waits for it, then the margin; never before.
+      expect((plays[i] as { t: number }).t - ready).toBeGreaterThanOrEqual(5_000);
+    }
+    expect(r.account.replies.some((x) => x.text.startsWith('Too soon'))).toBe(false);
     await r.kit.stop();
   });
 

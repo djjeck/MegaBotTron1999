@@ -340,7 +340,7 @@ describe('three bots in one group, one person: each command as the form of wides
     await r.kit.stop();
   });
 
-  it('settles: waits for a turn ready 4 s later, then one bare send plays all three', async () => {
+  it('settles: waits for a turn ready 4 s later, and its margin, then one bare send plays all three', async () => {
     // A sitting 3 s after alice writes; each player's first look 4 s after the last's.
     const m = T0 + 10 * MIN;
     const r = await run({
@@ -361,8 +361,9 @@ describe('three bots in one group, one person: each command as the form of wides
     expect(r.group.sent).toHaveLength(1);
     const at = r.kit.clock.now();
     expect(at).toBeGreaterThan(m + 11_000);
+    // DuelBot's turn ready at 11 s, and 5 s more, its margin (D146).
     for (const p of ['quest', 'duel', 'lore'] as const)
-      expect(r.turn(p)).toMatchObject({ ready: false, sent: { t: m + 11_000 } });
+      expect(r.turn(p)).toMatchObject({ ready: false, sent: { t: m + 16_000 } });
     await r.kit.stop();
   });
 
