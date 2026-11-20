@@ -34,6 +34,7 @@ import { type InputPort } from './ports.ts';
 import { type SealedState } from './sealed-store.ts';
 import { type SettingsRegistry, type SettingValue } from './settings.ts';
 import { type StateView } from './state-view.ts';
+import { type FileLimits, type StoreFileInfo } from './store.ts';
 
 /** The core's document of the off switch. */
 export const POWER_DOC = 'power';
@@ -115,6 +116,27 @@ export interface ControlsHost {
   held?(): HeldControl[];
   /** Where the instance's start is, and what failed to load (D143). */
   boot?(): BootControl;
+  /** A node's files (D149), read from its instance's store whatever its state; none: no node. */
+  files?(id: string): NodeFiles | undefined;
+}
+
+/** What the controls read of a node's files (D149): the owner lists and downloads, never deletes. */
+export interface NodeFiles {
+  list(): StoreFileInfo[];
+  read(name: string): Uint8Array | undefined;
+  info(name: string): StoreFileInfo | undefined;
+  /** What they take together, in bytes. */
+  used(): number;
+  readonly limit: FileLimits;
+}
+
+/** A node's files, as the owner sees them (`GET /plugins/<id>/files`, D149). */
+export interface FilesView {
+  files: StoreFileInfo[];
+  /** What they take together, in bytes. */
+  used: number;
+  /** How much a file, and the instance's files together, may take. */
+  limits: FileLimits;
 }
 
 /** A package or module that failed to load (D143): what, its module's id for a module, and why. */
@@ -568,6 +590,24 @@ export class Controls {
     } catch (e) {
       return { error: message(e) };
     }
+  }
+
+  /** A node's files (D149): undefined for no node. */
+  files(id: string): FilesView | undefined {
+    const files = this.host.files?.(id);
+    if (files === undefined) return undefined;
+    return { files: files.list(), used: files.used(), limits: files.limit };
+  }
+
+  /**
+   * One of a node's files, its bytes and what is kept of it: undefined for no node or no such
+   * file. Throws for a name no file may have.
+   */
+  file(id: string, name: string): { info: StoreFileInfo; bytes: Uint8Array } | undefined {
+    const files = this.host.files?.(id);
+    const info = files?.info(name);
+    const bytes = info === undefined ? undefined : files?.read(name);
+    return info === undefined || bytes === undefined ? undefined : { info, bytes };
   }
 
   /**

@@ -14,7 +14,8 @@
  * forms stay editable whatever its state. Its group (D69),
  * the lane it is drawn in, is picked among the draft's, or named anew. Its outputs say what they
  * carry (D71): an events output its event types, an interface output its members. A node up that
- * keeps a state (D72) shows it, drawn from its schema; a running connector, its queue (D73). Its
+ * keeps a state (D72) shows it, drawn from its schema; a running connector, its queue (D73); a node
+ * of the instance, the files its plugin keeps (D149), an image shown. Its
  * chat commands say where the commands edges serve them (D109), each chat by name, or that no edge
  * does; a connector's, which commands of which plugins it serves.
  *
@@ -49,6 +50,7 @@ import { CostLine } from './Costs.tsx';
 import { withDefaults } from './defaults.ts';
 import type { PortChange } from './draft.ts';
 import { edgeKey, endOf, instanceOf } from './draft.ts';
+import { NodeFiles } from './Files.tsx';
 import { MemberCall, NodeStatus, SettingsInForce } from './NodeControls.tsx';
 import { heardTypes, Payloads } from './Payloads.tsx';
 import type { PlayPlace } from './plays.ts';
@@ -978,6 +980,7 @@ export function NodeDetails(props: {
       ) : null}
       {running || live?.state === 'stopped' ? <NodeState id={view.id} /> : null}
       {connector && running ? <ConnectorQueue id={view.id} /> : null}
+      {live === undefined ? null : <NodeFiles id={view.id} />}
       {!scripted || props.script === undefined ? null : (
         <ScriptSection
           node={node}

@@ -5,7 +5,8 @@
  * - `FakeConnector`, with its plugin (`fakeConnectorPlugin`): a connector of any network whose
  *   messages are said by the test or the simulator (`hear`) and whose sends go to it (`onSend`),
  *   with the account's limits, so that the plugins read and send through it as they do live.
- * - `DevKit`: a core on a virtual clock (packages/core/src/clock.ts), its stores in memory,
+ * - `DevKit`: a core on a virtual clock (packages/core/src/clock.ts), its stores in memory, their
+ *   files (`ctx.store.files`) too,
  *   with the plugins given, their configuration, the owner's kept settings, and the
  *   documents their stores start with: the state of a run, set before it starts.
  * - `defineSimulator`: a simulator plugin, a model of a game that runs other plugins on the kit
@@ -166,6 +167,11 @@ export interface DevKitOptions {
   settings?: Record<string, Record<string, unknown>>;
   /** The documents each plugin instance's store starts with, by instance id and name. */
   documents?: Record<string, Record<string, unknown>>;
+  /**
+   * How much each instance's files may take (`CoreOptions.fileLimits`); kept in memory, as the
+   * documents are.
+   */
+  fileLimits?: CoreOptions['fileLimits'];
   /** Where the core's records and every event published go, beside the kit's own log (`log`). */
   record?: CoreOptions['record'];
   /**
@@ -207,6 +213,7 @@ export class DevKit {
       ...(o.config === undefined ? {} : { config: o.config }),
       ...(o.graph === undefined ? {} : { graph: o.graph }),
       ...(o.documents === undefined ? {} : { documents: o.documents }),
+      ...(o.fileLimits === undefined ? {} : { fileLimits: o.fileLimits }),
       ...(o.print === undefined ? {} : { print: o.print }),
       ...(o.validateEvents === undefined ? {} : { validateEvents: o.validateEvents }),
       ...(o.allowArchived === undefined ? {} : { allowArchived: o.allowArchived }),

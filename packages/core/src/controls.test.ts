@@ -897,3 +897,98 @@ describe('reads with an input, and a node’s state for the viewer (bot-os.md D7
     expect(core.controls.view('keeper')).toEqual({ error: 'keeper is not running' });
   });
 });
+
+describe('a node’s files, listed and downloaded by the owner (bot-os.md D149)', () => {
+  let server: http.Server | undefined;
+  let dir: string | undefined;
+  afterEach(async () => {
+    await new Promise<void>((r) => (server ? server.close(() => r()) : r()));
+    if (dir !== undefined) fs.rmSync(dir, { recursive: true, force: true });
+  });
+  it('lists them, serves an image inline and anything else as an attachment, sandboxed', async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'files-'));
+    const painter = definePlugin({
+      manifest: {
+        id: 'card-painter',
+        version: '0.1.0',
+        kinds: ['stats'],
+        description: 'keeps pictures',
+      },
+      create: (ctx) => {
+        ctx.store.files.write('card-42.png', Uint8Array.from([0x89, 0x50]));
+        ctx.store.files.write('page.html', new TextEncoder().encode('<script>1</script>'));
+        expect(() => ctx.store.files.write('huge', new Uint8Array(21))).toThrow(
+          'file huge is 21 B, over the 20 B a file may be'
+        );
+        return {};
+      },
+    });
+    const core = new Core({
+      clock: new VirtualClock(1000),
+      dataDir: dir,
+      fileLimits: { file: 20 },
+      graph: {
+        version: 2,
+        nodes: [{ id: 'painter', plugin: 'card-painter', instance: 'pictures' }],
+        edges: [],
+      },
+    });
+    core.register(painter);
+    await core.start();
+    server = controlServer({ controls: core.controls, settings: core.settings });
+    await new Promise<void>((r) => server?.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as { port: number };
+    const get = (p: string) => fetch(`http://127.0.0.1:${port}${p}`);
+    const list = await get('/plugins/painter/files');
+    expect([list.status, await list.json()]).toEqual([
+      200,
+      {
+        files: [
+          { name: 'card-42.png', size: 2, type: 'image/png', written: 1000 },
+          { name: 'page.html', size: 18, type: 'application/octet-stream', written: 1000 },
+        ],
+        used: 20,
+        limits: { file: 20, total: 256 * 2 ** 20 },
+      },
+    ]);
+    // Under the node's instance.
+    expect(fs.existsSync(path.join(dir, 'instances', 'pictures', 'files', 'card-42.png'))).toBe(
+      true
+    );
+    const image = await get('/plugins/painter/files/card-42.png');
+    expect(image.status).toBe(200);
+    expect(image.headers.get('content-type')).toBe('image/png');
+    expect(image.headers.get('content-disposition')).toBe('inline; filename="card-42.png"');
+    expect(image.headers.get('content-security-policy')).toBe("default-src 'none'; sandbox");
+    expect(image.headers.get('x-content-type-options')).toBe('nosniff');
+    expect([...new Uint8Array(await image.arrayBuffer())]).toEqual([0x89, 0x50]);
+    const page = await get('/plugins/painter/files/page.html');
+    expect(page.headers.get('content-disposition')).toBe('attachment; filename="page.html"');
+    expect(await page.text()).toBe('<script>1</script>');
+    const json = async (p: string) => {
+      const res = await get(p);
+      return [res.status, await res.json()] as const;
+    };
+    expect(await json('/plugins/painter/files/none.png')).toEqual([
+      404,
+      { error: 'painter keeps no file none.png' },
+    ]);
+    expect(await json('/plugins/nobody/files')).toEqual([404, { error: 'no plugin nobody' }]);
+    expect(await json('/plugins/nobody/files/a.png')).toEqual([
+      404,
+      { error: 'nobody keeps no file a.png' },
+    ]);
+    expect(await json('/plugins/painter/files/_meta')).toEqual([
+      400,
+      { error: 'Error: not a file name: "_meta"' },
+    ]);
+    // Deleting stays the plugin's.
+    const del = await fetch(`http://127.0.0.1:${port}/plugins/painter/files/card-42.png`, {
+      method: 'POST',
+    });
+    expect(del.status).toBe(404);
+    // Read whatever the node's state.
+    await core.stop();
+    expect(core.controls.files('painter')?.files).toHaveLength(2);
+  });
+});

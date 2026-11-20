@@ -66,6 +66,8 @@ describe('a connector’s sealed store (D123)', () => {
     expect(JSON.stringify(base.read('login'))).not.toContain('next-token-2');
     expect(sealed.read('login')).toEqual({ token: 'next-token-2' });
     expect(sealed.names()).toEqual(['login']);
+    // Its files are the store's, unsealed (D149).
+    expect(sealed.files).toBe(base.files);
     sealed.remove('login');
     expect(sealed.read('login')).toBeUndefined();
   });

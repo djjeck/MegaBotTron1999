@@ -172,6 +172,28 @@ describe('DevKit', () => {
     expect(kit.core.settings.kept()).toEqual({ n: 4 });
   });
 
+  it('keeps a plugin’s files in memory, with the limits the kit is given (D149)', async () => {
+    let ctx: PluginContext | undefined;
+    const painter = definePlugin({
+      manifest: { id: 'card-painter', version: '0.1.0', kinds: ['stats'], description: 'paints' },
+      create: (c) => {
+        ctx = c;
+        return {};
+      },
+    });
+    const kit = new DevKit({ plugins: [painter], start: 5000, fileLimits: { total: 4 } });
+    await kit.start();
+    const files = (ctx as PluginContext).store.files;
+    files.write('card-42.png', Uint8Array.from([1, 2, 3]));
+    expect([...(files.read('card-42.png') as Uint8Array)]).toEqual([1, 2, 3]);
+    expect(files.list()).toEqual([
+      { name: 'card-42.png', size: 3, type: 'image/png', written: 5000 },
+    ]);
+    expect(() => files.write('more', Uint8Array.from([1, 2]))).toThrow('an instance may keep');
+    expect(kit.core.controls.files('card-painter')?.used).toBe(3);
+    await kit.stop();
+  });
+
   it('sends nothing through a dry-run edge, and logs it as sent (D64)', async () => {
     const fake = new FakeConnector({ account: 'irc:alice' });
     const records: { type: string; outcome?: unknown }[] = [];

@@ -128,26 +128,30 @@ the server that guards them.
   value as a labelled line; its card shows a line of it. A running connector's panel lists its
   **Queue** (`Queue.tsx`, D73): each send waiting, until when, and the nodes that asked for it with
   what cancels them, a send several share marked so, and the sends coalesced since the start with
-  the pairs of nodes that shared them; a chat-out edge's panel sets each command's spacing
-  (`minIntervalS`, empty for the connector's default). Every change is checked by the core, and each
-  refusal shown on its edge, port, node or field (`draft.ts`, the draft's pure changes); each
-  warning (docs/bot-os.md D89: a chat-in edge reading a chat its connector does not monitor), which
-  refuses nothing, in amber and dashed on its edge, its port and its node, listed in their panels
-  and the review, and counted in the map's bar (`N warnings`), Apply offered all the same; typing in
-  a panel keeps its field focused, and the cards and edges that draw as before are kept as drawn
-  (`stable.ts`), so the map does not redraw at each keystroke. **Review changes** opens a dialog
-  with the diff and two actions (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`) and
-  restarts the instance on it, waiting for it and coming back to the page, still logged in
-  (`src/ui/Restart.tsx`), with a note that says so and goes by itself after 30 seconds (or at its
-  **dismiss**), or says why the core refused it and restarts nothing; **Revert** drops the draft,
-  back to the graph saved, once confirmed. Its × (or Escape) only closes it, the draft kept. When
-  the saved graph is not what runs (changed through the API, rolled back, or a restart that did not
-  happen), a banner offers **Apply (restart)**; a saved graph refused at the last start is shown
-  first. A **script** node (docs/bot-os.md D76, D78, `src/ui/graph/script/`) has its ports in a form
-  in its panel (`ScriptPorts.tsx`), a port renamed once its name is typed (left, or Enter; a name
-  empty or taken refused), its edges moved with it in the same change, and removed with its row's
-  **Remove**, its edges with it in the same change, after a confirmation naming them (docs/bot-os.md
-  D84: several ports of a kind, each its own name), and **Edit script** opens its code in Monaco
+  the pairs of nodes that shared them. A node of the instance whose plugin keeps files
+  (`ctx.store.files`, docs/bot-os.md D149) lists them under **Files** (`Files.tsx`): each with its
+  size, type and when it was written, a link to download it, a raster image (PNG, JPEG, GIF, WebP)
+  shown, and what they take against the instance's limit; read only, as deleting one is the
+  plugin's. A chat-out edge's panel sets each command's spacing (`minIntervalS`, empty for the
+  connector's default). Every change is checked by the core, and each refusal shown on its edge,
+  port, node or field (`draft.ts`, the draft's pure changes); each warning (docs/bot-os.md D89: a
+  chat-in edge reading a chat its connector does not monitor), which refuses nothing, in amber and
+  dashed on its edge, its port and its node, listed in their panels and the review, and counted in
+  the map's bar (`N warnings`), Apply offered all the same; typing in a panel keeps its field
+  focused, and the cards and edges that draw as before are kept as drawn (`stable.ts`), so the map
+  does not redraw at each keystroke. **Review changes** opens a dialog with the diff and two actions
+  (`Review.tsx`): **Apply** saves the graph (`PUT /graph/file`) and restarts the instance on it,
+  waiting for it and coming back to the page, still logged in (`src/ui/Restart.tsx`), with a note
+  that says so and goes by itself after 30 seconds (or at its **dismiss**), or says why the core
+  refused it and restarts nothing; **Revert** drops the draft, back to the graph saved, once
+  confirmed. Its × (or Escape) only closes it, the draft kept. When the saved graph is not what runs
+  (changed through the API, rolled back, or a restart that did not happen), a banner offers **Apply
+  (restart)**; a saved graph refused at the last start is shown first. A **script** node
+  (docs/bot-os.md D76, D78, `src/ui/graph/script/`) has its ports in a form in its panel
+  (`ScriptPorts.tsx`), a port renamed once its name is typed (left, or Enter; a name empty or taken
+  refused), its edges moved with it in the same change, and removed with its row's **Remove**, its
+  edges with it in the same change, after a confirmation naming them (docs/bot-os.md D84: several
+  ports of a kind, each its own name), and **Edit script** opens its code in Monaco
   (`ScriptEditor.tsx`, `ScriptCode.tsx`: `monaco-editor`, bundled, its chunk loaded only then),
   typed by a `.d.ts` made from its ports (`types.ts`), beside a panel of its API; every key typed
   there is the editor's (the dialog is out of the reach of the map's keys, Space to pan among them),

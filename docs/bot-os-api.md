@@ -922,6 +922,7 @@ the core's own is `/data/core/`:
 - `read(name)` and `write(name, value)` of JSON documents, by name (letters, digits, `-`, `_` and
   `.`: no path), written atomically (a temporary file, then a rename), so that a crash leaves the
   old document or the new one, never half of one.
+- `files`: bytes by name, beside the documents (bot-os.md D149), below.
 - `version`: the schema version kept with the documents (`_meta.json`). At start the core runs the
   manifest's migrations from the kept version up to the manifest's, each one awaited; a failed one
   leaves the store as it was, and fails that plugin only (§3).
@@ -937,6 +938,51 @@ directory of mode 700; the core keeps its own beside them (`_meta.json`, the ver
 failed one leaves the store as it was, and a store newer than its plugin (an image rolled back)
 fails that plugin rather than being read wrong. A crash between the two renames of the commit is
 undone at the next start.
+
+**Files** (bot-os.md D149, #66). A plugin that makes or receives files it must keep (pictures an
+image service painted, to send again as photos; a document a bot sent) keeps them in its store, as
+its documents, never as base64 in a document nor on a share mounted into the container:
+
+```ts
+interface StoreFiles {
+  write(name: string, bytes: Uint8Array, options?: { type?: string }): void;
+  read(name: string): Uint8Array | undefined;
+  list(): { name: string; size: number; type: string; written: number }[]; // by name
+  delete(name: string): void;
+}
+```
+
+- **Names** are a document's (letters, digits, `-`, `_` and `.`, no path, none starting with `_`),
+  of at most 200 characters; a bad one throws. `type` is a media type (`image/png`), lower-cased;
+  none given, it is guessed from the name's extension (`png`, `jpg`/`jpeg`, `gif`, `webp`, `svg`,
+  `pdf`, `txt`, `json`), else `application/octet-stream`. `written` is the core's clock, in
+  milliseconds. What `read` returns is the plugin's to change: it is not the stored file.
+- **On disk:** `<instance>/files/<name>`, mode 600 in a directory of mode 700, written atomically (a
+  temporary file, flushed, then renamed), as a document is; its type and time are kept beside it
+  (`files/.meta/<name>.json`), written just after its bytes, so a crash between the two leaves the
+  new bytes with the previous file's type. A file put back by hand, with nothing kept of it, has its
+  type from its name and its time from the disk. They are in the data volume, backed up and restored
+  with the rest of the instance (Backups, below); `Stores.delete` deletes them with the store.
+- **Limits:** a file may take 16 MB, and all of an instance's files 256 MB (`DEFAULT_FILE_LIMITS`);
+  a write past either throws a `FileLimitError` that says why
+  (`file card-42.png is 20.0 MB, over the 16.0 MB a file may be`;
+  `file card-43.png (2.0 MB) would take the files to 257.0 MB, over the 256.0 MB an instance may keep`),
+  a file replaced counted once. The deployment sets its own: `CoreOptions.fileLimits`
+  (`{ file?, total? }`, in bytes), which the image's entry point sets from `FILE_MAX_MB` and
+  `FILES_MAX_MB` in its environment (in MB; unset, the defaults).
+- **Migrations** see the files (`MigrationStore` is a `Store`). The staged copy hard-links them
+  rather than copying them (a copy where the file system refuses a link), as they may be large: a
+  write replaces a file by a rename and a delete unlinks it, never a change in place, so the store's
+  own files are as they were until the commit, and a failed migration leaves them, as the documents,
+  untouched.
+- **Read by the owner,** never deleted: `GET /plugins/<id>/files` and
+  `GET /plugins/<id>/files/<name>` (§4.11), and the node's panel in the web UI. Deleting one is the
+  plugin's (or an action it declares).
+- A connector's sealed view (`ctx.secrets.store`, §4.9) has the store's files, unsealed.
+- An answer's photo takes bytes (`Answer.photo({ data, filename })`, §2), so a file read back is
+  sent as is. A `card-painter` plugin, for example, asks an image service for a card's picture,
+  writes `card-42.png` with the picture's provenance in a document beside it, and answers `/card 42`
+  with the photo read back, without asking the service again.
 
 **Backups.** The whole data volume is the instance's state: the graph, the event log, the instances'
 stores, the core's own and the modules. Back up the volume as one, with the instance stopped for the
@@ -1666,9 +1712,10 @@ public API (`packages/core/src/devkit.ts`):
   instance: their configuration (`config`), the owner's kept settings (`settings`) and the documents
   their stores start with (`documents`), and the event log before the run (`history`), which the
   plugins read with `ctx.events`; `kit.log` is that log in memory, every record of the run added
-  (`MemoryEventLog`). An archived plugin runs on a kit only when the run says so (`allowArchived`).
-  `start` refuses a setting refused and a run with a plugin failed; `runUntil(t)` runs the clock.
-  The core is the instance's own, unchanged.
+  (`MemoryEventLog`). The stores' files (`ctx.store.files`, §4.2) are in memory too, their times on
+  the virtual clock, within the core's limits or the run's (`fileLimits`). An archived plugin runs
+  on a kit only when the run says so (`allowArchived`). `start` refuses a setting refused and a run
+  with a plugin failed; `runUntil(t)` runs the clock. The core is the instance's own, unchanged.
 - **Script nodes** (§5, bot-os.md D76) run on a kit in the main thread
   (`scriptPlugin({ isolation: 'in-process' })`), on its virtual clock, so that a test of one stays
   deterministic.
@@ -1780,6 +1827,12 @@ the sends merged since the start, `{ count, pairs: [{ nodes: [a, b], count }] }`
 that is not a connector); `GET /plugins/<id>/view` (the state a node keeps, read only, D72:
 `{ schema, state, updatedAt?, freshness?, pin? }`, its schema a JSON Schema, offered by the state
 nodes and `owner-notice`, §4.16; 404 for a node that keeps none, 409 for one not running);
+`GET /plugins/<id>/files` (a node's files, §4.2, D149, read from its instance's store whatever the
+node's state: `{ files: [{ name, size, type, written }], used, limits: { file, total } }`; 404 for
+no node) and `GET /plugins/<id>/files/<name>` (one file's bytes, its `content-type` its type,
+`inline` for a raster image, PNG, JPEG, GIF or WebP, an `attachment` otherwise, always with
+`content-security-policy: default-src 'none'; sandbox` and `nosniff`, so that a file a plugin wrote
+never runs in the web UI's origin; 404 for no node or no such file, 400 for a name no file has);
 `POST /plugins/<id>/actions/<name>`, the body the action's input (400 for an input refused by its
 schema, 409 for the plugin's refusal); `GET /plugins/<id>/login` (a connector's login, §4.5,
 bot-os.md D116: its `LoginState`) and `POST /plugins/<id>/login`, `{ "action", "values"? }`, its

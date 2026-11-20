@@ -105,7 +105,7 @@ import { SealedStore } from './sealed-store.ts';
 import { Sealer, type Secrets, SecretStore } from './secrets.ts';
 import { hideSensitive, openSensitive, sealSensitive } from './sensitive.ts';
 import { PluginSettings, SETTINGS_DOC, SettingsRegistry } from './settings.ts';
-import { CORE_STORE, type Migration, Stores } from './store.ts';
+import { CORE_STORE, type FileLimits, type Migration, Stores } from './store.ts';
 import { Summaries, type SummarySection, type SummaryWindow } from './summary.ts';
 
 /**
@@ -242,6 +242,12 @@ export interface CoreOptions {
    * Ignored with one.
    */
   documents?: Record<string, Record<string, unknown>>;
+  /**
+   * How much each instance's files may take, in bytes (`ctx.store.files`, bot-os.md D149): a file,
+   * and all of an instance's together; the core's defaults (`DEFAULT_FILE_LIMITS`, 16 MB and
+   * 256 MB) for what is not said.
+   */
+  fileLimits?: Partial<FileLimits>;
   /** How long a plugin's `stop` may take before the next one stops. */
   stopTimeoutMs?: number;
   /**
@@ -447,7 +453,10 @@ export class Core {
         new Set([...this.entries.values()].filter((e) => e.manifest.notices).map((e) => e.id)),
       error: (node, line) => this.logger(node).error(line),
     });
-    this.stores = new Stores(options.dataDir);
+    this.stores = new Stores(options.dataDir, {
+      now: () => options.clock.now(),
+      ...(options.fileLimits === undefined ? {} : { fileLimits: options.fileLimits }),
+    });
     if (options.dataDir === undefined)
       for (const [id, docs] of Object.entries(options.documents ?? {})) {
         const store = this.stores.open(id);
@@ -505,6 +514,10 @@ export class Core {
         this.o.record?.({ type: 'core.login', t: this.o.clock.now(), ...fields }),
       held: () => this.held(),
       boot: () => this.boot(),
+      files: (id) => {
+        const instance = this.entries.get(id)?.node.instance;
+        return instance === undefined ? undefined : this.stores.internal(instance).files;
+      },
     });
     this.driftMonitor = new DriftMonitor({
       clock: options.clock,

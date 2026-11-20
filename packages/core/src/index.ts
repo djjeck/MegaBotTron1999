@@ -82,9 +82,11 @@ export {
   type BootControl,
   type Connection,
   Controls,
+  type FilesView,
   type HeldControl,
   KILLED,
   type LoadFailureView,
+  type NodeFiles,
   OFF_REFUSAL,
   type PluginControl,
   POWER_DOC,
@@ -439,11 +441,19 @@ export {
 } from './state-view.ts';
 export {
   CORE_STORE,
+  DEFAULT_FILE_LIMITS,
+  FileLimitError,
+  type FileLimits,
+  FILES_DIR,
+  guessType,
   INSTANCES_DIR,
   type Migration,
   type MigrationStore,
   type Store,
+  type StoreFileInfo,
+  type StoreFiles,
   Stores,
+  type StoresOptions,
 } from './store.ts';
 export {
   counted,

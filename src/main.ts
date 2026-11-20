@@ -69,6 +69,14 @@ for (const method of ['log', 'info', 'debug', 'warn', 'error'] as const) {
   const print = console[method].bind(console);
   console[method] = (...args: unknown[]) => print(secrets.redact(format(...args)));
 }
+// How much a plugin instance's files may take (ctx.store.files, docs/bot-os.md D149), in MB: a file
+// (FILE_MAX_MB) and all of an instance's (FILES_MAX_MB); the core's defaults, 16 and 256, unless set.
+const megabytes = (name: string): number | undefined => {
+  const n = Number(env[name]);
+  return env[name] && Number.isFinite(n) && n > 0 ? Math.round(n * 2 ** 20) : undefined;
+};
+const fileMax = megabytes('FILE_MAX_MB');
+const filesMax = megabytes('FILES_MAX_MB');
 const events = new CoreEventLog(dataDir);
 const clock = wallClock();
 // The instance's composition, saved in the volume (D50): read at load, edited by the owner.
@@ -79,6 +87,10 @@ const core = new Core({
   // The release and commit, for the owner's start notice (owner-notice, docs/bot-os.md D92).
   build,
   dataDir,
+  fileLimits: {
+    ...(fileMax === undefined ? {} : { file: fileMax }),
+    ...(filesMax === undefined ? {} : { total: filesMax }),
+  },
   secrets,
   graphFile,
   // What the plugins read back of the log: a replay of recent history, a fresh instance's first

@@ -1671,6 +1671,24 @@ svg.chat-kind {
   overflow-wrap: anywhere;
 }
 
+/* A node's files (D149): each with its size and type, an image shown at the panel's width. */
+.details ul.files {
+  padding-left: 1.2rem;
+  margin: 0;
+}
+
+.details ul.files > li {
+  margin-bottom: 0.4rem;
+  overflow-wrap: anywhere;
+}
+
+.details ul.files img {
+  max-width: 100%;
+  max-height: 16rem;
+  margin-top: 0.2rem;
+  border: 1px solid var(--line);
+}
+
 /* A send several nodes share, and the count of them: two nodes may duplicate a piece of logic. */
 .badge.coalesced,
 .details p.coalesced {

@@ -80,9 +80,11 @@ Docker or Compose secrets, and put the UI behind a reverse proxy with HTTPS, and
 with its own authentication, rather than publishing the port.
 
 - **`/data`** is the instance's state: the graph (`graph.json`, and its versions in
-  `graph-history/`), each plugin instance's state (`instances/<id>/`), the core's own (`core/`), the
-  event log (`events-<day>.jsonl`) and the modules installed (`modules/`). Back it up as one, with
-  the container stopped.
+  `graph-history/`), each plugin instance's state (`instances/<id>/`, its files in `files/`), the
+  core's own (`core/`), the event log (`events-<day>.jsonl`) and the modules installed (`modules/`).
+  Back it up as one, with the container stopped. A plugin instance's files may take 16 MB each and
+  256 MB together ([docs/bot-os.md](docs/bot-os.md) D149); `FILE_MAX_MB` and `FILES_MAX_MB` in the
+  environment set other limits.
 - **Restart policy:** run it with `--restart unless-stopped` (or Compose's
   `restart: unless-stopped`): the owner applies a saved graph or an installed module by
   `POST /restart`, which stops the instance, its state kept, and exits for Docker to start it again.

@@ -54,6 +54,12 @@
  *   for a node that keeps none, 409 for one not running.
  * - `POST /plugins/<id>/actions/<name>` with the action's input as the body: its output, a 400 for
  *   an input its schema refuses, a 409 when the plugin refuses, with why.
+ * - `GET /plugins/<id>/files`: a node's files (D149), each with its name, size, media type and
+ *   when it was written, what they take together and the limits; read from its instance's store,
+ *   whatever the node's state. 404 for no node.
+ * - `GET /plugins/<id>/files/<name>`: one file's bytes, as its media type; inline for a raster
+ *   image (PNG, JPEG, GIF, WebP), as an attachment otherwise, and sandboxed, so that a file a
+ *   plugin wrote never runs in the UI's origin. 404 for no node or no such file.
  * - `GET /plugins/<id>/login`: where a connector's login stands (D116), what it asks next;
  *   `POST /plugins/<id>/login {"action": "token", "values": {"token": "…"}}` answers it, and says
  *   where it stands next (a refused answer in its `error`). 404 for a node that offers no login,
@@ -129,6 +135,9 @@ async function body(req: http.IncomingMessage, max?: number): Promise<unknown> {
   const text = (await bytes(req, max)).toString('utf8');
   return text === '' ? {} : (JSON.parse(text) as unknown);
 }
+
+/** The media types a file is served inline as, and the UI shows: raster images, which run nothing. */
+const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
 const TARBALL = /^application\/(?:gzip|x-gzip|x-tar|octet-stream)\b/iu;
 
@@ -525,6 +534,30 @@ export function controlHandler(
           if (refused !== undefined) return reply(400, { error: refused });
         }
         return reply(200, settings.current());
+      }
+      const f = /^\/plugins\/([^/]+)\/files(?:\/([^/]+))?$/u.exec(route);
+      if (f !== null && !post && !put) {
+        const [, rawId = '', rawName] = f;
+        const id = decodeURIComponent(rawId);
+        if (rawName === undefined) {
+          const r = controls.files(id);
+          return r === undefined ? reply(404, { error: `no plugin ${id}` }) : reply(200, r);
+        }
+        const name = decodeURIComponent(rawName);
+        const r = controls.file(id, name);
+        if (r === undefined) return reply(404, { error: `${id} keeps no file ${name}` });
+        const inline = INLINE.has(r.info.type);
+        res.writeHead(200, {
+          'content-type': r.info.type,
+          'content-length': String(r.bytes.byteLength),
+          // The name's characters are a document's: nothing to escape.
+          'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${name}"`,
+          'content-security-policy': "default-src 'none'; sandbox",
+          'x-content-type-options': 'nosniff',
+          'cache-control': 'no-store',
+        });
+        res.end(r.bytes);
+        return;
       }
       const m =
         /^\/plugins\/([^/]+)\/(clear-stop|kill|state|actions|view|queue|login)(?:\/([^/]+))?$/u.exec(

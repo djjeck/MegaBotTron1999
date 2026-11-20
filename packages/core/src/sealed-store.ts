@@ -8,7 +8,7 @@
  * login, and why is kept for its login's state; every string opened is remembered as a secret.
  */
 import { isSealed, type Sealer, SealError } from './secrets.ts';
-import { type Store } from './store.ts';
+import { type Store, type StoreFiles } from './store.ts';
 
 /** Where a connector's kept credentials stand at rest. */
 export interface SealedState {
@@ -86,5 +86,10 @@ export class SealedStore implements Store {
 
   names(): string[] {
     return this.base.names();
+  }
+
+  /** The store's files (D149), as they are: none is sealed. */
+  get files(): StoreFiles {
+    return this.base.files;
   }
 }

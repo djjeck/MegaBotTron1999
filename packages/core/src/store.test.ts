@@ -158,3 +158,167 @@ describe('Stores, after a crash', () => {
     expect(fs.readdirSync(path.join(dataDir, 'instances'))).toEqual(['a']);
   });
 });
+
+describe('a store’s files (D149)', () => {
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+
+  it('keeps bytes by name, atomically, mode 600, with their type and time', () => {
+    let t = 1000;
+    const stores = new Stores(dataDir, { now: () => t });
+    const files = stores.open('card-painter').files;
+    expect(files.read('card-42.png')).toBeUndefined();
+    expect(files.list()).toEqual([]);
+    files.write('card-42.png', png);
+    t = 2000;
+    files.write('notes', new TextEncoder().encode('hi'), { type: 'Text/Plain' });
+    files.write('blob.bin', Buffer.from([1]));
+    expect(Buffer.from(files.read('card-42.png') as Uint8Array)).toEqual(Buffer.from(png));
+    expect(files.list()).toEqual([
+      { name: 'blob.bin', size: 1, type: 'application/octet-stream', written: 2000 },
+      { name: 'card-42.png', size: 7, type: 'image/png', written: 1000 },
+      { name: 'notes', size: 2, type: 'text/plain', written: 2000 },
+    ]);
+    const dir = path.join(dataDir, 'instances', 'card-painter', 'files');
+    expect(fs.statSync(path.join(dir, 'card-42.png')).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(dir).mode & 0o777).toBe(0o700);
+    // No temporary left behind, and the documents are not the files.
+    expect(fs.readdirSync(dir).sort()).toEqual(['.meta', 'blob.bin', 'card-42.png', 'notes']);
+    expect(stores.open('card-painter').names()).toEqual([]);
+    // Replaced whole.
+    files.write('card-42.png', Uint8Array.from([9]));
+    expect([...(files.read('card-42.png') as Uint8Array)]).toEqual([9]);
+    files.delete('card-42.png');
+    files.delete('never');
+    expect(files.read('card-42.png')).toBeUndefined();
+    expect(files.list().map((f) => f.name)).toEqual(['blob.bin', 'notes']);
+    // Put back by hand, with nothing kept of it: its type from its name, its time from the disk.
+    fs.writeFileSync(path.join(dir, 'put.gif'), 'GIF');
+    fs.mkdirSync(path.join(dir, 'a-dir'));
+    expect(files.list().find((f) => f.name === 'put.gif')).toMatchObject({
+      size: 3,
+      type: 'image/gif',
+      written: expect.any(Number),
+    });
+    expect(files.list().map((f) => f.name)).not.toContain('a-dir');
+    expect(new Stores(dataDir).open('nobody').files.list()).toEqual([]);
+    // Gone with its store.
+    stores.delete('card-painter');
+    expect(fs.existsSync(dir)).toBe(false);
+  });
+
+  it('refuses a name with a path, a type that is none, and what is not bytes', () => {
+    const files = new Stores(dataDir).open('a').files;
+    for (const name of ['../b', 'a/b', '..', '_meta', '', '.hidden', 'x'.repeat(201)])
+      expect(() => files.write(name, png)).toThrow('not a file name');
+    expect(() => files.read('../x')).toThrow('not a file name');
+    expect(() => files.delete('_x')).toThrow('not a file name');
+    expect(() => files.write('a', png, { type: 'png' })).toThrow('file a: not a media type: "png"');
+    expect(() => files.write('a', png, { type: `image/${'x'.repeat(130)}` })).toThrow(
+      'not a media type'
+    );
+    expect(() => files.write('a', 'text' as unknown as Uint8Array)).toThrow('file a: not bytes');
+    expect(files.write('x'.repeat(200), png)).toBeUndefined();
+  });
+
+  it('refuses a file over the size a file may be, or the instance’s total, with why', () => {
+    const stores = new Stores(dataDir, { fileLimits: { file: 3000, total: 4000 } });
+    expect(stores.fileLimits).toEqual({ file: 3000, total: 4000 });
+    const files = stores.open('a').files;
+    expect(() => files.write('big', new Uint8Array(3001))).toThrow(
+      'file big is 2.9 KB, over the 2.9 KB a file may be'
+    );
+    files.write('one', new Uint8Array(2500));
+    expect(() => files.write('two', new Uint8Array(2000))).toThrow(
+      'file two (2.0 KB) would take the files to 4.4 KB, over the 3.9 KB an instance may keep'
+    );
+    // A file replaced counts once.
+    files.write('one', new Uint8Array(3000));
+    files.write('two', new Uint8Array(1000));
+    expect(() => files.write('three', new Uint8Array(1))).toThrow('1 B');
+    expect(new Stores(dataDir).fileLimits).toEqual({ file: 16 * 2 ** 20, total: 256 * 2 ** 20 });
+    expect(() =>
+      new Stores(dataDir, { fileLimits: { file: 20 * 2 ** 20 } })
+        .open('b')
+        .files.write('x', new Uint8Array(17 * 2 ** 20))
+    ).not.toThrow();
+    expect(() =>
+      new Stores(dataDir, { fileLimits: { file: 2 ** 21 } })
+        .open('b')
+        .files.write('x', new Uint8Array(2 ** 21 + 1))
+    ).toThrow('file x is 2.0 MB, over the 2.0 MB a file may be');
+  });
+
+  it('migrates them hard-linked, never copied, the store’s own left as they were', async () => {
+    const stores = new Stores(dataDir, { now: () => 5 });
+    const store = stores.open('a');
+    store.files.write('keep.png', png);
+    store.files.write('gone.png', png);
+    store.files.write('changed', Uint8Array.from([1]));
+    const dir = path.join(dataDir, 'instances', 'a', 'files');
+    const inode = fs.statSync(path.join(dir, 'keep.png')).ino;
+    let staged: number | undefined;
+    const steps = [
+      (s: MigrationStore) => {
+        staged = fs.statSync(
+          path.join(`${dataDir}/instances/a.migrating`, 'files', 'keep.png')
+        ).ino;
+        expect(s.files.list().map((f) => f.name)).toEqual(['changed', 'gone.png', 'keep.png']);
+        s.files.delete('gone.png');
+        s.files.write('changed', Uint8Array.from([2]));
+        s.files.write('new', Uint8Array.from([3]));
+        // The store's own, untouched while it runs.
+        expect([...(store.files.read('changed') as Uint8Array)]).toEqual([1]);
+        expect(store.files.read('gone.png')).toBeDefined();
+      },
+    ];
+    // A failed one leaves every file as it was.
+    await expect(
+      stores.migrate('a', [
+        ...steps,
+        () => {
+          throw new Error('nope');
+        },
+      ])
+    ).rejects.toThrow('nope');
+    expect(staged).toBe(inode);
+    expect(store.files.list().map((f) => f.name)).toEqual(['changed', 'gone.png', 'keep.png']);
+    expect([...(store.files.read('changed') as Uint8Array)]).toEqual([1]);
+    expect(fs.existsSync(`${dataDir}/instances/a.migrating`)).toBe(false);
+    expect(fs.statSync(path.join(dir, 'keep.png')).nlink).toBe(1);
+    // One that succeeds: what it made is the store's.
+    await stores.migrate('a', steps);
+    expect(store.files.list().map((f) => f.name)).toEqual(['changed', 'keep.png', 'new']);
+    expect([...(store.files.read('changed') as Uint8Array)]).toEqual([2]);
+    expect(fs.statSync(path.join(dir, 'keep.png'))).toMatchObject({ ino: inode, nlink: 1 });
+    expect(store.files.list().find((f) => f.name === 'keep.png')?.written).toBe(5);
+    expect(fs.readdirSync(path.join(dataDir, 'instances'))).toEqual(['a']);
+  });
+
+  it('keeps them in memory without a data directory, a migration’s seen by a store opened before', async () => {
+    const stores = new Stores(undefined, { now: () => 7 });
+    const before = stores.open('a');
+    before.files.write('a.png', png);
+    const read = before.files.read('a.png') as Uint8Array;
+    // What the plugin changes of what it read, or of what it wrote, is not kept.
+    read[0] = 0;
+    expect((before.files.read('a.png') as Uint8Array)[0]).toBe(0x89);
+    expect(before.files.list()).toEqual([
+      { name: 'a.png', size: 7, type: 'image/png', written: 7 },
+    ]);
+    await expect(
+      stores.migrate('a', [
+        (s) => {
+          s.files.delete('a.png');
+          throw new Error('half');
+        },
+      ])
+    ).rejects.toThrow('half');
+    expect(before.files.list()).toHaveLength(1);
+    await stores.migrate('a', [(s) => s.files.write('b', Uint8Array.from([1]))]);
+    expect(before.files.list().map((f) => f.name)).toEqual(['a.png', 'b']);
+    before.files.delete('a.png');
+    expect(before.files.read('a.png')).toBeUndefined();
+    stores.delete('a');
+    expect(stores.open('a').files.list()).toEqual([]);
+  });
+});
