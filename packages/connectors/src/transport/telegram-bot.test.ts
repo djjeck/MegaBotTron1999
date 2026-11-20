@@ -1,5 +1,5 @@
 import { FloodWait, type Inbound } from '@megabottron1999/core';
-import { BotError, type Context, GrammyError } from 'grammy';
+import { BotError, type Context, GrammyError, InputFile } from 'grammy';
 import { type UserFromGetMe } from 'grammy/types';
 import { describe, expect, it } from 'vitest';
 import { BOT_INFO, stubBot } from '#test/telegram.ts';
@@ -506,6 +506,81 @@ describe('TelegramBotConnector', () => {
     expect(stub.calls.at(-1)?.payload).toMatchObject({ text: '**b**' });
     expect(stub.calls.at(-1)?.payload['parse_mode']).toBeUndefined();
     expect(logs.at(-1)).toMatch(/^formatting refused, sending plain text: /u);
+  });
+
+  it('sends a photo with sendPhoto: its caption, as HTML from Markdown, in reply; its file id (D150)', async () => {
+    const { c, stub, logs } = connector();
+    const bytes = { data: new Uint8Array([1, 2]), filename: 'card.png' };
+    await expect(
+      c.deliverPhoto('-100123', bytes, { caption: '**A** card', format: 'markdown', replyTo: '41' })
+    ).resolves.toEqual({ id: '101', photo: 'photo-101' });
+    const sent = stub.calls.at(-1);
+    expect(sent?.method).toBe('sendPhoto');
+    expect(sent?.payload).toMatchObject({
+      chat_id: -100123,
+      caption: '<b>A</b> card',
+      parse_mode: 'HTML',
+      reply_parameters: { message_id: 41, allow_sending_without_reply: true },
+    });
+    expect(sent?.payload['photo']).toBeInstanceOf(InputFile);
+    // By its file id, with nothing more.
+    await expect(c.deliverPhoto('@lobby', 'photo-101')).resolves.toEqual({
+      id: '102',
+      photo: 'photo-102',
+    });
+    expect(stub.calls.at(-1)?.payload).toEqual({ chat_id: '@lobby', photo: 'photo-101' });
+    // A plain caption as written.
+    await c.deliverPhoto('1', 'photo-101', { caption: '**as is**' });
+    expect(stub.calls.at(-1)?.payload).toEqual({
+      chat_id: 1,
+      photo: 'photo-101',
+      caption: '**as is**',
+    });
+    // A caption Telegram cannot parse goes again as written.
+    const send = stub.bot.api.sendPhoto.bind(stub.bot.api);
+    let first = true;
+    stub.bot.api.sendPhoto = ((chat: number, photo: string, other?: object) => {
+      if (!first) return send(chat, photo, other);
+      first = false;
+      return Promise.reject(
+        new GrammyError(
+          'Bad Request',
+          { ok: false, error_code: 400, description: "Bad Request: can't parse entities: x" },
+          'sendPhoto',
+          {}
+        )
+      );
+    }) as typeof stub.bot.api.sendPhoto;
+    await c.deliverPhoto('1', 'photo-101', { caption: '**b**', format: 'markdown' });
+    expect(stub.calls.at(-1)?.payload).toEqual({
+      chat_id: 1,
+      photo: 'photo-101',
+      caption: '**b**',
+    });
+    expect(logs.at(-1)).toMatch(/^formatting refused, sending the caption plain: /u);
+    // Any other refusal, and a flood wait, as a text's.
+    stub.bot.api.sendPhoto = (() =>
+      Promise.reject(
+        new GrammyError(
+          'Too Many Requests',
+          { ok: false, error_code: 429, description: 'x', parameters: { retry_after: 90 } },
+          'sendPhoto',
+          {}
+        )
+      )) as unknown as typeof stub.bot.api.sendPhoto;
+    await expect(c.deliverPhoto('1', 'photo-101')).rejects.toBeInstanceOf(FloodWait);
+    stub.bot.api.sendPhoto = (() =>
+      Promise.reject(
+        new GrammyError(
+          'Bad Request',
+          { ok: false, error_code: 400, description: "Bad Request: can't parse entities: y" },
+          'sendPhoto',
+          {}
+        )
+      )) as unknown as typeof stub.bot.api.sendPhoto;
+    await expect(
+      c.deliverPhoto('1', 'photo-101', { caption: '**c**', format: 'markdown' })
+    ).rejects.toBeInstanceOf(GrammyError);
   });
 
   it("turns Telegram's longer flood waits into the core's, and passes other errors on", async () => {

@@ -4,7 +4,8 @@
  *
  * - `FakeConnector`, with its plugin (`fakeConnectorPlugin`): a connector of any network whose
  *   messages are said by the test or the simulator (`hear`) and whose sends go to it (`onSend`),
- *   with the account's limits, so that the plugins read and send through it as they do live.
+ *   with the account's limits, so that the plugins read and send through it as they do live; the
+ *   photos sent too (bot-os.md D150), with their caption and the message they answer.
  * - `DevKit`: a core on a virtual clock (packages/core/src/clock.ts), its stores in memory, their
  *   files (`ctx.store.files`) too,
  *   with the plugins given, their configuration, the owner's kept settings, and the
@@ -16,10 +17,11 @@
  * Nothing in here knows of any game.
  */
 import { type Clock, VirtualClock } from './clock.ts';
-import { type Buttons } from './commands.ts';
+import { type Buttons, type CommandPhoto } from './commands.ts';
 import {
   type Connector,
   ConnectorBase,
+  type ConnectorPhotoOptions,
   type ConnectorSendOptions,
   type Inbound,
   type Surface,
@@ -28,7 +30,7 @@ import {
 import { Core, type CoreOptions } from './core.ts';
 import { type LogEntry, MemoryEventLog } from './event-log.ts';
 import { type Manifest, ManifestError, type ManifestInput, parseManifest } from './manifest.ts';
-import { type Limits } from './outbox.ts';
+import { type Limits, type TextFormat } from './outbox.ts';
 import { definePlugin, type Plugin } from './plugin.ts';
 
 export interface FakeConnectorOptions {
@@ -38,8 +40,13 @@ export interface FakeConnectorOptions {
   self?: string;
   /** The account's limits, which its outbox keeps to; none, no rate limit. */
   limits?: Limits;
-  /** Where a send goes; true if it went (the default: every send goes). */
+  /**
+   * Where a send goes; true if it went (the default: every send goes). A photo's comes with its
+   * caption (`''` without one); false refuses it, as the network would.
+   */
   onSend?: (chat: string, text: string) => boolean;
+  /** It cannot send photos, as IRC's (bot-os.md D150): it has no `deliverPhoto`. */
+  noPhotos?: boolean;
   /** The chats the account administers (`isAdmin`). */
   admins?: readonly string[];
   /** The chats it can see (`surfaces`), in order; none: it cannot list them. */
@@ -51,10 +58,36 @@ export interface FakeConnectorOptions {
 /** A message the connector hears: its account and network are the connector's. */
 export type Heard = Omit<Inbound, 'account' | 'network' | 'playback'> & { playback?: boolean };
 
+/**
+ * A send the fake connector made: its text, with the buttons it carried (`SendOptions.buttons`);
+ * or a photo (bot-os.md D150), `text` its caption (`''` without one), with its `format`, the
+ * message it answers (`replyTo`), and the id it was given (`id`, `'photo-<n>'` for bytes, the id
+ * it was sent by otherwise).
+ */
+export interface FakeSent {
+  chat: string;
+  text: string;
+  buttons?: Buttons;
+  photo?: CommandPhoto;
+  format?: TextFormat;
+  replyTo?: string;
+  id?: string;
+}
+
 /** A connector of any network, driven by a test or a simulator. */
 export class FakeConnector extends ConnectorBase implements Connector {
-  /** Every send, in order, with the buttons a send carried (`SendOptions.buttons`). */
-  readonly sent: { chat: string; text: string; buttons?: Buttons }[] = [];
+  /** Every send, in order, photos among them. */
+  readonly sent: FakeSent[] = [];
+  /**
+   * Sends a photo (bot-os.md D150): kept in `sent`; the message's id and the photo's. Absent when
+   * the test says it has none (`noPhotos`).
+   */
+  readonly deliverPhoto?: (
+    chat: string,
+    photo: CommandPhoto,
+    options?: ConnectorPhotoOptions
+  ) => Promise<{ id?: string; photo?: string }>;
+  private photos = 0;
   private readonly onSend: ((chat: string, text: string) => boolean) | undefined;
   private readonly admins: readonly string[];
   /** Its surfaces, as a test sets them; undefined: none (it cannot list them). */
@@ -70,6 +103,22 @@ export class FakeConnector extends ConnectorBase implements Connector {
     this.onSend = o.onSend;
     this.admins = o.admins ?? [];
     this.ownerChat = o.owner;
+    if (o.noPhotos !== true)
+      this.deliverPhoto = (chat, photo, options = {}) => {
+        const text = options.caption ?? '';
+        if (!(this.onSend?.(chat, text) ?? true)) return Promise.reject(new Error('not sent'));
+        const n = ++this.photos;
+        const id = typeof photo === 'string' ? photo : `photo-${n}`;
+        this.sent.push({
+          chat,
+          text,
+          photo,
+          ...(options.format === undefined ? {} : { format: options.format }),
+          ...(options.replyTo === undefined ? {} : { replyTo: options.replyTo }),
+          id,
+        });
+        return Promise.resolve({ id: `m${n}`, photo: id });
+      };
     const listed = o.surfaces;
     if (listed !== undefined)
       this.surfaces = (q = {}) => {

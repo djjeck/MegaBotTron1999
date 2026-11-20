@@ -128,6 +128,11 @@ export const graphSchema = z.strictObject({
          */
         minIntervalS: z.record(z.string().min(1), z.number().nonnegative()).optional(),
         /**
+         * A chat-out's: it lets photos through where it names its `commands` (D150), which a
+         * photo, having no first word, is never among.
+         */
+        photos: z.boolean().optional(),
+        /**
          * A commands edge's (D109): the commands it serves, by name, of its plugin's; absent, all
          * of them.
          */
@@ -649,10 +654,15 @@ export function resolveGraph(
       continue;
     }
     if (
-      (e.sends !== undefined || e.commands !== undefined || e.minIntervalS !== undefined) &&
+      (e.sends !== undefined ||
+        e.commands !== undefined ||
+        e.minIntervalS !== undefined ||
+        e.photos !== undefined) &&
       input.type !== 'chat-out'
     ) {
-      problems.push(`${name}: only a chat-out edge carries sends, commands and minIntervalS`);
+      problems.push(
+        `${name}: only a chat-out edge carries sends, commands, minIntervalS and photos`
+      );
       continue;
     }
     if (e.dryRun !== undefined && input.type !== 'chat-out' && input.type !== 'commands') {
@@ -722,6 +732,7 @@ export function resolveGraph(
               sends: e.sends ?? [],
               ...(e.commands === undefined ? {} : { commands: e.commands }),
               ...(e.minIntervalS === undefined ? {} : { minIntervalS: e.minIntervalS }),
+              ...(e.photos === undefined ? {} : { photos: e.photos }),
               ...(e.dryRun === undefined ? {} : { dryRun: e.dryRun }),
             }
           : undefined;

@@ -56,7 +56,11 @@ reads, with when it was edited (`edited`), live only and once per edit, to the p
 edits (`onEdit`) alone: none hears it as a message. The catch-up gives each message as it now reads,
 and no edit made while the instance was down. A bot's message with inline buttons gives their
 labels, row by row (`buttons`, `telegram-user`, D145; `[]` when it has none), and an edit gives them
-as they now are.
+as they now are. Both Telegram connectors send photos through the outbox (`deliverPhoto`, D150),
+with a caption, plain or Markdown, in reply to a message: `telegram-bot` with the Bot API's
+`sendPhoto`, answering the photo's `file_id`; `telegram-user` with GramJS's `sendFile`, answering
+`<id>:<access hash>:<file reference>`; each sends one again by the id it gave. `irc` sends none, and
+the outbox refuses them with why.
 
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
   structured output by a zod schema. A model connector (docs/bot-os.md D117): it logs each call

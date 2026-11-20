@@ -50,6 +50,8 @@ function client(): GramClient {
     getInputEntity: (id) => Promise.resolve({ peer: id }),
     getMe: () => Promise.resolve({ username: 'alice' }),
     sendMessage: () => Promise.resolve({ id: 1 }),
+    uploadFile: () => Promise.reject(new Error('no upload here')),
+    sendFile: () => Promise.reject(new Error('no file here')),
     addEventHandler: () => {},
     getMessages: () => Promise.resolve([]),
     downloadMedia: () => Promise.resolve(undefined),

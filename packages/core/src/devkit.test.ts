@@ -94,6 +94,31 @@ describe('FakeConnector', () => {
     expect([plain.self(), plain.send('x', 'y'), plain.limits]).toEqual(['Me', true, undefined]);
     expect(() => new FakeConnector({ account: 'nobody' })).toThrow('not an account');
   });
+
+  it('keeps the photos it sends, with their caption and reply, or has none (D150)', async () => {
+    const c = new FakeConnector({ account: 'telegram:me', onSend: (chat) => chat !== '#closed' });
+    const bytes = { data: new Uint8Array([1]), filename: 'card.png' };
+    await expect(
+      c.deliverPhoto?.('#lobby', bytes, { caption: 'A *card*', format: 'markdown', replyTo: '9' })
+    ).resolves.toEqual({ id: 'm1', photo: 'photo-1' });
+    await expect(c.deliverPhoto?.('#lobby', 'photo-1')).resolves.toEqual({
+      id: 'm2',
+      photo: 'photo-1',
+    });
+    await expect(c.deliverPhoto?.('#closed', bytes)).rejects.toThrow('not sent');
+    expect(c.sent).toEqual([
+      {
+        chat: '#lobby',
+        text: 'A *card*',
+        photo: bytes,
+        format: 'markdown',
+        replyTo: '9',
+        id: 'photo-1',
+      },
+      { chat: '#lobby', text: '', photo: 'photo-1', id: 'photo-1' },
+    ]);
+    expect(new FakeConnector({ account: 'irc:me', noPhotos: true }).deliverPhoto).toBeUndefined();
+  });
 });
 
 describe('DevKit', () => {

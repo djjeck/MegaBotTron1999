@@ -46,6 +46,7 @@ import {
   inScope,
   type Request,
   tapOf,
+  type TextFormat,
 } from '@megabottron1999/core';
 import { type Api, type Bot, InputFile } from 'grammy';
 import { type Command, markdownToTelegramHtml, type Switchboard } from 'grammy-switchboard';
@@ -155,8 +156,22 @@ export function surfaceOf(
 }
 
 /** A photo as the Bot API takes it: by its file id, or uploaded. */
-const media = (photo: CommandPhoto): string | InputFile =>
+export const media = (photo: CommandPhoto): string | InputFile =>
   typeof photo === 'string' ? photo : new InputFile(photo.data, photo.filename);
+
+/**
+ * A photo's caption as the Bot API takes it (bot-os.md D150): Markdown as Telegram HTML, as a
+ * text's; plain as written; none, nothing.
+ */
+export const captionOf = (
+  caption: string | undefined,
+  format: TextFormat | undefined
+): { caption?: string; parse_mode?: 'HTML' } =>
+  caption === undefined
+    ? {}
+    : format === 'markdown'
+      ? { caption: markdownToTelegramHtml(caption), parse_mode: 'HTML' }
+      : { caption };
 
 export interface PublicCommandsOptions {
   handlers: Handlers;
@@ -292,11 +307,13 @@ export function installPublicCommands(
         for (const messageId of sent.messageIds)
           remove(options, `${topic}:${messageId}`, () => switchboard.delete({ topic, messageId }));
       },
-      photo: async (photo) =>
+      photo: async (photo, caption, format) =>
         (
           await switchboard.send({
             topic,
             photo: media(photo),
+            ...(caption === undefined ? {} : { text: caption }),
+            ...(caption !== undefined && format && { format }),
             ...(replyTo === undefined ? {} : { replyTo }),
           })
         ).fileIds[0],
@@ -541,7 +558,9 @@ function inChat(api: Api, chatId: number, replyTo: number, expire: Expire): Answ
         api.deleteMessage(chatId, sent.message_id)
       );
     },
-    photo: async (photo) =>
-      (await api.sendPhoto(chatId, media(photo), reply)).photo.at(-1)?.file_id,
+    photo: async (photo, caption, format) =>
+      (
+        await api.sendPhoto(chatId, media(photo), { ...reply, ...captionOf(caption, format) })
+      ).photo.at(-1)?.file_id,
   };
 }

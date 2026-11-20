@@ -226,15 +226,18 @@ each in the menus of the chats it is served in, and answers it there alone, with
 (`Request.chat`) (`packages/core/src/commands.ts`). The answer is the surface's (D29), within the
 edge: the handler says what to answer (`Answer`: a text, plain or Markdown, with buttons that each
 run a command again and an expiry in a group; a photo, as bytes or by the network's id of one sent
-before), and the surface sends it in reply to the asker (`Asker`: the network's id and username, and
-whether it is the owner), in the chat asked; each answer is recorded as a send (`core.send`, its
-`origin` `command /<name>`, `sent` or `failed`), and a dry-run edge logs it (`dry-run`) and sends
-nothing. What a plugin sends on its own goes through its outbox, within its chat-out edges, each
-sending for real or as a dry run (§4.6). The surface is a connector's (`ChatSurface`): the core
-serves every running connector that offers one its commands (`serve(core.served(node))`), once every
-plugin has started, the core's own cards ending with that surface's way home (`home`, §4.11). A
-surface is the owner's interactive control (commands, cards and their buttons), not a report
-channel: it tells the owner nothing on its own (bot-os.md D94).
+before, with a caption under it if given, plain or Markdown as a text is,
+`photo(photo, caption?, format?)`: a caption over `CAPTION_MAX`, Telegram's 1024 characters, is
+refused, thrown and logged `refused`, before anything is sent, bot-os.md D150), and the surface
+sends it in reply to the asker (`Asker`: the network's id and username, and whether it is the
+owner), in the chat asked; each answer is recorded as a send (`core.send`, its `origin`
+`command /<name>`, `sent` or `failed`), and a dry-run edge logs it (`dry-run`) and sends nothing.
+What a plugin sends on its own goes through its outbox, within its chat-out edges, each sending for
+real or as a dry run (§4.6). The surface is a connector's (`ChatSurface`): the core serves every
+running connector that offers one its commands (`serve(core.served(node))`), once every plugin has
+started, the core's own cards ending with that surface's way home (`home`, §4.11). A surface is the
+owner's interactive control (commands, cards and their buttons), not a report channel: it tells the
+owner nothing on its own (bot-os.md D94).
 
 **The owner's commands.** A command may be the owner's (`owner: true`): the core answers it to the
 owner only (`Asker.owner`), and the surface only in the owner's chat, never in a group; it needs a
@@ -260,7 +263,7 @@ hears a namespace's events only through a port an edge binds.
 | Port type   | Output                                                                                                                          | Input                                                                                                                                                                                 |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `chat-in`   | `chat`: a connector's account, of its network (derived)                                                                         | `{ type: 'chat-in', network?, when?, sameAs? }` (declared); its edge carries the chats it `reads` and its `senders`                                                                   |
-| `chat-out`  | `{ type: 'chat-out', network?, many?, owner?, single? }` (declared in `outputs`); its edge carries what it `sends`              | `chat`: a connector's account (derived), bound to any number of senders; their edges carry the chats sent to and `commands`                                                           |
+| `chat-out`  | `{ type: 'chat-out', network?, many?, owner?, single?, photos? }` (declared in `outputs`); its edge carries what it `sends`     | `chat`: a connector's account (derived), bound to any number of senders; their edges carry the chats sent to and `commands`                                                           |
 | `events`    | `events` (`<ns>-events` with more than one): each namespace it registers (derived)                                              | `{ type: 'events', namespace }`, bound to any number of instances; it hears only theirs; `namespace` may be `{ config: key }`                                                         |
 | `interface` | `interface`: its declared reads and actions (every plugin has one, derived)                                                     | `{ type: 'interface', plugin, members }`; none for a plugin it only needs started first; no `plugin`: a contract                                                                      |
 | `commands`  | `{ type: 'commands' }` (declared in `outputs`, a connector's alone, of its account's network); its edges carry what each serves | `commands`: a plugin's chat commands (derived from `interface.commands`), bound to any number of connectors; each edge carries `serves`, `chats`, `privateChats`, `senders`, `dryRun` |
@@ -273,9 +276,12 @@ edge runs from a sender's chat-out output, on its right, to the connector's chat
 the chats it may send to (`sends`) and the commands it may send there (`commands`, by first word;
 none: any text), with, for its queued sends, the least seconds between two sends of a command in one
 chat (`minIntervalS`, `{ "/inventory": 300 }`, by first word; a command not named, the connector's
-`commandIntervalS`: §4.6, bot-os.md D73). A chat-out output may **declare the commands it sends**
-(`commands`, by first word) and their spacing (`minIntervalS`), as a script node's do (bot-os.md
-D74): the check refuses an edge from it that allows another command, or any text
+`commandIntervalS`: §4.6, bot-os.md D73). **A photo** has no first word: an edge that names its
+`commands` lets none through unless it says `photos: true`, or its output declares `photos: true`
+(bot-os.md D150; an edge that names no command lets photos through as any text). A chat-out output
+may **declare the commands it sends** (`commands`, by first word) and their spacing
+(`minIntervalS`), as a script node's do (bot-os.md D74): the check refuses an edge from it that
+allows another command, or any text
 (`node look: output port chat sends only /look: its edge allows /buy too`); a new edge drawn from it
 starts with them; and its queued sends are spaced by its declared intervals, its edge's own winning
 for a command it names. A connector has both, as one node (one account, one session); the editor
@@ -1188,8 +1194,12 @@ connectors, from the chats they have seen), which a send the network refused nam
 an edge naming no chat from an output declared `owner` sends (`owner-notice`'s, §2.1, §5, D97).
 
 The connector itself also implements `send(chat, text)`, and, for a network whose sends answer later
-(Telegram), `deliver(chat, text)`, which resolves with the message's id; only the outbox calls them:
-no plugin holds a way to send that skips it.
+(Telegram), `deliver(chat, text)`, which resolves with the message's id; and, for one that sends
+photos (both Telegram connectors, bot-os.md D150),
+`deliverPhoto(chat, photo, { caption?, format?, replyTo? })`, which resolves with the message's id
+and the photo's (`photo`), to send it again by; only the outbox calls them: no plugin holds a way to
+send that skips it. A connector without `deliverPhoto` (`irc`) cannot send photos, and the outbox
+refuses them with why (§4.6).
 
 **Surfaces** (bot-os.md D63, D96): a connector may list the chats it can see,
 `surfaces({ search?, limit? })`, most recently active first, for the owner to pick from (the control
@@ -1384,6 +1394,37 @@ connector (§2.1):
   `within` and `from`, combined with `all`, and `waitFor` waits on a connector handle for the first
   match (`packages/core/src/replies.ts`).
 - Every attempt is logged (`core.send`), with its outcome.
+
+**A photo** (bot-os.md D150): `send`, `enqueue` and `deliver` take a photo where they take a text,
+`{ photo, caption?, replyTo? }` (`PhotoSend`): `photo` its bytes and a file name
+(`{ data: Uint8Array, filename }`) or the network's id of one sent before (`CommandPhoto`, §2);
+`caption`, the words under it, plain, or Markdown with `format: 'markdown'` as a text takes it (here
+in `send` and `enqueue` too); `replyTo`, the network's id of a message in that chat it answers.
+
+```ts
+const r = await ctx
+  .outbox('chat')
+  .deliver(
+    '#lobby',
+    { photo: { data, filename: 'card.png' }, caption: 'A *rare* card', replyTo: m.id },
+    { format: 'markdown' }
+  );
+// { text: '[photo card.png]', outcome: 'sent', id: '<message id>', photo: '<photo id>' }
+await ctx.outbox('chat').deliver('#lobby', { photo: r.photo as string }); // again, by its id
+```
+
+It runs every check a text does, in the same order, but a command's: the reach (its chat in the
+edge's `sends`; an edge that names `commands` lets it through only with `photos: true`, on the edge
+or its output, §2.1: `a photo is not among <node>'s commands: its edge or output must say photos`),
+a dry run, the node's state, a flood wait, the rate and the connection. It is no command: no
+watchdog (D93), no answer waited for (D98), no command's interval (D73), and a queued photo is never
+coalesced. Refused at once, before anything is sent: a caption over `CAPTION_MAX` (1024 characters,
+Telegram's, counted as written: `a caption of 1100 characters, over the 1024 a photo may carry`),
+and a connector that cannot send photos (`<account> cannot send photos`: one with no `deliverPhoto`,
+such as `irc`). `deliver` answers the network's id of the photo sent (`photo`), beside the message's
+(`id`), to send it again by; a queued photo settles with it too (`QueuedResult.photo`). Its result's
+and its record's `text` is its label, `[photo <filename>]` (`[photo]` by an id); the record
+(`core.send`) has its caption's length (`caption`), never its bytes nor its caption.
 
 As built (`packages/core/src/outbox.ts`): the checks run in a fixed order, each refusal with its
 reason: the caller's own refusal (`refuse`, for a game's grammar), the reach
@@ -1703,8 +1744,11 @@ public API (`packages/core/src/devkit.ts`):
   connector of any network (the account's prefix), whose messages the test or the simulator says
   (`hear`, live unless `playback`) and whose status it sets (`open`, `connecting`, `close`), and
   whose sends go to its `onSend` (and are kept, `sent`), with the account's `limits` and the chats
-  it administers (`admins`). The plugins read it through their handles and send through their
-  outboxes, as they do live.
+  it administers (`admins`). It sends photos (`deliverPhoto`, bot-os.md D150; none with `noPhotos`,
+  as `irc`), kept in `sent` too (`FakeSent`): `text` the caption (`''` without one), `photo` as
+  sent, `format`, `replyTo`, and `id`, the photo's id it answers (`photo-<n>` for bytes, the id it
+  was sent by otherwise); the message's id is `m<n>`. The plugins read it through their handles and
+  send through their outboxes, as they do live.
 - **`DevKit`**: a core on a `VirtualClock` (§4.1) whose stores are in memory, with the plugins of
   the run, the run's graph (`graph`; by default one instance of each, bound as the manifests say,
   each connector's node on its manifest's account: a graph given names a fake connector's account on
@@ -2357,41 +2401,43 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   retries (a backoff capped at ten minutes). Its status is `connecting` until `getMe` answers,
   `connected` while it polls; its own name is the bot's username. It hears every message Telegram
   delivers the bot and sends through the account's outbox (`deliver`, to a chat id or an
-  `@username`; a 429 longer than auto-retry waits out becomes `FloodWait`); `commandIntervalS` in
-  its config is its queue's default interval between two sends of a command (D73), and
-  `unansweredAt`, `unansweredAtBy` its watchdog's threshold (§4.6, D93). With `chats` in its config
-  (picked among its chats, D96) it monitors only those for the plugins; its surfaces are the chats
-  it has seen and its owner (§4.5), and the updates Telegram kept while it was down come marked
-  `missed` (and `playback` once older than its config's `liveGraceS`, 120 s by default, D83).
-  Configured with its owner (`owner`, in its node's config, picked among its chats and kept by id,
-  D96), it is the instance's chat surface, the owner's interactive control (§4.8, bot-os.md D56)
-  (`telegram-surface.ts`): the switchboard on its bot (`telegram-switchboard.ts`, on
-  grammy-switchboard), the owner's controls answered in the owner's chat, and the plugins' commands
-  that the commands edges from its `commands` output serve (D109), each answered only in the chats
-  its edge names (a group, the owner's chat, every private chat with `privateChats`) and listed in
-  those chats' menus alone (the switchboard's, the owner's chat; every private chat's; Telegram's
-  `chat` scope for each other chat, a group's included, but a group its gate refuses)
-  (`telegram-commands.ts`), the menus kept registered, a refused one retried and one set again when
-  the bot joins its chat; in any group, one answer per user a minute and one every 10 s, each group
-  its own throttles, and an answer deleted when its handler asks (`deleteInGroupAfterMs`). Without
-  an `owner` it is no surface, and its commands edges answer nothing. It tells the owner nothing on
-  its own (D94): a send with buttons (`SendOptions.buttons`, an `owner-notice` telling a `told`
-  notice) to the owner's chat goes through the surface's switchboard, whose taps run the owner's
-  commands as a card's do; to any other chat, the text alone. Nothing hands its bot out (P9). Its
-  gate (D128, `telegram-gate.ts`), each list picked among its chats: `groups`, `any` group it is
-  added to (default; `blockGroups` the ones it ignores even so) or `only` the groups in
-  `onlyGroups`; `people`, `anyone` (default; `blockPeople`, never its owner) or `only` the people
-  and bots in `onlyPeople`, its owner always allowed, listed or not; a list of the choice not made
-  is refused by its check. In a group it does not work in, nothing goes further: no message reaches
-  a reader, no command an edge or its surface. A command (or a tap on a button) of a person it does
-  not work for, in any chat, goes no further either, what they say still reaching the readers. Each
-  command dropped is recorded (`telegram-bot.denied`: `chat`, `chatTitle`, `sender`, `by` `group` or
-  `person`, `command`, `replied`; on the Events page) and counted in its node's view and on its
-  card; silent unless `denyReply` sets one line to answer a person with, at most once in 10 minutes
-  per person. Its `home` (D105) is the command of the owner's main card, as typed (`/menu`,
-  `/menu main`) or short (`menu`, `menu:main`), at most 64 bytes: the core's own cards on its
-  surface (`/plugins`, `/settings`) end with a button that runs it, labelled `homeLabel` (`🏠 Home`
-  by default); unset, they have none.
+  `@username`; a 429 longer than auto-retry waits out becomes `FloodWait`); a photo with `sendPhoto`
+  (D150: its `caption`, Markdown as Telegram HTML and as written if Telegram cannot parse it,
+  `reply_parameters` sent all the same if the message answered is gone), answering the `file_id` of
+  its largest size; `commandIntervalS` in its config is its queue's default interval between two
+  sends of a command (D73), and `unansweredAt`, `unansweredAtBy` its watchdog's threshold (§4.6,
+  D93). With `chats` in its config (picked among its chats, D96) it monitors only those for the
+  plugins; its surfaces are the chats it has seen and its owner (§4.5), and the updates Telegram
+  kept while it was down come marked `missed` (and `playback` once older than its config's
+  `liveGraceS`, 120 s by default, D83). Configured with its owner (`owner`, in its node's config,
+  picked among its chats and kept by id, D96), it is the instance's chat surface, the owner's
+  interactive control (§4.8, bot-os.md D56) (`telegram-surface.ts`): the switchboard on its bot
+  (`telegram-switchboard.ts`, on grammy-switchboard), the owner's controls answered in the owner's
+  chat, and the plugins' commands that the commands edges from its `commands` output serve (D109),
+  each answered only in the chats its edge names (a group, the owner's chat, every private chat with
+  `privateChats`) and listed in those chats' menus alone (the switchboard's, the owner's chat; every
+  private chat's; Telegram's `chat` scope for each other chat, a group's included, but a group its
+  gate refuses) (`telegram-commands.ts`), the menus kept registered, a refused one retried and one
+  set again when the bot joins its chat; in any group, one answer per user a minute and one every 10
+  s, each group its own throttles, and an answer deleted when its handler asks
+  (`deleteInGroupAfterMs`). Without an `owner` it is no surface, and its commands edges answer
+  nothing. It tells the owner nothing on its own (D94): a send with buttons (`SendOptions.buttons`,
+  an `owner-notice` telling a `told` notice) to the owner's chat goes through the surface's
+  switchboard, whose taps run the owner's commands as a card's do; to any other chat, the text
+  alone. Nothing hands its bot out (P9). Its gate (D128, `telegram-gate.ts`), each list picked among
+  its chats: `groups`, `any` group it is added to (default; `blockGroups` the ones it ignores even
+  so) or `only` the groups in `onlyGroups`; `people`, `anyone` (default; `blockPeople`, never its
+  owner) or `only` the people and bots in `onlyPeople`, its owner always allowed, listed or not; a
+  list of the choice not made is refused by its check. In a group it does not work in, nothing goes
+  further: no message reaches a reader, no command an edge or its surface. A command (or a tap on a
+  button) of a person it does not work for, in any chat, goes no further either, what they say still
+  reaching the readers. Each command dropped is recorded (`telegram-bot.denied`: `chat`,
+  `chatTitle`, `sender`, `by` `group` or `person`, `command`, `replied`; on the Events page) and
+  counted in its node's view and on its card; silent unless `denyReply` sets one line to answer a
+  person with, at most once in 10 minutes per person. Its `home` (D105) is the command of the
+  owner's main card, as typed (`/menu`, `/menu main`) or short (`menu`, `menu:main`), at most 64
+  bytes: the core's own cards on its surface (`/plugins`, `/settings`) end with a button that runs
+  it, labelled `homeLabel` (`🏠 Home` by default); unset, they have none.
 - **`telegram-user`** (`packages/connectors/src/plugins/telegram-user.ts`, on GramJS in
   `packages/connectors/src/transport/telegram-user.ts`): the owner's own account, from a login in
   its node's panel (§4.5, D116: `user-login.ts`, the API pair once, then a QR code or the phone,
@@ -2407,9 +2453,13 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   news. It starts without waiting, retries every minute, and raises a `told` notice of the first
   failure (`ctx.notify`, §4.8); a message carries its id, the one it replies to, and `own` for the
   owner's own from any device. It sends only through the account's outbox (`deliver`, with the
-  message's id), its queue's default interval between two sends of a command its config's
-  `commandIntervalS` (D73), its watchdog's threshold `unansweredAt` and `unansweredAtBy` (§4.6,
-  D93); GramJS's flood waits become `FloodWait`.
+  message's id; a photo with GramJS's `sendFile`, D150, its bytes uploaded as a photo whatever its
+  name, its caption Markdown as Telegram HTML or plain, in reply to `replyTo`; the photo's id it
+  answers is `<id>:<access hash>:<file reference>`, by which it sends it again, a Bot API `file_id`
+  refused with why; Telegram's file reference may expire, and a send by it then fails
+  `FILE_REFERENCE_EXPIRED`, the bytes to send again), its queue's default interval between two sends
+  of a command its config's `commandIntervalS` (D73), its watchdog's threshold `unansweredAt` and
+  `unansweredAtBy` (§4.6, D93); GramJS's flood waits become `FloodWait`.
 - **`ServiceConnector`** (`packages/connectors/src/plugins/service.ts`): for a connector plugin that
   holds an account's secrets and offers what it makes from them through its declared interface, but
   has no chat: it reads and sends nothing. Its manifest says `chat: false` (§2.1, bot-os.md D148),

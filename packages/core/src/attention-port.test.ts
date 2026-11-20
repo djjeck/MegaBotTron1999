@@ -121,7 +121,7 @@ describe('the attention port type', () => {
         ms
       )
     ).toEqual([
-      'edge person → b.attention: only a chat-out edge carries sends, commands and minIntervalS',
+      'edge person → b.attention: only a chat-out edge carries sends, commands, minIntervalS and photos',
       'node b: input port attention: interface of person cannot bind attention (edge person.interface → b.attention)',
     ]);
     // The default graph binds it as its manifest says.

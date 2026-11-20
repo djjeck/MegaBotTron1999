@@ -36,12 +36,12 @@ hidden from every view of it (`src/sensitive.ts`, `hideSensitive`, D124).
 - `tools/modules.ts`: loads module directories as the instance does, for a module repository.
 - `src/react.ts`: `react()`, a reaction: when an event is heard or a message matches, send a command
   through the outbox (docs/bot-os-api.md §4.15).
-- `src/outbox.ts`: an account's outbox: the reach, dry runs and the pace of every send, and its
-  queue (docs/bot-os.md D73): one per (connector, chat), the same text of different nodes coalesced,
-  each command spaced by its interval, each live send waiting while its account connects (D108),
-  each send dropped when its cancel holds, its node stops or the instance does, and the merges
-  counted since the start, by pair of nodes; and its watchdog (docs/bot-os.md D93), which stops an
-  actor whose sends of a command go unanswered too many times in a row.
+- `src/outbox.ts`: an account's outbox: the reach, dry runs and the pace of every send, a photo's
+  too (D150), and its queue (docs/bot-os.md D73): one per (connector, chat), the same text of
+  different nodes coalesced, each command spaced by its interval, each live send waiting while its
+  account connects (D108), each send dropped when its cancel holds, its node stops or the instance
+  does, and the merges counted since the start, by pair of nodes; and its watchdog (docs/bot-os.md
+  D93), which stops an actor whose sends of a command go unanswered too many times in a row.
 - `src/answers.ts`: command answers (docs/bot-os.md D98): the parsers' declared answers (a
   manifest's `answers`), the sends waiting for theirs (`await enqueue(…)` settles with `answer`),
   and the retry-loop guard, which backs off a node refused again and again for one reason, by a

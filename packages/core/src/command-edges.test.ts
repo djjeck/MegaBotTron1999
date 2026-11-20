@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { VirtualClock } from './clock.ts';
-import { type Answer, type Asker, type ChatCommand } from './commands.ts';
+import { type Answer, type Asker, CAPTION_MAX, type ChatCommand } from './commands.ts';
 import { Core } from './core.ts';
 import { FakeConnector } from './devkit.ts';
 import { type GraphInput, resolveGraph } from './graph.ts';
@@ -48,7 +48,11 @@ const mapper = definePlugin({
     kinds: ['stats'],
     description: 'draws the map',
     interface: {
-      commands: { map: { help: 'the map', menu: 'la mappa' }, ban: { help: 'ban someone' } },
+      commands: {
+        map: { help: 'the map', menu: 'la mappa' },
+        ban: { help: 'ban someone' },
+        long: { help: 'a long caption' },
+      },
     },
   },
   create: () => ({
@@ -56,9 +60,15 @@ const mapper = definePlugin({
       map: {
         run: async (a) => {
           await a.text('here');
-          await a.photo({ data: new Uint8Array([1]), filename: 'map.png' });
+          await a.photo(
+            { data: new Uint8Array([1]), filename: 'map.png' },
+            'the *map*',
+            'markdown'
+          );
         },
       },
+      // A caption over Telegram's limit (D150).
+      long: { run: async (a) => void (await a.photo('file-1', 'x'.repeat(CAPTION_MAX + 1))) },
       ban: { run: (a) => a.text('banned'), allow: (who) => who.username === 'alice' },
     },
   }),
@@ -77,7 +87,7 @@ describe('the commands ports (D109)', () => {
     const m = parseManifest(mapper.manifest);
     expect(m.inputs['commands']).toEqual({
       type: 'commands',
-      commands: ['map', 'ban'],
+      commands: ['map', 'ban', 'long'],
       optional: true,
       help: 'Its chat commands: the connectors that answer them, where, and to whom',
     });
@@ -133,7 +143,7 @@ describe('the commands ports (D109)', () => {
       ])
     ).toEqual(['edge bot.commands → mapper.commands: twice in the graph']);
     expect(check([{ from: 'bot.commands', to: 'mapper.commands', sends: [GROUP] }])).toEqual([
-      'edge bot.commands → mapper.commands: only a chat-out edge carries sends, commands and minIntervalS',
+      'edge bot.commands → mapper.commands: only a chat-out edge carries sends, commands, minIntervalS and photos',
     ]);
     expect(check([{ from: 'bot.commands', to: 'mapper.commands', reads: '*' }])).toEqual([
       'edge bot.commands → mapper.commands: only a chat-in edge carries reads',
@@ -173,7 +183,10 @@ describe('what the core serves a chat surface (D109)', () => {
   const answered: string[] = [];
   const answer: Answer = {
     text: (t) => (answered.push(t), Promise.resolve()),
-    photo: () => (answered.push('photo'), Promise.resolve('file-1')),
+    photo: (_p, caption, format) => (
+      answered.push(`photo ${caption ?? ''} ${format ?? 'plain'}`),
+      Promise.resolve('file-1')
+    ),
   };
   const asker = (more: Partial<Asker> = {}): Asker => ({ id: '7', username: 'bob', ...more });
 
@@ -203,7 +216,7 @@ describe('what the core serves a chat surface (D109)', () => {
     ]);
     expect(served.every((c) => c.where === undefined)).toBe(true);
     // The admin side still lists every plugin's.
-    expect(core.commands().filter((c) => c.plugin === 'mapper')).toHaveLength(2);
+    expect(core.commands().filter((c) => c.plugin === 'mapper')).toHaveLength(3);
     await core.stop();
   });
 
@@ -232,12 +245,17 @@ describe('what the core serves a chat surface (D109)', () => {
     // Bob may ask, but the plugin answers /ban to alice alone.
     expect(ban.allow?.(asker())).toBe(false);
     await map.run(answer, { args: '', chat: GROUP });
-    expect(answered).toEqual(['here', 'photo']);
+    expect(answered).toEqual(['here', 'photo the *map* markdown']);
     expect(
       records
         .filter((r) => r.type === 'core.send')
         .map((r) => `${String(r['origin'])} ${String(r['chat'])} ${String(r['outcome'])}`)
     ).toEqual([`command /map ${GROUP} sent`, `command /map ${GROUP} sent`]);
+    // A photo logged by its name and its caption's length, never its bytes (D150).
+    expect(records.filter((r) => r.type === 'core.send').at(-1)).toMatchObject({
+      text: '[photo map.png]',
+      caption: 9,
+    });
     await core.stop();
   });
 
@@ -262,6 +280,18 @@ describe('what the core serves a chat surface (D109)', () => {
         .map((r) => `${String(r['text'])} ${String(r['mode'])} ${String(r['outcome'])}`)
     ).toEqual(['here dry-run dry-run', '[photo map.png] dry-run dry-run']);
     await core.stop();
+    // A caption over CAPTION_MAX: refused before anything is sent, and logged so (D150).
+    const long = await start([{ from: 'bot.commands', to: 'mapper.commands', serves: ['long'] }]);
+    await expect(
+      (long.served.find((c) => c.name === 'long') as ChatCommand).run(answer, { args: '' })
+    ).rejects.toThrow(`a caption of ${CAPTION_MAX + 1} characters, over the ${CAPTION_MAX}`);
+    expect(answered).toEqual([]);
+    expect(long.records.filter((r) => r.type === 'core.send').at(-1)).toMatchObject({
+      text: '[photo]',
+      outcome: 'refused',
+      caption: CAPTION_MAX + 1,
+    });
+    await long.core.stop();
     const live = await start([{ from: 'bot.commands', to: 'mapper.commands', chats: [OWNER] }]);
     const broken: Answer = {
       text: () => Promise.reject(new Error('blocked')),

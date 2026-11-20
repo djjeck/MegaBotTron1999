@@ -34,9 +34,11 @@ import { type Clock } from './clock.ts';
 import {
   type Answer,
   type Asker,
+  captionRefusal,
   type ChatCommand,
   type CommandButton,
   type CommandHandler,
+  photoLabel,
 } from './commands.ts';
 import { type Connector, handleOf, type Inbound, type ReadFilter } from './connector.ts';
 import { Controls, type StopRecord, type StopSource } from './controls.ts';
@@ -873,6 +875,8 @@ export class Core {
             ? {}
             : { minIntervalS: { ...declared, ...chat.minIntervalS } }),
           ...(b.dryRun === true ? { dryRun: true } : {}),
+          // Photos let through where its output declares them (D150), as its edge may.
+          ...(output?.type === 'chat-out' && output.photos === true ? { photos: true } : {}),
         };
       });
     const { state, reason } = entry.status;
@@ -1007,7 +1011,9 @@ export class Core {
 
   /**
    * A command's answer held as a send is (D109, P10): recorded (`core.send`, the origin
-   * `command /<name>`), and on a dry-run edge logged and never sent (a photo's id then none).
+   * `command /<name>`), and on a dry-run edge logged and never sent (a photo's id then none). A
+   * photo is logged by its label and its caption's length, never its bytes; a caption over
+   * `CAPTION_MAX` is refused, logged so and thrown, before anything is sent (D150).
    */
   private heldAnswer(
     answer: Answer,
@@ -1016,7 +1022,12 @@ export class Core {
     chat: string,
     dryRun: boolean
   ): Answer {
-    const log = (text: string, outcome: SendRecord['outcome'], reason?: string): void => {
+    const log = (
+      text: string,
+      outcome: SendRecord['outcome'],
+      reason?: string,
+      caption?: string
+    ): void => {
       const r: SendRecord = {
         type: 'core.send',
         t: this.o.clock.now(),
@@ -1028,21 +1039,26 @@ export class Core {
         text,
         outcome,
         ...(reason === undefined ? {} : { reason }),
+        ...(caption === undefined ? {} : { caption: caption.length }),
       };
       this.counted(r);
       this.o.record?.(r);
     };
-    const held = async <T>(text: string, go: () => Promise<T>): Promise<T | undefined> => {
+    const held = async <T>(
+      text: string,
+      go: () => Promise<T>,
+      caption?: string
+    ): Promise<T | undefined> => {
       if (dryRun) {
-        log(text, 'dry-run');
+        log(text, 'dry-run', undefined, caption);
         return undefined;
       }
       try {
         const r = await go();
-        log(text, 'sent');
+        log(text, 'sent', undefined, caption);
         return r;
       } catch (e) {
-        log(text, 'failed', message(e));
+        log(text, 'failed', message(e), caption);
         throw e;
       }
     };
@@ -1050,10 +1066,14 @@ export class Core {
       text: async (text, format, options) => {
         await held(text, () => answer.text(text, format, options));
       },
-      photo: (photo) =>
-        held(typeof photo === 'string' ? '[photo]' : `[photo ${photo.filename}]`, () =>
-          answer.photo(photo)
-        ),
+      photo: (photo, caption, format) => {
+        const long = captionRefusal(caption);
+        if (long !== undefined) {
+          log(photoLabel(photo), 'refused', long, caption);
+          return Promise.reject(new Error(long));
+        }
+        return held(photoLabel(photo), () => answer.photo(photo, caption, format), caption);
+      },
     };
   }
 

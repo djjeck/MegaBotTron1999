@@ -134,6 +134,12 @@ export const chatBindingSchema = z.strictObject({
    * the command's first word; a command not named: the connector's default.
    */
   minIntervalS: z.record(z.string().min(1), z.number().nonnegative()).optional(),
+  /**
+   * It lets photos through where it names its `commands` (bot-os.md D150): a photo has no first
+   * word, so an edge that names its commands refuses one unless it says so. None: no photo, where
+   * it names commands; any, where it names none.
+   */
+  photos: z.boolean().optional(),
 });
 export type ChatBinding = z.output<typeof chatBindingSchema>;
 
@@ -238,6 +244,11 @@ export const outputSchema = z.discriminatedUnion('type', [
      * drawn from it starts with them. None: whatever its edge allows.
      */
     commands: chats.min(1).optional(),
+    /**
+     * It sends photos too (bot-os.md D150): any edge from it lets them through, its `commands`
+     * restricting its texts alone.
+     */
+    photos: z.literal(true).optional(),
     /**
      * The least seconds between two queued sends of a command in one chat, by its first word, as
      * the plugin needs them (D73, D74): its edge's own `minIntervalS` wins for a command it names.

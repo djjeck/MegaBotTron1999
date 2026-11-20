@@ -33,6 +33,15 @@
  * now or refuses, as `send` does, and waits for the network's answer (Telegram's), with the sent
  * message's id, or `failed` with why if the network refused it.
  *
+ * **A photo** (bot-os.md D150) goes as a text does, each of the three taking one (`PhotoSend`: its
+ * bytes or the network's id of one sent before, a caption, the message it answers) where they take
+ * a text, through the same checks but those of a command: it has no first word, so an edge that
+ * names its commands lets it through only if it, or its output, says `photos`; no watchdog, no
+ * answer waited for, no command's interval, never coalesced. A caption over `CAPTION_MAX` and a
+ * connector that cannot send photos (no `deliverPhoto`) refuse it at once. It is logged by its file
+ * name and its caption's length, never its bytes; it answers the network's id of the photo sent
+ * (`photo`), to send it again by.
+ *
  * **A send the network refuses** (bot-os.md D95), whichever way it went: a queued or immediate send
  * goes through the connector's `deliver` where it has one, so its answer comes back to the outbox
  * rather than to the container's log alone. A refusal (not a flood wait, which holds the account)
@@ -52,7 +61,7 @@ import {
   type ReadAnswer,
 } from './answers.ts';
 import { type Clock, type TimerHandle } from './clock.ts';
-import { type Buttons } from './commands.ts';
+import { type Buttons, captionRefusal, type CommandPhoto, photoLabel } from './commands.ts';
 import { type Connector } from './connector.ts';
 import { type Notice } from './notices.ts';
 
@@ -91,6 +100,23 @@ export type SendResult = {
   retryAt?: number;
 };
 
+/**
+ * A photo to send (bot-os.md D150): its bytes and a file name, or the network's id of one sent
+ * before (`CommandPhoto`); the words under it, plain unless `SendOptions.format` says Markdown, at
+ * most `CAPTION_MAX` characters; and the network's id of a message in that chat it answers.
+ */
+export interface PhotoSend {
+  photo: CommandPhoto;
+  caption?: string;
+  replyTo?: string;
+}
+
+/** What a send carries: a text, or a photo. */
+export type Outgoing = string | PhotoSend;
+
+/** A send's text as results and the log give it: the text, or the photo's label, never its bytes. */
+const textOf = (m: Outgoing): string => (typeof m === 'string' ? m : photoLabel(m.photo));
+
 /** A send that waited for the network's answer (`deliver`): its id, or why it failed there. */
 export type DeliverResult = {
   text: string;
@@ -98,6 +124,8 @@ export type DeliverResult = {
   reason?: string;
   /** The network's id of the message sent. */
   id?: string;
+  /** A photo's: the network's id of the photo sent, to send it again by (D150). */
+  photo?: string;
   /** Refused as the retry-loop guard backs its node off (D98, D142): when it may go again. */
   retryAt?: number;
 };
@@ -114,6 +142,8 @@ export type SendRecord = DeliverResult & {
   mode: SendMode;
   /** The other nodes a coalesced queued send went for (bot-os.md D73). */
   with?: string[];
+  /** A photo's caption's length, in characters (D150); its text, the photo's label. */
+  caption?: number;
 };
 
 /** Thrown by a connector's `send` when the network asks to wait: the account holds that long. */
@@ -170,6 +200,11 @@ export interface Reach {
    */
   minIntervalS?: Readonly<Record<string, number>> | undefined;
   dryRun?: boolean | undefined;
+  /**
+   * It lets photos through (bot-os.md D150) where it names its `commands`: a photo has no first
+   * word. An edge that names none lets them through anyway.
+   */
+  photos?: boolean | undefined;
 }
 
 /** What the outbox knows of a sender: its reach on this account's connector, and a stop. */
@@ -262,16 +297,20 @@ export interface OutboxHandle {
    * otherwise.
    */
   mode(): SendMode;
-  /** Sends now, or refuses with why. */
-  send(chat: string, text: string, options?: SendOptions): SendResult;
+  /** Sends a text, or a photo (D150), now, or refuses with why. */
+  send(chat: string, message: Outgoing, options?: SendOptions): SendResult;
   /**
    * Queues a send (bot-os.md D73): in its turn, spaced within the account's limits and its
    * command's interval in that chat, coalesced with the same text another node has waiting for the
-   * same chat, and dropped if its `cancel` holds before it goes. Awaited, its outcome.
+   * same chat (never a photo), and dropped if its `cancel` holds before it goes. Awaited, its
+   * outcome, with a photo's id once sent.
    */
-  enqueue(chat: string, text: string, options?: QueueOptions): QueuedSend;
-  /** Sends now or refuses, and waits for the network's answer: the message's id. */
-  deliver(chat: string, text: string, options?: SendOptions): Promise<DeliverResult>;
+  enqueue(chat: string, message: Outgoing, options?: QueueOptions): QueuedSend;
+  /**
+   * Sends now or refuses, and waits for the network's answer: the message's id, and a photo's
+   * (`photo`), to send it again by.
+   */
+  deliver(chat: string, message: Outgoing, options?: SendOptions): Promise<DeliverResult>;
   /**
    * What holds its sends of `command` (a first word) to `chat` back now (bot-os.md D98, D142): the
    * retry-loop guard, until when, and why; never a game's cooldown, which is a state's. Undefined:
@@ -328,6 +367,8 @@ export interface QueuedResult {
   reason?: string;
   /** Refused as the retry-loop guard backs its node off: when it may go again. */
   retryAt?: number;
+  /** A photo sent: the network's id of it, to send it again by (D150). */
+  photo?: string;
   /** The event that cancelled it. */
   event?: CancelEvent;
   /**
@@ -439,10 +480,14 @@ interface Member {
   timer?: TimerHandle;
 }
 
-/** A send waiting in its chat's queue: one text, for one or more nodes. */
+/** A send waiting in its chat's queue: one text, for one or more nodes, or one node's photo. */
 interface Waiting {
   chat: string;
+  /** Its text, or a photo's label. */
   text: string;
+  /** A photo's (D150): what goes. */
+  photo?: PhotoSend;
+  /** Its first word; `''` for a photo, which is no command. */
   command: string;
   queuedAt: number;
   members: Member[];
@@ -540,21 +585,37 @@ export class Outbox {
     return this.waitingList.length;
   }
 
-  send(plugin: string, chat: string, text: string, options: SendOptions = {}): SendResult {
-    const v = this.check(plugin, chat, text, options);
+  send(plugin: string, chat: string, message: Outgoing, options: SendOptions = {}): SendResult {
+    const v = this.check(plugin, chat, message, options);
     const result =
       'refused' in v
         ? v.refused
-        : (this.resting(plugin, chat, text) ??
-          (v.dryRun ? undefined : this.stalled(plugin, chat, text)) ??
-          this.attempt(chat, text, v.dryRun, options.buttons, [plugin]).result);
-    this.sent(chat, text, result);
-    if (result.outcome === 'sent') {
-      this.went(plugin, chat, text);
-      this.expect([plugin], chat, text);
+        : (this.holdOf(plugin, chat, message, v.dryRun) ??
+          this.attempt(chat, message, v.dryRun, options, [plugin]).result);
+    this.sent(chat, message, result);
+    if (result.outcome === 'sent' && typeof message === 'string') {
+      this.went(plugin, chat, message);
+      this.expect([plugin], chat, message);
     }
-    this.log(plugin, chat, options, result, v.mode);
+    this.log(plugin, chat, options, result, v.mode, [], message);
     return result;
+  }
+
+  /**
+   * What holds a command's send back now: the guard (D98), and for a live one the watchdog (D93).
+   * A photo is no command: nothing.
+   */
+  private holdOf(
+    plugin: string,
+    chat: string,
+    message: Outgoing,
+    dryRun: boolean
+  ): SendResult | undefined {
+    if (typeof message !== 'string') return undefined;
+    return (
+      this.resting(plugin, chat, message) ??
+      (dryRun ? undefined : this.stalled(plugin, chat, message))
+    );
   }
 
   /**
@@ -595,10 +656,10 @@ export class Outbox {
     return this.answers.backoffs(plugin);
   }
 
-  /** Notes when a command went (or went as a dry run), for its interval (D73). */
-  private sent(chat: string, text: string, r: { outcome: string }): void {
-    if (r.outcome === 'sent' || r.outcome === 'dry-run')
-      this.lastSent.set(`${chat} ${firstWord(text)}`, this.o.clock.now());
+  /** Notes when a command went (or went as a dry run), for its interval (D73); a photo is none. */
+  private sent(chat: string, message: Outgoing, r: { outcome: string }): void {
+    if (typeof message === 'string' && (r.outcome === 'sent' || r.outcome === 'dry-run'))
+      this.lastSent.set(`${chat} ${firstWord(message)}`, this.o.clock.now());
   }
 
   /** How a sender sends now (`OutboxHandle.mode`). */
@@ -625,40 +686,40 @@ export class Outbox {
   async deliver(
     plugin: string,
     chat: string,
-    text: string,
+    message: Outgoing,
     options: SendOptions = {}
   ): Promise<DeliverResult> {
-    const v = this.check(plugin, chat, text, options);
+    const text = textOf(message);
+    const photo = typeof message === 'string' ? undefined : message;
+    const v = this.check(plugin, chat, message, options);
     let result: DeliverResult =
       'refused' in v
         ? v.refused
-        : (this.resting(plugin, chat, text) ??
-          (v.dryRun ? undefined : this.stalled(plugin, chat, text)) ??
+        : (this.holdOf(plugin, chat, message, v.dryRun) ??
           this.admit(text, v.dryRun) ?? { text, outcome: 'sent' });
     let pending: Pending | undefined;
     if (result.outcome === 'sent') {
       const connector = this.o.connector();
       const now = this.o.clock.now();
-      if (connector?.deliver === undefined)
-        result = this.attempt(chat, text, false, options.buttons, [plugin]).result;
-      else if (connector.status().state !== 'connected')
+      const unable = photo === undefined ? undefined : this.photoless(connector);
+      if (unable !== undefined) result = { text, outcome: 'refused', reason: unable };
+      else if (photo === undefined && connector?.deliver === undefined)
+        result = this.attempt(chat, text, false, options, [plugin]).result;
+      else if (connector?.status().state !== 'connected')
         result = { text, outcome: 'refused', reason: 'not connected' };
       else {
         this.recent.push(now);
-        // Waiting before the network acks it: the bot may answer first.
-        pending = this.expect([plugin], chat, text);
+        // Waiting before the network acks it: the bot may answer first. A photo waits for none.
+        pending = photo === undefined ? this.expect([plugin], chat, text) : undefined;
         try {
-          const extra = {
-            ...(options.format === undefined ? {} : { format: options.format }),
-            ...(options.buttons === undefined ? {} : { buttons: options.buttons }),
-          };
-          const { id } = await connector.deliver(
-            chat,
+          const sent = await this.transmit(connector, chat, message, options, true);
+          result = {
             text,
-            Object.keys(extra).length === 0 ? undefined : extra
-          );
-          result = { text, outcome: 'sent', ...(id === undefined ? {} : { id }) };
-          if (id !== undefined) pending?.identify(id);
+            outcome: 'sent',
+            ...(sent.id === undefined ? {} : { id: sent.id }),
+            ...(sent.photo === undefined ? {} : { photo: sent.photo }),
+          };
+          if (sent.id !== undefined) pending?.identify(sent.id);
         } catch (e) {
           pending?.drop();
           if (e instanceof FloodWait) {
@@ -675,14 +736,56 @@ export class Outbox {
         }
       }
     }
-    this.sent(chat, text, result);
-    if (result.outcome === 'sent') {
+    this.sent(chat, message, result);
+    if (result.outcome === 'sent' && photo === undefined) {
       this.went(plugin, chat, text);
       // Sent by the connector's `send`, with no answer of the network's to wait for first.
       if (pending === undefined) this.expect([plugin], chat, text);
     }
-    this.log(plugin, chat, options, result, v.mode);
+    this.log(plugin, chat, options, result, v.mode, [], message);
     return result;
+  }
+
+  /** Why the account cannot send a photo (D150): its connector does not run, or has no way to. */
+  private photoless(connector: Connector | undefined): string | undefined {
+    if (connector === undefined) return 'not connected';
+    return connector.deliverPhoto === undefined ? `${this.account} cannot send photos` : undefined;
+  }
+
+  /**
+   * A send through the connector, awaited: a text through its `deliver` (its `format` only where
+   * `format` says, as `deliver` alone sends it formatted), a photo through its `deliverPhoto`.
+   */
+  private transmit(
+    connector: Connector,
+    chat: string,
+    message: Outgoing,
+    options: SendOptions,
+    format: boolean
+  ): Promise<{ id?: string; photo?: string }> {
+    if (typeof message === 'string') {
+      const extra = {
+        ...(!format || options.format === undefined ? {} : { format: options.format }),
+        ...(options.buttons === undefined ? {} : { buttons: options.buttons }),
+      };
+      return (connector.deliver as NonNullable<Connector['deliver']>).call(
+        connector,
+        chat,
+        message,
+        Object.keys(extra).length === 0 ? undefined : extra
+      );
+    }
+    const extra = {
+      ...(message.caption === undefined ? {} : { caption: message.caption }),
+      ...(options.format === undefined ? {} : { format: options.format }),
+      ...(message.replyTo === undefined ? {} : { replyTo: message.replyTo }),
+    };
+    return (connector.deliverPhoto as NonNullable<Connector['deliverPhoto']>).call(
+      connector,
+      chat,
+      message.photo,
+      Object.keys(extra).length === 0 ? undefined : extra
+    );
   }
 
   /**
@@ -755,9 +858,12 @@ export class Outbox {
    * its own.
    * It goes in its turn: the oldest send whose command's interval in its chat has passed since that
    * command last went (the edges', the connector's by default), within the account's pace; a send
-   * of another command does not wait behind it. Until then, its cancel may drop it.
+   * of another command does not wait behind it. Until then, its cancel may drop it. A photo (D150)
+   * is never coalesced, and waits for no command's interval.
    */
-  enqueue(plugin: string, chat: string, text: string, options: QueueOptions = {}): QueuedSend {
+  enqueue(plugin: string, chat: string, message: Outgoing, options: QueueOptions = {}): QueuedSend {
+    const text = textOf(message);
+    const photo = typeof message === 'string' ? undefined : message;
     const { cancel, ...sendOptions } = options;
     const id = ++this.members;
     let settle!: (r: QueuedResult) => void;
@@ -786,13 +892,13 @@ export class Outbox {
       then: (onDone, onFail) => result.then(onDone, onFail),
     };
     // What can never go now waits for nothing: refused at once.
-    const v = this.check(plugin, chat, text, sendOptions);
+    const v = this.check(plugin, chat, message, sendOptions);
     if ('refused' in v) {
-      this.log(plugin, chat, sendOptions, v.refused, v.mode);
+      this.log(plugin, chat, sendOptions, v.refused, v.mode, [], message);
       member.settle(v.refused);
       return handle;
     }
-    member.intervalMs = this.intervalOf(plugin, chat, text, sendOptions);
+    member.intervalMs = photo === undefined ? this.intervalOf(plugin, chat, text, sendOptions) : 0;
     const deadline =
       cancel?.withinMs === undefined
         ? cancel?.deadline
@@ -800,13 +906,14 @@ export class Outbox {
     if (deadline !== undefined) member.deadline = deadline;
     // Coalesced with the same text for the same chat, wherever it waits, but only another node's:
     // a node's own repeated send (buying an item twice) stays a send of its own.
-    // A send with buttons stays its own: its buttons are its sender's.
+    // A send with buttons stays its own: its buttons are its sender's; and so does a photo.
     const same =
-      sendOptions.buttons === undefined
+      sendOptions.buttons === undefined && photo === undefined
         ? this.waitingList.find(
             (w) =>
               w.chat === chat &&
               w.text === text &&
+              w.photo === undefined &&
               !w.members.some((m) => m.plugin === plugin || m.options.buttons !== undefined)
           )
         : undefined;
@@ -814,7 +921,8 @@ export class Outbox {
       this.waitingList.push({
         chat,
         text,
-        command: firstWord(text),
+        ...(photo === undefined ? {} : { photo }),
+        command: photo === undefined ? firstWord(text) : '',
         queuedAt: this.o.clock.now(),
         members: [member],
       });
@@ -996,7 +1104,7 @@ export class Outbox {
   /** Whether a waiting send would go live for any of its nodes now (not only as a dry run). */
   private goesLive(w: Waiting): boolean {
     return w.members.some((m) => {
-      const v = this.check(m.plugin, w.chat, w.text, m.options);
+      const v = this.check(m.plugin, w.chat, w.photo ?? w.text, m.options);
       return !('refused' in v) && !v.dryRun;
     });
   }
@@ -1015,12 +1123,15 @@ export class Outbox {
           outcome: 'refused',
           reason: `not connected: waited ${CONNECT_WAIT_MS / 60_000} min for the connection`,
         };
+        const message = w.photo ?? w.text;
         this.log(
           m.plugin,
           w.chat,
           m.options,
           refused,
-          this.check(m.plugin, w.chat, w.text, m.options).mode
+          this.check(m.plugin, w.chat, message, m.options).mode,
+          [],
+          message
         );
         this.drop(m.id, refused);
         any = true;
@@ -1036,14 +1147,19 @@ export class Outbox {
    */
   private issue(w: Waiting): void {
     this.waitingList = this.waitingList.filter((x) => x !== w);
+    const message = w.photo ?? w.text;
     const going: { m: Member; dryRun: boolean; mode: SendMode }[] = [];
     for (const m of w.members) {
-      const v = this.check(m.plugin, w.chat, w.text, m.options);
+      const v = this.check(m.plugin, w.chat, message, m.options);
       // A live share of a node its watchdog pauses now (D93) is refused, as a stop's would be.
       const refused =
-        'refused' in v ? v.refused : v.dryRun ? undefined : this.stalled(m.plugin, w.chat, w.text);
+        'refused' in v
+          ? v.refused
+          : v.dryRun || w.photo !== undefined
+            ? undefined
+            : this.stalled(m.plugin, w.chat, w.text);
       if (refused !== undefined) {
-        this.log(m.plugin, w.chat, m.options, refused, v.mode);
+        this.log(m.plugin, w.chat, m.options, refused, v.mode, [], message);
         m.settle(refused);
         this.queueLog(m.plugin, w.chat, w.text, 'refused', refused.reason);
       } else if (!('refused' in v)) going.push({ m, dryRun: v.dryRun, mode: v.mode });
@@ -1051,34 +1167,32 @@ export class Outbox {
     const lead = going.find((g) => !g.dryRun) ?? going[0];
     if (lead === undefined) return;
     const live = [...new Set(going.filter((g) => !g.dryRun).map((g) => g.m.plugin))];
-    const { result, answer } = this.attempt(
-      w.chat,
-      w.text,
-      lead.dryRun,
-      lead.m.options.buttons,
-      live
-    );
+    const { result, answer } = this.attempt(w.chat, message, lead.dryRun, lead.m.options, live);
     // It waits for the game's answer from now (D98): the bot may answer before the network acks.
     const pending =
-      result.outcome === 'sent' && live.length > 0 ? this.expect(live, w.chat, w.text) : undefined;
+      result.outcome === 'sent' && live.length > 0 && w.photo === undefined
+        ? this.expect(live, w.chat, w.text)
+        : undefined;
     void answer?.then((a) => {
       if (a.failed !== undefined) pending?.drop();
       else if (a.id !== undefined) pending?.identify(a.id);
     });
-    this.sent(w.chat, w.text, result);
+    this.sent(w.chat, message, result);
     const others = [
       ...new Set(going.filter((g) => g.m.plugin !== lead.m.plugin).map((g) => g.m.plugin)),
     ];
-    this.log(lead.m.plugin, w.chat, lead.m.options, result, lead.mode, others);
+    this.log(lead.m.plugin, w.chat, lead.m.options, result, lead.mode, others, message);
     for (const g of going) {
       const outcome = result.outcome === 'sent' && g.dryRun ? 'dry-run' : result.outcome;
-      if (outcome === 'sent') this.went(g.m.plugin, w.chat, w.text);
-      const settle = (failed: string | undefined): void => {
+      if (outcome === 'sent' && w.photo === undefined) this.went(g.m.plugin, w.chat, w.text);
+      const settle = (a: { failed?: string; photo?: string } | undefined): void => {
+        const failed = a?.failed;
         const reason = failed ?? result.reason;
         const r: QueuedResult = {
           text: w.text,
           outcome: failed === undefined ? outcome : 'failed',
           ...(reason === undefined ? {} : { reason }),
+          ...(a?.photo === undefined ? {} : { photo: a.photo }),
         };
         this.queueLog(g.m.plugin, w.chat, w.text, r.outcome, reason);
         if (r.outcome !== 'sent' || pending === undefined) {
@@ -1087,11 +1201,11 @@ export class Outbox {
         }
         // Sent, and its handle waits for the game's answer (D98).
         g.m.status = 'sent';
-        pending.wait((a) => g.m.settle({ ...r, answer: a }));
+        pending.wait((x) => g.m.settle({ ...r, answer: x }));
       };
       // A live share settles once the network answers (D95); a dry run, at once.
       if (answer === undefined || outcome !== 'sent') settle(undefined);
-      else void answer.then((a) => settle(a.failed));
+      else void answer.then(settle);
     }
   }
 
@@ -1144,15 +1258,21 @@ export class Outbox {
   private check(
     plugin: string,
     chat: string,
-    text: string,
+    message: Outgoing,
     options: SendOptions
   ): ({ refused: SendResult } | { dryRun: boolean }) & { mode: SendMode } {
+    const text = textOf(message);
+    const photo = typeof message === 'string' ? undefined : message;
     const policy = this.o.policy?.(plugin, options.port) ?? {};
     const reaches = this.reachesOf(policy);
     const word = text.split(/\s/u, 1)[0] ?? '';
-    // The edges that let it send this: through a live one, it goes for real (D64).
+    // The edges that let it send this: through a live one, it goes for real (D64). A photo has no
+    // first word: an edge that names its commands lets it through only if it says photos (D150).
     const through = reaches?.filter(
-      (r) => r.sends.includes(chat) && (r.commands === undefined || r.commands.includes(word))
+      (r) =>
+        r.sends.includes(chat) &&
+        (r.commands === undefined ||
+          (photo === undefined ? r.commands.includes(word) : r.photos === true))
     );
     const dryRun =
       through !== undefined && through.length > 0 && through.every((r) => r.dryRun === true);
@@ -1165,7 +1285,19 @@ export class Outbox {
     if (reaches !== undefined) {
       if (!reaches.some((r) => r.sends.includes(chat)))
         return refuse(`${plugin} does not send to ${chat}`);
-      if (through?.length === 0) return refuse(`${word} is not among ${plugin}'s commands`);
+      if (through?.length === 0)
+        return refuse(
+          photo === undefined
+            ? `${word} is not among ${plugin}'s commands`
+            : `a photo is not among ${plugin}'s commands: its edge or output must say photos`
+        );
+    }
+    if (photo !== undefined) {
+      const long = captionRefusal(photo.caption);
+      if (long !== undefined) return refuse(long);
+      const connector = this.o.connector();
+      if (connector !== undefined && connector.deliverPhoto === undefined)
+        return refuse(`${this.account} cannot send photos`);
     }
     if (policy.held !== undefined) return refuse(policy.held);
     return { dryRun, mode };
@@ -1207,35 +1339,45 @@ export class Outbox {
    */
   private attempt(
     chat: string,
-    text: string,
+    message: Outgoing,
     dryRun: boolean,
-    buttons: Buttons | undefined,
+    options: SendOptions,
     plugins: readonly string[]
-  ): { result: SendResult; answer?: Promise<{ failed?: string; id?: string }> } {
+  ): {
+    result: SendResult;
+    answer?: Promise<{ failed?: string; id?: string; photo?: string }>;
+  } {
+    const text = textOf(message);
     const refuse = (reason: string): SendResult => ({ text, outcome: 'refused', reason });
     const admitted = this.admit(text, dryRun);
     if (admitted !== undefined) return { result: admitted };
     const now = this.o.clock.now();
     const connector = this.o.connector();
-    if (connector?.deliver !== undefined) {
+    const photo = typeof message === 'string' ? undefined : message;
+    // A photo goes through `deliverPhoto` alone (D150).
+    const unable = photo === undefined ? undefined : this.photoless(connector);
+    if (unable !== undefined) return { result: refuse(unable) };
+    if (connector !== undefined && (photo !== undefined || connector.deliver !== undefined)) {
       if (connector.status().state !== 'connected') return { result: refuse('not connected') };
       this.recent.push(now);
-      const answer = connector
-        .deliver(chat, text, buttons === undefined ? undefined : { buttons })
-        .then(
-          ({ id }) => (id === undefined ? {} : { id }),
-          (e: unknown) => {
-            if (e instanceof FloodWait) {
-              this.heldUntil = this.o.clock.now() + e.ms;
-              return { failed: e.message };
-            }
-            const reason = e instanceof Error ? e.message : String(e);
-            this.unreachable(plugins, chat, text, reason);
-            return { failed: reason };
+      const answer = this.transmit(connector, chat, message, options, false).then(
+        ({ id, photo: sent }) => ({
+          ...(id === undefined ? {} : { id }),
+          ...(sent === undefined ? {} : { photo: sent }),
+        }),
+        (e: unknown) => {
+          if (e instanceof FloodWait) {
+            this.heldUntil = this.o.clock.now() + e.ms;
+            return { failed: e.message };
           }
-        );
+          const reason = e instanceof Error ? e.message : String(e);
+          this.unreachable(plugins, chat, text, reason);
+          return { failed: reason };
+        }
+      );
       return { result: { text, outcome: 'sent' }, answer };
     }
+    const { buttons } = options;
     let sent: boolean;
     try {
       sent =
@@ -1292,8 +1434,10 @@ export class Outbox {
     options: SendOptions,
     result: DeliverResult,
     mode: SendMode,
-    coalesced: readonly string[] = []
+    coalesced: readonly string[] = [],
+    message: Outgoing = result.text
   ): void {
+    const caption = typeof message === 'string' ? undefined : message.caption;
     this.o.record?.({
       type: 'core.send',
       t: this.o.clock.now(),
@@ -1304,6 +1448,8 @@ export class Outbox {
       mode,
       ...result,
       ...(coalesced.length === 0 ? {} : { with: [...coalesced] }),
+      // A photo's caption by its length alone (D150); the photo by its label, never its bytes.
+      ...(caption === undefined ? {} : { caption: caption.length }),
     });
   }
 }

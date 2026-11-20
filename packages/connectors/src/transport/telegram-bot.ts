@@ -29,8 +29,10 @@
 import { autoRetry } from '@grammyjs/auto-retry';
 import {
   type Buttons,
+  type CommandPhoto,
   type Connector,
   ConnectorBase,
+  type ConnectorPhotoOptions,
   type ConnectorSendOptions,
   FloodWait,
   type InboundDocument,
@@ -44,6 +46,7 @@ import { Bot, GrammyError } from 'grammy';
 import { type Chat, type Document, type Message, type UserFromGetMe } from 'grammy/types';
 import { markdownToTelegramHtml } from 'grammy-switchboard';
 import { SeenLedger } from './seen-ledger.ts';
+import { captionOf, media } from './telegram-commands.ts';
 import { commandOf, type Denied, type DenyCount, type Gate } from './telegram-gate.ts';
 
 // A 429 is waited out as Telegram asks, a few times; network errors and 5xx fail the call, so the
@@ -597,10 +600,7 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
     text: string,
     options: ConnectorSendOptions & { format?: TextFormat } = {}
   ): Promise<{ id?: string }> {
-    // A chat named by a `@username` it has seen goes to its id: the Bot API reaches a person by
-    // id alone (D96); any other `@username` (a public group's, a channel's) as written.
-    const id = this.names.get(chat.toLowerCase())?.[0] ?? chat;
-    const to = /^-?\d+$/u.test(id) ? Number(id) : chat;
+    const to = this.to(chat);
     try {
       const owner = this.o.ownerChat;
       if (owner !== undefined && String(to) === owner.chat && (options.buttons?.length ?? 0) > 0)
@@ -617,6 +617,62 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
         }
       const sent = await this.bot.api.sendMessage(to, text);
       return { id: String(sent.message_id) };
+    } catch (e) {
+      const ms = floodMs(e);
+      throw ms === undefined ? e : new FloodWait(ms);
+    }
+  }
+
+  /**
+   * Where the Bot API sends to `chat`: a chat named by a `@username` it has seen goes to its id,
+   * since the Bot API reaches a person by id alone (D96); any other `@username` (a public group's,
+   * a channel's) as written.
+   */
+  private to(chat: string): number | string {
+    const id = this.names.get(chat.toLowerCase())?.[0] ?? chat;
+    return /^-?\d+$/u.test(id) ? Number(id) : chat;
+  }
+
+  /**
+   * Sends a photo with `sendPhoto` and waits for Telegram's answer (bot-os.md D150): the message's
+   * id, and the photo's `file_id` (its largest size), to send it again by. A Markdown caption goes
+   * as Telegram HTML, and as written if Telegram cannot parse it, as a text does; in reply to
+   * `replyTo`, sent all the same if that message is gone.
+   */
+  async deliverPhoto(
+    chat: string,
+    photo: CommandPhoto,
+    options: ConnectorPhotoOptions = {}
+  ): Promise<{ id?: string; photo?: string }> {
+    const to = this.to(chat);
+    const reply =
+      options.replyTo === undefined
+        ? {}
+        : {
+            reply_parameters: {
+              message_id: Number(options.replyTo),
+              allow_sending_without_reply: true,
+            },
+          };
+    const send = async (
+      format: TextFormat | undefined
+    ): Promise<{ id: string; photo?: string }> => {
+      const sent = await this.bot.api.sendPhoto(to, media(photo), {
+        ...reply,
+        ...captionOf(options.caption, format),
+      });
+      const file = sent.photo.at(-1)?.file_id;
+      return { id: String(sent.message_id), ...(file === undefined ? {} : { photo: file }) };
+    };
+    try {
+      if (options.format === 'markdown' && options.caption !== undefined)
+        try {
+          return await send('markdown');
+        } catch (e) {
+          if (!(e instanceof GrammyError && /can't parse entities/iu.test(e.description))) throw e;
+          this.o.log(`formatting refused, sending the caption plain: ${e.description}`);
+        }
+      return await send(undefined);
     } catch (e) {
       const ms = floodMs(e);
       throw ms === undefined ? e : new FloodWait(ms);

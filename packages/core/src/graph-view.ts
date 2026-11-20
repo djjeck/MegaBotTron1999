@@ -58,6 +58,7 @@ const carried = (e: GraphEdge): string =>
           .sort(([a], [b]) => byText(a, b))
           .map(([c, s]) => `${c} ${s}s`)
           .join(' ')}`,
+    e.photos === true ? 'photos' : '',
     e.serves === undefined ? '' : `serves ${e.serves.join(' ')}`,
     e.chats !== undefined && e.chats.length > 0 ? `in ${e.chats.join(' ')}` : '',
     e.privateChats === true ? 'in private chats' : '',

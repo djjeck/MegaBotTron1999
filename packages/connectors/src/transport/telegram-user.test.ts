@@ -15,6 +15,7 @@ import {
   LAST_SEEN_DOC,
   LOOK_AFTER_SEND_MS,
   LOOK_LIMIT,
+  photoId,
   type RawDialog,
   type RawMessage,
   RETRY_MS,
@@ -56,10 +57,13 @@ function fake(
     historyFails?: Error[];
     /** Each message's file, by its id: its bytes, or the download's error. */
     files?: Record<number, Uint8Array | string | Error>;
+    /** A media message's send, its answer. */
+    sendFile?: () => Promise<{ id: number; media?: unknown }>;
   } = {}
 ) {
   const calls: string[] = [];
   const sent: { entity: unknown; message: string }[] = [];
+  const media: { entity: unknown; params: Parameters<GramClient['sendFile']>[1] }[] = [];
   let failures = o.failConnect ?? 0;
   let handler: ((event: { message: RawMessage }) => Promise<void>) | undefined;
   let editHandler: ((event: { message: RawMessage }) => Promise<void>) | undefined;
@@ -80,6 +84,21 @@ function fake(
     sendMessage: (entity, { message }) => {
       sent.push({ entity, message });
       return o.send?.() ?? Promise.resolve({ id: 99 });
+    },
+    uploadFile: ({ file }) => {
+      calls.push(`upload ${file.name} ${file.size}`);
+      return Promise.resolve({ uploaded: file.name } as never);
+    },
+    sendFile: (entity, params) => {
+      media.push({ entity, params });
+      return (
+        o.sendFile?.() ??
+        Promise.resolve({
+          id: 98,
+          chatId: { toString: () => GROUP },
+          media: { photo: { id: 7, accessHash: -8, fileReference: new Uint8Array([1, 2, 255]) } },
+        })
+      );
     },
     addEventHandler: (h, builder) => {
       if (builder instanceof EditedMessage) editHandler = h;
@@ -106,7 +125,7 @@ function fake(
   };
   const deliver = (message: RawMessage) => handler?.({ message }) ?? Promise.resolve();
   const edit = (message: RawMessage) => editHandler?.({ message }) ?? Promise.resolve();
-  return { client, calls, sent, deliver, edit, handlers: () => handlers };
+  return { client, calls, sent, media, deliver, edit, handlers: () => handlers };
 }
 
 const flush = () => new Promise((r) => setImmediate(r));
@@ -336,6 +355,64 @@ describe('TelegramUserConnector', () => {
     ]);
     await expect(c.deliver('-100999', 'x')).rejects.toThrow(
       '-100999 is not a chat of telegram:alice'
+    );
+  });
+
+  it('sends a photo with sendFile: uploaded or by its id, its caption, in reply (D150)', async () => {
+    const { c, f } = await connector();
+    const bytes = { data: new Uint8Array([1, 2, 3]), filename: 'card.png' };
+    const id = `7:-8:${Buffer.from([1, 2, 255]).toString('base64url')}`;
+    await expect(
+      c.deliverPhoto(GROUP, bytes, { caption: '**A** card', format: 'markdown', replyTo: '41' })
+    ).resolves.toEqual({ id: '98', photo: id });
+    expect(f.calls).toContain('upload card.png 3');
+    const [first] = f.media;
+    expect(first?.entity).toEqual({ peer: Number(GROUP) });
+    expect(first?.params).toMatchObject({
+      caption: '<b>A</b> card',
+      parseMode: 'html',
+      replyTo: 41,
+    });
+    expect(first?.params.file).toBeInstanceOf(Api.InputMediaUploadedPhoto);
+    // Again by the id it gave, a plain caption as written, in no reply.
+    await c.deliverPhoto('@quiz_bot', id, { caption: '**as is**' });
+    const again = f.media.at(-1);
+    expect(again?.params).toEqual({
+      file: expect.any(Api.InputMediaPhoto) as unknown,
+      caption: '**as is**',
+      parseMode: false,
+    });
+    const photo = (again?.params.file as Api.InputMediaPhoto).id as Api.InputPhoto;
+    expect([String(photo.id), String(photo.accessHash), [...photo.fileReference]]).toEqual([
+      '7',
+      '-8',
+      [1, 2, 255],
+    ]);
+    // No caption: an empty one, and no id of a message with no photo.
+    const bare = await connector(fake({ sendFile: () => Promise.resolve({ id: 5 }) }));
+    await expect(bare.c.deliverPhoto(GROUP, id)).resolves.toEqual({ id: '5' });
+    expect(bare.f.media[0]?.params).toMatchObject({ caption: '', parseMode: false });
+    await expect(c.deliverPhoto(GROUP, 'photo-101')).rejects.toThrow(
+      'photo-101 is not the id of a photo telegram:alice sent'
+    );
+    await expect(c.deliverPhoto('-100999', bytes)).rejects.toThrow(
+      '-100999 is not a chat of telegram:alice'
+    );
+    const flood = Object.assign(new Error('A wait of 30 seconds is required'), { seconds: 30 });
+    const slow = await connector(fake({ sendFile: () => Promise.reject(flood) }));
+    await expect(slow.c.deliverPhoto(GROUP, id)).rejects.toBeInstanceOf(FloodWait);
+    const gone = await connector(
+      fake({ sendFile: () => Promise.reject(new Error('FILE_REFERENCE_EXPIRED')) })
+    );
+    await expect(gone.c.deliverPhoto(GROUP, id)).rejects.toThrow('FILE_REFERENCE_EXPIRED');
+  });
+
+  it('reads the id of a photo only from a message that carries one (D150)', () => {
+    expect(photoId(undefined)).toBeUndefined();
+    expect(photoId({})).toBeUndefined();
+    expect(photoId({ photo: { id: 1, accessHash: 2 } })).toBeUndefined();
+    expect(photoId({ photo: { id: 1, accessHash: 2, fileReference: new Uint8Array([]) } })).toBe(
+      '1:2:'
     );
   });
 

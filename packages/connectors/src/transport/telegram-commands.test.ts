@@ -33,7 +33,7 @@ const AUTHOR_MENU = [
 
 /**
  * The public commands on a real switchboard with the author's chat and the group, fed through a
- * stub bot: `/map` answers with a photo and reports its file id, `/ping` with a line, `/bold` with a
+ * stub bot: `/map` answers with a photo, a Markdown caption under it, and reports its file id, `/ping` with a line, `/bold` with a
  * line in Markdown, `/brief` with a line to delete from the group in a minute; `/pong` is an alias of `/ping`, and
  * `/nothing` of no command. `run()` runs what was scheduled.
  */
@@ -57,7 +57,9 @@ function chats(handlers?: Handlers, allow?: PublicCommandsOptions['allow']) {
   stub.bot.use(switchboard);
   const answering: Handlers = handlers ?? {
     map: async (a) =>
-      void fileIds.push(await a.photo({ data: Buffer.from([1]), filename: 'mappa.png' })),
+      void fileIds.push(
+        await a.photo({ data: Buffer.from([1]), filename: 'mappa.png' }, 'the **map**', 'markdown')
+      ),
     ping: (a) => a.text('pong'),
     bold: (a) => a.text('**pong** & <ping>', 'markdown'),
     brief: (a) => a.text('gone soon', undefined, { deleteInGroupAfterMs: 60_000 }),
@@ -143,7 +145,11 @@ describe('installPublicCommands', () => {
     await c.feed(GROUP, 2, '/ping@ExampleBot');
     const [photo, line] = c.sent();
     expect(photo?.method).toBe('sendPhoto');
-    expect(photo?.payload).toMatchObject({ chat_id: GROUP });
+    expect(photo?.payload).toMatchObject({
+      chat_id: GROUP,
+      caption: 'the <b>map</b>',
+      parse_mode: 'HTML',
+    });
     expect(JSON.stringify(photo?.payload['reply_parameters'])).toMatch(/"message_id":\d+/u);
     // The largest size's id.
     expect(c.fileIds).toEqual([expect.stringMatching(/^photo-\d+$/u)]);
@@ -157,6 +163,8 @@ describe('installPublicCommands', () => {
     await c.feed(AUTHOR, AUTHOR, '/map');
     await c.feed(AUTHOR, AUTHOR, '/map');
     expect(c.to()).toEqual([GROUP, AUTHOR, AUTHOR]);
+    // Its caption, formatted by the switchboard (D150).
+    expect(c.sent()[1]?.payload).toMatchObject({ caption: 'the <b>map</b>', parse_mode: 'HTML' });
   });
 
   it("answers in anyone's private chat, once per user a minute", async () => {

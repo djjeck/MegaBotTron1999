@@ -358,4 +358,23 @@ describe('a chat-out edge’s spacing (bot-os.md D73)', () => {
       'actor-b.channel → irc.chat (chat-out): sends #a; commands !go !look; spaced !go 300s !look 60s'
     );
   });
+
+  it('prints that it lets photos through (D150)', () => {
+    const photos: Graph = {
+      ...graph,
+      edges: [
+        {
+          from: 'actor-b.channel',
+          to: 'irc.chat',
+          type: 'chat-out',
+          sends: ['#a'],
+          commands: ['!go'],
+          photos: true,
+        },
+      ],
+    };
+    expect(graphText(photos)).toContain(
+      'actor-b.channel → irc.chat (chat-out): sends #a; commands !go; photos'
+    );
+  });
 });

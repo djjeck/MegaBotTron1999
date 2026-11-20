@@ -55,12 +55,37 @@ export function tapOf(action: string): { name: string; args: string } | undefine
 /** A photo to send: its bytes and a file name, or the network's id of one sent before. */
 export type CommandPhoto = string | { data: Uint8Array; filename: string };
 
+/**
+ * The longest caption a photo may carry (bot-os.md D150): Telegram's, 1024 characters, counted as
+ * written (UTF-16 code units, Markdown's marks included). A longer one is refused before sending.
+ */
+export const CAPTION_MAX = 1024;
+
+/** Why a photo's caption cannot go (longer than `CAPTION_MAX`); undefined when it can. */
+export function captionRefusal(caption: string | undefined): string | undefined {
+  return caption !== undefined && caption.length > CAPTION_MAX
+    ? `a caption of ${caption.length} characters, over the ${CAPTION_MAX} a photo may carry`
+    : undefined;
+}
+
+/**
+ * A photo as the log names it, never its bytes: `[photo <filename>]`, or `[photo]` by the network's
+ * id.
+ */
+export function photoLabel(photo: CommandPhoto): string {
+  return typeof photo === 'string' ? '[photo]' : `[photo ${photo.filename}]`;
+}
+
 /** How a handler answers, in reply to the command, in the chat it came from. */
 export interface Answer {
   /** Sends `text`, plain unless `format` says it is Markdown. */
   text(text: string, format?: TextFormat, options?: AnswerOptions): Promise<void>;
-  /** Sends a photo; the network's id for it, if it gives one, to send it again by. */
-  photo(photo: CommandPhoto): Promise<string | undefined>;
+  /**
+   * Sends a photo, with `caption` under it if given, plain unless `format` says it is Markdown (a
+   * caption over `CAPTION_MAX` is refused, thrown, before sending); the network's id for the photo,
+   * if it gives one, to send it again by.
+   */
+  photo(photo: CommandPhoto, caption?: string, format?: TextFormat): Promise<string | undefined>;
 }
 
 /** What was asked: the text typed after the command, trimmed. */

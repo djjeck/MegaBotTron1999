@@ -10,7 +10,12 @@
  */
 
 import { z } from 'zod';
-import { type Buttons, type ChatCommand, type CommandButton } from './commands.ts';
+import {
+  type Buttons,
+  type ChatCommand,
+  type CommandButton,
+  type CommandPhoto,
+} from './commands.ts';
 import { type Limits, type TextFormat } from './outbox.ts';
 
 /**
@@ -298,6 +303,16 @@ export interface ConnectorSendOptions {
   buttons?: Buttons;
 }
 
+/** What a photo sent through a connector may carry (bot-os.md D150). */
+export interface ConnectorPhotoOptions {
+  /** The words under it, at most `CAPTION_MAX` characters (the outbox has checked). */
+  caption?: string;
+  /** The caption is Markdown: a connector that formats sends it formatted. */
+  format?: TextFormat;
+  /** The network's id of a message in that chat it answers. */
+  replyTo?: string;
+}
+
 /** A connector, as its plugin implements it. */
 export interface Connector extends ConnectorHandle {
   /** Its account's limits, which the outbox keeps to: below the network's own. */
@@ -320,6 +335,17 @@ export interface Connector extends ConnectorHandle {
     text: string,
     options?: ConnectorSendOptions & { format?: TextFormat }
   ): Promise<{ id?: string }>;
+  /**
+   * Sends a photo to `chat` and waits for the network's answer (bot-os.md D150): the message's id,
+   * and the network's id of the photo (`photo`), to send it again by. Only the outbox calls it,
+   * through its checks; a connector without it cannot send photos (IRC), and the outbox refuses
+   * them with why. Rejects as `deliver` does.
+   */
+  deliverPhoto?(
+    chat: string,
+    photo: CommandPhoto,
+    options?: ConnectorPhotoOptions
+  ): Promise<{ id?: string; photo?: string }>;
   /**
    * The chats it can see, most recently active first, those matching `query.search` (bot-os.md
    * D63): what the owner picks the monitored chats and each edge's from. Rejects while it cannot

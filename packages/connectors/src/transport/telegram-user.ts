@@ -40,8 +40,10 @@
  */
 import {
   type Clock,
+  type CommandPhoto,
   type Connector,
   ConnectorBase,
+  type ConnectorPhotoOptions,
   FloodWait,
   type Inbound,
   type InboundDocument,
@@ -53,10 +55,13 @@ import {
   type SurfaceQuery,
   type TimerHandle,
 } from '@megabottron1999/core';
+import { markdownToTelegramHtml } from 'grammy-switchboard';
 import { Api, TelegramClient } from 'telegram';
+import { CustomFile } from 'telegram/client/uploads.js';
 import { EditedMessage } from 'telegram/events/EditedMessage.js';
 import { NewMessage } from 'telegram/events/index.js';
 import { Logger, LogLevel } from 'telegram/extensions/Logger.js';
+import { returnBigInt } from 'telegram/Helpers.js';
 import { StringSession } from 'telegram/sessions/index.js';
 import { RawLog } from './raw-log.ts';
 import { LAST_SEEN_DOC, type LedgerStore, SEEN_ABOVE_DOC, SeenLedger } from './seen-ledger.ts';
@@ -132,6 +137,18 @@ export interface GramClient {
     entity: never,
     params: { message: string }
   ): Promise<{ id: number; chatId?: { toString(): string } | undefined }>;
+  /** A file's bytes uploaded (a photo's, D150): the handle a media message sends it by. */
+  uploadFile(params: { file: CustomFile; workers: number }): Promise<Api.TypeInputFile>;
+  /** A media message sent (a photo, D150): as `sendMessage` answers, with its media. */
+  sendFile(
+    entity: never,
+    params: {
+      file: Api.TypeInputMedia;
+      caption: string;
+      parseMode: false | 'html';
+      replyTo?: number;
+    }
+  ): Promise<{ id: number; chatId?: { toString(): string } | undefined; media?: unknown }>;
   /** A chat's messages, latest first: below `offsetId` (0: from the latest), above `minId`. */
   getMessages(
     entity: never,
@@ -177,6 +194,32 @@ function buttonsOf(m: RawMessage): { buttons: string[][] } {
     )
     .filter((r) => r.length > 0);
   return { buttons: rows };
+}
+
+/**
+ * The id a `telegram-user` gives a photo it sent (bot-os.md D150), to send it again by: Telegram's
+ * photo id, its access hash and its file reference (base64url), `<id>:<hash>:<reference>`; none
+ * when the message carries no photo.
+ */
+export function photoId(media: unknown): string | undefined {
+  const photo =
+    typeof media === 'object' && media !== null ? (media as { photo?: unknown }).photo : undefined;
+  if (typeof photo !== 'object' || photo === null) return undefined;
+  const p = photo as { id?: unknown; accessHash?: unknown; fileReference?: unknown };
+  if (p.id === undefined || p.accessHash === undefined || !(p.fileReference instanceof Uint8Array))
+    return undefined;
+  return `${String(p.id)}:${String(p.accessHash)}:${Buffer.from(p.fileReference).toString('base64url')}`;
+}
+
+/** A photo by the id `photoId` gave it; undefined when the id is not one. */
+function inputPhoto(id: string): Api.InputPhoto | undefined {
+  const m = /^(-?\d+):(-?\d+):([\w-]*)$/u.exec(id);
+  if (m === null) return undefined;
+  return new Api.InputPhoto({
+    id: returnBigInt(m[1] ?? ''),
+    accessHash: returnBigInt(m[2] ?? ''),
+    fileReference: Buffer.from(m[3] ?? '', 'base64url'),
+  });
 }
 
 /** How long a failed start waits before the next. */
@@ -403,16 +446,75 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       const sent = await this.o.client.sendMessage((await this.peer(chat)) as never, {
         message: text,
       });
-      // Its own message, never heard back live from this session: accounted for, so that the
-      // catch-up does not deliver it as missed (D66).
-      const key = sent.chatId?.toString() ?? (/^-?\d+$/u.test(chat) ? chat : undefined);
-      this.raw.add({ via: 'sent', chat, id: sent.id, text });
-      if (key !== undefined) {
-        this.accountLive(key, sent.id);
-        // The answer to it may be the chat's last message: no later one would show its gap (D147).
-        if (sequential(key)) this.look(key, chat, this.known(key, sent.id), LOOK_AFTER_SEND_MS);
-      }
+      this.own(chat, sent, text);
       return { id: String(sent.id) };
+    } catch (e) {
+      const ms = floodMs(e);
+      throw ms === undefined ? e : new FloodWait(ms);
+    }
+  }
+
+  /**
+   * Its own message, never heard back live from this session: accounted for, so that the catch-up
+   * does not deliver it as missed (D66).
+   */
+  private own(
+    chat: string,
+    sent: { id: number; chatId?: { toString(): string } | undefined },
+    text: string
+  ): void {
+    const key = sent.chatId?.toString() ?? (/^-?\d+$/u.test(chat) ? chat : undefined);
+    this.raw.add({ via: 'sent', chat, id: sent.id, text });
+    if (key !== undefined) {
+      this.accountLive(key, sent.id);
+      // The answer to it may be the chat's last message: no later one would show its gap (D147).
+      if (sequential(key)) this.look(key, chat, this.known(key, sent.id), LOOK_AFTER_SEND_MS);
+    }
+  }
+
+  /**
+   * Sends a photo with GramJS's `sendFile` (bot-os.md D150): its bytes uploaded, or by an id this
+   * connector gave one before (`photoId`: Telegram's photo id, access hash and file reference); a
+   * Markdown caption as Telegram HTML, a plain one as written; in reply to `replyTo`. The message's
+   * id, and the photo's, to send it again by. Telegram's file reference in that id may expire: a
+   * send by it then fails with Telegram's `FILE_REFERENCE_EXPIRED`, and the bytes go again.
+   */
+  async deliverPhoto(
+    chat: string,
+    photo: CommandPhoto,
+    options: ConnectorPhotoOptions = {}
+  ): Promise<{ id?: string; photo?: string }> {
+    if (!this.monitors(chat)) throw new Error(`${chat} is not a chat of ${this.account}`);
+    const byId = typeof photo === 'string' ? inputPhoto(photo) : undefined;
+    if (typeof photo === 'string' && byId === undefined)
+      throw new Error(`${photo} is not the id of a photo ${this.account} sent`);
+    const { client } = this.o;
+    try {
+      const file =
+        typeof photo === 'string'
+          ? new Api.InputMediaPhoto({ id: byId as Api.InputPhoto })
+          : new Api.InputMediaUploadedPhoto({
+              file: await client.uploadFile({
+                file: new CustomFile(
+                  photo.filename,
+                  photo.data.byteLength,
+                  '',
+                  Buffer.from(photo.data)
+                ),
+                workers: 1,
+              }),
+            });
+      const markdown = options.format === 'markdown' && options.caption !== undefined;
+      const caption = options.caption ?? '';
+      const sent = await client.sendFile((await this.peer(chat)) as never, {
+        file,
+        caption: markdown ? markdownToTelegramHtml(caption) : caption,
+        parseMode: markdown ? 'html' : false,
+        ...(options.replyTo === undefined ? {} : { replyTo: Number(options.replyTo) }),
+      });
+      this.own(chat, sent, caption);
+      const id = photoId(sent.media);
+      return { id: String(sent.id), ...(id === undefined ? {} : { photo: id }) };
     } catch (e) {
       const ms = floodMs(e);
       throw ms === undefined ? e : new FloodWait(ms);
