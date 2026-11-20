@@ -472,6 +472,37 @@ describe('chat-in and chat-out', () => {
     ).toEqual(['edge teller.chat → tg.chat: twice in the graph']);
   });
 
+  it('refuses an edge on a service connector’s chat, which it has not, and says why (D148)', () => {
+    const plugins = new Map(image());
+    plugins.set('llm', m('llm', { kinds: ['connector'], account: 'llm:api', chat: false }));
+    const nodes = [...graph().nodes, { id: 'llm', plugin: 'llm' }];
+    const why = 'llm is a service connector, with no chat to read or send through (D148)';
+    expect(
+      problems(
+        {
+          version: 2,
+          nodes,
+          edges: [
+            ...(graph().edges ?? []),
+            { from: 'llm.chat', to: 'actor.channel' },
+            { from: 'actor.channel', to: 'llm.chat' },
+          ],
+        },
+        plugins
+      )
+    ).toEqual([`node llm: no output port chat: ${why}`, `node llm: no input port chat: ${why}`]);
+    expect(
+      problems(
+        {
+          version: 2,
+          nodes,
+          edges: [...(graph().edges ?? []), { from: 'llm', to: 'actor.channel' }],
+        },
+        plugins
+      )
+    ).toEqual([`edge llm → actor.channel: no output of llm fits chat-in of irc: ${why}`]);
+  });
+
   it('refuses a chat-out bound twice, unbound, or the wrong way round', () => {
     const base = {
       version: 2,

@@ -529,6 +529,25 @@ describe('the cards', () => {
     expect(nodesOfCards(['chat::out', 'actor-a', 'chat'])).toEqual(['chat', 'actor-a']);
   });
 
+  it('draw a service connector, with no chat (D148), as one card, its interface alone', () => {
+    const service = {
+      ...chat,
+      id: 'llm',
+      inputs: {},
+      outputs: {
+        interface: {
+          type: 'interface',
+          plugin: 'llm',
+          members: [],
+          label: 'interface',
+          optional: false,
+        },
+      },
+    } as typeof chat;
+    expect(isSplit(service)).toBe(false);
+    expect(cardsOf(service)).toEqual([{ id: 'llm', node: 'llm', side: undefined, view: service }]);
+  });
+
   it('end a chat-out edge on the out card, and every other on the node’s card', () => {
     expect(targetCard({ from: 'actor-a.chat', to: 'chat.chat', type: 'chat-out' }, views)).toBe(
       'chat::out'

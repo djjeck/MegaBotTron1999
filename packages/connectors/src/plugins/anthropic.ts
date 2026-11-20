@@ -13,6 +13,9 @@
  * calls (`anthropic.call`: the calling node, the model, the tokens and the cost in USD from its
  * price table, `PRICES`, a model without one logged with its cost unknown and a warning), and keeps the
  * last 24 hours by calling node and by model (`spend.ts`), on its card, its page and its panel.
+ *
+ * A service connector (bot-os.md D148, its manifest's `chat: false`): its account has no chat, so
+ * its node has no chat-in output and no chat-out input, only its `interface`.
  */
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
@@ -235,6 +238,8 @@ export function anthropicPlugin(o: AnthropicPluginOptions = {}): Plugin {
       kinds: ['connector'],
       description: 'The Claude API: asks a model, with structured output',
       account,
+      // A service connector (bot-os.md D148): its `ask` is its only port to it, no chat.
+      chat: false,
       model: true,
       secrets: [ANTHROPIC_KEY],
       config: anthropicConfig,

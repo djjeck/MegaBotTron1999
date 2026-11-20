@@ -19,6 +19,7 @@ describe('parseManifest', () => {
       configSensitive: [],
       login: false,
       model: false,
+      chat: true,
       configChats: [],
       notices: false,
       summary: false,
@@ -341,6 +342,42 @@ describe('parseManifest', () => {
     );
     const m = parseManifest({ ...base, kinds: ['connector'], account: 'llm:api', model: true });
     expect(m.model).toBe(true);
+  });
+
+  it('derives no chat ports for a service connector, with no chat (D148), and only a connector', () => {
+    const chatty = parseManifest({ ...base, kinds: ['connector'], account: 'irc:alice' });
+    expect(chatty.chat).toBe(true);
+    expect(chatty.inputs['chat']).toMatchObject({ type: 'chat-out', network: 'irc' });
+    expect(chatty.outputs['chat']).toEqual({ type: 'chat-in', network: 'irc' });
+    const service = parseManifest({
+      ...base,
+      kinds: ['connector'],
+      account: 'llm:api',
+      chat: false,
+      interface: { actions: { ask: { help: 'asks', input: z.object({}) } } },
+    });
+    expect(service.inputs).toEqual({});
+    expect(Object.keys(service.outputs)).toEqual(['interface']);
+    // With no chat derived, an output of its own may take the name.
+    expect(
+      parseManifest({
+        ...base,
+        kinds: ['connector'],
+        account: 'llm:api',
+        chat: false,
+        outputs: { chat: { type: 'chat-out' } },
+      }).outputs['chat']
+    ).toMatchObject({ type: 'chat-out' });
+    expect(() => parseManifest({ ...base, chat: false })).toThrow(
+      /chat: only a connector has a chat to drop/u
+    );
+    const service2 = { ...base, kinds: ['connector'], account: 'llm:api', chat: false } as const;
+    expect(() => parseManifest({ ...service2, monitors: 'all' })).toThrow(
+      /monitors: a connector with no chat monitors none/u
+    );
+    expect(() =>
+      parseManifest({ ...service2, outputs: { commands: { type: 'commands' } } })
+    ).toThrow(/outputs: a connector with no chat serves no chat commands/u);
   });
 
   it('refuses the core id, a self requirement and events outside the namespaces registered', () => {

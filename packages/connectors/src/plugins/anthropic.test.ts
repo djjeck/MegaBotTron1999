@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { Core, definePlugin, VirtualClock } from '@megabottron1999/core';
+import { Core, definePlugin, parseManifest, VirtualClock } from '@megabottron1999/core';
 import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -150,6 +150,13 @@ describe('askWith', () => {
 });
 
 describe('the anthropic plugin', () => {
+  it('is a service connector: no chat in or out, its interface alone (D148)', () => {
+    const manifest = parseManifest(anthropicPlugin().manifest);
+    expect(manifest.chat).toBe(false);
+    expect(manifest.inputs).toEqual({});
+    expect(Object.keys(manifest.outputs)).toEqual(['interface']);
+  });
+
   it('makes its client from its own secret, and a plugin bound to it asks', async () => {
     const keys: string[] = [];
     const answers: unknown[] = [];

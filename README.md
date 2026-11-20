@@ -9,11 +9,12 @@ plugins are wired is a typed graph of ports, which the web UI draws: each plugin
 each binding an edge, and the edges are the permissions. Data flows left to right: a connector's
 chats are read on the left of the graph (chat-in edges, to the parsers) and written to on its right
 (chat-out edges, from the plugins that send), so a connector is drawn as two cards, in and out
-([docs/bot-os.md](docs/bot-os.md) D60). A chat-in edge reads some chats, or any its connector
-monitors, from some senders, or anyone (D62); the chats are picked from the lists the connectors
-give (D63). A node is enabled, disabled by the owner, stopped by exception (a safety stop, drift,
-the send-queue watchdog, the owner's kill), or inactive while a node it needs is down; a chat-out
-edge sends for real or as a dry run, logged as sent (D64).
+([docs/bot-os.md](docs/bot-os.md) D60); a service connector, whose account has no chat (the
+`anthropic` connector), has no chat ports and is one card (D148). A chat-in edge reads some chats,
+or any its connector monitors, from some senders, or anyone (D62); the chats are picked from the
+lists the connectors give (D63). A node is enabled, disabled by the owner, stopped by exception (a
+safety stop, drift, the send-queue watchdog, the owner's kill), or inactive while a node it needs is
+down; a chat-out edge sends for real or as a dry run, logged as sent (D64).
 
 It knows no game. Games, and what plays them, are plugins on top of it.
 

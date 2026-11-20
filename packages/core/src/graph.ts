@@ -321,6 +321,15 @@ const fitting = (input: InputPort, manifest: Manifest, loose = false): [string, 
   );
 
 /**
+ * Why a connector has no chat port, for an edge that names one (bot-os.md D148): it has no chat
+ * (`chat: false`), a service connector. Empty for any other node.
+ */
+const noChat = (manifest: Manifest, node: string): string =>
+  manifest.kinds.includes('connector') && !manifest.chat
+    ? `: ${node} is a service connector, with no chat to read or send through (D148)`
+    : '';
+
+/**
  * The programmatic wiring's graph: a node per plugin, its id the plugin's, with its configuration
  * (`config`, by id), and each port bound as its manifest's `bind` says (an events input, by
  * default, to every other node registering its namespace; an interface input to the node of its
@@ -589,7 +598,9 @@ export function resolveGraph(
         `node ${toNode}: no input port ${toPort}` +
           (declared?.type === 'events' && typeof declared.namespace !== 'string'
             ? `: its namespace comes from config ${declared.namespace.config}, which is not set`
-            : '')
+            : toPort === 'chat' || e.type === 'chat-out'
+              ? noChat(to.manifest, toNode)
+              : '')
       );
       continue;
     }
@@ -597,8 +608,12 @@ export function resolveGraph(
     if (port === undefined) {
       const fits = fitting(input, from.manifest);
       if (fits.length !== 1) {
+        const why =
+          fits.length === 0 && input.type === 'chat-in' ? noChat(from.manifest, fromNode) : '';
         problems.push(
-          `${name}: ${fits.length === 0 ? 'no' : 'more than one'} output of ${fromNode} fits ${describePort(input)}; name it`
+          why === ''
+            ? `${name}: ${fits.length === 0 ? 'no' : 'more than one'} output of ${fromNode} fits ${describePort(input)}; name it`
+            : `${name}: no output of ${fromNode} fits ${describePort(input)}${why}`
         );
         continue;
       }
@@ -606,7 +621,10 @@ export function resolveGraph(
     }
     let output = from.manifest.outputs[port];
     if (output === undefined) {
-      problems.push(`node ${fromNode}: no output port ${port}`);
+      problems.push(
+        `node ${fromNode}: no output port ${port}` +
+          (port === 'chat' || e.type === 'chat-in' ? noChat(from.manifest, fromNode) : '')
+      );
       continue;
     }
     if (output.type === 'chat-in' && from.account !== undefined)

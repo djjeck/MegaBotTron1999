@@ -162,6 +162,13 @@ export const manifestSchema = z
      */
     model: z.boolean().default(false),
     /**
+     * Whether a connector's account has a chat (docs/bot-os-api.md §2.1, bot-os.md D148): by
+     * default, it reads and sends, and has a chat-in output and a chat-out input, both `chat`. A
+     * service connector (an API's account, as `anthropic`) says `false`: it reads and sends
+     * nothing, has neither, and offers what it makes through its interface alone.
+     */
+    chat: z.boolean().default(true),
+    /**
      * The steps that bring its store from each older version to the next (docs/bot-os-api.md §4.2):
      * the store's version is the number of them.
      */
@@ -374,6 +381,24 @@ export const manifestSchema = z
         path: ['configSecrets'],
         message: 'only a connector may hold secrets (P9)',
       });
+    if (!m.chat && !connector)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['chat'],
+        message: 'only a connector has a chat to drop (D148)',
+      });
+    if (!m.chat && m.monitors !== undefined)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['monitors'],
+        message: 'a connector with no chat monitors none (D148)',
+      });
+    if (!m.chat && Object.values(m.outputs).some((p) => p.type === 'commands'))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['outputs'],
+        message: 'a connector with no chat serves no chat commands (D148)',
+      });
     if (connector && m.account === undefined)
       ctx.addIssue({ code: 'custom', path: ['account'], message: 'a connector names its account' });
     if (!connector && m.account !== undefined)
@@ -583,7 +608,7 @@ export const manifestSchema = z
       });
     const derived = new Set([
       'interface',
-      ...(m.account === undefined ? [] : ['chat']),
+      ...(m.account === undefined || !m.chat ? [] : ['chat']),
       ...m.games.registers.map((ns) =>
         m.games.registers.length === 1 ? 'events' : `${ns}-events`
       ),
@@ -614,12 +639,14 @@ function regexProblem(pattern: string): string | undefined {
  * events input `<namespace>-events`. A port declared in `inputs` under one of these names is left
  * as written.
  *
- * A connector (its `account`) has a chat-in output and a chat-out input, both named `chat`.
+ * A connector (its `account`) has a chat-in output and a chat-out input, both named `chat`, unless
+ * it has no chat (`chat: false`, D148).
  */
 function normalise<
   M extends {
     id: string;
     account?: string | undefined;
+    chat: boolean;
     requires: string[];
     uses: Record<string, string[]>;
     games: { registers: string[]; consumes: string[] };
@@ -663,8 +690,8 @@ function normalise<
     // A connector's commands output is of its account's network (D109).
     for (const [name, p] of Object.entries(declaredOut))
       if (p.type === 'commands') outputs[name] = { ...p, network };
-    outputs['chat'] = { type: 'chat-in', network };
-    if (!Object.hasOwn(all, 'chat'))
+    if (m.chat) outputs['chat'] = { type: 'chat-in', network };
+    if (m.chat && !Object.hasOwn(all, 'chat'))
       all['chat'] = {
         type: 'chat-out',
         network,

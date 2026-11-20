@@ -8,6 +8,9 @@
  * - its **out** card (`telegram-user · out`), with its chat-out input alone, at the right, its id
  *   the node's with `::out` (a node's id has no colon, so no node can take it).
  *
+ * A service connector, whose account has no chat (`chat: false`, bot-os.md D148), has no chat-out
+ * input, and is one card, as any other node.
+ *
  * Each card is placed on its own; selecting either selects the node. The split lives here, in the
  * editor's view, and nowhere in the graph file. Pure functions, tested apart from React.
  */
