@@ -156,6 +156,15 @@ export function locateProblem(problem: string, raw: unknown): GraphProblem {
   if (key?.[1] === 'settings') out.setting = key[2] as string;
   const edge = /^edge (\S+) → (\S+):/u.exec(problem) ?? /\(edge (\S+) → (\S+)\)$/u.exec(problem);
   if (edge !== null) out.edge = { from: edge[1] as string, to: edge[2] as string };
+  // An edge dropped for a port gone from its node (D154): the edge, and that node and port.
+  const dropped = /^edge (\S+) → (\S+) dropped: (\S+) has no (?:input|output) port (\S+)$/u.exec(
+    problem
+  );
+  if (dropped !== null) {
+    out.edge = { from: dropped[1] as string, to: dropped[2] as string };
+    out.node = dropped[3] as string;
+    out.port = dropped[4] as string;
+  }
   const cycle = /^a cycle of required edges: (\S+)/u.exec(problem);
   if (cycle !== null) out.node = cycle[1] as string;
   return out;

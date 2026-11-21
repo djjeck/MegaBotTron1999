@@ -236,8 +236,6 @@ describe('the graph', () => {
       'node actor: input port channel: events of game cannot bind chat-in of irc (edge game.events → actor.channel)',
       'edge game → game.channel: a node cannot feed itself',
       'edge nobody → actor.game: no node nobody',
-      'node actor: no input port nothing',
-      'node game: no output port nothing',
       'edge irc → actor.game: no output of irc fits interface of game; name it',
       'edge game → actor.notices: its type is events, not chat-in',
       'edge game → actor.map: only a chat-out edge carries sends, commands, minIntervalS and photos',
@@ -472,6 +470,31 @@ describe('chat-in and chat-out', () => {
         many
       )
     ).toEqual(['edge teller.chat → tg.chat: twice in the graph']);
+  });
+
+  it('drops an edge to or from a port its node no longer declares, with a warning (D154)', () => {
+    const stale = resolveGraph(
+      graph({
+        edges: [
+          ...(graph().edges ?? []),
+          { from: 'game.interface', to: 'actor.account', type: 'interface' },
+          { from: 'game.gone', to: 'actor.map' },
+        ],
+      }),
+      image()
+    );
+    expect(stale.warnings).toEqual([
+      'edge game.interface → actor.account dropped: actor has no input port account',
+      'edge game.gone → actor.map dropped: game has no output port gone',
+    ]);
+    // The rest is the graph it was before the edges went stale.
+    expect(stale.graph.edges).toEqual(resolveGraph(graph(), image()).graph.edges);
+    // A port declared the other way round is no stale port, and stays a problem.
+    expect(
+      problems(
+        graph({ edges: [...(graph().edges ?? []), { from: 'actor.game', to: 'game.channel' }] })
+      )
+    ).toEqual(['node actor: no output port game']);
   });
 
   it('refuses an edge on a service connector’s chat, which it has not, and says why (D148)', () => {

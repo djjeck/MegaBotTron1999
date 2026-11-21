@@ -306,6 +306,67 @@ describe('the core on the graph file', () => {
     await core.stop();
   });
 
+  it('runs a saved graph whose plugins lost a port, its stale edges dropped and warned of (D154)', async () => {
+    // An upgrade took `account` from the actor's inputs and `lost` from its outputs.
+    const edges = good.edges ?? [];
+    const stale = {
+      ...good,
+      edges: [
+        ...edges,
+        { from: 'scorer.interface', to: 'actor.account', type: 'interface' },
+        { from: 'actor.lost', to: 'chat.chat', sends: ['#lobby'] },
+      ],
+    };
+    write('graph.json', stale);
+    const { core, lines, told, file } = instance();
+    await core.start();
+    file.started(core);
+    const warnings = [
+      'edge scorer.interface → actor.account dropped: actor has no input port account',
+      'edge actor.lost → chat.chat dropped: actor has no output port lost',
+    ];
+    expect(core.graphProblems()).toEqual([]);
+    expect(core.status().map((s) => [s.id, s.state])).toEqual([
+      ['chat', 'running'],
+      ['scorer', 'running'],
+      ['actor', 'running'],
+    ]);
+    expect(core.graph()?.edges).toHaveLength(edges.length);
+    expect(lines).toContain(`core: the graph warns:\n${warnings.join('\n')}`);
+    for (const w of warnings) expect(told).toContain(`warning: ${w}`);
+    const controls = graphFileControls(file, core);
+    // Shown by the editor's check, located on the node, the port and the edge.
+    expect(controls.check(stale)).toMatchObject({
+      ok: true,
+      warnings: [
+        {
+          text: warnings[0],
+          node: 'actor',
+          port: 'account',
+          edge: { from: 'scorer.interface', to: 'actor.account' },
+        },
+        {
+          text: warnings[1],
+          node: 'actor',
+          port: 'lost',
+          edge: { from: 'actor.lost', to: 'chat.chat' },
+        },
+      ],
+    });
+    // Not written at the load: the file keeps them, marked as ran, until the next save drops them.
+    expect(JSON.parse(fs.readFileSync(file.file, 'utf8'))).toEqual(stale);
+    expect(file.history.list()[0]).toMatchObject({ source: 'found', start: { result: 'ran' } });
+    expect(controls.save(stale)).toMatchObject({
+      saved: true,
+      restart: false,
+      warnings: warnings.map((text) => ({ text })),
+    });
+    expect(
+      (JSON.parse(fs.readFileSync(file.file, 'utf8')) as { edges: unknown[] }).edges
+    ).toHaveLength(edges.length);
+    await core.stop();
+  });
+
   it('starts with no node on a file it refuses, keeps the file, and says why', async () => {
     write('graph.json', bad);
     const { core, lines, told } = instance();

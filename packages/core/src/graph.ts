@@ -13,7 +13,9 @@
  * - The programmatic wiring is the default graph: a node per plugin registered, each input bound as
  *   its manifest's `bind` says. Any other graph (a file) replaces it as a whole.
  * - A required input left unbound, an edge between ports of two types, an input of one edge bound
- *   twice, an unknown plugin, node or port, and a cycle of required edges fail the start.
+ *   twice, an unknown plugin, node or port, and a cycle of required edges fail the start. An edge
+ *   naming a port its node's manifest no longer declares at all (an upgrade dropped it) is stale:
+ *   dropped from the graph, with a warning, and the rest runs (bot-os.md D154).
  * - A chat runs left to right (bot-os.md D60): a chat-in edge from a connector's output to a
  *   reader's input, with its `reads`; a chat-out edge from a sender's output to the connector's
  *   input, with its `sends` and `commands`. A connector's chat-out input takes any number of edges;
@@ -335,6 +337,18 @@ const noChat = (manifest: Manifest, node: string): string =>
     : '';
 
 /**
+ * Whether a port an edge names is gone from its node (bot-os.md D154): its manifest declares no
+ * port of that name, input or output, and it is not a service connector's chat (D148, refused
+ * with why). An edge to or from it is stale, dropped with a warning; one naming a port the
+ * manifest declares the other way round, or an input its config leaves out (an events namespace
+ * from a config not set, a gated input), stays a problem.
+ */
+const gone = (manifest: Manifest, port: string, node: string, chat: boolean): boolean =>
+  manifest.inputs[port] === undefined &&
+  manifest.outputs[port] === undefined &&
+  (!chat || noChat(manifest, node) === '');
+
+/**
  * The programmatic wiring's graph: a node per plugin, its id the plugin's, with its configuration
  * (`config`, by id), and each port bound as its manifest's `bind` says (an events input, by
  * default, to every other node registering its namespace; an interface input to the node of its
@@ -478,8 +492,8 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  * the core holds it (each edge's ends and type written out), its nodes, in the graph's order, and
  * its warnings (bot-os.md D89), which refuse nothing: a chat-in edge that reads a chat its
  * connector's config does not monitor (`monitoredChats`, `unmonitoredReads`; each chat by any of
- * its names, as `chatNames` says, D90). A GraphError lists every problem, each naming its node and
- * port.
+ * its names, as `chatNames` says, D90); an edge dropped for naming a port its node no longer has
+ * (`gone`, D154). A GraphError lists every problem, each naming its node and port.
  */
 export function resolveGraph(
   raw: unknown,
@@ -599,6 +613,12 @@ export function resolveGraph(
     const input = to.ports[toPort];
     if (input === undefined) {
       const declared = to.manifest.inputs[toPort];
+      // A port its node's manifest no longer declares, as either end (an upgrade dropped it): the
+      // edge is stale, dropped and warned of, and the rest runs (D154).
+      if (gone(to.manifest, toPort, toNode, toPort === 'chat' || e.type === 'chat-out')) {
+        warnings.push(`${name} dropped: ${toNode} has no input port ${toPort}`);
+        continue;
+      }
       problems.push(
         `node ${toNode}: no input port ${toPort}` +
           (declared?.type === 'events' && typeof declared.namespace !== 'string'
@@ -626,6 +646,10 @@ export function resolveGraph(
     }
     let output = from.manifest.outputs[port];
     if (output === undefined) {
+      if (gone(from.manifest, port, fromNode, port === 'chat' || e.type === 'chat-in')) {
+        warnings.push(`${name} dropped: ${fromNode} has no output port ${port}`);
+        continue;
+      }
       problems.push(
         `node ${fromNode}: no output port ${port}` +
           (port === 'chat' || e.type === 'chat-in' ? noChat(from.manifest, fromNode) : '')

@@ -699,6 +699,20 @@ connector knows the chat read, or every chat monitored, and no name matches. Wha
 not warn of: unknown, not wrong. For a connector whose chats have one name each (`irc`), the names
 as written decide. Other checks may add warnings in the same list.
 
+**An edge to a port gone from its node** (bot-os.md D154) is dropped, with a warning: both its nodes
+exist, and the node's manifest (its own, for a node whose config declares its ports) declares no
+port of that name at all, neither input nor output, as when a module upgrade removed it. The check
+leaves the edge out of the graph it holds and warns
+(`edge telegram-user.interface → postcard.account dropped: postcard has no input port account`, or
+`… dropped: <node> has no output port <port>`), located on that node, its port and the edge; the
+load prints it and raises it as a `warning` notice (§4.16), and the rest runs. The load does not
+write the file: the edge stays in `graph.json`, warned of at each start, until the next save (the
+editor's, or `PUT /graph/file`), which writes the graph as the core holds it, without the edge, the
+version before it kept in the history. Still problems: an edge to a node not in the graph, a node
+whose plugin is missing, an edge on a service connector's `chat` (§2.1), a port declared the other
+way round, an input declared but left out by its node's config (an events namespace from a config
+key not set, a gated input off), and what the drop leaves unbound (a required input it fed).
+
 **The control API's graph routes** (§4.11), the owner's alone:
 
 - `GET /graph/file`: the saved file (`graph`, as written) and its `text` (`graphText`, §4.12),

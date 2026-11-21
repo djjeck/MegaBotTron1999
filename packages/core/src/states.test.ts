@@ -193,9 +193,9 @@ describe('a disabled node (D64)', () => {
     const config = instance(graph({ parser: { disabled: true, config: { chat: 3 } } }));
     expect(() => config.core.load()).toThrow(/^plugin parser: config chat: /u);
     const edge = instance(
-      graph({ actor: { disabled: true } }, [{ from: 'actor.interface', to: 'parser.nothing' }])
+      graph({ actor: { disabled: true } }, [{ from: 'helper.interface', to: 'parser.chat' }])
     );
-    expect(() => edge.core.load()).toThrow('node parser: no input port nothing');
+    expect(() => edge.core.load()).toThrow(/^node parser: input port chat: /u);
   });
 
   it('prints `disabled`, and a dry-run edge `dry-run`, for the history’s diffs', () => {
