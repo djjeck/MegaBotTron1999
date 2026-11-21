@@ -10,10 +10,21 @@ import type { FormEvent } from 'react';
 import { useState } from 'react';
 import type { MemberView } from '#src/ui/api.ts';
 import { api, seg } from '#src/ui/api.ts';
+import { BYTES_KEY } from './MediaField.tsx';
 import { SchemaForm } from './SchemaForm.tsx';
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-const show = (v: unknown): string => JSON.stringify(v, null, 2) ?? 'null';
+/**
+ * A value as JSON, bytes (`{ "$bytes": "<base64>" }`, an answer's media, D155) said by their size
+ * rather than printed.
+ */
+const show = (v: unknown): string =>
+  JSON.stringify(
+    v,
+    (k, x: unknown) =>
+      k === BYTES_KEY && typeof x === 'string' ? `${Math.floor((x.length * 3) / 4)} bytes` : x,
+    2
+  ) ?? 'null';
 
 /** Its own account of itself, as its `status` read gives it. */
 export function NodeStatus({ status }: { status: unknown }) {

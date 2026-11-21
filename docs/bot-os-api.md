@@ -1821,13 +1821,15 @@ public API (`packages/core/src/devkit.ts`):
   the run, the run's graph (`graph`; by default one instance of each, bound as the manifests say,
   each connector's node on its manifest's account: a graph given names a fake connector's account on
   its node, which is otherwise `<network>:<node id>`) and, set before it starts, keyed by plugin
-  instance: their configuration (`config`), the owner's kept settings (`settings`) and the documents
-  their stores start with (`documents`), and the event log before the run (`history`), which the
-  plugins read with `ctx.events`; `kit.log` is that log in memory, every record of the run added
-  (`MemoryEventLog`). The stores' files (`ctx.store.files`, §4.2) are in memory too, their times on
-  the virtual clock, within the core's limits or the run's (`fileLimits`). An archived plugin runs
-  on a kit only when the run says so (`allowArchived`). `start` refuses a setting refused and a run
-  with a plugin failed; `runUntil(t)` runs the clock. The core is the instance's own, unchanged.
+  instance: their configuration (`config`), the owner's kept settings (`settings`), the documents
+  their stores start with (`documents`) and their files (`files`, each a `Media`, its bytes and its
+  type; bot-os.md D155: a collection's pictures, made with `collectionSeed`, §5), and the event log
+  before the run (`history`), which the plugins read with `ctx.events`; `kit.log` is that log in
+  memory, every record of the run added (`MemoryEventLog`). The stores' files (`ctx.store.files`,
+  §4.2) are in memory too, their times on the virtual clock, within the core's limits or the run's
+  (`fileLimits`). An archived plugin runs on a kit only when the run says so (`allowArchived`).
+  `start` refuses a setting refused and a run with a plugin failed; `runUntil(t)` runs the clock.
+  The core is the instance's own, unchanged.
 - **Script nodes** (§5, bot-os.md D76) run on a kit in the main thread
   (`scriptPlugin({ isolation: 'in-process' })`), on its virtual clock, so that a test of one stays
   deterministic.
@@ -1946,15 +1948,17 @@ no node) and `GET /plugins/<id>/files/<name>` (one file's bytes, its `content-ty
 `content-security-policy: default-src 'none'; sandbox` and `nosniff`, so that a file a plugin wrote
 never runs in the web UI's origin; 404 for no node or no such file, 400 for a name no file has);
 `POST /plugins/<id>/actions/<name>`, the body the action's input (400 for an input refused by its
-schema, 409 for the plugin's refusal); `GET /plugins/<id>/login` (a connector's login, §4.5,
-bot-os.md D116: its `LoginState`) and `POST /plugins/<id>/login`, `{ "action", "values"? }`, its
-answer, which says where it stands next, an answer it refused in its `error` (404 for a node that
-offers no login, 409 for one not running or an action it does not offer now, 400 for a body that is
-no answer); `GET /instances` (§2.2); `GET /graph/file`, `POST /graph/check`, `PUT /graph/file`,
-`GET /graph/history`, `GET /graph/history/<id>`, `POST /graph/history/<id>/rollback`,
-`POST /graph/rollback` and `POST /restart` (§2.3); `GET /available`, `GET /modules`,
-`POST /modules`, `POST /modules/plan`, `POST /modules/link` (or `POST /modules/github`),
-`POST /modules/updates`, `GET /modules/hosts`, `POST /modules/hosts`,
+schema, 409 for the plugin's refusal; bytes in it, a `Media`'s, as `{ "$bytes": "<base64>" }`,
+§4.18, within the body's limit, `MAX_UPLOAD`, 64 MiB of JSON, so about 48 MiB of bytes; every answer
+of the control API writes bytes so too, bot-os.md D155); `GET /plugins/<id>/login` (a connector's
+login, §4.5, bot-os.md D116: its `LoginState`) and `POST /plugins/<id>/login`,
+`{ "action", "values"? }`, its answer, which says where it stands next, an answer it refused in its
+`error` (404 for a node that offers no login, 409 for one not running or an action it does not offer
+now, 400 for a body that is no answer); `GET /instances` (§2.2); `GET /graph/file`,
+`POST /graph/check`, `PUT /graph/file`, `GET /graph/history`, `GET /graph/history/<id>`,
+`POST /graph/history/<id>/rollback`, `POST /graph/rollback` and `POST /restart` (§2.3);
+`GET /available`, `GET /modules`, `POST /modules`, `POST /modules/plan`, `POST /modules/link` (or
+`POST /modules/github`), `POST /modules/updates`, `GET /modules/hosts`, `POST /modules/hosts`,
 `DELETE /modules/hosts/<host>`, `POST /modules/<id>/rollback` and `DELETE /modules/<id>` (§7.4);
 `GET /secrets`, the names of the Docker secrets provided, never their values, for a connector's
 config to name (§4.9; the wiring leaves out `web_ui_password`, `bot_os_key` and `github_token`, the
@@ -2482,6 +2486,16 @@ interface MediaLimits {
   images check with it.
 - **`mediaOfFile(files, name)`**: a file of the plugin's store (§4.2) as a `Media`, its type the one
   kept with it; undefined when there is none.
+- **`mediaField(limits?)`** (bot-os.md D155): a `Media` within `limits`, as a schema: refused with
+  `mediaRefusal`'s why past them, its JSON Schema saying `media: { kinds?, mimes?, maxBytes? }`.
+  `mediaSchema`'s says `media: {}`. The editor's forms draw a property whose schema says `media` as
+  a file's picker (choose, preview, replace, remove, refused past its limits before it is sent),
+  wherever it is: an action's input, a config (whose media would sit in the graph file as base64: a
+  picture belongs in a collection, §5).
+- **Bytes as JSON** (D155): `{ "$bytes": "<base64>" }`, the one key (`BYTES_KEY`; `isJsonBytes`).
+  `bytesSchema`, and so `mediaSchema`, reads that form as bytes, so that the owner's panel sends a
+  file in an action's input (§4.11); `bytesJson`, a replacer for `JSON.stringify`, writes bytes so,
+  as every answer of the control API does: `JSON.stringify(value, bytesJson)`.
 
 **An action that answers media** answers a `MediaResult`: the media, `null` for none, or why not,
 never thrown; its manifest's `output` is `mediaResultSchema`. A plugin that keeps pictures answers
@@ -2520,6 +2534,7 @@ its bytes is for later.
 | `player`        | actor        | `@megabottron1999/turns`      | One game bot's commands, each when ready, in its person's sittings, run as one node per bot                                                                                |
 | `reactor`       | actor        | `@megabottron1999/turns`      | One reaction (§4.15) from its config: a command sent when an event is heard or a message matches                                                                           |
 | `script`        | actor, stats | `@megabottron1999/turns`      | TypeScript typed in the editor, on the ports its config declares, in a worker thread of its own                                                                            |
+| `collection`    | stats        | `@megabottron1999/turns`      | Records of a schema its config gives, media included, edited in its panel and read through its interface (D155)                                                            |
 | `owner-notice`  | stats        | `@megabottron1999/turns`      | Tells the owner what needs attention (§4.16), a summary on a cadence (§4.17) and a notice at each start, through a chat-out edge                                           |
 | (states)        | stats        | `@megabottron1999/turns`      | `statePlugin`: a game's player state, kept from its parsers' events, from a spec a game gives, with its commands' readiness; `readinessPlugin`: the readiness alone (D141) |
 
@@ -2940,6 +2955,83 @@ its bytes is for later.
     ]
   }
   ```
+
+- **`collection`** (`packages/turns/src/collection.ts`, bot-os.md D155): records of a schema its
+  config gives, media included, edited by the owner in its node's panel and read by other nodes
+  through its interface: data kept apart from the logic that uses it (a writer's cast, a list of
+  sentences, a list of pictures). One node per collection; its node's manifest is its own (§2, D74):
+  its actions' inputs are made from its fields, and its event type is in its node's namespace. Its
+  config, `postcard`'s cast:
+
+  ```json
+  {
+    "fields": [
+      { "name": "name", "type": "text", "required": true, "unique": true },
+      { "name": "role", "type": "choice", "options": ["seller", "character"] },
+      { "name": "behaviour", "type": "text", "long": true, "help": "How they act" },
+      { "name": "setting", "type": "text", "long": true },
+      { "name": "face", "type": "media", "kinds": ["image"], "maxBytes": 10485760 }
+    ],
+    "title": "name"
+  }
+  ```
+
+  Each field: `name` (a word), `type` (`text`, `number`, `boolean`, `choice`, `list` of texts,
+  `media`), `help`, `required`, `unique` (a text, a number or a choice; a text trimmed and compared
+  without case); a text's `long` (several lines); a choice's `options`; a media's `kinds` (`image`,
+  `video`, `audio`, `document`), `mimes` and `maxBytes` (§4.18's limits). `title`, the text field
+  that names a record in lists, the first text field by default. The check refuses a choice without
+  options, a key of another type's, a name twice, a title that is no text field.
+
+  ```ts
+  interface CollectionRecord {
+    id: string; // `r1`, `r2`, …: stable, never reused
+    position: number; // its place in the order, from 0
+    values: Record<string, string | number | boolean | string[] | MediaRef>;
+    incomplete?: string[]; // why, when it is: `face is required`
+  }
+  interface MediaRef {
+    id: string; // `sha256:<hex>`, its bytes' SHA-256
+    mime: string;
+    width?: number;
+    height?: number;
+  }
+  ```
+
+  - **Reads**, through an interface input
+    `{ type: 'interface', plugin: 'collection', members: ['state.list', 'state.media'] }`: `list()`,
+    the records in order; `get({ id })`, one, `null` for none; `schema()`, `{ fields, title? }`, its
+    fields with their defaults; `media({ id })`, a `MediaResult` (§4.18): the bytes of a media its
+    records hold, its type, width and height the record's, `{ ok: true, media: null }` for an id no
+    record holds, `{ ok: false, error }` for an id that is none (`sha256:<64 hex>`) or a file gone.
+  - **Actions**, each checked against its schema, then by the collection (a required field given, a
+    unique value no other record has, a media within its field's limits and of the type it says),
+    refused with why (thrown through an interface; a 400 or a 409 from the panel):
+    `add({ values, position? })`, last by default; `update({ id, values, unset? })`, the values
+    given put in, the fields of `unset` cleared (a required one refused); `remove({ id })`;
+    `reorder({ id, position })`. A media field's value is a `Media`
+    (`{ data, mime, width?, height? }`; from the panel, its bytes as `{ "$bytes": "<base64>" }`).
+    Each answers the record (`reorder`, the list), and announces it: **`<node>.changed`**,
+    `{ change: 'added' | 'updated' | 'removed' | 'reordered', id }`.
+  - **Its store:** the records are its document `records` (`{ next, records: [{ id, values }] }`); a
+    media's bytes are its file `sha256-<hex>` (a file's name takes no colon), kept once whatever the
+    records that hold them, written before the record that refers to them; a file so named that no
+    record refers to is deleted after each change and at the start.
+  - **A schema changed** keeps the records and starts all the same: a field gone is dropped from
+    them at the start, kept so, with a warning in its log; a value its field no longer takes is kept
+    but left out of `values`, and the record is `incomplete`, saying why, as is one missing a
+    required field or repeating a unique value an earlier record has. An update that fixes it
+    completes it; one that changes another field is not refused for it.
+  - **Its panel**, while it runs (`Collection.tsx` of the web UI): its records, each named by its
+    title field, its values in a line, its pictures as thumbnails, why it is incomplete; **Add a
+    record** and **Edit** open a form made from its `add` action's `values`, a media field a file's
+    picker; an edit sends what changed and what was cleared; ↑ and ↓ move one; **Remove** asks
+    first.
+  - **The dev kit:** `collectionSeed(records)`, records whose media fields are `Media`, gives the
+    document and the files of its store, ids `r1`, `r2`, … in order:
+    `new DevKit({ documents: { cast: seed.documents }, files: { cast: seed.files }, … })` (§4.10).
+
+  Out of scope: adding records from chat, and passing media by reference between nodes.
 
 - **`script`** (`packages/turns/src/script-plugin.ts`, bot-os.md D76): a node whose code the owner
   types in the editor, on the ports its config declares; its node's manifest is made from them (§2,

@@ -7,7 +7,7 @@
  * before any plugin package, module or connector is loaded, so that the owner always reaches the
  * UI, whatever a plugin does. Then, in the background (`bootstrap`), each of the image's plugin
  * packages is imported on its own (the connectors, attention and the player, the reactor, the
- * script node and owner-notice), then the modules installed under `/data/modules/<id>/` (D49,
+ * script node, the collection and owner-notice), then the modules installed under `/data/modules/<id>/` (D49,
  * docs/bot-os-api.md §7); one that fails to load is named, with why, and only the nodes of its
  * plugins are held. The graph is the saved one, `/data/graph.json` (D50, docs/bot-os-api.md §2.3),
  * each node's state in its instance under `/data/instances/`. No file: no node runs until the owner
@@ -145,6 +145,11 @@ const packages: PackageSpec[] = [
   {
     name: '@megabottron1999/turns/script-plugin.ts',
     load: async () => [(await import('@megabottron1999/turns/script-plugin.ts')).scriptPlugin()],
+  },
+  // Records of a schema its config gives, media included, edited in its panel (docs/bot-os.md D155).
+  {
+    name: '@megabottron1999/turns/collection.ts',
+    load: async () => [(await import('@megabottron1999/turns/collection.ts')).collectionPlugin()],
   },
   // What needs the owner's attention, told through a connector (docs/bot-os.md D91).
   {

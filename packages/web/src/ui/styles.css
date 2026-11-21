@@ -2038,3 +2038,76 @@ ul.warnings {
 .plays-field li select {
   flex: 0 1 auto;
 }
+
+/* A media field (MediaField.tsx, D155): its preview, its file picked through a button. */
+.media-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.media-field img {
+  max-width: 100%;
+  max-height: 10rem;
+  border: 1px solid var(--line);
+}
+.media-field .media-buttons {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.media-field label.button input[type='file'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.media-field label.button {
+  position: relative;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+}
+textarea.long {
+  width: 100%;
+  min-height: 5rem;
+}
+
+/* A list of objects (SchemaForm.tsx, D155): a form per item, its buttons beside it. */
+.object-list .object-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+.object-list .object-row > fieldset {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* A collection's records (Collection.tsx, D155): each with its thumbnails and its buttons. */
+.details ol.records {
+  padding-left: 1.4rem;
+  margin: 0.3rem 0;
+}
+.details ol.records > li {
+  margin-bottom: 0.6rem;
+  overflow-wrap: anywhere;
+}
+.records .thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.records img.thumb {
+  width: 4rem;
+  height: 4rem;
+  object-fit: cover;
+  border: 1px solid var(--line);
+}
+.row-buttons {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+.record-form {
+  margin-top: 0.5rem;
+}

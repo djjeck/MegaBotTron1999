@@ -258,9 +258,13 @@ export {
   parseManifest,
 } from './manifest.ts';
 export {
+  BYTES_KEY,
+  bytesJson,
   bytesSchema,
+  isJsonBytes,
   type Media,
   MEDIA_KINDS,
+  mediaField,
   type MediaKind,
   mediaKind,
   type MediaLimits,

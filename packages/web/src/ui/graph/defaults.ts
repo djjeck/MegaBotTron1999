@@ -32,7 +32,12 @@ export function withDefaults(
     const given = out[key];
     const fallback = property['default'] ?? plain(property)['default'];
     const inner = plain(property);
-    if (inner['type'] === 'object' && inner['properties'] !== undefined) {
+    // A media (D155) is a file the owner picks: never one made of defaults.
+    if (
+      inner['type'] === 'object' &&
+      inner['properties'] !== undefined &&
+      inner['media'] === undefined
+    ) {
       if (given !== undefined && !isRecord(given)) continue;
       const base = given ?? (isRecord(fallback) ? fallback : undefined);
       if (base === undefined && !required.includes(key)) continue;

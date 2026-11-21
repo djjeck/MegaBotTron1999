@@ -11,6 +11,10 @@
  * - `MediaResult`, with `mediaResultSchema`: what an action that answers media answers, wherever
  *   the bytes came from (a network, a plugin's files: `mediaOfFile`).
  *
+ * - As JSON (D155): bytes are `{ "$bytes": "<base64>" }` (`bytesJson` writes them so, `bytesSchema`
+ *   reads them), so that the owner's panel sends a file; `mediaField(limits)`, a `Media` within
+ *   limits, its JSON Schema saying `media` and them, for the form's picker.
+ *
  * Bytes only: a reference to media (a plugin's file, by its hash) passed in their place is for later.
  */
 import { z } from 'zod';
@@ -33,16 +37,61 @@ export interface Media {
 /** A media type: `type/subtype`, in lower case, no parameters. */
 const MIME = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u;
 
-/** Bytes, in a schema: a `Uint8Array` (a `Buffer` is one). */
-export const bytesSchema = z.custom<Uint8Array>((v) => v instanceof Uint8Array, 'bytes');
+/**
+ * Bytes as JSON carries them (bot-os.md D155): `{ "$bytes": "<base64>" }`, the one key. The
+ * control API answers bytes so (`bytesJson`), and a schema of bytes (`bytesSchema`) reads them so,
+ * so that the owner's panel sends a file in an action's input, or a config's.
+ */
+export const BYTES_KEY = '$bytes';
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/u;
 
-/** A `Media`'s schema, for a manifest's action that takes or answers one (D153). */
-export const mediaSchema = z.object({
-  data: bytesSchema,
-  mime: z.string().regex(MIME, 'a media type, as type/subtype in lower case'),
-  width: z.number().int().positive().optional(),
-  height: z.number().int().positive().optional(),
-});
+/** Whether `v` is bytes as JSON carries them (`{ "$bytes": "<base64>" }`). */
+export function isJsonBytes(v: unknown): v is { [BYTES_KEY]: string } {
+  // A plain object only: never bytes themselves, whose keys would be every byte.
+  if (typeof v !== 'object' || v === null) return false;
+  const proto = Object.getPrototypeOf(v) as unknown;
+  if (proto !== Object.prototype && proto !== null) return false;
+  const keys = Object.keys(v);
+  const b64 = (v as Record<string, unknown>)[BYTES_KEY];
+  return keys.length === 1 && typeof b64 === 'string' && BASE64.test(b64);
+}
+
+/**
+ * A replacer for `JSON.stringify` that writes bytes (a `Uint8Array`, a `Buffer`) as
+ * `{ "$bytes": "<base64>" }` (D155), rather than an object of numbers.
+ */
+export function bytesJson(this: unknown, key: string, value: unknown): unknown {
+  // A Buffer's own toJSON has run already: the value as it was is the holder's.
+  const raw = (this as Record<string, unknown> | null)?.[key];
+  if (raw instanceof Uint8Array)
+    return {
+      [BYTES_KEY]: Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength).toString('base64'),
+    };
+  return value;
+}
+
+/**
+ * Bytes, in a schema: a `Uint8Array` (a `Buffer` is one), or bytes as JSON carries them
+ * (`{ "$bytes": "<base64>" }`, D155), read as their bytes.
+ */
+export const bytesSchema = z.preprocess(
+  (v) => (isJsonBytes(v) ? new Uint8Array(Buffer.from(v[BYTES_KEY], 'base64')) : v),
+  z.custom<Uint8Array>((v) => v instanceof Uint8Array, 'bytes')
+);
+
+/**
+ * A `Media`'s schema, for a manifest's action that takes or answers one (D153). Its JSON Schema
+ * says `media` (D155: its limits, none here), so that the owner's forms draw a file's picker for
+ * it, wherever it is (an action's input, a config).
+ */
+export const mediaSchema = z
+  .object({
+    data: bytesSchema,
+    mime: z.string().regex(MIME, 'a media type, as type/subtype in lower case'),
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(),
+  })
+  .meta({ media: {} });
 
 /**
  * A media's kind, from its type (D153): `image/*`, `video/*` and `audio/*` are theirs; any other
@@ -132,6 +181,25 @@ export function mediaRefusal(media: unknown, limits: MediaLimits = {}): string |
   if (limits.maxBytes !== undefined && m.data.byteLength > limits.maxBytes)
     return `${sizeInWords(m.data.byteLength)}, more than the ${sizeInWords(limits.maxBytes)} taken here`;
   return undefined;
+}
+
+/**
+ * A `Media` within `limits`, in a schema (D155): `mediaSchema`, refused with `mediaRefusal`'s why
+ * past them, its JSON Schema saying them (`media: { kinds?, mimes?, maxBytes? }`) so that the
+ * owner's form picks only what it takes and says so.
+ */
+export function mediaField(limits: MediaLimits = {}) {
+  const said = {
+    ...(limits.kinds === undefined ? {} : { kinds: [...limits.kinds] }),
+    ...(limits.mimes === undefined ? {} : { mimes: [...limits.mimes] }),
+    ...(limits.maxBytes === undefined ? {} : { maxBytes: limits.maxBytes }),
+  };
+  return mediaSchema
+    .superRefine((m, ctx) => {
+      const why = mediaRefusal(m, limits);
+      if (why !== undefined) ctx.addIssue({ code: 'custom', message: why });
+    })
+    .meta({ media: said });
 }
 
 /**

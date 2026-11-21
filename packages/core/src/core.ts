@@ -79,6 +79,7 @@ import {
 import { holdUnloaded, type Unloaded } from './held.ts';
 import { type InstanceInfo, InstanceRegistry } from './instance-registry.ts';
 import { type Manifest, parseManifest, SECRET_NAME } from './manifest.ts';
+import { type Media } from './media.ts';
 import { type Notice, Notices } from './notices.ts';
 import {
   Outbox,
@@ -244,6 +245,12 @@ export interface CoreOptions {
    * Ignored with one.
    */
   documents?: Record<string, Record<string, unknown>>;
+  /**
+   * Without a data volume, the files each instance's store holds as the core is made (D149), by
+   * instance and name, each its bytes and its type (a `Media`, D153): a run of the dev kit's seeded
+   * with pictures (a collection's, D155). Ignored with one.
+   */
+  files?: Record<string, Record<string, Media>>;
   /**
    * How much each instance's files may take, in bytes (`ctx.store.files`, bot-os.md D149): a file,
    * and all of an instance's together; the core's defaults (`DEFAULT_FILE_LIMITS`, 16 MB and
@@ -463,6 +470,12 @@ export class Core {
       for (const [id, docs] of Object.entries(options.documents ?? {})) {
         const store = this.stores.open(id);
         for (const [name, value] of Object.entries(docs)) store.write(name, value);
+      }
+    if (options.dataDir === undefined)
+      for (const [id, files] of Object.entries(options.files ?? {})) {
+        const store = this.stores.open(id);
+        for (const [name, f] of Object.entries(files))
+          store.files.write(name, f.data, { type: f.mime });
       }
     this.sealer = secrets === undefined ? undefined : new Sealer(secrets);
     const dir = this.stores.dirOf(CORE);

@@ -8,7 +8,10 @@
  * value, each by its label; a field whose schema says when it applies (`shownWhen: { key: value }`,
  * a sibling key's value, its default counted) is shown only then, and taken away from the value as
  * soon as a change makes it not apply, so that a list of a mode not chosen never lingers hidden. Each field shows its value, or the schema's default, unmarked (the editor fills a node's
- * config with its defaults, `defaults.ts`); its description, the schema's, is its help.
+ * config with its defaults, `defaults.ts`); its description, the schema's, is its help. A media
+ * (its schema says `media`, the core's `mediaSchema`, bot-os.md D155) is a file picked, previewed,
+ * replaced or removed (`MediaField.tsx`); a text whose schema says `long` a larger box; a list of
+ * objects a form per item, each moved or removed, and added to.
  *
  * Editable when given `onChange` (the editor's draft, D55): a field emptied (once left) is taken
  * away, so that its default holds; a key of `secretKeys` (a connector's `configSecrets`, bot-os-api.md §4.9) is a
@@ -23,6 +26,7 @@ import type { JsonSchema } from '#src/ui/api.ts';
 import { plain } from './defaults.ts';
 import type { Scalar } from './ListFields.tsx';
 import { ListField, listItems, RecordField, recordValues } from './ListFields.tsx';
+import { MediaField, mediaLimits } from './MediaField.tsx';
 
 const show = (v: unknown): string => JSON.stringify(v, null, 2) ?? '';
 
@@ -141,30 +145,135 @@ export function JsonField(props: {
 function TextField(props: {
   name: string;
   number: boolean;
+  /** A text of several lines (its schema's `long`, D155): typed in a larger box. */
+  long?: boolean;
   value: string;
   set: ((v: unknown) => void) | undefined;
 }) {
   const [emptied, setEmptied] = useState(false);
   const { set } = props;
-  return (
-    <input
-      aria-label={props.name}
-      type={props.number ? 'number' : 'text'}
-      value={emptied ? '' : props.value}
-      readOnly={set === undefined}
-      onChange={(e) => {
-        const raw = e.target.value;
-        setEmptied(raw === '');
-        if (raw !== '') set?.(props.number ? Number(raw) : raw);
-      }}
-      onBlur={() => {
-        if (!emptied) return;
-        setEmptied(false);
-        set?.(undefined);
-      }}
-    />
+  const common = {
+    'aria-label': props.name,
+    value: emptied ? '' : props.value,
+    readOnly: set === undefined,
+    onChange: (e: { target: { value: string } }) => {
+      const raw = e.target.value;
+      setEmptied(raw === '');
+      if (raw !== '') set?.(props.number ? Number(raw) : raw);
+    },
+    onBlur: () => {
+      if (!emptied) return;
+      setEmptied(false);
+      set?.(undefined);
+    },
+  };
+  return props.long === true ? (
+    <textarea className="long" rows={4} {...common} />
+  ) : (
+    <input type={props.number ? 'number' : 'text'} {...common} />
   );
 }
+
+/** The items' schema of a list of objects, drawn as a form each; undefined for any other. */
+export function objectItems(schema: JsonSchema): JsonSchema | undefined {
+  if (schema['type'] !== 'array') return undefined;
+  const items = schema['items'] as JsonSchema | undefined;
+  return items !== undefined &&
+    plain(items)['type'] === 'object' &&
+    plain(items)['properties'] !== undefined &&
+    mediaLimits(plain(items)) === undefined
+    ? plain(items)
+    : undefined;
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * A list of objects (D155: a collection's `fields`), each item a form of its own, with its remove
+ * and move buttons, and an add button below; emptied, taken away. Read-only without `set`.
+ */
+function ObjectListField(props: {
+  name: string;
+  items: JsonSchema;
+  value: unknown;
+  set: ((v: unknown) => void) | undefined;
+  mediaSrc: MediaSrc | undefined;
+}) {
+  const { name, set } = props;
+  const rows = Array.isArray(props.value) ? (props.value as unknown[]) : [];
+  const write = (next: unknown[]): void => set?.(next.length === 0 ? undefined : next);
+  const move = (i: number, by: number): void => {
+    const next = [...rows];
+    const [row] = next.splice(i, 1);
+    next.splice(i + by, 0, row);
+    write(next);
+  };
+  return (
+    <div className="object-list" role="group" aria-label={name}>
+      {rows.length === 0 ? <span className="muted small">none</span> : null}
+      {rows.map((row, i) => (
+        <div key={i} className="object-row">
+          <SchemaForm
+            legend={`${name} ${i + 1}`}
+            schema={props.items}
+            value={isObject(row) ? row : {}}
+            mediaSrc={props.mediaSrc}
+            {...(set === undefined
+              ? {}
+              : { onChange: (v) => write(rows.map((r, j) => (j === i ? v : r))) })}
+          />
+          {set === undefined ? null : (
+            <span className="row-buttons">
+              <button
+                type="button"
+                className="link"
+                aria-label={`move ${name} ${i + 1} up`}
+                title="Move up"
+                disabled={i === 0}
+                onClick={() => move(i, -1)}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="link"
+                aria-label={`move ${name} ${i + 1} down`}
+                title="Move down"
+                disabled={i === rows.length - 1}
+                onClick={() => move(i, 1)}
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                className="link"
+                aria-label={`remove ${name} ${i + 1}`}
+                title="Remove"
+                onClick={() => write(rows.filter((_, j) => j !== i))}
+              >
+                −
+              </button>
+            </span>
+          )}
+        </div>
+      ))}
+      {set === undefined ? null : (
+        <button
+          type="button"
+          aria-label={`add to ${name}`}
+          title="Add"
+          onClick={() => write([...rows, {}])}
+        >
+          +
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The address of a kept media's picture (a record's, D155), for its preview. */
+export type MediaSrc = (value: unknown) => string | undefined;
 
 function Field(props: {
   name: string;
@@ -173,6 +282,7 @@ function Field(props: {
   required: boolean;
   set: ((v: unknown) => void) | undefined;
   editing: Editing | undefined;
+  mediaSrc: MediaSrc | undefined;
 }) {
   const { name, set, editing } = props;
   const schema = plain(props.schema);
@@ -182,13 +292,15 @@ function Field(props: {
   const value = props.value !== undefined ? props.value : fallback;
   const description = (props.schema['description'] ?? schema['description']) as string | undefined;
   const errors = editing?.errors[name] ?? [];
-  if (type === 'object' && schema['properties'] !== undefined)
+  const media = mediaLimits(props.schema) ?? mediaLimits(schema);
+  if (type === 'object' && schema['properties'] !== undefined && media === undefined)
     return (
       <div className="field">
         <SchemaForm
           legend={name}
           schema={schema}
           value={props.value as Record<string, unknown> | undefined}
+          mediaSrc={props.mediaSrc}
           {...(set === undefined ? {} : { onChange: (v) => set(v) })}
         />
         {description === undefined ? null : <small className="muted">{description}</small>}
@@ -197,7 +309,22 @@ function Field(props: {
   let control;
   const custom = editing?.custom[name];
   const labels = choicesOf(props.schema);
+  const items = objectItems(schema);
   if (custom !== undefined && set !== undefined) control = custom(props.value, set);
+  else if (media !== undefined)
+    control = (
+      <MediaField name={name} limits={media} value={props.value} set={set} src={props.mediaSrc} />
+    );
+  else if (items !== undefined)
+    control = (
+      <ObjectListField
+        name={name}
+        items={items}
+        value={props.value}
+        set={set}
+        mediaSrc={props.mediaSrc}
+      />
+    );
   else if (enumOf !== undefined && labels !== undefined)
     control = <Choices name={name} values={enumOf} labels={labels} value={value} set={set} />;
   else if (editing?.secretKeys.includes(name) === true && set !== undefined) {
@@ -250,6 +377,7 @@ function Field(props: {
       <TextField
         name={name}
         number={type !== 'string'}
+        long={(props.schema['long'] ?? schema['long']) === true}
         value={value === undefined ? '' : String(value)}
         set={set}
       />
@@ -277,6 +405,8 @@ function Field(props: {
   else control = <JsonField name={name} value={value} set={set} />;
   // A list's or a record's rows hold their own inputs, each labelled: no label around them all.
   const rows =
+    media !== undefined ||
+    items !== undefined ||
     listItems(schema) !== undefined ||
     recordValues(schema) !== undefined ||
     (enumOf !== undefined && labels !== undefined);
@@ -318,6 +448,8 @@ export function SchemaForm(props: {
   custom?: Readonly<Record<string, CustomControl>>;
   /** Keys drawn last, folded under "Tuning": fields a first setup leaves at their defaults. */
   folded?: readonly string[];
+  /** The address of a kept media's picture (D155), for a media field's preview. */
+  mediaSrc?: MediaSrc | undefined;
 }) {
   const properties = (props.schema['properties'] ?? {}) as Record<string, JsonSchema>;
   const required = (props.schema['required'] ?? []) as string[];
@@ -362,6 +494,7 @@ export function SchemaForm(props: {
           required={required.includes(name)}
           set={setter(name)}
           editing={editing}
+          mediaSrc={props.mediaSrc}
         />
       ))}
       {folded.length === 0 ? null : (
@@ -376,6 +509,7 @@ export function SchemaForm(props: {
               required={required.includes(name)}
               set={setter(name)}
               editing={editing}
+              mediaSrc={props.mediaSrc}
             />
           ))}
         </details>

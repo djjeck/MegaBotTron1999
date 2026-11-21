@@ -13,7 +13,7 @@
  * - `DevKit`: a core on a virtual clock (packages/core/src/clock.ts), its stores in memory, their
  *   files (`ctx.store.files`) too,
  *   with the plugins given, their configuration, the owner's kept settings, and the
- *   documents their stores start with: the state of a run, set before it starts.
+ *   documents and files their stores start with: the state of a run, set before it starts.
  * - `defineSimulator`: a simulator plugin, a model of a game that runs other plugins on the kit
  *   (bot-os.md D13). It is not registered in an instance: its manifest says what it is and what it
  *   plays, and its `run` plays one run.
@@ -313,6 +313,12 @@ export interface DevKitOptions {
   /** The documents each plugin instance's store starts with, by instance id and name. */
   documents?: Record<string, Record<string, unknown>>;
   /**
+   * The files each plugin instance's store starts with (D149), by instance id and name, each its
+   * bytes and its type (a `Media`): a collection's pictures (D155, `collectionSeed` of
+   * `@megabottron1999/turns`), a state's.
+   */
+  files?: Record<string, Record<string, Media>>;
+  /**
    * How much each instance's files may take (`CoreOptions.fileLimits`); kept in memory, as the
    * documents are.
    */
@@ -358,6 +364,7 @@ export class DevKit {
       ...(o.config === undefined ? {} : { config: o.config }),
       ...(o.graph === undefined ? {} : { graph: o.graph }),
       ...(o.documents === undefined ? {} : { documents: o.documents }),
+      ...(o.files === undefined ? {} : { files: o.files }),
       ...(o.fileLimits === undefined ? {} : { fileLimits: o.fileLimits }),
       ...(o.print === undefined ? {} : { print: o.print }),
       ...(o.validateEvents === undefined ? {} : { validateEvents: o.validateEvents }),

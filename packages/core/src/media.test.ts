@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { controlServer } from './control-server.ts';
 import { assertMedia, DevKit, fakeMedia } from './devkit.ts';
 import {
+  BYTES_KEY,
+  bytesJson,
+  bytesSchema,
+  isJsonBytes,
+  type Media,
+  mediaField,
   mediaKind,
   mediaMismatch,
   mediaOfFile,
@@ -157,5 +165,107 @@ describe('mediaOfFile', () => {
       data: JPEG,
       mime: 'application/octet-stream',
     });
+  });
+});
+
+describe('bytes as JSON (D155)', () => {
+  it('writes bytes as { $bytes: base64 }, and reads them back through bytesSchema', () => {
+    const m = fakeMedia('image/png', { size: 12, width: 2 });
+    const json = JSON.stringify({ m, b: Buffer.from('hi'), n: 1 }, bytesJson);
+    const back = JSON.parse(json) as { m: { data: unknown }; b: unknown; n: number };
+    expect(back.b).toEqual({ [BYTES_KEY]: 'aGk=' });
+    expect(back.n).toBe(1);
+    expect(isJsonBytes(back.m.data)).toBe(true);
+    const parsed = mediaSchema.parse(back.m);
+    expect(parsed.data).toBeInstanceOf(Uint8Array);
+    expect([...parsed.data]).toEqual([...m.data]);
+    expect(parsed.width).toBe(2);
+    expect(isJsonBytes({ [BYTES_KEY]: 'not base64!' })).toBe(false);
+    expect(isJsonBytes({ [BYTES_KEY]: 'aGk=', more: 1 })).toBe(false);
+    expect(isJsonBytes([1])).toBe(false);
+    expect(isJsonBytes(null)).toBe(false);
+    expect(bytesSchema.safeParse({ [BYTES_KEY]: 'not base64!' }).success).toBe(false);
+  });
+
+  it('says a media in its JSON Schema, and a field’s limits', () => {
+    expect(z.toJSONSchema(mediaSchema, { io: 'input', unrepresentable: 'any' })).toMatchObject({
+      type: 'object',
+      media: {},
+    });
+    const face = mediaField({ kinds: ['image'], mimes: ['image/png'], maxBytes: 100 });
+    expect(z.toJSONSchema(face, { io: 'input', unrepresentable: 'any' })).toMatchObject({
+      media: { kinds: ['image'], mimes: ['image/png'], maxBytes: 100 },
+    });
+    expect(face.safeParse(fakeMedia('image/png', { size: 50 })).success).toBe(true);
+    const r = face.safeParse(fakeMedia('image/png', { size: 101 }));
+    expect(r.error?.issues[0]?.message).toBe('101 B, more than the 100 B taken here');
+    expect(z.toJSONSchema(mediaField(), { io: 'input', unrepresentable: 'any' })).toMatchObject({
+      media: {},
+    });
+  });
+
+  it('goes both ways through the control API: an action given a file answers it back', async () => {
+    const kit = new DevKit({
+      plugins: [
+        definePlugin({
+          manifest: {
+            id: 'album',
+            version: '0.1.0',
+            kinds: ['agent'],
+            description: 'Echoes a picture',
+            interface: {
+              actions: {
+                echo: { help: 'Answers the picture', input: z.object({ picture: mediaSchema }) },
+              },
+            },
+          },
+          create: () => ({
+            interface: {
+              actions: {
+                echo: ({ picture }: { picture: Media }) => ({ ok: true, media: picture }),
+              },
+            },
+          }),
+        }),
+      ],
+    });
+    await kit.start();
+    const server = controlServer({
+      controls: kit.core.controls,
+      settings: kit.core.settings,
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as { port: number };
+    const picture = fakeMedia('image/gif', { size: 20 });
+    const res = await fetch(`http://127.0.0.1:${port}/plugins/album/actions/echo`, {
+      method: 'POST',
+      body: JSON.stringify({ picture }, bytesJson),
+    });
+    const out = (await res.json()) as { media: { data: unknown; mime: string } };
+    expect(res.status).toBe(200);
+    expect(out.media.mime).toBe('image/gif');
+    expect([...mediaSchema.parse(out.media).data]).toEqual([...picture.data]);
+    await new Promise<void>((r) => server.close(() => r()));
+    await kit.stop();
+  });
+
+  it('seeds a dev kit’s stores with files', async () => {
+    let listed: unknown;
+    const kit = new DevKit({
+      plugins: [
+        definePlugin({
+          manifest: { id: 'album', version: '0.1.0', kinds: ['agent'], description: 'Pictures' },
+          create: (ctx) => ({
+            start() {
+              listed = mediaOfFile(ctx.store.files, 'one');
+            },
+          }),
+        }),
+      ],
+      files: { album: { one: fakeMedia('image/png', { size: 8 }) } },
+    });
+    await kit.start();
+    expect(listed).toEqual({ data: fakeMedia('image/png', { size: 8 }).data, mime: 'image/png' });
+    await kit.stop();
   });
 });

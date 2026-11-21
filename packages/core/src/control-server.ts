@@ -53,7 +53,9 @@
  * - `GET /plugins/<id>/view`: the state a node keeps, with its schema, for the viewer (D72); 404
  *   for a node that keeps none, 409 for one not running.
  * - `POST /plugins/<id>/actions/<name>` with the action's input as the body: its output, a 400 for
- *   an input its schema refuses, a 409 when the plugin refuses, with why.
+ *   an input its schema refuses, a 409 when the plugin refuses, with why. Bytes go both ways as
+ *   `{ "$bytes": "<base64>" }` (bot-os.md D155): a `Media` in the input (a file the panel sends,
+ *   within the body's `MAX_UPLOAD`, 64 MiB, so about 48 MiB of bytes), and in every answer.
  * - `GET /plugins/<id>/files`: a node's files (D149), each with its name, size, media type and
  *   when it was written, what they take together and the limits; read from its instance's store,
  *   whatever the node's state. 404 for no node.
@@ -109,6 +111,7 @@ import { type GraphFileControls, GraphFileError } from './graph-file.ts';
 import { describeNodes } from './graph-view.ts';
 import { type InstanceInfo } from './instance-registry.ts';
 import { loginAnswer } from './login.ts';
+import { bytesJson } from './media.ts';
 import { type TreeListing } from './module-files.ts';
 import { GitError, type HostControls, type RepoPick } from './module-git.ts';
 import { type ModuleFile, ModuleInUse, type ModuleSource } from './module-store.ts';
@@ -326,7 +329,8 @@ export function controlHandler(
   return (req, res) => {
     const reply = (status: number, value: unknown): void => {
       res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      res.end(`${JSON.stringify(value)}\n`);
+      // Bytes in an answer (a read's media, D155) go as `{ "$bytes": "<base64>" }`.
+      res.end(`${JSON.stringify(value, bytesJson)}\n`);
     };
     const handle = async (): Promise<void> => {
       const url = new URL(req.url ?? '/', 'http://control');

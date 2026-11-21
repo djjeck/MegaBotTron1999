@@ -23,11 +23,15 @@ hidden from every view of it (`src/sensitive.ts`, `hideSensitive`, D124).
 - `src/index.ts` is the public API (`@megabottron1999/core`); plugins import nothing else.
 - `src/devkit.ts`: a core on a virtual clock with fake connectors, for tests and simulators; a fake
   connector given the photos of its messages answers the action `photo` (D151); media made up for a
-  test and checked (`fakeMedia`, `assertMedia`, D153).
+  test and checked (`fakeMedia`, `assertMedia`, D153); a run's stores seeded with files as with
+  documents (`files`, D155).
 - `src/media.ts`: media (docs/bot-os.md D153): `Media`, bytes and their type, shared by every plugin
   that passes a picture, its schema, its kind, a type read from the bytes (`sniffMime`), the checks
   that the bytes are the type they say and within limits (`mediaMismatch`, `mediaRefusal`), what an
-  action that answers media answers (`MediaResult`), and a plugin's file as a media (`mediaOfFile`).
+  action that answers media answers (`MediaResult`), and a plugin's file as a media (`mediaOfFile`);
+  bytes as JSON carries them, `{ "$bytes": "<base64>" }`, read by `bytesSchema` and written by
+  `bytesJson` (the control API's answers), and a media within limits as a schema whose JSON Schema
+  says them, for the editor's file picker (`mediaField`, D155).
 - `src/message-photo.ts`: a message's photo fetched on demand (docs/bot-os.md D151): the action
   `photo({ chat, message })` a connector plugin offers on its interface over its connector's
   `photo`, answering a `MediaResult` (D153), and its size limit (`PHOTO_MAX_BYTES`).

@@ -1,8 +1,8 @@
 # @megabottron1999/turns
 
 The base plugins for automation: three for a game bot played by a simulated person (its parser, the
-person, the player), one reaction, a game's player state, the script node, and the node that tells
-the owner what needs attention.
+person, the player), one reaction, a game's player state, the script node, a collection of records,
+and the node that tells the owner what needs attention.
 
 - `turnParserPlugin` (`src/turn-parser.ts`): a parser of one bot's answers on a Telegram user
   account (a chat-in input: it reads, never sends), from a grammar the game provides with its bot's
@@ -105,6 +105,19 @@ the owner what needs attention.
   applied and refused, answers read, turns). Its view, in its node's panel, shows what waits to be
   told and when, its last tells, the start notice's and the summary's times, and the last message
   each chat refused (`notSent`, D95).
+- `collectionPlugin` (`src/collection.ts`): the `collection`, records of a schema its config gives
+  (docs/bot-os.md D155): its `fields`, each a `text` (one line or `long`), `number`, `boolean`,
+  `choice` of its `options`, `list` of texts or `media` (a `Media` within its `kinds`, `mimes` and
+  `maxBytes`), `required` or `unique`, with its `help`; `title`, the field that names a record. Its
+  node's manifest is its own (D74): the actions' inputs made from its fields, its event
+  `<node>.changed`. Its records are its store's document `records`, each a stable id (`r1`, …) and
+  its place; a media's bytes its store's file `sha256-<hex>`, kept once, the record holding
+  `{ id: "sha256:<hex>", mime, width?, height? }`, a file no record refers to deleted after each
+  change and at the start. Reads `list`, `get`, `schema` and `media` (a `MediaResult`); actions
+  `add`, `update`, `remove`, `reorder`, each checked against its schema. A schema changed keeps the
+  records: a field gone is dropped, a value its field no longer takes kept but left out, the record
+  `incomplete` with why, as one missing a required field; the node starts all the same.
+  `collectionSeed(records)` makes its store's document and files for a dev kit's run.
 - `scriptPlugin` (`src/script-plugin.ts`): the `script` node, TypeScript the owner types in the web
   UI (docs/bot-os.md D76), on the ports its config declares (events and interface inputs, chat-out
   outputs with their commands, events of its own; several of a kind, each its own name, D84), its
