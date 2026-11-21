@@ -265,7 +265,7 @@ hears a namespace's events only through a port an edge binds.
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `chat-in`   | `chat`: a connector's account, of its network (derived)                                                                         | `{ type: 'chat-in', network?, when?, sameAs? }` (declared); its edge carries the chats it `reads` and its `senders`                                                                   |
 | `chat-out`  | `{ type: 'chat-out', network?, many?, owner?, single?, photos? }` (declared in `outputs`); its edge carries what it `sends`     | `chat`: a connector's account (derived), bound to any number of senders; their edges carry the chats sent to and `commands`                                                           |
-| `events`    | `events` (`<ns>-events` with more than one): each namespace it registers (derived)                                              | `{ type: 'events', namespace }`, bound to any number of instances; it hears only theirs; `namespace` may be `{ config: key }`                                                         |
+| `events`    | `events` (`<ns>-events` with more than one): each namespace it registers (derived)                                              | `{ type: 'events', namespace }`, bound to any number of instances; it hears only theirs; `namespace` may be `{ config: key }`, or `{ edge: true }`: its one edge's (below, D156)      |
 | `interface` | `interface`: its declared reads and actions (every plugin has one, derived)                                                     | `{ type: 'interface', plugin, members }`; none for a plugin it only needs started first; no `plugin`: a contract                                                                      |
 | `commands`  | `{ type: 'commands' }` (declared in `outputs`, a connector's alone, of its account's network); its edges carry what each serves | `commands`: a plugin's chat commands (derived from `interface.commands`), bound to any number of connectors; each edge carries `serves`, `chats`, `privateChats`, `senders`, `dryRun` |
 | `attention` | `{ type: 'attention' }` (declared in `outputs`): a simulated person's attention, bound to any number of players                 | `{ type: 'attention', bind? }` (declared): the person whose sittings it plays in, one edge; it carries nothing                                                                        |
@@ -383,6 +383,44 @@ node whose config leaves a required one unresolved is refused, naming the node
 whose value names no namespace; an optional one whose key is not set is not there: the node has no
 such port, and an edge to it is refused. `resolveInputs` (`packages/core/src/ports.ts`) resolves
 them; `ResolvedNode.ports` holds a node's.
+
+**An events input whose namespace is its edge's** (bot-os.md D156): a plugin that hears a node's own
+events, in that node's id's namespace (a `collection`'s `<node>.changed`, §5; a script node's, D74),
+cannot name it in its manifest, and should not ask the owner to type the node's id in its config. It
+declares `{ type: 'events', namespace: { edge: true } }`, usually `optional`:
+
+```ts
+inputs: {
+  cast: { type: 'interface', plugin: 'collection', members: ['state.list'] },
+  'cast-events': {
+    type: 'events',
+    namespace: { edge: true },
+    optional: true,
+    help: 'The cast’s changes, to remake the cards at once',
+  },
+},
+```
+
+The port is always there, with nothing to configure, so the editor draws an edge to it from any
+events output at once (`edge: true` in its view, no `namespace` until bound). It takes **one** edge
+(a second is refused:
+`input port cast-events takes one edge: its namespace is the node its edge comes from`), from an
+events output of any namespace; the graph's check gives it that output's namespace
+(`hosts.events → postcard.cast-events`: `hosts`), as `ResolvedNode.ports` holds it, and the bus,
+`ctx.events.read` and the check then treat it as any events input of that namespace. Unbound, it
+hears nothing, and a required one is refused as any unbound input is
+(`input port cast-events (events of the node its edge comes from) is not bound`). Its code
+subscribes relative to the port, and learns the namespace if it needs it (the node's id, for a
+collection), from the bus or from each event's `type`:
+
+```ts
+const ns = ctx.bus.namespace('cast-events'); // 'hosts', or undefined with no edge
+ctx.bus.subscribeTo('cast-events', 'changed', (e) => remake(e.type)); // e.type: 'hosts.changed'
+```
+
+The programmatic wiring (`defaultGraph`, the dev kit's default) binds it only where its manifest's
+`bind: { nodes: [id] }` says, to that node's events output; a test binds it with the edge itself, in
+the kit's `graph` (`edges: [{ from: 'hosts.events', to: 'postcard.cast-events' }]`).
 
 Each port type has a stable id, a description, and a shape and a colour for the drawing
 (`PORT_TYPE_INFO`). An input may be `optional`: it may be left unbound, imposes no order and fails
@@ -1053,6 +1091,12 @@ wake.
   the next one is read. It returns the way to stop; a plugin that fails or stops is unsubscribed.
   The handler gets, with the event, where the log put it (`at`, a `LogPosition`, below; undefined
   without a log).
+- `bus.namespace(port)` is the namespace its events input `port` hears (bot-os.md D156): the
+  manifest's, its config's, or, for one declared `{ edge: true }`, its edge's; undefined while no
+  edge binds that one. `bus.subscribeTo(port, pattern, handler)` subscribes relative to it:
+  `'changed'` is `<namespace>.changed`, `'*'` the whole namespace; each event still has its full
+  `type`. An unbound input from its edge hears nothing, and its stop does nothing. Both throw for a
+  port that is not one of its events inputs.
 - Every event published is written to the event log, as `{ type, t, instance, ...payload }`, one
   JSON line per record in a file per UTC day (`packages/core/src/event-log.ts`); `instance` is the
   instance whose state the publishing node runs on (§2.2). `type`, `t` and `instance` are the

@@ -1954,7 +1954,18 @@ export class Core {
     // Handed back once: a crash before the next stop must not restore it a second time.
     kept.backend.delete(RESTORE);
     const log = this.logger(id);
-    const own = this.bus.handle(id, entry.manifest, sourcesOf(node), log, node.instance);
+    const own = this.bus.handle(
+      id,
+      entry.manifest,
+      sourcesOf(node),
+      log,
+      node.instance,
+      Object.fromEntries(
+        Object.entries(node.ports).flatMap(([port, p]) =>
+          p.type === 'events' ? [[port, p.namespace]] : []
+        )
+      )
+    );
     // The message its node is reading now, through a chat-in edge: an event it publishes meanwhile
     // is an answer heard from that chat, for the send-queue watchdog (D93), and, if its manifest
     // declares the event an answer, the answer to a command sent there (D98); its own messages and
@@ -2218,7 +2229,9 @@ export class Core {
     const readable = new Set([
       ...manifest.games.registers,
       manifest.id,
-      ...Object.values(node.ports).flatMap((i) => (i.type === 'events' ? [i.namespace] : [])),
+      ...Object.values(node.ports).flatMap((i) =>
+        i.type === 'events' && i.namespace !== '' ? [i.namespace] : []
+      ),
     ]);
     const nsOf = (type: string): string =>
       type.includes('.') ? type.slice(0, type.indexOf('.')) : type;
@@ -2532,7 +2545,8 @@ function sourcesOf(node: ResolvedNode): Map<string, Set<string>> {
   for (const ns of node.manifest.games.registers) add(ns, node.id);
   for (const [port, bs] of node.inputs) {
     const input = node.ports[port];
-    if (input?.type !== 'events') continue;
+    // One from its edge that no edge binds (D156) hears nothing.
+    if (input?.type !== 'events' || input.namespace === '') continue;
     if (!out.has(input.namespace)) out.set(input.namespace, new Set());
     for (const b of bs) add(input.namespace, b.node);
   }

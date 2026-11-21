@@ -110,14 +110,16 @@ and the node that tells the owner what needs attention.
   `choice` of its `options`, `list` of texts or `media` (a `Media` within its `kinds`, `mimes` and
   `maxBytes`), `required` or `unique`, with its `help`; `title`, the field that names a record. Its
   node's manifest is its own (D74): the actions' inputs made from its fields, its event
-  `<node>.changed`. Its records are its store's document `records`, each a stable id (`r1`, …) and
-  its place; a media's bytes its store's file `sha256-<hex>`, kept once, the record holding
-  `{ id: "sha256:<hex>", mime, width?, height? }`, a file no record refers to deleted after each
-  change and at the start. Reads `list`, `get`, `schema` and `media` (a `MediaResult`); actions
-  `add`, `update`, `remove`, `reorder`, each checked against its schema. A schema changed keeps the
-  records: a field gone is dropped, a value its field no longer takes kept but left out, the record
-  `incomplete` with why, as one missing a required field; the node starts all the same.
-  `collectionSeed(records)` makes its store's document and files for a dev kit's run.
+  `<node>.changed` (a plugin hears it through an events input declared `namespace: { edge: true }`,
+  D156: the edge from the collection's `events` output is enough). Its records are its store's
+  document `records`, each a stable id (`r1`, …) and its place; a media's bytes its store's file
+  `sha256-<hex>`, kept once, the record holding `{ id: "sha256:<hex>", mime, width?, height? }`, a
+  file no record refers to deleted after each change and at the start. Reads `list`, `get`, `schema`
+  and `media` (a `MediaResult`); actions `add`, `update`, `remove`, `reorder`, each checked against
+  its schema. A schema changed keeps the records: a field gone is dropped, a value its field no
+  longer takes kept but left out, the record `incomplete` with why, as one missing a required field;
+  the node starts all the same. `collectionSeed(records)` makes its store's document and files for a
+  dev kit's run.
 - `scriptPlugin` (`src/script-plugin.ts`): the `script` node, TypeScript the owner types in the web
   UI (docs/bot-os.md D76), on the ports its config declares (events and interface inputs, chat-out
   outputs with their commands, events of its own; several of a kind, each its own name, D84), its

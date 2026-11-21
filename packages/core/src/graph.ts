@@ -621,7 +621,9 @@ export function resolveGraph(
       }
       problems.push(
         `node ${toNode}: no input port ${toPort}` +
-          (declared?.type === 'events' && typeof declared.namespace !== 'string'
+          (declared?.type === 'events' &&
+          typeof declared.namespace !== 'string' &&
+          'config' in declared.namespace
             ? `: its namespace comes from config ${declared.namespace.config}, which is not set`
             : toPort === 'chat' || e.type === 'chat-out'
               ? noChat(to.manifest, toNode)
@@ -710,6 +712,13 @@ export function resolveGraph(
       continue;
     }
     const bound = to.inputs.get(toPort) as Binding[];
+    // An events input whose namespace is its edge's (D156) takes one edge: its namespace is that.
+    if (input.type === 'events' && input.edge === true && bound.length > 0) {
+      problems.push(
+        `node ${toNode}: input port ${toPort} takes one edge: its namespace is the node its edge comes from (${name})`
+      );
+      continue;
+    }
     if (
       input.type !== 'events' &&
       input.type !== 'chat-out' &&
@@ -779,6 +788,9 @@ export function resolveGraph(
       ...dryRun,
     };
     bound.push({ node: fromNode, port, type: input.type, ...carries });
+    // Its namespace, from its edge (D156): the events output's it comes from.
+    if (input.type === 'events' && input.edge === true && output.type === 'events')
+      to.ports[toPort] = { ...input, namespace: output.namespace };
     sending?.push({ node: toNode, port: toPort, type: input.type, ...carries });
     edges.push({
       from: `${fromNode}.${port}`,

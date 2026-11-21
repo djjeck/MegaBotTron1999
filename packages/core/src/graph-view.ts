@@ -244,6 +244,11 @@ export type PortView = (
       namespace?: string;
       /** The key of its node's config that names its namespace, when the manifest says so. */
       config?: string;
+      /**
+       * An input's namespace is its edge's (D156): the events output's its one edge comes from;
+       * `namespace` is that once an edge binds it.
+       */
+      edge?: true;
       /** The key of its node's config that, set, gives the node this port (the reactor's `on`). */
       when?: string;
       /**
@@ -391,8 +396,12 @@ function inputView(
     const from = declared.type === 'events' ? declared.namespace : undefined;
     return {
       type: 'events',
-      ...(typeof p.namespace === 'string' ? { namespace: p.namespace } : {}),
-      ...(from !== undefined && typeof from !== 'string' ? { config: from.config } : {}),
+      ...(typeof p.namespace === 'string' && p.namespace !== '' ? { namespace: p.namespace } : {}),
+      ...(from !== undefined && typeof from !== 'string'
+        ? 'edge' in from
+          ? { edge: true as const }
+          : { config: from.config }
+        : {}),
       ...(p.when === undefined ? {} : { when: p.when.config }),
       ...base,
     };

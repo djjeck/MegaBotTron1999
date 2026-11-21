@@ -13,7 +13,10 @@
  *   written to on its right.
  * - `events`: the events of a namespace, from the plugins that register it. The manifest names the
  *   namespace, or the key of its node's config that does (`{ config: 'on' }`), so that a plugin
- *   that learns what it listens to from its config (the reactor) has the port resolved per node.
+ *   that learns what it listens to from its config (the reactor) has the port resolved per node;
+ *   or `{ edge: true }` (bot-os.md D156): the namespace of the events output its one edge comes
+ *   from, a collection's or a script node's own id, resolved by the graph, so that wiring the edge
+ *   is enough.
  * - `interface`: a plugin's declared interface (§2): its reads and actions; an input names the
  *   members it uses, none for a plugin it only needs started first. An input that names no plugin
  *   is a contract: any interface that declares its members binds it.
@@ -158,6 +161,9 @@ const configKey = z.strictObject({
   config: z.string().regex(/^[A-Za-z_$][\w$]*$/u, 'expected a config key'),
 });
 
+/** An events input's namespace, from its edge (D156): the events output's it comes from. */
+const fromEdge = z.strictObject({ edge: z.literal(true) });
+
 /**
  * An input port, as a manifest declares it. `bind` is the edge the programmatic wiring gives it
  * by default (the core's default graph); an explicit graph binds it as it says.
@@ -190,9 +196,11 @@ export const inputSchema = z.discriminatedUnion('type', [
     type: z.literal('events'),
     /**
      * Its namespace; or `{ config: key }`, the key of its node's config whose value names it (a
-     * namespace, or an event type of it), resolved per node (`resolveInputs`).
+     * namespace, or an event type of it), resolved per node (`resolveInputs`); or `{ edge: true }`
+     * (D156), the namespace of the events output its edge comes from, resolved by the graph: the
+     * port always exists, takes one edge from any events output, and hears nothing without one.
      */
-    namespace: z.union([z.string().regex(ID), configKey]),
+    namespace: z.union([z.string().regex(ID), configKey, fromEdge]),
     /**
      * The key of its node's config that, set, gives the node this port, as a chat-in's: unset, the
      * node has none; set, it is required unless `optional` (a reactor on events must hear some).
@@ -337,10 +345,21 @@ export interface CommandsInput {
 export const COMMANDS_PORT = 'commands';
 /** An events input's namespace as declared: a namespace, or the config key that names one. */
 export type NamespaceSource = Extract<DeclaredInput, { type: 'events' }>['namespace'];
-/** An input port of a node: its namespace resolved (`resolveInputs`), as the graph compares it. */
+/**
+ * An input port of a node: its namespace resolved (`resolveInputs`), as the graph compares it. An
+ * events input whose namespace is its edge's (`edge`, D156) has `''` until the graph binds it,
+ * then the namespace of the events output its edge comes from.
+ */
 export type InputPort =
   | Exclude<ManifestInputPort, { type: 'events' }>
-  | (Omit<Extract<DeclaredInput, { type: 'events' }>, 'namespace'> & { namespace: string });
+  | (Omit<Extract<DeclaredInput, { type: 'events' }>, 'namespace'> & {
+      namespace: string;
+      edge?: true;
+    });
+
+/** Whether an events input's namespace, as declared, is its edge's (D156). */
+export const isFromEdge = (namespace: NamespaceSource): namespace is { edge: true } =>
+  typeof namespace === 'object' && 'edge' in namespace;
 
 /** An output port: a connector's chat-in, a declared chat-out, and the derived events and interface. */
 export type OutputPort =
@@ -360,8 +379,15 @@ export function describePort(p: ManifestInputPort | InputPort | OutputPort): str
   if (p.type === 'commands')
     return 'commands' in p ? 'commands' : `commands of ${p.network ?? 'any network'}`;
   if (p.type === 'attention') return 'attention';
-  if (p.type === 'events')
-    return `events of ${typeof p.namespace === 'string' ? p.namespace : `config ${p.namespace.config}`}`;
+  if (p.type === 'events') {
+    if (typeof p.namespace === 'string')
+      return 'edge' in p && p.edge === true && p.namespace === ''
+        ? 'events of the node its edge comes from'
+        : `events of ${p.namespace}`;
+    return isFromEdge(p.namespace)
+      ? 'events of the node its edge comes from'
+      : `events of config ${p.namespace.config}`;
+  }
   return p.plugin === undefined
     ? `interface with ${p.members.join(', ')}`
     : `interface of ${p.plugin}`;
@@ -382,7 +408,9 @@ export function mismatch(input: InputPort, output: OutputPort): string | undefin
       ? undefined
       : no;
   if (input.type === 'events')
-    return output.type === 'events' && input.namespace === output.namespace ? undefined : no;
+    return output.type === 'events' && (input.edge === true || input.namespace === output.namespace)
+      ? undefined
+      : no;
   if (input.type === 'commands') return output.type === 'commands' ? undefined : no;
   if (input.type === 'attention') return output.type === 'attention' ? undefined : no;
   if (output.type === 'commands' || output.type === 'attention') return no;
@@ -406,7 +434,7 @@ export function namespaceOf(value: unknown): string | undefined {
 /**
  * A node's input ports, each resolved from its node's `config` when the manifest says so: an
  * events input's namespace (`{ config: key }`), the namespace the key's value names, or the event
- * type's; a chat-in or events input's presence (`when: { config: key }`), there only while the key
+ * type's (one from its edge, `{ edge: true }`, is there with `''`, for the graph to resolve); a chat-in or events input's presence (`when: { config: key }`), there only while the key
  * is set (and not false). An events input whose namespace key is not set is left out if it is optional or has such
  * a `when` (the node has no such port), and is a problem if it is required; one whose value names
  * no namespace is a problem. Each problem names the port; the caller names the node.
@@ -429,6 +457,11 @@ export function resolveInputs(
       continue;
     if (p.type !== 'events' || typeof p.namespace === 'string') {
       ports[name] = p as InputPort;
+      continue;
+    }
+    // Its edge's (D156): always there, its namespace the graph's to resolve.
+    if (isFromEdge(p.namespace)) {
+      ports[name] = { ...p, namespace: '', edge: true };
       continue;
     }
     const key = p.namespace.config;

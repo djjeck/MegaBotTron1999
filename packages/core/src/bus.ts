@@ -33,6 +33,20 @@ export interface BusHandle {
    * (`at`, bot-os.md D72; undefined without a log). Returns the way to stop.
    */
   subscribe(pattern: string, handler: EventHandler): () => void;
+  /**
+   * The namespace its events input `port` hears (D156): its manifest's, its config's, or, for one
+   * declared `{ edge: true }`, the namespace of the events output its edge comes from (a
+   * collection's or a script node's own id: the node bound); undefined while no edge binds that
+   * one. Throws for a port that is not one of its events inputs.
+   */
+  namespace(port: string): string | undefined;
+  /**
+   * Hears `pattern`, relative to its events input `port` (D156): a name (`'changed'`, the type
+   * `<namespace>.changed`) or `'*'` (its whole namespace), each event with its full `type`. An
+   * input from its edge that no edge binds hears nothing: the stop returned does nothing. Throws
+   * as `namespace` does, and as `subscribe` does for a type not registered.
+   */
+  subscribeTo(port: string, pattern: string, handler: EventHandler): () => void;
 }
 
 /** A subscriber: the event, and where the log put it (undefined without a log). */
@@ -106,9 +120,20 @@ export class Bus {
     manifest: Manifest,
     sources: ReadonlyMap<string, ReadonlySet<string>>,
     log: Logger,
-    kept: string = instance
+    kept: string = instance,
+    /** Its events inputs' namespaces, by port: `''` for one from its edge that none binds (D156). */
+    ports: Readonly<Record<string, string>> = {}
   ): BusHandle {
-    return {
+    const namespace = (port: string): string | undefined => {
+      const ns = ports[port];
+      if (ns === undefined)
+        throw new Error(
+          `${instance} has no events input ${port}` +
+            (Object.keys(ports).length === 0 ? '' : `: its are ${Object.keys(ports).join(', ')}`)
+        );
+      return ns === '' ? undefined : ns;
+    };
+    const handle: BusHandle = {
       publish: (type, payload, t) => {
         const entry = this.types.get(type);
         if (entry === undefined) throw new Error(`no event type ${type} is registered`);
@@ -153,7 +178,14 @@ export class Bus {
           this.subscriptions = this.subscriptions.filter((x) => x !== s);
         };
       },
+      namespace,
+      subscribeTo: (port, pattern, handler) => {
+        const ns = namespace(port);
+        if (ns === undefined) return () => {};
+        return handle.subscribe(pattern === '*' ? ns : `${ns}.${pattern}`, handler);
+      },
     };
+    return handle;
   }
 
   /** Drops every subscription of a plugin: it failed, or stopped. */

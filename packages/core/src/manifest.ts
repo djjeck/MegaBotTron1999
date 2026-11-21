@@ -572,6 +572,7 @@ export const manifestSchema = z
       if (
         p.type === 'events' &&
         typeof p.namespace !== 'string' &&
+        'config' in p.namespace &&
         !Object.hasOwn(m.config?.shape ?? {}, p.namespace.config)
       )
         ctx.addIssue({

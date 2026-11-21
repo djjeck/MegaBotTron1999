@@ -239,6 +239,48 @@ describe('collectionManifest', () => {
   });
 });
 
+describe('a collection’s events, heard from the edge alone (D156)', () => {
+  it('reaches a plugin whose events input takes its namespace from its edge', async () => {
+    const heard: string[] = [];
+    const bound: (string | undefined)[] = [];
+    const watcher = definePlugin({
+      manifest: {
+        id: 'postcard',
+        version: '0.1.0',
+        kinds: ['stats'],
+        description: 'Remakes its cards when its cast changes',
+        inputs: {
+          'cast-events': { type: 'events', namespace: { edge: true }, optional: true },
+        },
+      },
+      create: (ctx) => {
+        bound.push(ctx.bus.namespace('cast-events'));
+        ctx.bus.subscribeTo('cast-events', 'changed', (e) =>
+          heard.push(`${e.type} ${String(e['change'])} ${String(e['id'])}`)
+        );
+        return {};
+      },
+    });
+    const kit = new DevKit({
+      plugins: [collectionPlugin(), watcher],
+      graph: {
+        version: 2,
+        nodes: [
+          { id: 'hosts', plugin: 'collection', config: CAST as Record<string, unknown> },
+          { id: 'postcard', plugin: 'postcard' },
+        ],
+        // No config names the collection: the edge alone binds it.
+        edges: [{ from: 'hosts.events', to: 'postcard.cast-events' }],
+      },
+    });
+    await kit.start();
+    await kit.core.controls.act('hosts', 'add', { values: { name: 'Ada' } });
+    expect(bound).toEqual(['hosts']);
+    expect(heard).toEqual(['hosts.changed added r1']);
+    await kit.stop();
+  });
+});
+
 describe('a collection’s records', () => {
   it('adds, updates, reorders and removes, each announced as <node>.changed', async () => {
     const t = await run();

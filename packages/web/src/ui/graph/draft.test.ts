@@ -749,6 +749,10 @@ describe('an edge dragged (#4)', () => {
     );
     // Not resolved yet: the check says.
     expect(bindProblem(dice, port({ type: 'events', config: 'on' }))).toBeUndefined();
+    // One whose namespace is its edge's (D156) takes any events output, with nothing configured.
+    const fromEdge = port({ type: 'events', edge: true });
+    expect(bindProblem(dice, fromEdge)).toBeUndefined();
+    expect(inputsOf({ 'cast-events': fromEdge }, undefined)).toEqual({ 'cast-events': fromEdge });
     const face = port({ type: 'interface', plugin: 'dice', members: ['state.get'] });
     expect(
       bindProblem(face, port({ type: 'interface', plugin: 'dice', members: ['state.get'] }))
