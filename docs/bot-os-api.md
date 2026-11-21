@@ -225,9 +225,10 @@ then the plugin's own, and its answers held by the edge, then the core's own. Th
 each in the menus of the chats it is served in, and answers it there alone, with the chat asked in
 (`Request.chat`) (`packages/core/src/commands.ts`). The answer is the surface's (D29), within the
 edge: the handler says what to answer (`Answer`: a text, plain or Markdown, with buttons that each
-run a command again and an expiry in a group; a photo, as bytes or by the network's id of one sent
-before, with a caption under it if given, plain or Markdown as a text is,
-`photo(photo, caption?, format?)`: a caption over `CAPTION_MAX`, Telegram's 1024 characters, is
+run a command again and an expiry in a group; a photo, as a `Media` (§4.18) or by the network's id
+of one sent before, with a caption under it if given, plain or Markdown as a text is,
+`photo(photo, caption?, format?)`: a caption over `CAPTION_MAX`, Telegram's 1024 characters, and
+bytes no JPEG, PNG, GIF or WebP or not the type they say (`photoRefusal`, bot-os.md D153), are
 refused, thrown and logged `refused`, before anything is sent, bot-os.md D150), and the surface
 sends it in reply to the asker (`Asker`: the network's id and username, and whether it is the
 owner), in the chat asked; each answer is recorded as a send (`core.send`, its `origin`
@@ -985,10 +986,11 @@ interface StoreFiles {
   `GET /plugins/<id>/files/<name>` (§4.11), and the node's panel in the web UI. Deleting one is the
   plugin's (or an action it declares).
 - A connector's sealed view (`ctx.secrets.store`, §4.9) has the store's files, unsealed.
-- An answer's photo takes bytes (`Answer.photo({ data, filename })`, §2), so a file read back is
-  sent as is. A `card-painter` plugin, for example, asks an image service for a card's picture,
-  writes `card-42.png` with the picture's provenance in a document beside it, and answers `/card 42`
-  with the photo read back, without asking the service again.
+- A file read back is a `Media` (`mediaOfFile(ctx.store.files, name)`, §4.18: its bytes and the type
+  kept with it), which an answer's photo (`Answer.photo`, §2), an outbox's (§4.6) and `ask`'s images
+  (§4.13) take as is. A `card-painter` plugin, for example, asks an image service for a card's
+  picture, writes `card-42.png` with the picture's provenance in a document beside it, and answers
+  `/card 42` with the photo read back, without asking the service again.
 
 **Backups.** The whole data volume is the instance's state: the graph, the event log, the instances'
 stores, the core's own and the modules. Back up the volume as one, with the instance stopped for the
@@ -1205,14 +1207,15 @@ refuses them with why (§4.6).
 `photo(chat, message)` (both Telegram connectors), and its plugin then offers it as the action
 `photo` of its node's interface (`photoAction` and `PHOTO_ACTION`,
 `packages/core/src/message-photo.ts`), which a plugin reaches through an interface input bound to
-the node, so that the edge is the permission (P6, P17); nothing is downloaded with a message (D82):
+the node, so that the edge is the permission (P6, P17); nothing is downloaded with a message (D82).
+It answers a `MediaResult` (§4.18, bot-os.md D153), the photo its `media`:
 
 ```ts
 inputs: { tg: { type: 'interface', plugin: 'telegram-user', members: ['actions.photo'] } },
 // …
 const { actions } = ctx.use<{ actions: { photo: FetchPhoto } }>('tg');
 const r = await actions.photo({ chat: '-1001000000001', message: '4242' });
-if (r.ok && r.photo !== null) ctx.store.files.write('room-4242.jpg', r.photo.data, { type: r.photo.mime });
+if (r.ok && r.media !== null) ctx.store.files.write('room-4242', r.media.data, { type: r.media.mime });
 ```
 
 ```ts
@@ -1220,15 +1223,12 @@ interface PhotoRequest {
   chat: string; // a chat the connector monitors, by any of its names
   message: string; // the network's id of the message (`Inbound.id`)
 }
-type PhotoResult =
-  | { ok: true; photo: MessagePhoto | null } // null: the message has no photo
-  | { ok: false; error: string }; // why not: not connected, not its chat, not found, too large…
-interface MessagePhoto {
-  data: Uint8Array; // the largest size the network has
-  mime: string; // read from the bytes (`imageMime`): `image/jpeg` for a Telegram photo
-  width?: number; // in pixels, where the network says
-  height?: number;
-}
+type FetchPhoto = (request: PhotoRequest) => Promise<MediaResult>;
+// MediaResult (§4.18):
+//   | { ok: true; media: Media | null } // null: the message has no photo
+//   | { ok: false; error: string } // why not: not connected, not its chat, not found, too large…
+// media: the largest size the network has; its mime read from the bytes (`sniffMime`),
+// `image/jpeg` for a Telegram photo; its width and height in pixels, where the network says.
 ```
 
 It never throws. A photo over `PHOTO_MAX_BYTES` (10 MiB, Telegram's own limit for a photo) is
@@ -1438,8 +1438,8 @@ connector (§2.1):
 - Every attempt is logged (`core.send`), with its outcome.
 
 **A photo** (bot-os.md D150): `send`, `enqueue` and `deliver` take a photo where they take a text,
-`{ photo, caption?, replyTo? }` (`PhotoSend`): `photo` its bytes and a file name
-(`{ data: Uint8Array, filename }`) or the network's id of one sent before (`CommandPhoto`, §2);
+`{ photo, caption?, replyTo? }` (`PhotoSend`): `photo` a `Media` (§4.18, bot-os.md D153; uploaded
+named by its type, `photo.png`) or the network's id of one sent before (`CommandPhoto`, §2);
 `caption`, the words under it, plain, or Markdown with `format: 'markdown'` as a text takes it (here
 in `send` and `enqueue` too); `replyTo`, the network's id of a message in that chat it answers.
 
@@ -1448,10 +1448,10 @@ const r = await ctx
   .outbox('chat')
   .deliver(
     '#lobby',
-    { photo: { data, filename: 'card.png' }, caption: 'A *rare* card', replyTo: m.id },
+    { photo: { data, mime: 'image/png' }, caption: 'A *rare* card', replyTo: m.id },
     { format: 'markdown' }
   );
-// { text: '[photo card.png]', outcome: 'sent', id: '<message id>', photo: '<photo id>' }
+// { text: '[photo image/png, 48213 bytes]', outcome: 'sent', id: '<message id>', photo: '<photo id>' }
 await ctx.outbox('chat').deliver('#lobby', { photo: r.photo as string }); // again, by its id
 ```
 
@@ -1462,10 +1462,12 @@ a dry run, the node's state, a flood wait, the rate and the connection. It is no
 watchdog (D93), no answer waited for (D98), no command's interval (D73), and a queued photo is never
 coalesced. Refused at once, before anything is sent: a caption over `CAPTION_MAX` (1024 characters,
 Telegram's, counted as written: `a caption of 1100 characters, over the 1024 a photo may carry`),
-and a connector that cannot send photos (`<account> cannot send photos`: one with no `deliverPhoto`,
-such as `irc`). `deliver` answers the network's id of the photo sent (`photo`), beside the message's
+bytes that are no photo (`PHOTO_MIMES`: JPEG, PNG, GIF or WebP) or not the type they say
+(`photoRefusal`, D153: `the photo: its bytes are image/jpeg, not the image/png it says`), and a
+connector that cannot send photos (`<account> cannot send photos`: one with no `deliverPhoto`, such
+as `irc`). `deliver` answers the network's id of the photo sent (`photo`), beside the message's
 (`id`), to send it again by; a queued photo settles with it too (`QueuedResult.photo`). Its result's
-and its record's `text` is its label, `[photo <filename>]` (`[photo]` by an id); the record
+and its record's `text` is its label, `[photo <mime>, <n> bytes]` (`[photo]` by an id); the record
 (`core.send`) has its caption's length (`caption`), never its bytes nor its caption.
 
 As built (`packages/core/src/outbox.ts`): the checks run in a fixed order, each refusal with its
@@ -1790,12 +1792,17 @@ public API (`packages/core/src/devkit.ts`):
   as `irc`), kept in `sent` too (`FakeSent`): `text` the caption (`''` without one), `photo` as
   sent, `format`, `replyTo`, and `id`, the photo's id it answers (`photo-<n>` for bytes, the id it
   was sent by otherwise); the message's id is `m<n>`. Given the photos of its messages (`photos`:
-  `{ chat, message, photo }`, `photo` a `MessagePhoto` or a string, the why of a refusal; more with
+  `{ chat, message, photo }`, `photo` a `Media` or a string, the why of a refusal; more with
   `givePhoto(chat, message, photo)`), it fetches them (`photo`, bot-os.md D151), a message not given
   one answering `null`, and `fakeConnectorPlugin` then offers the action `photo` on its interface,
   as a Telegram connector's does (§4.5): a plugin bound to
   `fakeConnectorPlugin('telegram-user', fake)` with members `actions.photo` asks it as it would
   live. The plugins read it through their handles and send through their outboxes, as they do live.
+- **`fakeMedia(mime?, { size?, width?, height? })`** and **`assertMedia(value, limits?)`** (§4.18,
+  bot-os.md D153): a `Media` made up for a test (a PNG by default), its first bytes those of its
+  type where `sniffMime` reads it, padded to `size` (64 bytes by default): bytes that pass
+  `mediaMismatch`, not a picture a decoder would draw; and a value checked to be a `Media` within
+  `limits` (`mediaRefusal`), returned as one, or thrown with why (`not a media: …`).
 - **`DevKit`**: a core on a `VirtualClock` (§4.1) whose stores are in memory, with the plugins of
   the run, the run's graph (`graph`; by default one instance of each, bound as the manifests say,
   each connector's node on its manifest's account: a graph given names a fake connector's account on
@@ -2207,7 +2214,7 @@ if (r.ok) use(r.output); // typed by the schema; else r.error says why
 interface AskRequest<T> {
   system?: string; // the fixed instructions, cached by the API between the calls that share them
   prompt: string; // the user's turn
-  images?: { data: Uint8Array; mime: string }[]; // shown before the prompt's text (bot-os.md D152)
+  images?: Media[]; // shown before the prompt's text (bot-os.md D152, D153); width and height unsent
   model?: string; // the configuration's `model` by default (claude-opus-5-5)
   maxTokens?: number; // the configuration's `maxTokens` by default (16000)
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'; // the configuration's, or the model's
@@ -2223,13 +2230,13 @@ type AskResult<T> =
 `ask` never throws: a refusal (`refused`), an answer cut short (`answer cut short`), an answer that
 does not fit the schema (`unreadable answer`) and an error of the API or the network
 (`API error 429 …`) are failed answers, so that a plugin's loop survives them. **Images** (bot-os.md
-D152): `images` go as base64 image blocks before the prompt's text, in the user's turn; `mime` is
-`image/jpeg`, `image/png`, `image/gif` or `image/webp`, and the bytes must be of that type (read
-from them). Checked before the call against the Messages API's limits, as Anthropic's vision guide
-states them (`IMAGES_MAX`, `IMAGE_MAX_BASE64`, `REQUEST_MAX` in the code, each the lowest that holds
-for every model): at most 100 images, each at most 10 MB base64-encoded (about 7.5 MB of bytes), the
-request at most 128 MB; a request that breaks one is a failed answer saying which
-(`image 2: image/bmp is not a type the API takes (…)`,
+D152): `images`, each a `Media` (§4.18, D153), go as base64 image blocks before the prompt's text,
+in the user's turn; `mime` is `image/jpeg`, `image/png`, `image/gif` or `image/webp`, and the bytes
+must be of that type (`mediaRefusal`). Checked before the call against the Messages API's limits, as
+Anthropic's vision guide states them (`IMAGES_MAX`, `IMAGE_MAX_BASE64`, `REQUEST_MAX` in the code,
+each the lowest that holds for every model): at most 100 images, each at most 10 MB base64-encoded
+(about 7.5 MB of bytes), the request at most 128 MB; a request that breaks one is a failed answer
+saying which (`image 2: image/bmp is not a type taken here (…)`,
 `101 images, more than the 100 a request may carry`), and no call is made. An image too large in
 pixels (over 8000 by 8000, or over a stricter limit, which its error states, in a request of more
 than 20) the API refuses, its error the answer. The model pays for an image by its pixels: a plugin
@@ -2425,6 +2432,66 @@ by their outcome's kind (`unknown` for one it could not read); an `attention` no
 its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(window)` gives what
 `collect` gives, for tests.
 
+### 4.18 Media
+
+Bytes and their media type (bot-os.md D153, `packages/core/src/media.ts`): the one shape every
+plugin that passes a picture uses, and later a video, a sound or a document, so that the same bytes
+go from a connector's `photo` (§4.5) to a plugin's state, its outbox (§4.6) and `ask` (§4.13) as
+they are, wherever they came from.
+
+```ts
+interface Media {
+  data: Uint8Array;
+  mime: string; // `type/subtype`, lower case: `image/png`
+  width?: number; // in pixels, where whoever made it knows
+  height?: number;
+}
+type MediaKind = 'image' | 'video' | 'audio' | 'document'; // MEDIA_KINDS
+type MediaResult = { ok: true; media: Media | null } | { ok: false; error: string };
+interface MediaLimits {
+  kinds?: readonly MediaKind[];
+  mimes?: readonly string[];
+  maxBytes?: number;
+}
+```
+
+- **`mediaSchema`** and **`mediaResultSchema`**: their zod schemas, for a manifest's action that
+  takes or answers media (`bytesSchema`, bytes alone).
+- **`mediaKind(mime)`**: `image/*`, `video/*` and `audio/*` are theirs; any other type a `document`.
+- **`sniffMime(data)`**: the type the first bytes say, of `SNIFFED_MIMES` (JPEG, PNG, GIF, WebP,
+  PDF); undefined for any other.
+- **`mediaMismatch(media)`**: why the bytes are not the type they say, where it can be told (bytes
+  `sniffMime` reads, or a type it reads); undefined when they are, or when it cannot tell.
+- **`mediaRefusal(value, limits?)`**: why a value cannot go where `limits` say: no `Media` (its
+  schema), a kind or a type not taken, bytes of another type (`mediaMismatch`), more bytes than
+  `maxBytes`; undefined when it can. The outbox's photos (`photoRefusal`, `PHOTO_MIMES`) and `ask`'s
+  images check with it.
+- **`mediaOfFile(files, name)`**: a file of the plugin's store (§4.2) as a `Media`, its type the one
+  kept with it; undefined when there is none.
+
+**An action that answers media** answers a `MediaResult`: the media, `null` for none, or why not,
+never thrown; its manifest's `output` is `mediaResultSchema`. A plugin that keeps pictures answers
+them as a connector answers a message's photo, and its reader cannot tell which it asks:
+
+```ts
+// quest-state: the picture of each room, fetched once through telegram-user's photo
+interface: { actions: { room: { help: 'A room’s picture', input: z.object({ room: z.string() }), output: mediaResultSchema } } },
+// …
+room: ({ room }) => {
+  const media = mediaOfFile(ctx.store.files, `room-${room}`);
+  return { ok: true, media: media ?? null };
+},
+// postcard: shows it to ask, then sends it
+const r = await ctx.use<{ actions: { room: (q: { room: string }) => Promise<MediaResult> } }>('quest').actions.room({ room: '7' });
+if (r.ok && r.media !== null) {
+  await llm.actions.ask({ prompt: 'Describe this room in one line.', images: [r.media] });
+  await ctx.outbox('chat').deliver('#lobby', { photo: r.media, caption: 'Room 7' });
+}
+```
+
+Bytes only: passing a reference to media (a plugin's file, by its hash) between nodes in place of
+its bytes is for later.
+
 ## 5. The shell's own plugins
 
 | Plugin          | Kinds        | Package                       | What it is                                                                                                                                                                 |
@@ -2514,8 +2581,8 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   news. It starts without waiting, retries every minute, and raises a `told` notice of the first
   failure (`ctx.notify`, §4.8); a message carries its id, the one it replies to, and `own` for the
   owner's own from any device. It sends only through the account's outbox (`deliver`, with the
-  message's id; a photo with GramJS's `sendFile`, D150, its bytes uploaded as a photo whatever its
-  name, its caption Markdown as Telegram HTML or plain, in reply to `replyTo`; the photo's id it
+  message's id; a photo with GramJS's `sendFile`, D150, its bytes uploaded as a photo, named by its
+  type, its caption Markdown as Telegram HTML or plain, in reply to `replyTo`; the photo's id it
   answers is `<id>:<access hash>:<file reference>`, by which it sends it again, a Bot API `file_id`
   refused with why; Telegram's file reference may expire, and a send by it then fails
   `FILE_REFERENCE_EXPIRED`, the bytes to send again), its queue's default interval between two sends

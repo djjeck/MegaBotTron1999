@@ -40,12 +40,12 @@ import {
   type ConnectorPhotoOptions,
   type ConnectorSendOptions,
   FloodWait,
-  imageMime,
   type InboundDocument,
   LIVE_GRACE_S,
-  type MessagePhoto,
+  type Media,
   photoTooLarge,
   readDocument,
+  sniffMime,
   type Surface,
   type SurfaceQuery,
   type TextFormat,
@@ -754,7 +754,7 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
    * Null for a message it heard without one since it started; any other it refuses with why
    * (`PHOTO_UNKNOWN`): the Bot API fetches no message by its id.
    */
-  async photo(chat: string, message: string): Promise<MessagePhoto | null> {
+  async photo(chat: string, message: string): Promise<Media | null> {
     const names = this.names.get(chat.toLowerCase()) ?? [chat];
     const chats = this.chats;
     if (chats !== undefined && !names.some((n) => chats.has(n.toLowerCase())))
@@ -779,6 +779,6 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
           : `Telegram asks to wait ${ms / 1000} s`
       );
     }
-    return { data, mime: imageMime(data) ?? 'image/jpeg', width: kept.width, height: kept.height };
+    return { data, mime: sniffMime(data) ?? 'image/jpeg', width: kept.width, height: kept.height };
   }
 }

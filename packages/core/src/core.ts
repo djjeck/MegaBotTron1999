@@ -34,11 +34,11 @@ import { type Clock } from './clock.ts';
 import {
   type Answer,
   type Asker,
-  captionRefusal,
   type ChatCommand,
   type CommandButton,
   type CommandHandler,
   photoLabel,
+  photoRefusal,
 } from './commands.ts';
 import { type Connector, handleOf, type Inbound, type ReadFilter } from './connector.ts';
 import { Controls, type StopRecord, type StopSource } from './controls.ts';
@@ -1013,7 +1013,8 @@ export class Core {
    * A command's answer held as a send is (D109, P10): recorded (`core.send`, the origin
    * `command /<name>`), and on a dry-run edge logged and never sent (a photo's id then none). A
    * photo is logged by its label and its caption's length, never its bytes; a caption over
-   * `CAPTION_MAX` is refused, logged so and thrown, before anything is sent (D150).
+   * `CAPTION_MAX`, or a photo `photoRefusal` refuses (D153), is refused, logged so and thrown,
+   * before anything is sent (D150).
    */
   private heldAnswer(
     answer: Answer,
@@ -1067,7 +1068,7 @@ export class Core {
         await held(text, () => answer.text(text, format, options));
       },
       photo: (photo, caption, format) => {
-        const long = captionRefusal(caption);
+        const long = photoRefusal(photo, caption);
         if (long !== undefined) {
           log(photoLabel(photo), 'refused', long, caption);
           return Promise.reject(new Error(long));

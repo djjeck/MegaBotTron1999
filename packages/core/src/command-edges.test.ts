@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { VirtualClock } from './clock.ts';
 import { type Answer, type Asker, CAPTION_MAX, type ChatCommand } from './commands.ts';
 import { Core } from './core.ts';
-import { FakeConnector } from './devkit.ts';
+import { FakeConnector, fakeMedia } from './devkit.ts';
 import { type GraphInput, resolveGraph } from './graph.ts';
 import { type Manifest, parseManifest } from './manifest.ts';
 import { definePlugin, type Plugin } from './plugin.ts';
@@ -60,11 +60,7 @@ const mapper = definePlugin({
       map: {
         run: async (a) => {
           await a.text('here');
-          await a.photo(
-            { data: new Uint8Array([1]), filename: 'map.png' },
-            'the *map*',
-            'markdown'
-          );
+          await a.photo(fakeMedia('image/png', { size: 16 }), 'the *map*', 'markdown');
         },
       },
       // A caption over Telegram's limit (D150).
@@ -253,7 +249,7 @@ describe('what the core serves a chat surface (D109)', () => {
     ).toEqual([`command /map ${GROUP} sent`, `command /map ${GROUP} sent`]);
     // A photo logged by its name and its caption's length, never its bytes (D150).
     expect(records.filter((r) => r.type === 'core.send').at(-1)).toMatchObject({
-      text: '[photo map.png]',
+      text: '[photo image/png, 16 bytes]',
       caption: 9,
     });
     await core.stop();
@@ -278,7 +274,7 @@ describe('what the core serves a chat surface (D109)', () => {
       records
         .filter((r) => r.type === 'core.send')
         .map((r) => `${String(r['text'])} ${String(r['mode'])} ${String(r['outcome'])}`)
-    ).toEqual(['here dry-run dry-run', '[photo map.png] dry-run dry-run']);
+    ).toEqual(['here dry-run dry-run', '[photo image/png, 16 bytes] dry-run dry-run']);
     await core.stop();
     // A caption over CAPTION_MAX: refused before anything is sent, and logged so (D150).
     const long = await start([{ from: 'bot.commands', to: 'mapper.commands', serves: ['long'] }]);

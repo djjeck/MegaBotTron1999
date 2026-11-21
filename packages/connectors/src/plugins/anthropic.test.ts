@@ -214,7 +214,7 @@ describe('ask with images (D152)', () => {
     expect(await ask({ prompt: 'p', images: [{ data: PNG, mime: 'image/bmp' }] })).toEqual({
       ok: false,
       error:
-        'image 1: image/bmp is not a type the API takes (image/jpeg, image/png, image/gif, image/webp)',
+        'image 1: image/bmp is not a type taken here (image/jpeg, image/png, image/gif, image/webp)',
     });
     expect(
       imagesRefusal({
@@ -224,15 +224,13 @@ describe('ask with images (D152)', () => {
           { data: PNG, mime: '' },
         ],
       })
-    ).toBe(
-      'image 2: no type is not a type the API takes (image/jpeg, image/png, image/gif, image/webp)'
-    );
+    ).toBe('image 2: no type is not a media type');
     expect(imagesRefusal({ prompt: 'p', images: [{ data: PNG, mime: 'image/jpeg' }] })).toBe(
       'image 1: its bytes are image/png, not the image/jpeg it says'
     );
     expect(
       imagesRefusal({ prompt: 'p', images: [{ data: new Uint8Array([1, 2]), mime: 'image/png' }] })
-    ).toBe('image 1: its bytes are no JPEG, PNG, GIF or WebP image, not the image/png it says');
+    ).toBe('image 1: its bytes are not image/png, as it says');
     const many = Array.from({ length: IMAGES_MAX + 1 }, () => ({ data: PNG, mime: 'image/png' }));
     expect(imagesRefusal({ prompt: 'p', images: many })).toBe(
       `${IMAGES_MAX + 1} images, more than the ${IMAGES_MAX} a request may carry`

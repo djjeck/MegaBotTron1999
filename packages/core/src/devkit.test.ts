@@ -97,7 +97,7 @@ describe('FakeConnector', () => {
 
   it('keeps the photos it sends, with their caption and reply, or has none (D150)', async () => {
     const c = new FakeConnector({ account: 'telegram:me', onSend: (chat) => chat !== '#closed' });
-    const bytes = { data: new Uint8Array([1]), filename: 'card.png' };
+    const bytes = { data: new Uint8Array([1]), mime: 'image/png' };
     await expect(
       c.deliverPhoto?.('#lobby', bytes, { caption: 'A *card*', format: 'markdown', replyTo: '9' })
     ).resolves.toEqual({ id: 'm1', photo: 'photo-1' });

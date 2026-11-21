@@ -1,29 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { DevKit, FakeConnector, fakeConnectorPlugin } from './devkit.ts';
-import {
-  type FetchPhoto,
-  imageMime,
-  PHOTO_MAX_BYTES,
-  photoAction,
-  photoTooLarge,
-} from './message-photo.ts';
+import { type FetchPhoto, PHOTO_MAX_BYTES, photoAction, photoTooLarge } from './message-photo.ts';
 import { definePlugin } from './plugin.ts';
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 1]);
 const ROOM = { data: JPEG, mime: 'image/jpeg', width: 800, height: 600 };
-
-describe('imageMime', () => {
-  it('reads JPEG, PNG, GIF and WebP from their first bytes; nothing else', () => {
-    expect(imageMime(JPEG)).toBe('image/jpeg');
-    expect(imageMime(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe(
-      'image/png'
-    );
-    expect(imageMime(new TextEncoder().encode('GIF89a'))).toBe('image/gif');
-    expect(imageMime(new TextEncoder().encode('RIFF\0\0\0\0WEBPVP8 '))).toBe('image/webp');
-    expect(imageMime(new TextEncoder().encode('RIFF\0\0\0\0WAVEfmt '))).toBeUndefined();
-    expect(imageMime(new Uint8Array([]))).toBeUndefined();
-  });
-});
 
 describe('photoTooLarge', () => {
   it('refuses a photo over 10 MiB, saying its size; not one unknown or within it', () => {
@@ -60,9 +41,9 @@ describe('photoAction', () => {
     );
     expect(await act({ chat: '#lobby', message: '1' }, { node: 'postcard' })).toEqual({
       ok: true,
-      photo: ROOM,
+      media: ROOM,
     });
-    expect(await act({ chat: '#lobby', message: '2' })).toEqual({ ok: true, photo: null });
+    expect(await act({ chat: '#lobby', message: '2' })).toEqual({ ok: true, media: null });
     expect(await act({ chat: '#lobby', message: '3' })).toEqual({
       ok: false,
       error: 'no message 3 in #lobby',
@@ -141,10 +122,10 @@ describe('a fake connector’s photos (D151)', () => {
     });
     await kit.start();
     expect(asked).toEqual([
-      { ok: true, photo: ROOM },
+      { ok: true, media: ROOM },
       { ok: false, error: 'CHANNEL_PRIVATE' },
-      { ok: true, photo: { data: JPEG, mime: 'image/jpeg' } },
-      { ok: true, photo: null },
+      { ok: true, media: { data: JPEG, mime: 'image/jpeg' } },
+      { ok: true, media: null },
     ]);
     await kit.stop();
   });

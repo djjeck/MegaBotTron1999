@@ -15,6 +15,7 @@
  * command again; a photo, as bytes or by the id the network gave it once sent. Nothing in here
  * knows of any network.
  */
+import { type Media, mediaRefusal } from './media.ts';
 import { type TextFormat } from './outbox.ts';
 
 /**
@@ -52,8 +53,14 @@ export function tapOf(action: string): { name: string; args: string } | undefine
   return undefined;
 }
 
-/** A photo to send: its bytes and a file name, or the network's id of one sent before. */
-export type CommandPhoto = string | { data: Uint8Array; filename: string };
+/**
+ * A photo to send: a `Media` (bot-os.md D153), an image of one of `PHOTO_MIMES`, or the network's
+ * id of one sent before.
+ */
+export type CommandPhoto = string | Media;
+
+/** The types a photo sent may have (D153): those Telegram takes as a photo. */
+export const PHOTO_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
 
 /**
  * The longest caption a photo may carry (bot-os.md D150): Telegram's, 1024 characters, counted as
@@ -69,11 +76,30 @@ export function captionRefusal(caption: string | undefined): string | undefined 
 }
 
 /**
- * A photo as the log names it, never its bytes: `[photo <filename>]`, or `[photo]` by the network's
- * id.
+ * Why a photo cannot go (D150, D153): its caption longer than `CAPTION_MAX`, or its bytes no image
+ * of `PHOTO_MIMES`, or not of the type they say (`mediaRefusal`); undefined when it can.
+ */
+export function photoRefusal(photo: CommandPhoto, caption?: string): string | undefined {
+  const long = captionRefusal(caption);
+  if (long !== undefined || typeof photo === 'string') return long;
+  const refused = mediaRefusal(photo, { mimes: PHOTO_MIMES });
+  return refused === undefined ? undefined : `the photo: ${refused}`;
+}
+
+/**
+ * A photo as the log names it, never its bytes: `[photo <type>, <n> bytes]`, or `[photo]` by the
+ * network's id.
  */
 export function photoLabel(photo: CommandPhoto): string {
-  return typeof photo === 'string' ? '[photo]' : `[photo ${photo.filename}]`;
+  return typeof photo === 'string'
+    ? '[photo]'
+    : `[photo ${photo.mime}, ${photo.data.byteLength} bytes]`;
+}
+
+/** A file name for a photo's upload, from its type (D153): `photo.jpg`, `photo.png`. */
+export function photoFilename(photo: Media): string {
+  const sub = photo.mime.slice(photo.mime.indexOf('/') + 1);
+  return `photo.${sub === 'jpeg' ? 'jpg' : sub}`;
 }
 
 /** How a handler answers, in reply to the command, in the chat it came from. */
@@ -82,7 +108,7 @@ export interface Answer {
   text(text: string, format?: TextFormat, options?: AnswerOptions): Promise<void>;
   /**
    * Sends a photo, with `caption` under it if given, plain unless `format` says it is Markdown (a
-   * caption over `CAPTION_MAX` is refused, thrown, before sending); the network's id for the photo,
+   * caption over `CAPTION_MAX`, or a photo `photoRefusal` refuses, is thrown, before sending); the network's id for the photo,
    * if it gives one, to send it again by.
    */
   photo(photo: CommandPhoto, caption?: string, format?: TextFormat): Promise<string | undefined>;

@@ -61,20 +61,20 @@ with a caption, plain or Markdown, in reply to a message: `telegram-bot` with th
 `sendPhoto`, answering the photo's `file_id`; `telegram-user` with GramJS's `sendFile`, answering
 `<id>:<access hash>:<file reference>`; each sends one again by the id it gave. `irc` sends none, and
 the outbox refuses them with why. Both fetch a message's photo on demand (D151), for a plugin an
-edge binds to their node's interface (`actions.photo`: its bytes, the largest size, at most 10 MiB;
-`null` for none; else why not): `telegram-user` fetches the message by its id (GramJS's
-`getMessages`, `downloadMedia`); `telegram-bot`, which the Bot API lets fetch no message by its id,
-only the photos of the messages it heard or sent, the latest 1000 kept by their `file_id` in its
-store.
+edge binds to their node's interface (`actions.photo`, answering a `MediaResult`, D153: its `media`,
+the largest size, at most 10 MiB; `null` for none; else why not): `telegram-user` fetches the
+message by its id (GramJS's `getMessages`, `downloadMedia`); `telegram-bot`, which the Bot API lets
+fetch no message by its id, only the photos of the messages it heard or sent, the latest 1000 kept
+by their `file_id` in its store.
 
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
-  structured output by a zod schema, and images the model sees before the prompt's text (JPEG, PNG,
-  GIF or WebP, within the API's limits, checked before the call: docs/bot-os.md D152). A model
-  connector (docs/bot-os.md D117): it logs each call itself (`anthropic.call`: the calling node, the
-  model, the tokens, the cost in USD from its price table, Anthropic's published prices kept in its
-  code so that a release updates them, a model of no price logged as unknown), and keeps its last 24
-  hours by node and model in its store (`spend.ts`, which another model connector can reuse), shown
-  on its card, its panel and its page **Spend**.
+  structured output by a zod schema, and images the model sees before the prompt's text (each a
+  `Media`, D153: JPEG, PNG, GIF or WebP, within the API's limits, checked before the call:
+  docs/bot-os.md D152). A model connector (docs/bot-os.md D117): it logs each call itself
+  (`anthropic.call`: the calling node, the model, the tokens, the cost in USD from its price table,
+  Anthropic's published prices kept in its code so that a release updates them, a model of no price
+  logged as unknown), and keeps its last 24 hours by node and model in its store (`spend.ts`, which
+  another model connector can reuse), shown on its card, its panel and its page **Spend**.
 
 Their secrets come from Docker secrets, never from variables. The two Telegram connectors take none:
 they log in from their node's panel (docs/bot-os.md D116, D118): `bot-login.ts` takes a bot's token

@@ -20,7 +20,14 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import { type ActionCall, definePlugin, imageMime, type Plugin } from '@megabottron1999/core';
+import {
+  type ActionCall,
+  definePlugin,
+  type Media,
+  mediaRefusal,
+  mediaSchema,
+  type Plugin,
+} from '@megabottron1999/core';
 import { z } from 'zod';
 import { ServiceConnector } from './service.ts';
 import {
@@ -130,22 +137,17 @@ export const IMAGES_MAX = 100;
 export const IMAGE_MAX_BASE64 = 10_000_000;
 export const REQUEST_MAX = 128_000_000 - 1_000_000;
 
-/** An image shown to the model with the prompt (D152): its bytes and its media type. */
-export interface AskImage {
-  data: Uint8Array;
-  mime: string;
-}
-
 /** What `ask` asks. */
 export interface AskRequest<T = unknown> {
   /** The fixed instructions, cached by the API between calls that share them. */
   system?: string;
   prompt: string;
   /**
-   * Images the model sees with the prompt (D152), sent before its text in the user's turn: JPEG,
-   * PNG, GIF or WebP, within the API's limits (`IMAGES_MAX`, `IMAGE_MAX_BASE64`, `REQUEST_MAX`).
+   * Images the model sees with the prompt (D152), sent before its text in the user's turn: each a
+   * `Media` (D153) of `IMAGE_TYPES`, within the API's limits (`IMAGES_MAX`, `IMAGE_MAX_BASE64`,
+   * `REQUEST_MAX`); a width and a height are not sent.
    */
-  images?: readonly AskImage[];
+  images?: readonly Media[];
   model?: string;
   maxTokens?: number;
   effort?: Effort;
@@ -176,14 +178,7 @@ export type AnthropicClient = Pick<Anthropic, 'messages'>;
 const askInput = z.object({
   system: z.string().optional(),
   prompt: z.string().min(1),
-  images: z
-    .array(
-      z.object({
-        data: z.custom<Uint8Array>((v) => v instanceof Uint8Array, 'bytes'),
-        mime: z.string(),
-      })
-    )
-    .optional(),
+  images: z.array(mediaSchema).optional(),
   model: z.string().min(1).optional(),
   maxTokens: z.number().int().positive().optional(),
   effort: z.enum(EFFORTS).optional(),
@@ -216,8 +211,9 @@ const base64Size = (n: number): number => 4 * Math.ceil(n / 3);
 const mb = (n: number): string => (n < 1_000_000 ? `${n} B` : `${(n / 1_000_000).toFixed(1)} MB`);
 
 /**
- * Why the images of a request cannot go (D152), checked before the call: their number, each one's
- * type (as said, and as its bytes are) and size, and the request's; undefined when they can.
+ * Why the images of a request cannot go (D152), checked before the call: their number, each one
+ * (`mediaRefusal`, D153: a `Media` of `IMAGE_TYPES`, its bytes the type it says), each one's size
+ * and the request's; undefined when they can.
  */
 export function imagesRefusal(
   r: Pick<AskRequest, 'images' | 'prompt' | 'system'>
@@ -228,11 +224,8 @@ export function imagesRefusal(
   let total = Buffer.byteLength(r.prompt) + Buffer.byteLength(r.system ?? '');
   for (const [i, image] of images.entries()) {
     const which = `image ${i + 1}`;
-    if (!(IMAGE_TYPES as readonly string[]).includes(image.mime))
-      return `${which}: ${image.mime || 'no type'} is not a type the API takes (${IMAGE_TYPES.join(', ')})`;
-    const read = imageMime(image.data);
-    if (read !== image.mime)
-      return `${which}: its bytes are ${read === undefined ? 'no JPEG, PNG, GIF or WebP image' : `${read}`}, not the ${image.mime} it says`;
+    const refused = mediaRefusal(image, { mimes: IMAGE_TYPES });
+    if (refused !== undefined) return `${which}: ${refused}`;
     const size = base64Size(image.data.byteLength);
     if (size > IMAGE_MAX_BASE64)
       return `${which}: ${mb(size)} base64-encoded, more than the ${mb(IMAGE_MAX_BASE64)} the API takes`;

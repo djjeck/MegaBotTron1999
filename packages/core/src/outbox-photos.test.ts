@@ -7,7 +7,7 @@ import { VirtualClock } from './clock.ts';
 import { CAPTION_MAX, type CommandPhoto } from './commands.ts';
 import { type Connector, ConnectorBase, type ConnectorPhotoOptions } from './connector.ts';
 import { Core } from './core.ts';
-import { FakeConnector } from './devkit.ts';
+import { FakeConnector, fakeMedia } from './devkit.ts';
 import { type Notice } from './notices.ts';
 import {
   FloodWait,
@@ -42,7 +42,7 @@ class PhotoConnector extends ConnectorBase implements Connector {
   }
 }
 
-const BYTES: PhotoSend = { photo: { data: new Uint8Array([1, 2, 3]), filename: 'card.png' } };
+const BYTES: PhotoSend = { photo: fakeMedia('image/png', { size: 3 * 8 }) };
 
 function setup(
   o: { policy?: SenderPolicy; connector?: PhotoConnector | null; watch?: boolean } = {}
@@ -96,7 +96,12 @@ describe('a photo through the outbox (D150)', () => {
       { ...BYTES, caption: 'A *card*', replyTo: '41' },
       { format: 'markdown', origin: 'painter' }
     );
-    expect(r).toEqual({ text: '[photo card.png]', outcome: 'sent', id: '7', photo: 'file-7' });
+    expect(r).toEqual({
+      text: '[photo image/png, 24 bytes]',
+      outcome: 'sent',
+      id: '7',
+      photo: 'file-7',
+    });
     expect(connector?.calls).toEqual([
       {
         chat: '#lobby',
@@ -106,7 +111,7 @@ describe('a photo through the outbox (D150)', () => {
     ]);
     expect(records).toEqual([
       expect.objectContaining({
-        text: '[photo card.png]',
+        text: '[photo image/png, 24 bytes]',
         outcome: 'sent',
         origin: 'painter',
         caption: 8,
@@ -168,6 +173,23 @@ describe('a photo through the outbox (D150)', () => {
     expect(fits.outcome).toBe('sent');
   });
 
+  it('refuses bytes that are no photo, or not the type they say, before sending (D153)', async () => {
+    const { p, connector } = setup();
+    expect(p.send('#lobby', { photo: fakeMedia('application/pdf') }).reason).toBe(
+      'the photo: application/pdf is not a type taken here (image/jpeg, image/png, image/gif, image/webp)'
+    );
+    await expect(
+      p.deliver('#lobby', { photo: { data: new Uint8Array([1, 2, 3]), mime: 'image/png' } })
+    ).resolves.toMatchObject({
+      outcome: 'refused',
+      reason: 'the photo: its bytes are not image/png, as it says',
+    });
+    await expect(
+      p.enqueue('#lobby', { photo: { ...fakeMedia('image/jpeg'), mime: 'image/png' } })
+    ).resolves.toMatchObject({ outcome: 'refused' });
+    expect(connector?.calls).toEqual([]);
+  });
+
   it('is refused by a connector that cannot send photos, and while none runs or connects', async () => {
     const none = setup({ connector: new PhotoConnector(true) });
     expect(none.p.send('#lobby', BYTES).reason).toBe('test:me cannot send photos');
@@ -193,7 +215,7 @@ describe('a photo through the outbox (D150)', () => {
     await expect(dry.p.deliver('#lobby', BYTES)).resolves.toMatchObject({ outcome: 'dry-run' });
     expect(dry.p.send('#lobby', BYTES).reason).toBe('too soon');
     expect(dry.connector?.calls).toEqual([]);
-    expect(dry.records[0]).toMatchObject({ mode: 'dry-run', text: '[photo card.png]' });
+    expect(dry.records[0]).toMatchObject({ mode: 'dry-run', text: '[photo image/png, 24 bytes]' });
     const held = setup({ policy: { held: 'stopped: drift' } });
     expect(held.p.send('#lobby', BYTES).reason).toBe('stopped: drift');
   });
@@ -217,7 +239,10 @@ describe('a photo through the outbox (D150)', () => {
     });
     clock.advance(3000);
     const queued = p.enqueue('#lobby', BYTES);
-    await expect(queued).resolves.toMatchObject({ outcome: 'failed', text: '[photo card.png]' });
+    await expect(queued).resolves.toMatchObject({
+      outcome: 'failed',
+      text: '[photo image/png, 24 bytes]',
+    });
     expect(notices.map((n) => n.kind)).toEqual(['unreachable', 'unreachable']);
     // A queued photo the network asks to wait for holds the account too.
     connector?.answers.push(() => Promise.reject(new FloodWait(5000)));

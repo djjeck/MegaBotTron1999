@@ -33,13 +33,14 @@
  * now or refuses, as `send` does, and waits for the network's answer (Telegram's), with the sent
  * message's id, or `failed` with why if the network refused it.
  *
- * **A photo** (bot-os.md D150) goes as a text does, each of the three taking one (`PhotoSend`: its
- * bytes or the network's id of one sent before, a caption, the message it answers) where they take
+ * **A photo** (bot-os.md D150) goes as a text does, each of the three taking one (`PhotoSend`: a
+ * `Media`, D153, or the network's id of one sent before, a caption, the message it answers) where they take
  * a text, through the same checks but those of a command: it has no first word, so an edge that
  * names its commands lets it through only if it, or its output, says `photos`; no watchdog, no
- * answer waited for, no command's interval, never coalesced. A caption over `CAPTION_MAX` and a
- * connector that cannot send photos (no `deliverPhoto`) refuse it at once. It is logged by its file
- * name and its caption's length, never its bytes; it answers the network's id of the photo sent
+ * answer waited for, no command's interval, never coalesced. A caption over `CAPTION_MAX`, bytes no
+ * image of `PHOTO_MIMES` or not of the type they say (`photoRefusal`), and a connector that cannot
+ * send photos (no `deliverPhoto`) refuse it at once. It is logged by its label (its type and its
+ * bytes' count) and its caption's length, never its bytes; it answers the network's id of the photo sent
  * (`photo`), to send it again by.
  *
  * **A send the network refuses** (bot-os.md D95), whichever way it went: a queued or immediate send
@@ -61,7 +62,7 @@ import {
   type ReadAnswer,
 } from './answers.ts';
 import { type Clock, type TimerHandle } from './clock.ts';
-import { type Buttons, captionRefusal, type CommandPhoto, photoLabel } from './commands.ts';
+import { type Buttons, type CommandPhoto, photoLabel, photoRefusal } from './commands.ts';
 import { type Connector } from './connector.ts';
 import { type Notice } from './notices.ts';
 
@@ -101,8 +102,8 @@ export type SendResult = {
 };
 
 /**
- * A photo to send (bot-os.md D150): its bytes and a file name, or the network's id of one sent
- * before (`CommandPhoto`); the words under it, plain unless `SendOptions.format` says Markdown, at
+ * A photo to send (bot-os.md D150): a `Media` (D153), or the network's id of one sent before
+ * (`CommandPhoto`); the words under it, plain unless `SendOptions.format` says Markdown, at
  * most `CAPTION_MAX` characters; and the network's id of a message in that chat it answers.
  */
 export interface PhotoSend {
@@ -1293,8 +1294,8 @@ export class Outbox {
         );
     }
     if (photo !== undefined) {
-      const long = captionRefusal(photo.caption);
-      if (long !== undefined) return refuse(long);
+      const why = photoRefusal(photo.photo, photo.caption);
+      if (why !== undefined) return refuse(why);
       const connector = this.o.connector();
       if (connector !== undefined && connector.deliverPhoto === undefined)
         return refuse(`${this.account} cannot send photos`);

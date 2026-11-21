@@ -239,13 +239,18 @@ export const greeter = definePlugin({
   with its reason, `unanswered`), and a node refused again and again for one reason is backed off.
   The outbox keeps no game's cooldown (D142): when a command may be played is a state's readiness,
   which a player, or a script that cares, binds to.
-- **Photos** (D150): an outbox sends a photo as it sends a text (bytes, or the network's id of one
-  sent before, with a caption and in reply to a message), through the same checks; an edge that
+- **Photos** (D150): an outbox sends a photo as it sends a text (a `Media`, or the network's id of
+  one sent before, with a caption and in reply to a message), through the same checks; an edge that
   names its commands lets photos through only when it, or its output, says `photos: true`.
 - **A message's photo** (D151): both Telegram connectors fetch the photo of a message on demand, for
   a plugin an edge binds to their node's interface (`actions.photo`): its bytes, of the largest
   size, at most 10 MiB; never with every message. A bot can fetch only the photos of the messages it
   heard or sent (the Bot API fetches no message by its id).
+- **Media** (D153): one core type for bytes and their type (`Media`:
+  `{ data, mime, width?, height? }`, its kind read from the type), with its schema, the checks that
+  the bytes are what they say, and one answer for an action that answers media (`MediaResult`:
+  `{ ok: true, media }` or why not), shared by a message's photo, an outbox's photos, `ask`'s images
+  and any plugin that passes them.
 - **The owner's notices** (D91, D94): what needs the owner's attention is raised where it happens,
   recorded (`core.notice`, in the editor's Events page), and an `owner-notice` node tells it.
   Nothing reports outside the graph: the core sends no chat anything itself, so **with no

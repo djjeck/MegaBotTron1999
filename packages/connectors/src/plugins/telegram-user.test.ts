@@ -397,7 +397,7 @@ describe('the telegram-user plugin’s photo (D151)', () => {
     });
     await core.start();
     expect(asked).toEqual([
-      { ok: true, photo: { data: JPEG, mime: 'image/jpeg', width: 800, height: 600 } },
+      { ok: true, media: { data: JPEG, mime: 'image/jpeg', width: 800, height: 600 } },
     ]);
     // Logged with its caller and its size, never its bytes.
     expect(

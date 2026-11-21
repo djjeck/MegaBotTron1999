@@ -58,7 +58,7 @@ function chats(handlers?: Handlers, allow?: PublicCommandsOptions['allow']) {
   const answering: Handlers = handlers ?? {
     map: async (a) =>
       void fileIds.push(
-        await a.photo({ data: Buffer.from([1]), filename: 'mappa.png' }, 'the **map**', 'markdown')
+        await a.photo({ data: Buffer.from([1]), mime: 'image/png' }, 'the **map**', 'markdown')
       ),
     ping: (a) => a.text('pong'),
     bold: (a) => a.text('**pong** & <ping>', 'markdown'),

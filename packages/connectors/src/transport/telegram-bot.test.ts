@@ -513,7 +513,7 @@ describe('TelegramBotConnector', () => {
 
   it('sends a photo with sendPhoto: its caption, as HTML from Markdown, in reply; its file id (D150)', async () => {
     const { c, stub, logs } = connector();
-    const bytes = { data: new Uint8Array([1, 2]), filename: 'card.png' };
+    const bytes = { data: new Uint8Array([1, 2]), mime: 'image/png' };
     await expect(
       c.deliverPhoto('-100123', bytes, { caption: '**A** card', format: 'markdown', replyTo: '41' })
     ).resolves.toEqual({ id: '101', photo: 'photo-101' });
@@ -853,7 +853,7 @@ describe('TelegramBotConnector', () => {
       // A message it heard without a photo has none.
       expect(await c.photo('-100123', idOf(text))).toBeNull();
       // Its own, sent: kept by its chat and the id Telegram gave it.
-      const sent = await c.deliverPhoto('-100123', { data: JPEG, filename: 'room.jpg' });
+      const sent = await c.deliverPhoto('-100123', { data: JPEG, mime: 'image/jpeg' });
       await c.photo('-100123', sent.id ?? '');
       expect(ids.at(-1)).toBe(`photo-${sent.id}`);
       expect(Object.keys(docs[PHOTOS_DOC] as object)).toEqual([

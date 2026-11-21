@@ -44,6 +44,7 @@ import {
   type ChatCommand,
   type CommandPhoto,
   inScope,
+  photoFilename,
   type Request,
   tapOf,
   type TextFormat,
@@ -157,7 +158,7 @@ export function surfaceOf(
 
 /** A photo as the Bot API takes it: by its file id, or uploaded. */
 export const media = (photo: CommandPhoto): string | InputFile =>
-  typeof photo === 'string' ? photo : new InputFile(photo.data, photo.filename);
+  typeof photo === 'string' ? photo : new InputFile(photo.data, photoFilename(photo));
 
 /**
  * A photo's caption as the Bot API takes it (bot-os.md D150): Markdown as Telegram HTML, as a

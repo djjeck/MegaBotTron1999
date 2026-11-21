@@ -8,6 +8,8 @@
  *   photos sent too (bot-os.md D150), with their caption and the message they answer; and the
  *   photos of its messages, as the test gives them, which its plugin's action `photo` fetches
  *   (D151).
+ * - `fakeMedia` and `assertMedia`: a `Media` (bot-os.md D153) made up for a test, its bytes the
+ *   type it says; and a value checked to be one, within limits.
  * - `DevKit`: a core on a virtual clock (packages/core/src/clock.ts), its stores in memory, their
  *   files (`ctx.store.files`) too,
  *   with the plugins given, their configuration, the owner's kept settings, and the
@@ -26,16 +28,56 @@ import {
   type ConnectorPhotoOptions,
   type ConnectorSendOptions,
   type Inbound,
-  type MessagePhoto,
   type Surface,
   type SurfaceQuery,
 } from './connector.ts';
 import { Core, type CoreOptions } from './core.ts';
 import { type LogEntry, MemoryEventLog } from './event-log.ts';
 import { type Manifest, ManifestError, type ManifestInput, parseManifest } from './manifest.ts';
+import { type Media, type MediaLimits, mediaRefusal } from './media.ts';
 import { PHOTO_ACTION, photoAction } from './message-photo.ts';
 import { type Limits, type TextFormat } from './outbox.ts';
 import { definePlugin, type Plugin } from './plugin.ts';
+
+/** The first bytes of each type `fakeMedia` makes as its own (D153): what `sniffMime` reads. */
+const MAGIC: Readonly<Record<string, readonly number[]>> = {
+  'image/jpeg': [0xff, 0xd8, 0xff, 0xe0],
+  'image/png': [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  'image/gif': [...'GIF89a'].map((c) => c.charCodeAt(0)),
+  'image/webp': [...'RIFF\0\0\0\0WEBPVP8 '].map((c) => c.charCodeAt(0)),
+  'application/pdf': [...'%PDF-1.7\n'].map((c) => c.charCodeAt(0)),
+};
+
+/**
+ * A `Media` made up for a test (bot-os.md D153): `mime` (a PNG by default), its bytes starting as
+ * that type's do where `sniffMime` reads it, so that `mediaMismatch` passes it, padded with zeros
+ * to `size` bytes (64 by default), with the `width` and `height` given. Not a picture any decoder
+ * would draw: a test of a plugin that passes media, not of an image library.
+ */
+export function fakeMedia(
+  mime = 'image/png',
+  o: { size?: number; width?: number; height?: number } = {}
+): Media {
+  const head = MAGIC[mime] ?? [];
+  const data = new Uint8Array(Math.max(o.size ?? 64, head.length));
+  data.set(head);
+  return {
+    data,
+    mime,
+    ...(o.width === undefined ? {} : { width: o.width }),
+    ...(o.height === undefined ? {} : { height: o.height }),
+  };
+}
+
+/**
+ * `value` as a `Media` (D153), checked as `mediaRefusal` checks it (its shape, its bytes the type it
+ * says, within `limits`); throws with why when it is not one.
+ */
+export function assertMedia(value: unknown, limits?: MediaLimits): Media {
+  const why = mediaRefusal(value, limits);
+  if (why !== undefined) throw new Error(`not a media: ${why}`);
+  return value as Media;
+}
 
 export interface FakeConnectorOptions {
   /** Its account, `<network>:<name>`: the network is the part before the colon. */
@@ -72,7 +114,7 @@ export interface FakeConnectorOptions {
 export interface FakePhoto {
   chat: string;
   message: string;
-  photo: MessagePhoto | string;
+  photo: Media | string;
 }
 
 /** A message the connector hears: its account and network are the connector's. */
@@ -114,12 +156,12 @@ export class FakeConnector extends ConnectorBase implements Connector {
   readonly surfaces?: (query?: SurfaceQuery) => Promise<Surface[]>;
   private readonly ownerChat: string | undefined;
   /** The photos given, by `<chat> <message>`; undefined: it fetches none. */
-  private readonly given: Map<string, MessagePhoto | string> | undefined;
+  private readonly given: Map<string, Media | string> | undefined;
   /**
    * Fetches a message's photo (D151), as given (`photos`, `givePhoto`): null for a message not
    * given one, a rejection for a why. Absent when the test gave it no `photos`.
    */
-  readonly photo?: (chat: string, message: string) => Promise<MessagePhoto | null>;
+  readonly photo?: (chat: string, message: string) => Promise<Media | null>;
 
   constructor(o: FakeConnectorOptions) {
     const colon = o.account.indexOf(':');
@@ -172,7 +214,7 @@ export class FakeConnector extends ConnectorBase implements Connector {
    * Gives message `message` of `chat` a photo, or a why for `photo` to refuse it with (D151).
    * Throws for a fake made without `photos`, which fetches none.
    */
-  givePhoto(chat: string, message: string, photo: MessagePhoto | string): void {
+  givePhoto(chat: string, message: string, photo: Media | string): void {
     if (this.given === undefined) throw new Error(`${this.account} was made without photos`);
     this.given.set(`${chat} ${message}`, photo);
   }

@@ -42,7 +42,10 @@ export {
   type CommandPhoto,
   type CommandScope,
   inScope,
+  PHOTO_MIMES,
+  photoFilename,
   photoLabel,
+  photoRefusal,
   type Request,
   tapOf,
 } from './commands.ts';
@@ -64,7 +67,6 @@ export {
   isTextDocument,
   LIVE_GRACE_S,
   liveGraceS,
-  type MessagePhoto,
   readDocument,
   type ReadFilter,
   type Surface,
@@ -116,12 +118,14 @@ export {
 } from './core.ts';
 export { Costs, type DispatchCost, type NodeCost, type OwnCost, type Spend } from './costs.ts';
 export {
+  assertMedia,
   defineSimulator,
   DevKit,
   type DevKitOptions,
   FakeConnector,
   type FakeConnectorOptions,
   fakeConnectorPlugin,
+  fakeMedia,
   type FakePhoto,
   type FakeSent,
   type Heard,
@@ -254,13 +258,28 @@ export {
   parseManifest,
 } from './manifest.ts';
 export {
+  bytesSchema,
+  type Media,
+  MEDIA_KINDS,
+  type MediaKind,
+  mediaKind,
+  type MediaLimits,
+  mediaMismatch,
+  mediaOfFile,
+  mediaRefusal,
+  type MediaResult,
+  mediaResultSchema,
+  mediaSchema,
+  sizeInWords,
+  SNIFFED_MIMES,
+  sniffMime,
+} from './media.ts';
+export {
   type FetchPhoto,
-  imageMime,
   PHOTO_ACTION,
   PHOTO_MAX_BYTES,
   photoAction,
   type PhotoRequest,
-  type PhotoResult,
   photoTooLarge,
 } from './message-photo.ts';
 export {

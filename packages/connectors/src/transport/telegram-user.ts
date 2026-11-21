@@ -48,15 +48,16 @@ import {
   ConnectorBase,
   type ConnectorPhotoOptions,
   FloodWait,
-  imageMime,
   type Inbound,
   type InboundDocument,
   LIVE_GRACE_S,
-  type MessagePhoto,
+  type Media,
   NEEDS_LOGIN,
+  photoFilename,
   photoTooLarge,
   readDocument,
   type ReadFilter,
+  sniffMime,
   type Surface,
   type SurfaceQuery,
   type TimerHandle,
@@ -547,7 +548,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
           : new Api.InputMediaUploadedPhoto({
               file: await client.uploadFile({
                 file: new CustomFile(
-                  photo.filename,
+                  photoFilename(photo),
                   photo.data.byteLength,
                   '',
                   Buffer.from(photo.data)
@@ -581,7 +582,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
    * (with Telegram's wait) and a failed download. Its type is read from the bytes (a Telegram photo
    * is a JPEG).
    */
-  async photo(chat: string, message: string): Promise<MessagePhoto | null> {
+  async photo(chat: string, message: string): Promise<Media | null> {
     if (!this.connected) throw new Error('not connected');
     if (!this.monitors(chat)) throw new Error(`${chat} is not a chat ${this.account} monitors`);
     const id = Number(message);
@@ -611,7 +612,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       const data = new Uint8Array(got);
       return {
         data,
-        mime: imageMime(data) ?? 'image/jpeg',
+        mime: sniffMime(data) ?? 'image/jpeg',
         ...(largest.size.w === undefined ? {} : { width: largest.size.w }),
         ...(largest.size.h === undefined ? {} : { height: largest.size.h }),
       };

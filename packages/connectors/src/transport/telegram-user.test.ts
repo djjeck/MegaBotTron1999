@@ -368,12 +368,12 @@ describe('TelegramUserConnector', () => {
 
   it('sends a photo with sendFile: uploaded or by its id, its caption, in reply (D150)', async () => {
     const { c, f } = await connector();
-    const bytes = { data: new Uint8Array([1, 2, 3]), filename: 'card.png' };
+    const bytes = { data: new Uint8Array([1, 2, 3]), mime: 'image/png' };
     const id = `7:-8:${Buffer.from([1, 2, 255]).toString('base64url')}`;
     await expect(
       c.deliverPhoto(GROUP, bytes, { caption: '**A** card', format: 'markdown', replyTo: '41' })
     ).resolves.toEqual({ id: '98', photo: id });
-    expect(f.calls).toContain('upload card.png 3');
+    expect(f.calls).toContain('upload photo.png 3');
     const [first] = f.media;
     expect(first?.entity).toEqual({ peer: Number(GROUP) });
     expect(first?.params).toMatchObject({

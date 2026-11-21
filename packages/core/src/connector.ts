@@ -16,6 +16,7 @@ import {
   type CommandButton,
   type CommandPhoto,
 } from './commands.ts';
+import { type Media } from './media.ts';
 import { type Limits, type TextFormat } from './outbox.ts';
 
 /**
@@ -303,18 +304,6 @@ export interface ConnectorSendOptions {
   buttons?: Buttons;
 }
 
-/**
- * A message's photo, fetched on demand (bot-os.md D151, `Connector.photo`): its bytes, its media
- * type, and its size in pixels where the network says.
- */
-export interface MessagePhoto {
-  data: Uint8Array;
-  /** `image/jpeg` for a Telegram photo; read from the bytes (`imageMime`). */
-  mime: string;
-  width?: number;
-  height?: number;
-}
-
 /** What a photo sent through a connector may carry (bot-os.md D150). */
 export interface ConnectorPhotoOptions {
   /** The words under it, at most `CAPTION_MAX` characters (the outbox has checked). */
@@ -360,11 +349,12 @@ export interface Connector extends ConnectorHandle {
   ): Promise<{ id?: string; photo?: string }>;
   /**
    * Fetches the photo of message `message` in `chat`, a chat it monitors (bot-os.md D151): its
-   * bytes, of the largest size the network has; null when the message has none. Rejects with why
+   * bytes, of the largest size the network has, as a `Media` (D153), its type read from the bytes
+   * (`sniffMime`), and its size in pixels where the network says; null when the message has none. Rejects with why
    * not (not found, not readable, too large: `PHOTO_MAX_BYTES`). Only its plugin's action `photo`
    * (`photoAction`) calls it, for the plugins an edge binds to the connector's interface.
    */
-  photo?(chat: string, message: string): Promise<MessagePhoto | null>;
+  photo?(chat: string, message: string): Promise<Media | null>;
   /**
    * The chats it can see, most recently active first, those matching `query.search` (bot-os.md
    * D63): what the owner picks the monitored chats and each edge's from. Rejects while it cannot
