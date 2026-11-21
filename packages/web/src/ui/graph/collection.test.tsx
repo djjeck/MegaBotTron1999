@@ -8,11 +8,12 @@ import { DevKit } from '@megabottron1999/core';
 import { collectionPlugin } from '@megabottron1999/turns/collection.ts';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MemberView } from '#src/ui/api.ts';
+import type { MemberView, NodeView } from '#src/ui/api.ts';
 import { fakeApi } from '#test/fake-api.ts';
 import type { RecordView } from './Collection.tsx';
 import { changes, CollectionRecords } from './Collection.tsx';
 import { BYTES_KEY } from './MediaField.tsx';
+import { NodeDetails } from './NodeDetails.tsx';
 
 afterEach(() => {
   cleanup();
@@ -295,5 +296,72 @@ describe('a collection’s media fields, from the schema the control API serves 
     const form = screen.getByRole('group', { name: 'New record' });
     expect(pickers(form)).toEqual(['nullable', 'referred', 'refined']);
     expect(within(form).getByText('By reference')).toBeDefined();
+  });
+});
+
+describe('a collection node’s panel (#76)', () => {
+  const panel = (plugin: string) => {
+    const view: NodeView = {
+      id: 'cast',
+      plugin,
+      version: '0.1.0',
+      description: 'Records',
+      kinds: ['stats'],
+      configSchema: {
+        type: 'object',
+        properties: { fields: { type: 'array', items: { type: 'object', properties: {} } } },
+      },
+      inputs: {},
+      outputs: {},
+      interface: { reads: [], actions: ACTIONS, commands: [] },
+      secrets: [],
+      configSecrets: [],
+      events: [],
+    };
+    return render(
+      <NodeDetails
+        node={{ id: 'cast', plugin }}
+        view={view}
+        live={{
+          id: 'cast',
+          plugin,
+          description: 'Records',
+          kinds: ['stats'],
+          state: 'running',
+          settings: {},
+          reads: [],
+          actions: ['add'],
+        }}
+        problems={[]}
+        configErrors={{}}
+        settingErrors={{}}
+        secretNames={[]}
+        groups={[]}
+        change={() => {}}
+        remove={() => {}}
+        kill={() => {}}
+        cleared={false}
+        clearStop={() => {}}
+      />
+    );
+  };
+  const order = (): string[] =>
+    [...document.querySelectorAll('aside.details > section h3, aside.details > dl')].map((e) =>
+      e.tagName === 'DL' ? 'dl' : (e.textContent ?? '')
+    );
+
+  it('puts its Records first, above its config and everything else; other nodes keep theirs', async () => {
+    serve();
+    panel('collection');
+    await screen.findByLabelText('record r1');
+    const shown = order();
+    expect(shown[0]).toBe('Records');
+    expect(shown.indexOf('Records')).toBeLessThan(shown.indexOf('dl'));
+    expect(shown.indexOf('Records')).toBeLessThan(shown.indexOf('Config'));
+    cleanup();
+    serve();
+    panel('postcard');
+    expect(screen.queryByLabelText('records of cast')).toBeNull();
+    expect(order()[0]).toBe('dl');
   });
 });

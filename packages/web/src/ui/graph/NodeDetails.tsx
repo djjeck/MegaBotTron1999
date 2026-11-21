@@ -15,8 +15,10 @@
  * the lane it is drawn in, is picked among the draft's, or named anew. Its outputs say what they
  * carry (D71): an events output its event types, an interface output its members. A node up that
  * keeps a state (D72) shows it, drawn from its schema; a running connector, its queue (D73); a node
- * of the instance, the files its plugin keeps (D149), an image shown; a running collection, its
- * records, edited in forms made from its schema (D155, `Collection.tsx`). Its
+ * of the instance, the files its plugin keeps (D149), an image shown. A running collection's
+ * records come first, under its name and its problems, above everything else of the panel, its
+ * config included (#76): edited in forms made from its schema (D155, `Collection.tsx`), the common
+ * action, while its schema is set once. Its
  * chat commands say where the commands edges serve them (D109), each chat by name, or that no edge
  * does; a connector's, which commands of which plugins it serves.
  *
@@ -805,6 +807,10 @@ export function NodeDetails(props: {
           ))}
         </ul>
       )}
+      {/* A running collection's records first (#76): what the owner comes for; its schema is set once. */}
+      {running && view.plugin === COLLECTION ? (
+        <CollectionRecords node={view.id} actions={i.actions} />
+      ) : null}
       <dl>
         <dt>Instance</dt>
         <dd>
@@ -982,9 +988,6 @@ export function NodeDetails(props: {
       ) : null}
       {running || live?.state === 'stopped' ? <NodeState id={view.id} /> : null}
       {connector && running ? <ConnectorQueue id={view.id} /> : null}
-      {running && view.plugin === COLLECTION ? (
-        <CollectionRecords node={view.id} actions={i.actions} />
-      ) : null}
       {live === undefined ? null : <NodeFiles id={view.id} />}
       {!scripted || props.script === undefined ? null : (
         <ScriptSection

@@ -131,10 +131,12 @@ the server that guards them.
   in pixels read from the picture; its value is the `Media` as JSON carries it,
   `{ data: { "$bytes": "<base64>" }, mime, width?, height? }`, sent within the control API's body
   limit (64 MiB of JSON, about 48 MiB of bytes), and an answer's bytes are said by their size. A
-  running **collection** (docs/bot-os.md D155) lists its **Records** (`Collection.tsx`): each named
-  by its title field, its other values in a line, its pictures as thumbnails from its files, and why
-  it is incomplete; **Add a record** and **Edit** open a form made from its `add` action's `values`
-  (a kept picture previewed from its file), an edit sending only the values changed and the fields
+  running **collection** (docs/bot-os.md D155) lists its **Records** (`Collection.tsx`) first in its
+  node's panel, under its name and its problems, above everything else, its config (the `fields`
+  schema, set once) lower down (#76; any other node's panel keeps its order): each named by its
+  title field, its other values in a line, its pictures as thumbnails from its files, and why it is
+  incomplete; **Add a record** and **Edit** open a form made from its `add` action's `values` (a
+  kept picture previewed from its file), an edit sending only the values changed and the fields
   cleared; ↑ and ↓ move one, **Remove** asks first; each its node's action, its refusal shown. An
   events edge says what it carries (`Payloads.tsx`, #3): each event type and its payload's fields by
   dotted path and type, in its panel, in the title of its rhombus (a line per type), and in the
