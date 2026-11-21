@@ -31,6 +31,9 @@
  * only for the ids seen, never for a range assumed to have come live, so that a gap no look filled
  * is fetched at the next connection. To revisit when GramJS keeps update state (`catchUp`).
  *
+ * **A message's photo** (D151): fetched on demand, by the message's id in its chat, its photo's
+ * largest size downloaded (`photo`); never with the message.
+ *
  * **The raw log** (D147): the last 8 hours of what it heard, fetched, sent and found missing, raw,
  * in its store (`raw-log.ts`), for debugging.
  *
@@ -45,10 +48,13 @@ import {
   ConnectorBase,
   type ConnectorPhotoOptions,
   FloodWait,
+  imageMime,
   type Inbound,
   type InboundDocument,
   LIVE_GRACE_S,
+  type MessagePhoto,
   NEEDS_LOGIN,
+  photoTooLarge,
   readDocument,
   type ReadFilter,
   type Surface,
@@ -96,6 +102,12 @@ export interface RawMessage {
         attributes?: readonly unknown[] | undefined;
       }
     | undefined;
+  /**
+   * Its media (GramJS's `Message.media`): a photo's is a `MessageMediaPhoto`, its `photo` an
+   * `Api.Photo` whose `sizes` are each a `PhotoSize`, a `PhotoSizeProgressive`, a
+   * `PhotoCachedSize`…; read defensively, and only by `photo` (D151).
+   */
+  media?: unknown;
   getSender(): Promise<unknown>;
   getChat(): Promise<unknown>;
 }
@@ -149,17 +161,21 @@ export interface GramClient {
       replyTo?: number;
     }
   ): Promise<{ id: number; chatId?: { toString(): string } | undefined; media?: unknown }>;
-  /** A chat's messages, latest first: below `offsetId` (0: from the latest), above `minId`. */
+  /**
+   * A chat's messages, latest first: below `offsetId` (0: from the latest), above `minId`; or those
+   * of the `ids` given, each undefined (or a `MessageEmpty`) where there is none (D151), whatever
+   * GramJS's type says.
+   */
   getMessages(
     entity: never,
-    params: { limit: number; offsetId: number; minId: number }
+    params: { limit: number; offsetId: number; minId: number } | { ids: number[] }
   ): Promise<Iterable<RawMessage>>;
   addEventHandler(
     handler: (event: { message: RawMessage }) => Promise<void>,
     builder: NewMessage
   ): void;
-  /** A message's file, downloaded whole (a `Buffer`). */
-  downloadMedia(message: never, params: object): Promise<unknown>;
+  /** A message's file, downloaded whole (a `Buffer`); a photo's size `thumb` (D151). */
+  downloadMedia(message: never, params: { thumb?: never }): Promise<unknown>;
   /** A raw request: the logout (`auth.logOut`). */
   invoke?(request: Api.auth.LogOut): Promise<unknown>;
 }
@@ -220,6 +236,41 @@ function inputPhoto(id: string): Api.InputPhoto | undefined {
     accessHash: returnBigInt(m[2] ?? ''),
     fileReference: Buffer.from(m[3] ?? '', 'base64url'),
   });
+}
+
+/** A photo's size, as GramJS gives it, read defensively (D151). */
+interface RawPhotoSize {
+  className?: string;
+  w?: number;
+  h?: number;
+  size?: number;
+  sizes?: number[];
+  bytes?: Uint8Array;
+}
+
+/**
+ * The largest size of a message's photo (D151), with its bytes as Telegram states them: a
+ * `PhotoSize`'s `size`, a `PhotoSizeProgressive`'s largest, a `PhotoCachedSize`'s bytes. A
+ * stripped or a path size (a blurred preview, an outline) is no picture; none: no photo.
+ */
+function largestPhotoSize(photo: unknown): { size: RawPhotoSize; bytes: number } | undefined {
+  const sizes = (photo as { sizes?: unknown } | null | undefined)?.sizes;
+  if (!Array.isArray(sizes)) return undefined;
+  let best: { size: RawPhotoSize; bytes: number } | undefined;
+  for (const s of sizes as RawPhotoSize[]) {
+    if (typeof s !== 'object' || s === null) continue;
+    const bytes =
+      s.className === 'PhotoSize'
+        ? s.size
+        : s.className === 'PhotoSizeProgressive'
+          ? Math.max(0, ...(s.sizes ?? []))
+          : s.className === 'PhotoCachedSize'
+            ? s.bytes?.byteLength
+            : undefined;
+    if (bytes !== undefined && (best === undefined || bytes > best.bytes))
+      best = { size: s, bytes };
+  }
+  return best;
 }
 
 /** How long a failed start waits before the next. */
@@ -518,6 +569,55 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     } catch (e) {
       const ms = floodMs(e);
       throw ms === undefined ? e : new FloodWait(ms);
+    }
+  }
+
+  /**
+   * The photo of message `message` in `chat` (bot-os.md D151): the message fetched by its id in
+   * that chat (GramJS's `getMessages` with `ids`), its photo's largest size downloaded
+   * (`downloadMedia` with that size as `thumb`), refused before the download when Telegram states
+   * more than `PHOTO_MAX_BYTES`. Null for a message without a photo (a picture sent as a file is a
+   * document, and a link's preview is the link's: neither is a photo); rejects for a chat it does not monitor, a message not found, a flood wait
+   * (with Telegram's wait) and a failed download. Its type is read from the bytes (a Telegram photo
+   * is a JPEG).
+   */
+  async photo(chat: string, message: string): Promise<MessagePhoto | null> {
+    if (!this.connected) throw new Error('not connected');
+    if (!this.monitors(chat)) throw new Error(`${chat} is not a chat ${this.account} monitors`);
+    const id = Number(message);
+    if (!/^\d+$/u.test(message) || !Number.isSafeInteger(id) || id <= 0)
+      throw new Error(`${message} is not a message id`);
+    const { client } = this.o;
+    try {
+      const [m] = [
+        ...(await client.getMessages((await this.peer(chat)) as never, { ids: [id] })),
+      ] as (RawMessage | undefined | null)[];
+      if (
+        m === undefined ||
+        m === null ||
+        (m as { className?: string }).className === 'MessageEmpty'
+      )
+        throw new Error(`no message ${message} in ${chat}`);
+      const media = m.media as { className?: string; photo?: unknown } | null | undefined;
+      // A photo sent as such: not a link's preview, nor a picture sent as a file (a document).
+      const largest =
+        media?.className === 'MessageMediaPhoto' ? largestPhotoSize(media.photo) : undefined;
+      if (largest === undefined) return null;
+      const large = photoTooLarge(largest.bytes);
+      if (large !== undefined) throw new Error(large);
+      const got = await client.downloadMedia(m as never, { thumb: largest.size as never });
+      if (!(got instanceof Uint8Array) || got.byteLength === 0)
+        throw new Error(`the photo of message ${message} could not be downloaded`);
+      const data = new Uint8Array(got);
+      return {
+        data,
+        mime: imageMime(data) ?? 'image/jpeg',
+        ...(largest.size.w === undefined ? {} : { width: largest.size.w }),
+        ...(largest.size.h === undefined ? {} : { height: largest.size.h }),
+      };
+    } catch (e) {
+      const ms = floodMs(e);
+      throw ms === undefined ? e : new Error(`Telegram asks to wait ${ms / 1000} s`);
     }
   }
 

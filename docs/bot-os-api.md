@@ -1201,6 +1201,48 @@ and the photo's (`photo`), to send it again by; only the outbox calls them: no p
 send that skips it. A connector without `deliverPhoto` (`irc`) cannot send photos, and the outbox
 refuses them with why (§4.6).
 
+**A message's photo** (bot-os.md D151): a connector may fetch the photo of a message on demand,
+`photo(chat, message)` (both Telegram connectors), and its plugin then offers it as the action
+`photo` of its node's interface (`photoAction` and `PHOTO_ACTION`,
+`packages/core/src/message-photo.ts`), which a plugin reaches through an interface input bound to
+the node, so that the edge is the permission (P6, P17); nothing is downloaded with a message (D82):
+
+```ts
+inputs: { tg: { type: 'interface', plugin: 'telegram-user', members: ['actions.photo'] } },
+// …
+const { actions } = ctx.use<{ actions: { photo: FetchPhoto } }>('tg');
+const r = await actions.photo({ chat: '-1001000000001', message: '4242' });
+if (r.ok && r.photo !== null) ctx.store.files.write('room-4242.jpg', r.photo.data, { type: r.photo.mime });
+```
+
+```ts
+interface PhotoRequest {
+  chat: string; // a chat the connector monitors, by any of its names
+  message: string; // the network's id of the message (`Inbound.id`)
+}
+type PhotoResult =
+  | { ok: true; photo: MessagePhoto | null } // null: the message has no photo
+  | { ok: false; error: string }; // why not: not connected, not its chat, not found, too large…
+interface MessagePhoto {
+  data: Uint8Array; // the largest size the network has
+  mime: string; // read from the bytes (`imageMime`): `image/jpeg` for a Telegram photo
+  width?: number; // in pixels, where the network says
+  height?: number;
+}
+```
+
+It never throws. A photo over `PHOTO_MAX_BYTES` (10 MiB, Telegram's own limit for a photo) is
+refused with its size, before the download where the network states it, after it otherwise; a
+request not of that shape, and a node that needs a login, are refused too. Each call is logged on
+the connector's node: the caller, the chat, the message and the bytes' count, never the bytes.
+`telegram-user` fetches the message by its id in its chat and downloads its photo's largest size; a
+photo is one sent as such (a `MessageMediaPhoto`): a picture sent as a file is a document, a link's
+preview the link's, and both answer `null`. `telegram-bot` cannot fetch a message by its id (the Bot
+API has no such call), and never hears another bot: it keeps the `file_id` of the largest size of
+the photos of the messages it hears and sends, the latest 1000, in its store (`photos`), and
+downloads one with `getFile` when asked; a message it heard without a photo since it started answers
+`null`, and any other is refused, saying so. `irc` offers no `photo`.
+
 **Surfaces** (bot-os.md D63, D96): a connector may list the chats it can see,
 `surfaces({ search?, limit? })`, most recently active first, for the owner to pick from (the control
 API's `GET /accounts/<id>/surfaces`, §4.11), each a `Surface`: `id`, the name its config and edges
@@ -1747,8 +1789,13 @@ public API (`packages/core/src/devkit.ts`):
   it administers (`admins`). It sends photos (`deliverPhoto`, bot-os.md D150; none with `noPhotos`,
   as `irc`), kept in `sent` too (`FakeSent`): `text` the caption (`''` without one), `photo` as
   sent, `format`, `replyTo`, and `id`, the photo's id it answers (`photo-<n>` for bytes, the id it
-  was sent by otherwise); the message's id is `m<n>`. The plugins read it through their handles and
-  send through their outboxes, as they do live.
+  was sent by otherwise); the message's id is `m<n>`. Given the photos of its messages (`photos`:
+  `{ chat, message, photo }`, `photo` a `MessagePhoto` or a string, the why of a refusal; more with
+  `givePhoto(chat, message, photo)`), it fetches them (`photo`, bot-os.md D151), a message not given
+  one answering `null`, and `fakeConnectorPlugin` then offers the action `photo` on its interface,
+  as a Telegram connector's does (§4.5): a plugin bound to
+  `fakeConnectorPlugin('telegram-user', fake)` with members `actions.photo` asks it as it would
+  live. The plugins read it through their handles and send through their outboxes, as they do live.
 - **`DevKit`**: a core on a `VirtualClock` (§4.1) whose stores are in memory, with the plugins of
   the run, the run's graph (`graph`; by default one instance of each, bound as the manifests say,
   each connector's node on its manifest's account: a graph given names a fake connector's account on
@@ -2404,40 +2451,43 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   `@username`; a 429 longer than auto-retry waits out becomes `FloodWait`); a photo with `sendPhoto`
   (D150: its `caption`, Markdown as Telegram HTML and as written if Telegram cannot parse it,
   `reply_parameters` sent all the same if the message answered is gone), answering the `file_id` of
-  its largest size; `commandIntervalS` in its config is its queue's default interval between two
-  sends of a command (D73), and `unansweredAt`, `unansweredAtBy` its watchdog's threshold (§4.6,
-  D93). With `chats` in its config (picked among its chats, D96) it monitors only those for the
-  plugins; its surfaces are the chats it has seen and its owner (§4.5), and the updates Telegram
-  kept while it was down come marked `missed` (and `playback` once older than its config's
-  `liveGraceS`, 120 s by default, D83). Configured with its owner (`owner`, in its node's config,
-  picked among its chats and kept by id, D96), it is the instance's chat surface, the owner's
-  interactive control (§4.8, bot-os.md D56) (`telegram-surface.ts`): the switchboard on its bot
-  (`telegram-switchboard.ts`, on grammy-switchboard), the owner's controls answered in the owner's
-  chat, and the plugins' commands that the commands edges from its `commands` output serve (D109),
-  each answered only in the chats its edge names (a group, the owner's chat, every private chat with
-  `privateChats`) and listed in those chats' menus alone (the switchboard's, the owner's chat; every
-  private chat's; Telegram's `chat` scope for each other chat, a group's included, but a group its
-  gate refuses) (`telegram-commands.ts`), the menus kept registered, a refused one retried and one
-  set again when the bot joins its chat; in any group, one answer per user a minute and one every 10
-  s, each group its own throttles, and an answer deleted when its handler asks
-  (`deleteInGroupAfterMs`). Without an `owner` it is no surface, and its commands edges answer
-  nothing. It tells the owner nothing on its own (D94): a send with buttons (`SendOptions.buttons`,
-  an `owner-notice` telling a `told` notice) to the owner's chat goes through the surface's
-  switchboard, whose taps run the owner's commands as a card's do; to any other chat, the text
-  alone. Nothing hands its bot out (P9). Its gate (D128, `telegram-gate.ts`), each list picked among
-  its chats: `groups`, `any` group it is added to (default; `blockGroups` the ones it ignores even
-  so) or `only` the groups in `onlyGroups`; `people`, `anyone` (default; `blockPeople`, never its
-  owner) or `only` the people and bots in `onlyPeople`, its owner always allowed, listed or not; a
-  list of the choice not made is refused by its check. In a group it does not work in, nothing goes
-  further: no message reaches a reader, no command an edge or its surface. A command (or a tap on a
-  button) of a person it does not work for, in any chat, goes no further either, what they say still
-  reaching the readers. Each command dropped is recorded (`telegram-bot.denied`: `chat`,
-  `chatTitle`, `sender`, `by` `group` or `person`, `command`, `replied`; on the Events page) and
-  counted in its node's view and on its card; silent unless `denyReply` sets one line to answer a
-  person with, at most once in 10 minutes per person. Its `home` (D105) is the command of the
-  owner's main card, as typed (`/menu`, `/menu main`) or short (`menu`, `menu:main`), at most 64
-  bytes: the core's own cards on its surface (`/plugins`, `/settings`) end with a button that runs
-  it, labelled `homeLabel` (`🏠 Home` by default); unset, they have none.
+  its largest size; its interface's action `photo` (§4.5, D151) fetches the photo of a message it
+  heard or sent, the latest 1000 kept by their `file_id` in its store (`photos`), any other refused
+  with why (the Bot API fetches no message by its id); `commandIntervalS` in its config is its
+  queue's default interval between two sends of a command (D73), and `unansweredAt`,
+  `unansweredAtBy` its watchdog's threshold (§4.6, D93). With `chats` in its config (picked among
+  its chats, D96) it monitors only those for the plugins; its surfaces are the chats it has seen and
+  its owner (§4.5), and the updates Telegram kept while it was down come marked `missed` (and
+  `playback` once older than its config's `liveGraceS`, 120 s by default, D83). Configured with its
+  owner (`owner`, in its node's config, picked among its chats and kept by id, D96), it is the
+  instance's chat surface, the owner's interactive control (§4.8, bot-os.md D56)
+  (`telegram-surface.ts`): the switchboard on its bot (`telegram-switchboard.ts`, on
+  grammy-switchboard), the owner's controls answered in the owner's chat, and the plugins' commands
+  that the commands edges from its `commands` output serve (D109), each answered only in the chats
+  its edge names (a group, the owner's chat, every private chat with `privateChats`) and listed in
+  those chats' menus alone (the switchboard's, the owner's chat; every private chat's; Telegram's
+  `chat` scope for each other chat, a group's included, but a group its gate refuses)
+  (`telegram-commands.ts`), the menus kept registered, a refused one retried and one set again when
+  the bot joins its chat; in any group, one answer per user a minute and one every 10 s, each group
+  its own throttles, and an answer deleted when its handler asks (`deleteInGroupAfterMs`). Without
+  an `owner` it is no surface, and its commands edges answer nothing. It tells the owner nothing on
+  its own (D94): a send with buttons (`SendOptions.buttons`, an `owner-notice` telling a `told`
+  notice) to the owner's chat goes through the surface's switchboard, whose taps run the owner's
+  commands as a card's do; to any other chat, the text alone. Nothing hands its bot out (P9). Its
+  gate (D128, `telegram-gate.ts`), each list picked among its chats: `groups`, `any` group it is
+  added to (default; `blockGroups` the ones it ignores even so) or `only` the groups in
+  `onlyGroups`; `people`, `anyone` (default; `blockPeople`, never its owner) or `only` the people
+  and bots in `onlyPeople`, its owner always allowed, listed or not; a list of the choice not made
+  is refused by its check. In a group it does not work in, nothing goes further: no message reaches
+  a reader, no command an edge or its surface. A command (or a tap on a button) of a person it does
+  not work for, in any chat, goes no further either, what they say still reaching the readers. Each
+  command dropped is recorded (`telegram-bot.denied`: `chat`, `chatTitle`, `sender`, `by` `group` or
+  `person`, `command`, `replied`; on the Events page) and counted in its node's view and on its
+  card; silent unless `denyReply` sets one line to answer a person with, at most once in 10 minutes
+  per person. Its `home` (D105) is the command of the owner's main card, as typed (`/menu`,
+  `/menu main`) or short (`menu`, `menu:main`), at most 64 bytes: the core's own cards on its
+  surface (`/plugins`, `/settings`) end with a button that runs it, labelled `homeLabel` (`🏠 Home`
+  by default); unset, they have none.
 - **`telegram-user`** (`packages/connectors/src/plugins/telegram-user.ts`, on GramJS in
   `packages/connectors/src/transport/telegram-user.ts`): the owner's own account, from a login in
   its node's panel (§4.5, D116: `user-login.ts`, the API pair once, then a QR code or the phone,
@@ -2459,7 +2509,9 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   refused with why; Telegram's file reference may expire, and a send by it then fails
   `FILE_REFERENCE_EXPIRED`, the bytes to send again), its queue's default interval between two sends
   of a command its config's `commandIntervalS` (D73), its watchdog's threshold `unansweredAt` and
-  `unansweredAtBy` (§4.6, D93); GramJS's flood waits become `FloodWait`.
+  `unansweredAtBy` (§4.6, D93); GramJS's flood waits become `FloodWait`. Its interface's action
+  `photo` (§4.5, D151) fetches a message by its id in a chat it monitors and downloads its photo's
+  largest size.
 - **`ServiceConnector`** (`packages/connectors/src/plugins/service.ts`): for a connector plugin that
   holds an account's secrets and offers what it makes from them through its declared interface, but
   has no chat: it reads and sends nothing. Its manifest says `chat: false` (§2.1, bot-os.md D148),

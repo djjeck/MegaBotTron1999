@@ -9,13 +9,16 @@
  * only (groups by id, private chats by `@username`), or every chat of the account when it names
  * none (its surfaces, bot-os.md D63); each edge reads a subset (D62). At each connection it
  * catches up on what its readers' chats said while it was down (D62), keeping the last message id
- * seen in each chat in its store.
+ * seen in each chat in its store. Its interface offers `photo` (D151): a message's photo, fetched
+ * by its id when a plugin bound to it asks.
  */
 import {
   commandIntervalS,
   definePlugin,
   liveGraceS,
   LoginNeeded,
+  PHOTO_ACTION,
+  photoAction,
   type Plugin,
   unansweredAt,
   unansweredAtBy,
@@ -88,6 +91,8 @@ export function telegramUserPlugin(
       monitors: { config: 'chats', aliases: true },
       // Its credentials from a login in its node's panel, kept in its store (D116, D118).
       login: true,
+      // A message's photo, fetched on demand for the plugins an edge binds to it (D151).
+      interface: { actions: { photo: PHOTO_ACTION } },
     },
     create: (ctx) => {
       // Its credentials, sealed at rest under bot_os_key (D123).
@@ -117,6 +122,7 @@ export function telegramUserPlugin(
         return {
           connector: new LoginNeeded(ctx.account ?? account, 'telegram'),
           login,
+          interface: { actions: { photo: photoAction(undefined) } },
           stop: () => (held.delete(ctx.id), login.drop()),
         };
       }
@@ -143,6 +149,7 @@ export function telegramUserPlugin(
       return {
         connector,
         login,
+        interface: { actions: { photo: photoAction(connector, log) } },
         start: () => connector.start(),
         stop: async () => {
           held.delete(ctx.id);

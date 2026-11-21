@@ -21,7 +21,11 @@ credentials are sealed at rest under `bot_os_key` (`src/sealed-store.ts` and `Se
 hidden from every view of it (`src/sensitive.ts`, `hideSensitive`, D124).
 
 - `src/index.ts` is the public API (`@megabottron1999/core`); plugins import nothing else.
-- `src/devkit.ts`: a core on a virtual clock with fake connectors, for tests and simulators.
+- `src/devkit.ts`: a core on a virtual clock with fake connectors, for tests and simulators; a fake
+  connector given the photos of its messages answers the action `photo` (D151).
+- `src/message-photo.ts`: a message's photo fetched on demand (docs/bot-os.md D151): the action
+  `photo({ chat, message })` a connector plugin offers on its interface over its connector's
+  `photo`, its size limit (`PHOTO_MAX_BYTES`) and an image's type read from its bytes.
 - `src/boot.ts`, `src/held.ts`: the start in the background, once the wiring serves (docs/bot-os.md
   D143): the image's plugin packages, then the modules, each loaded on its own; a package or module
   that fails to load is told to the core, which holds the nodes of its plugins (`unloaded`) and

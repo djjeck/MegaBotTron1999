@@ -1,4 +1,12 @@
-import { Core, definePlugin, type Inbound, NEEDS_LOGIN, VirtualClock } from '@megabottron1999/core';
+import {
+  Core,
+  definePlugin,
+  type FetchPhoto,
+  type Inbound,
+  NEEDS_LOGIN,
+  parseManifest,
+  VirtualClock,
+} from '@megabottron1999/core';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -293,10 +301,10 @@ describe('the telegram-user plugin', () => {
       Promise.resolve([
         { id: { toString: () => GROUP }, inputEntity: { peer: GROUP }, message: { id: 2000 } },
       ]);
-    c.getMessages = (_, { limit, offsetId }) =>
+    c.getMessages = (_, params) =>
       Promise.resolve(
-        Array.from({ length: limit }, (_x, i) => ({
-          id: offsetId - 1 - i,
+        Array.from({ length: 'limit' in params ? params.limit : 0 }, (_x, i) => ({
+          id: ('offsetId' in params ? params.offsetId : 0) - 1 - i,
           date: 1,
           message: 'hi',
           getSender: () => Promise.resolve({ username: 'QuestBot' }),
@@ -330,6 +338,83 @@ describe('the telegram-user plugin', () => {
     expect(records).toContainEqual(
       expect.objectContaining({ type: 'telegram-user.catch-up', chat: GROUP, fetched: 1000 })
     );
+    await core.stop();
+  });
+});
+
+/** A plugin that asks a connector's node for a message's photo, through its interface (D151). */
+function asker(plugin: string, asked: unknown[], request: { chat: string; message: string }) {
+  return definePlugin({
+    manifest: {
+      id: 'postcard',
+      version: '0.1.0',
+      kinds: ['agent'],
+      description: 'Keeps the pictures of the rooms',
+      inputs: { tg: { type: 'interface', plugin, members: ['actions.photo'] } },
+    },
+    create: (ctx) => ({
+      async start() {
+        const { actions } = ctx.use<{ actions: { photo: FetchPhoto } }>('tg');
+        asked.push(await actions.photo(request));
+      },
+    }),
+  });
+}
+
+describe('the telegram-user plugin’s photo (D151)', () => {
+  it('offers photo on its interface: a plugin bound to it fetches a message’s photo', async () => {
+    const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 1]);
+    const c = client();
+    c.getMessages = () =>
+      Promise.resolve([
+        {
+          id: 42,
+          date: 1,
+          message: 'Room 4',
+          media: {
+            className: 'MessageMediaPhoto',
+            photo: { sizes: [{ className: 'PhotoSize', w: 800, h: 600, size: 4 }] },
+          },
+          getSender: () => Promise.resolve(undefined),
+          getChat: () => Promise.resolve(undefined),
+        },
+      ]);
+    c.downloadMedia = () => Promise.resolve(JPEG);
+    const asked: unknown[] = [];
+    const logs: string[] = [];
+    const core = new Core({
+      clock: new VirtualClock(),
+      config: { 'telegram-user': { chats: [GROUP] } },
+      documents: loggedIn('telegram-user'),
+      print: (l) => void logs.push(l),
+    });
+    core.register(
+      telegramUserPlugin({ client: () => c }),
+      asker('telegram-user', asked, { chat: GROUP, message: '42' })
+    );
+    expect(parseManifest(telegramUserPlugin().manifest).outputs['interface']).toMatchObject({
+      members: ['actions.photo'],
+    });
+    await core.start();
+    expect(asked).toEqual([
+      { ok: true, photo: { data: JPEG, mime: 'image/jpeg', width: 800, height: 600 } },
+    ]);
+    // Logged with its caller and its size, never its bytes.
+    expect(
+      logs.some((l) => l.includes(`photo of message 42 in ${GROUP}, for postcard: 4 bytes`))
+    ).toBe(true);
+    await core.stop();
+  });
+
+  it('refuses it, with why, while it needs a login', async () => {
+    const asked: unknown[] = [];
+    const core = new Core({ clock: new VirtualClock() });
+    core.register(
+      telegramUserPlugin(),
+      asker('telegram-user', asked, { chat: GROUP, message: '1' })
+    );
+    await core.start();
+    expect(asked).toEqual([{ ok: false, error: 'not logged in' }]);
     await core.stop();
   });
 });

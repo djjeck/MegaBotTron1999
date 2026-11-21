@@ -8,6 +8,9 @@ import {
   createBot,
   downloadFile,
   MEMBER_UNREACHABLE,
+  PHOTO_UNKNOWN,
+  PHOTOS_DOC,
+  PHOTOS_KEPT,
   type Startable,
   startBotWithRetry,
   surfaceOf,
@@ -804,6 +807,138 @@ describe('TelegramBotConnector', () => {
     expect(c.send('1', 'x')).toBe(true);
     await flush();
     expect(logs.at(-1)).toBe('send to 1 failed: Error: nope');
+  });
+
+  describe('a message’s photo (D151)', () => {
+    const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 9]);
+    /** A message with a photo, its sizes smallest first as Telegram gives them, in `chatId`. */
+    const withPhoto = (
+      stub: ReturnType<typeof stubBot>,
+      chatId: number,
+      sizes: Record<string, unknown>[]
+    ) => {
+      const u = stub.command(chatId, 5, 'x') as unknown as { message: Record<string, unknown> };
+      delete u.message['text'];
+      delete u.message['entities'];
+      u.message['photo'] = sizes;
+      return u as unknown as ReturnType<typeof stub.command>;
+    };
+    const idOf = (u: ReturnType<ReturnType<typeof stubBot>['command']>): string =>
+      String((u as unknown as { message: { message_id: number } }).message.message_id);
+    const SMALL = { file_id: 'small', file_unique_id: 's', width: 90, height: 60 };
+    const LARGE = {
+      file_id: 'large',
+      file_unique_id: 'l',
+      width: 1280,
+      height: 853,
+      file_size: 90_000,
+    };
+
+    it('keeps the photos it hears and sends, and downloads the largest when asked', async () => {
+      const ids: string[] = [];
+      const { c, stub, docs } = connector({
+        download: (id) => (ids.push(id), Promise.resolve(JPEG)),
+      });
+      const photo = withPhoto(stub, -100123, [SMALL, LARGE]);
+      const text = stub.command(-100123, 5, 'just words');
+      await stub.bot.handleUpdate(photo);
+      await stub.bot.handleUpdate(text);
+      expect(await c.photo('-100123', idOf(photo))).toEqual({
+        data: JPEG,
+        mime: 'image/jpeg',
+        width: 1280,
+        height: 853,
+      });
+      expect(ids).toEqual(['large']);
+      // A message it heard without a photo has none.
+      expect(await c.photo('-100123', idOf(text))).toBeNull();
+      // Its own, sent: kept by its chat and the id Telegram gave it.
+      const sent = await c.deliverPhoto('-100123', { data: JPEG, filename: 'room.jpg' });
+      await c.photo('-100123', sent.id ?? '');
+      expect(ids.at(-1)).toBe(`photo-${sent.id}`);
+      expect(Object.keys(docs[PHOTOS_DOC] as object)).toEqual([
+        `-100123 ${idOf(photo)}`,
+        `-100123 ${sent.id}`,
+      ]);
+    });
+
+    it('fetches a photo kept before a restart, by any name of its chat', async () => {
+      const first = connector({ download: () => Promise.resolve(JPEG) });
+      const u = withPhoto(first.stub, 5, [LARGE]);
+      await first.stub.bot.handleUpdate(u);
+      const again = connector({ docs: first.docs, download: () => Promise.resolve(JPEG) });
+      expect(await again.c.photo('5', idOf(u))).toMatchObject({ width: 1280 });
+      // A private chat named by its @username, once seen.
+      await again.stub.bot.handleUpdate(again.stub.command(5, 5, '/start', 'ada'));
+      expect(await again.c.photo('@ada', idOf(u))).toMatchObject({ width: 1280 });
+    });
+
+    it('refuses what it cannot fetch, with why', async () => {
+      const { c, stub } = connector({
+        chats: ['-100123'],
+        download: () => Promise.reject(new Error('HTTP 502')),
+      });
+      await expect(c.photo('-100999', '1')).rejects.toThrow(
+        '-100999 is not a chat telegram-bot:ExampleBot monitors'
+      );
+      await expect(c.photo('-100123', '77')).rejects.toThrow(
+        `no photo of message 77 in -100123 kept: ${PHOTO_UNKNOWN}`
+      );
+      const big = withPhoto(stub, -100123, [{ ...LARGE, file_size: 11 * 1024 * 1024 }]);
+      await stub.bot.handleUpdate(big);
+      await expect(c.photo('-100123', idOf(big))).rejects.toThrow(
+        'the photo is 11.0 MiB, more than the 10.0 MiB a photo may be'
+      );
+      const ok = withPhoto(stub, -100123, [SMALL]);
+      await stub.bot.handleUpdate(ok);
+      await expect(c.photo('-100123', idOf(ok))).rejects.toThrow(
+        `the photo of message ${idOf(ok)} could not be downloaded: HTTP 502`
+      );
+      // A photo in a chat it does not monitor is not kept.
+      const elsewhere = withPhoto(stub, -100999, [SMALL]);
+      await stub.bot.handleUpdate(elsewhere);
+      expect(Object.keys(c['photos'] as object)).toHaveLength(2);
+    });
+
+    it("says Telegram's wait, and reads a PNG's type from its bytes", async () => {
+      const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      let answer: Promise<Uint8Array> = Promise.resolve(PNG);
+      const { c, stub } = connector({ download: () => answer });
+      const u = withPhoto(stub, -100123, [SMALL]);
+      await stub.bot.handleUpdate(u);
+      expect(await c.photo('-100123', idOf(u))).toMatchObject({ mime: 'image/png' });
+      answer = Promise.reject(
+        new GrammyError(
+          'slow down',
+          {
+            ok: false,
+            error_code: 429,
+            description: 'Too Many Requests',
+            parameters: { retry_after: 9 },
+          },
+          'getFile',
+          {}
+        )
+      );
+      await expect(c.photo('-100123', idOf(u))).rejects.toThrow('Telegram asks to wait 9 s');
+      answer = Promise.reject('odd');
+      await expect(c.photo('-100123', idOf(u))).rejects.toThrow('could not be downloaded: odd');
+    });
+
+    it(`keeps the latest ${PHOTOS_KEPT} photos, and as many messages without one`, async () => {
+      const { c, stub, docs } = connector({ download: () => Promise.resolve(JPEG) });
+      const first = withPhoto(stub, -100123, [SMALL]);
+      const plain = stub.command(-100123, 5, 'words');
+      await stub.bot.handleUpdate(first);
+      await stub.bot.handleUpdate(plain);
+      for (let i = 0; i < PHOTOS_KEPT; i++) {
+        await stub.bot.handleUpdate(withPhoto(stub, -100123, [SMALL]));
+        await stub.bot.handleUpdate(stub.command(-100123, 5, 'words'));
+      }
+      expect(Object.keys(docs[PHOTOS_DOC] as object)).toHaveLength(PHOTOS_KEPT);
+      await expect(c.photo('-100123', idOf(first))).rejects.toThrow(PHOTO_UNKNOWN);
+      await expect(c.photo('-100123', idOf(plain))).rejects.toThrow(PHOTO_UNKNOWN);
+    }, 30_000);
   });
 });
 

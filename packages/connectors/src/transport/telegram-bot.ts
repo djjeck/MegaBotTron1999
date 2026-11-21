@@ -25,6 +25,11 @@
  * reply line, if any. The people it has seen in its groups, which the Bot API cannot list, it keeps
  * in memory (never in its store) and lists among its surfaces as people it cannot message, so that
  * the owner picks whom to block or allow.
+ *
+ * A message's photo (D151): the Bot API fetches no message by its id, so it keeps the largest
+ * size's `file_id` of the photos of the messages it hears and sends, the latest `PHOTOS_KEPT`, in
+ * its store, and downloads one when its plugin's action `photo` asks; any other it refuses, saying
+ * why.
  */
 import { autoRetry } from '@grammyjs/auto-retry';
 import {
@@ -35,8 +40,11 @@ import {
   type ConnectorPhotoOptions,
   type ConnectorSendOptions,
   FloodWait,
+  imageMime,
   type InboundDocument,
   LIVE_GRACE_S,
+  type MessagePhoto,
+  photoTooLarge,
   readDocument,
   type Surface,
   type SurfaceQuery,
@@ -179,6 +187,27 @@ export const OWNER_UNREACHABLE =
 const nameOf = (from: { id: number; username?: string } | undefined): string =>
   from === undefined ? '?' : from.username === undefined ? String(from.id) : `@${from.username}`;
 
+/**
+ * The store's document of the photos of the messages it heard and sent (bot-os.md D151), by
+ * `<chat id> <message id>`: the Bot API fetches no message by its id, so a photo it did not keep
+ * cannot be fetched.
+ */
+export const PHOTOS_DOC = 'photos';
+/** How many photos it keeps (D151), the latest; and as many messages heard without one. */
+export const PHOTOS_KEPT = 1000;
+
+/** A photo kept (D151): its largest size's `file_id`, its size in pixels and in bytes. */
+interface KeptPhoto {
+  file: string;
+  width: number;
+  height: number;
+  size?: number;
+}
+
+/** Why the bot cannot fetch the photo of a message it kept nothing of (D151). */
+export const PHOTO_UNKNOWN =
+  'a bot fetches only the photo of a message it heard or sent while it kept it (the Bot API fetches no message by its id, and a bot never hears another bot)';
+
 /** How long a chat Telegram would not give (`getChat`) is not asked for again. */
 const UNKNOWN_TTL_MS = 10 * 60_000;
 
@@ -260,6 +289,10 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
   private ownerUnknown: number | undefined;
   /** The people seen in its groups, by id, in memory only (D100): those it may block or allow. */
   private readonly members = new Map<string, Surface>();
+  /** The photos of the messages it heard and sent, as kept (D151). */
+  private readonly photos: Record<string, KeptPhoto>;
+  /** The messages it heard without a photo, the latest, in memory only (D151): theirs is none. */
+  private readonly plain = new Set<string>();
 
   constructor(options: BotConnectorOptions) {
     super(options.account, 'telegram');
@@ -274,6 +307,7 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
       for (const n of names) this.names.set(n.toLowerCase(), names);
     }
     this.ledger = new SeenLedger(options.store);
+    this.photos = { ...(options.store?.read<Record<string, KeptPhoto>>(PHOTOS_DOC) ?? {}) };
     // First in the bot's chain, so it hears every message before the app's handlers.
     this.bot.on('message', async (ctx, next) => {
       const m = ctx.message;
@@ -319,7 +353,10 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
         heard && m.document !== undefined ? await this.document(m.document) : undefined;
       // A file without a caption has no text: its text is then ''.
       const text = m.text ?? m.caption ?? (document === undefined ? undefined : '');
-      if (heard) this.ledger.advance(key, m.message_id);
+      if (heard) {
+        this.ledger.advance(key, m.message_id);
+        this.keep(m.chat.id, m.message_id, m.photo);
+      }
       if (text !== undefined && heard)
         try {
           const aliases = this.namesOf(m.chat).slice(1);
@@ -661,6 +698,8 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
         ...reply,
         ...captionOf(options.caption, format),
       });
+      // Its chat by id, as Telegram answers it (a `@username` sent to, as written otherwise).
+      this.keep((sent.chat as Chat | undefined)?.id ?? to, sent.message_id, sent.photo);
       const file = sent.photo.at(-1)?.file_id;
       return { id: String(sent.message_id), ...(file === undefined ? {} : { photo: file }) };
     };
@@ -677,5 +716,69 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
       const ms = floodMs(e);
       throw ms === undefined ? e : new FloodWait(ms);
     }
+  }
+
+  /**
+   * A message heard or sent, for `photo` (D151): its photo's largest size kept in its store, the
+   * latest `PHOTOS_KEPT`; a message without one remembered in memory, as many, as having none.
+   */
+  private keep(chat: number | string, message: number, photo: Message['photo']): void {
+    const key = `${chat} ${message}`;
+    const largest = photo?.at(-1);
+    if (largest === undefined) {
+      this.plain.add(key);
+      for (const old of this.plain) {
+        if (this.plain.size <= PHOTOS_KEPT) break;
+        this.plain.delete(old);
+      }
+      return;
+    }
+    delete this.photos[key];
+    this.photos[key] = {
+      file: largest.file_id,
+      width: largest.width,
+      height: largest.height,
+      ...(largest.file_size === undefined ? {} : { size: largest.file_size }),
+    };
+    // The oldest first, as an object keeps its string keys in insertion order.
+    const keys = Object.keys(this.photos);
+    for (const old of keys.slice(0, Math.max(0, keys.length - PHOTOS_KEPT)))
+      delete this.photos[old];
+    this.o.store?.write(PHOTOS_DOC, this.photos);
+  }
+
+  /**
+   * The photo of message `message` in `chat` (bot-os.md D151), a chat it monitors, by any of its
+   * names: the largest size of a photo it kept (`keep`) downloaded by its `file_id` (`getFile`, as
+   * a file of D82), refused before the download when Telegram stated more than `PHOTO_MAX_BYTES`.
+   * Null for a message it heard without one since it started; any other it refuses with why
+   * (`PHOTO_UNKNOWN`): the Bot API fetches no message by its id.
+   */
+  async photo(chat: string, message: string): Promise<MessagePhoto | null> {
+    const names = this.names.get(chat.toLowerCase()) ?? [chat];
+    const chats = this.chats;
+    if (chats !== undefined && !names.some((n) => chats.has(n.toLowerCase())))
+      throw new Error(`${chat} is not a chat ${this.account} monitors`);
+    const key = `${names[0] ?? chat} ${message}`;
+    const kept = this.photos[key];
+    if (kept === undefined) {
+      if (this.plain.has(key)) return null;
+      throw new Error(`no photo of message ${message} in ${chat} kept: ${PHOTO_UNKNOWN}`);
+    }
+    const large = photoTooLarge(kept.size);
+    if (large !== undefined) throw new Error(large);
+    const download = this.o.download ?? ((id: string) => downloadFile(this.bot, id));
+    let data: Uint8Array;
+    try {
+      data = await download(kept.file);
+    } catch (e) {
+      const ms = floodMs(e);
+      throw new Error(
+        ms === undefined
+          ? `the photo of message ${message} could not be downloaded: ${e instanceof Error ? e.message : String(e)}`
+          : `Telegram asks to wait ${ms / 1000} s`
+      );
+    }
+    return { data, mime: imageMime(data) ?? 'image/jpeg', width: kept.width, height: kept.height };
   }
 }

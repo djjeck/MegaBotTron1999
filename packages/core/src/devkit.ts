@@ -5,7 +5,9 @@
  * - `FakeConnector`, with its plugin (`fakeConnectorPlugin`): a connector of any network whose
  *   messages are said by the test or the simulator (`hear`) and whose sends go to it (`onSend`),
  *   with the account's limits, so that the plugins read and send through it as they do live; the
- *   photos sent too (bot-os.md D150), with their caption and the message they answer.
+ *   photos sent too (bot-os.md D150), with their caption and the message they answer; and the
+ *   photos of its messages, as the test gives them, which its plugin's action `photo` fetches
+ *   (D151).
  * - `DevKit`: a core on a virtual clock (packages/core/src/clock.ts), its stores in memory, their
  *   files (`ctx.store.files`) too,
  *   with the plugins given, their configuration, the owner's kept settings, and the
@@ -24,12 +26,14 @@ import {
   type ConnectorPhotoOptions,
   type ConnectorSendOptions,
   type Inbound,
+  type MessagePhoto,
   type Surface,
   type SurfaceQuery,
 } from './connector.ts';
 import { Core, type CoreOptions } from './core.ts';
 import { type LogEntry, MemoryEventLog } from './event-log.ts';
 import { type Manifest, ManifestError, type ManifestInput, parseManifest } from './manifest.ts';
+import { PHOTO_ACTION, photoAction } from './message-photo.ts';
 import { type Limits, type TextFormat } from './outbox.ts';
 import { definePlugin, type Plugin } from './plugin.ts';
 
@@ -53,6 +57,22 @@ export interface FakeConnectorOptions {
   surfaces?: readonly Surface[];
   /** The owner's own chat (`owner()`), as a `telegram-bot`'s; none: it has no owner. */
   owner?: string;
+  /**
+   * The photos of its messages (bot-os.md D151): given, even none, it fetches them (`photo`), and
+   * its plugin offers the action `photo`; a message not given has none (`null`). More are given
+   * with `givePhoto`.
+   */
+  photos?: readonly FakePhoto[];
+}
+
+/**
+ * A message's photo a fake connector answers `photo` with (D151): the photo, or why it cannot fetch
+ * it (a string), which the action answers as its `error`.
+ */
+export interface FakePhoto {
+  chat: string;
+  message: string;
+  photo: MessagePhoto | string;
 }
 
 /** A message the connector hears: its account and network are the connector's. */
@@ -93,6 +113,13 @@ export class FakeConnector extends ConnectorBase implements Connector {
   /** Its surfaces, as a test sets them; undefined: none (it cannot list them). */
   readonly surfaces?: (query?: SurfaceQuery) => Promise<Surface[]>;
   private readonly ownerChat: string | undefined;
+  /** The photos given, by `<chat> <message>`; undefined: it fetches none. */
+  private readonly given: Map<string, MessagePhoto | string> | undefined;
+  /**
+   * Fetches a message's photo (D151), as given (`photos`, `givePhoto`): null for a message not
+   * given one, a rejection for a why. Absent when the test gave it no `photos`.
+   */
+  readonly photo?: (chat: string, message: string) => Promise<MessagePhoto | null>;
 
   constructor(o: FakeConnectorOptions) {
     const colon = o.account.indexOf(':');
@@ -119,6 +146,15 @@ export class FakeConnector extends ConnectorBase implements Connector {
         });
         return Promise.resolve({ id: `m${n}`, photo: id });
       };
+    if (o.photos !== undefined) {
+      const given = new Map(o.photos.map((p) => [`${p.chat} ${p.message}`, p.photo]));
+      this.given = given;
+      this.photo = (chat, message) => {
+        const p = given.get(`${chat} ${message}`);
+        if (typeof p === 'string') return Promise.reject(new Error(p));
+        return Promise.resolve(p ?? null);
+      };
+    }
     const listed = o.surfaces;
     if (listed !== undefined)
       this.surfaces = (q = {}) => {
@@ -130,6 +166,15 @@ export class FakeConnector extends ConnectorBase implements Connector {
             .slice(0, q.limit ?? listed.length)
         );
       };
+  }
+
+  /**
+   * Gives message `message` of `chat` a photo, or a why for `photo` to refuse it with (D151).
+   * Throws for a fake made without `photos`, which fetches none.
+   */
+  givePhoto(chat: string, message: string, photo: MessagePhoto | string): void {
+    if (this.given === undefined) throw new Error(`${this.account} was made without photos`);
+    this.given.set(`${chat} ${message}`, photo);
   }
 
   /** The owner's own chat, as the test gave it. */
@@ -180,8 +225,13 @@ export class FakeConnector extends ConnectorBase implements Connector {
   }
 }
 
-/** The connector plugin `id` on a fake connector, for a kit's plugins to require and reach. */
+/**
+ * The connector plugin `id` on a fake connector, for a kit's plugins to require and reach; with
+ * the action `photo` on its interface when the connector fetches photos (`photos`, D151), as a
+ * Telegram connector's.
+ */
 export function fakeConnectorPlugin(id: string, connector: FakeConnector): Plugin {
+  const photos = connector.photo !== undefined;
   return definePlugin({
     manifest: {
       id,
@@ -189,8 +239,12 @@ export function fakeConnectorPlugin(id: string, connector: FakeConnector): Plugi
       kinds: ['connector'],
       description: `A fake connector of ${connector.account}, driven by a test or a simulator`,
       account: connector.account,
+      ...(photos ? { interface: { actions: { photo: PHOTO_ACTION } } } : {}),
     },
-    create: () => ({ connector }),
+    create: () => ({
+      connector,
+      ...(photos ? { interface: { actions: { photo: photoAction(connector) } } } : {}),
+    }),
   });
 }
 

@@ -1,9 +1,11 @@
 import {
   Core,
   definePlugin,
+  type FetchPhoto,
   type Graph,
   type GraphEdge,
   NEEDS_LOGIN,
+  parseManifest,
   VirtualClock,
 } from '@megabottron1999/core';
 import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
@@ -12,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { PHOTO_UNKNOWN } from '#src/transport/telegram-bot.ts';
 import { readWarnings } from '#test/monitors.ts';
 import { BOT_INFO, stubBot } from '#test/telegram.ts';
 import { telegramBotConfig, telegramBotPlugin } from './telegram-bot.ts';
@@ -458,6 +461,62 @@ describe('the telegram-bot plugin', () => {
     expect(schema.properties['onlyPeople']?.['shownWhen']).toEqual({ people: 'only' });
     expect(schema.properties['blockPeople']?.['shownWhen']).toEqual({ people: 'anyone' });
     expect(schema.properties['group']).toBeUndefined();
+  });
+});
+
+describe('the telegram-bot plugin’s photo (D151)', () => {
+  /** A plugin that asks the bot's node for a message's photo, through its interface. */
+  const asker = (asked: unknown[], request: { chat: string; message: string }) =>
+    definePlugin({
+      manifest: {
+        id: 'postcard',
+        version: '0.1.0',
+        kinds: ['agent'],
+        description: 'Keeps the pictures of the rooms',
+        inputs: { tg: { type: 'interface', plugin: 'telegram-bot', members: ['actions.photo'] } },
+      },
+      create: (ctx) => ({
+        async start() {
+          const { actions } = ctx.use<{ actions: { photo: FetchPhoto } }>('tg');
+          asked.push(await actions.photo(request));
+        },
+      }),
+    });
+
+  it('offers photo on its interface, refusing a message it kept nothing of, with why', async () => {
+    const stub = stubBot();
+    stub.bot.api.getMe = () => Promise.resolve(BOT_INFO);
+    stub.bot.start = () => new Promise<void>(() => {});
+    stub.bot.stop = () => Promise.resolve();
+    const asked: unknown[] = [];
+    const core = new Core({
+      clock: new VirtualClock(),
+      documents: { 'telegram-bot': { login: { token: '1:abcdef' } } },
+    });
+    core.register(
+      telegramBotPlugin({ bot: () => stub.bot }),
+      asker(asked, { chat: String(GROUP), message: '7' })
+    );
+    expect(parseManifest(telegramBotPlugin().manifest).outputs['interface']).toMatchObject({
+      members: ['actions.photo'],
+    });
+    await core.start();
+    expect(asked).toEqual([
+      { ok: false, error: `no photo of message 7 in ${GROUP} kept: ${PHOTO_UNKNOWN}` },
+    ]);
+    await core.stop();
+  });
+
+  it('refuses it, with why, while it needs a login; a request not of its shape too', async () => {
+    const asked: unknown[] = [];
+    const core = new Core({ clock: new VirtualClock() });
+    core.register(telegramBotPlugin(), asker(asked, { chat: '', message: '7' }));
+    await core.start();
+    expect(asked).toEqual([{ ok: false, error: 'a photo request is { chat, message }' }]);
+    expect(
+      await core.controls.act('telegram-bot', 'photo', { chat: '1', message: '2' })
+    ).toMatchObject({ output: { ok: false, error: 'not logged in' } });
+    await core.stop();
   });
 });
 

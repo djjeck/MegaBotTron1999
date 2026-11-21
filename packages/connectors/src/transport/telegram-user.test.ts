@@ -105,8 +105,16 @@ function fake(
       else handler = h;
       handlers++;
     },
-    getMessages: (entity, { limit, offsetId, minId }) => {
+    getMessages: (entity, params) => {
       const peer = String((entity as { peer: unknown }).peer);
+      if ('ids' in params) {
+        calls.push(`messages ${peer} ${params.ids.join(',')}`);
+        const all = o.history?.[peer] ?? [];
+        return Promise.resolve(
+          params.ids.map((id) => all.find((m) => m.id === id)) as unknown as RawMessage[]
+        );
+      }
+      const { limit, offsetId, minId } = params;
       calls.push(`history ${peer} <${offsetId} >${minId} ${limit}`);
       const fail = o.historyFails?.shift();
       if (fail !== undefined) return Promise.reject(fail);
@@ -1623,5 +1631,108 @@ describe('a chat by any of its names (D90)', () => {
     c.start();
     await settle(clock);
     expect((await c.surfaces({ search: 'lobby' })).map((x) => x.id)).toEqual(['@lobby_group']);
+  });
+});
+
+describe('TelegramUserConnector.photo (D151)', () => {
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+  /** A photo's media, its sizes as GramJS gives them. */
+  const photoMedia = (sizes: unknown[]) => ({
+    className: 'MessageMediaPhoto',
+    photo: { className: 'Photo', sizes },
+  });
+  const SIZES = [
+    { className: 'PhotoStrippedSize', type: 'i', bytes: new Uint8Array(40) },
+    { className: 'PhotoSize', type: 'm', w: 320, h: 240, size: 9000 },
+    { className: 'PhotoSizeProgressive', type: 'y', w: 1280, h: 960, sizes: [5000, 60_000] },
+    { className: 'PhotoPathSize', type: 'j', bytes: new Uint8Array(900_000) },
+  ];
+
+  it('fetches a message by its id in its chat, and downloads its largest size', async () => {
+    const f = fake({
+      history: {
+        [GROUP]: [
+          raw({ id: 41, media: photoMedia(SIZES) }),
+          raw({ id: 42, message: 'no picture' }),
+          raw({ id: 43, media: { className: 'MessageMediaWebPage', webpage: {} } }),
+          raw({ id: 44, media: { className: 'MessageMediaDocument', document: {} } }),
+          raw({ id: 45, media: photoMedia([{ className: 'PhotoStrippedSize', bytes: JPEG }]) }),
+        ],
+      },
+    });
+    const thumbs: unknown[] = [];
+    f.client.downloadMedia = (_m, params) => (
+      thumbs.push(params.thumb),
+      Promise.resolve(Buffer.from(JPEG))
+    );
+    const { c } = await connector(f);
+    const got = await c.photo(GROUP, '41');
+    expect(got).toEqual({ data: JPEG, mime: 'image/jpeg', width: 1280, height: 960 });
+    expect(got?.data).not.toBeInstanceOf(Buffer);
+    expect(thumbs).toEqual([SIZES[2]]);
+    expect(f.calls).toContain(`messages ${GROUP} 41`);
+    // A text, a link's preview, a file and a mere preview of a photo have no photo.
+    for (const id of ['42', '43', '44', '45']) expect(await c.photo(GROUP, id)).toBeNull();
+    expect(thumbs).toHaveLength(1);
+  });
+
+  it('reads the type from the bytes, and a cached size as the largest', async () => {
+    const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]);
+    const f = fake({
+      history: {
+        [GROUP]: [
+          raw({ id: 1, media: photoMedia([{ className: 'PhotoCachedSize', bytes: PNG }]) }),
+          raw({ id: 2, media: photoMedia([{ className: 'PhotoSize', w: 1, h: 1, size: 3 }]) }),
+        ],
+      },
+    });
+    f.client.downloadMedia = (m: RawMessage) =>
+      Promise.resolve(m.id === 1 ? PNG : new Uint8Array([1, 2, 3]));
+    const { c } = await connector(f);
+    expect(await c.photo(GROUP, '1')).toEqual({ data: PNG, mime: 'image/png' });
+    // Bytes of no known type are taken as Telegram's JPEG.
+    expect(await c.photo(GROUP, '2')).toMatchObject({ mime: 'image/jpeg', width: 1, height: 1 });
+  });
+
+  it('refuses with why: not connected, not its chat, no id, no message, too large, no bytes', async () => {
+    const big = [{ className: 'PhotoSize', w: 9000, h: 9000, size: 11 * 1024 * 1024 }];
+    const f = fake({
+      history: {
+        [GROUP]: [
+          raw({ id: 1, media: photoMedia(big) }),
+          raw({ id: 2, media: photoMedia(SIZES) }),
+          { className: 'MessageEmpty', id: 3 } as unknown as RawMessage,
+        ],
+      },
+      files: { 2: new Uint8Array(0) },
+    });
+    await expect(new TelegramUserConnector(optionsOf(f)).photo(GROUP, '1')).rejects.toThrow(
+      'not connected'
+    );
+    const { c } = await connector(f);
+    await expect(c.photo('-100999', '1')).rejects.toThrow(
+      '-100999 is not a chat telegram:alice monitors'
+    );
+    for (const bad of ['x', '0', '1.5', '-2'])
+      await expect(c.photo(GROUP, bad)).rejects.toThrow(`${bad} is not a message id`);
+    await expect(c.photo(GROUP, '3')).rejects.toThrow(`no message 3 in ${GROUP}`);
+    await expect(c.photo(GROUP, '4')).rejects.toThrow(`no message 4 in ${GROUP}`);
+    await expect(c.photo(GROUP, '1')).rejects.toThrow(
+      'the photo is 11.0 MiB, more than the 10.0 MiB a photo may be'
+    );
+    expect(f.calls).not.toContain('download 1');
+    await expect(c.photo(GROUP, '2')).rejects.toThrow(
+      'the photo of message 2 could not be downloaded'
+    );
+  });
+
+  it("says Telegram's wait, and passes any other failure on", async () => {
+    const f = fake({ history: { [GROUP]: [raw({ id: 1, media: photoMedia(SIZES) })] } });
+    const { c } = await connector(f);
+    f.client.downloadMedia = () =>
+      Promise.reject(Object.assign(new Error('FLOOD'), { seconds: 7 }));
+    await expect(c.photo(GROUP, '1')).rejects.toThrow('Telegram asks to wait 7 s');
+    f.client.getMessages = () => Promise.reject(new Error('CHANNEL_PRIVATE'));
+    await expect(c.photo(GROUP, '1')).rejects.toThrow('CHANNEL_PRIVATE');
   });
 });

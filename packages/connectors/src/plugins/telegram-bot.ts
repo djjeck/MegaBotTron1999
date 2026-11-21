@@ -16,6 +16,9 @@
  * through it, those with buttons to the owner's chat through its surface, whose taps run them. The token stays in the connector's store, and nothing hands it out:
  * no plugin, and not the wiring, gets the bot (P9).
  *
+ * Its interface offers `photo` (D151): the photo of a message it heard or sent, kept by its
+ * `file_id` (the Bot API fetches no message by its id), downloaded when a plugin bound to it asks.
+ *
  * Its `home` (bot-os.md D105) is the command of the owner's main card: the core's own cards
  * (`/plugins`, `/settings`) end with a button back to it, labelled `homeLabel`.
  *
@@ -32,6 +35,8 @@ import {
   definePlugin,
   liveGraceS,
   LoginNeeded,
+  PHOTO_ACTION,
+  photoAction,
   type Plugin,
   type StateView,
   unansweredAt,
@@ -199,6 +204,8 @@ export function telegramBotPlugin(
       account,
       // Its token from its node's panel, kept in its store (D116, D118).
       login: true,
+      // A message's photo, fetched on demand for the plugins an edge binds to it (D151).
+      interface: { actions: { photo: PHOTO_ACTION } },
       config: telegramBotConfig,
       // The chats its config lists; unset, every chat (D89). A chat goes by its id and its
       // @username, which its connector tells apart (D90).
@@ -244,6 +251,7 @@ export function telegramBotPlugin(
         return {
           connector: new LoginNeeded(ctx.account ?? account, 'telegram'),
           login,
+          interface: { actions: { photo: photoAction(undefined) } },
           stop: () => void held.delete(ctx.id),
         };
       const bot = make(token, log);
@@ -326,6 +334,7 @@ export function telegramBotPlugin(
             }),
         ...(surface === undefined ? {} : { surface }),
         login,
+        interface: { actions: { photo: photoAction(c, log) } },
         start: () => c.start(),
         stop: async () => {
           held.delete(ctx.id);

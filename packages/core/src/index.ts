@@ -64,6 +64,7 @@ export {
   isTextDocument,
   LIVE_GRACE_S,
   liveGraceS,
+  type MessagePhoto,
   readDocument,
   type ReadFilter,
   type Surface,
@@ -121,6 +122,7 @@ export {
   FakeConnector,
   type FakeConnectorOptions,
   fakeConnectorPlugin,
+  type FakePhoto,
   type FakeSent,
   type Heard,
   type Simulator,
@@ -251,6 +253,16 @@ export {
   type ManifestInput,
   parseManifest,
 } from './manifest.ts';
+export {
+  type FetchPhoto,
+  imageMime,
+  PHOTO_ACTION,
+  PHOTO_MAX_BYTES,
+  photoAction,
+  type PhotoRequest,
+  type PhotoResult,
+  photoTooLarge,
+} from './message-photo.ts';
 export {
   findModules,
   type ModuleCandidate,

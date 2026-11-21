@@ -60,7 +60,12 @@ as they now are. Both Telegram connectors send photos through the outbox (`deliv
 with a caption, plain or Markdown, in reply to a message: `telegram-bot` with the Bot API's
 `sendPhoto`, answering the photo's `file_id`; `telegram-user` with GramJS's `sendFile`, answering
 `<id>:<access hash>:<file reference>`; each sends one again by the id it gave. `irc` sends none, and
-the outbox refuses them with why.
+the outbox refuses them with why. Both fetch a message's photo on demand (D151), for a plugin an
+edge binds to their node's interface (`actions.photo`: its bytes, the largest size, at most 10 MiB;
+`null` for none; else why not): `telegram-user` fetches the message by its id (GramJS's
+`getMessages`, `downloadMedia`); `telegram-bot`, which the Bot API lets fetch no message by its id,
+only the photos of the messages it heard or sent, the latest 1000 kept by their `file_id` in its
+store.
 
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
   structured output by a zod schema. A model connector (docs/bot-os.md D117): it logs each call
