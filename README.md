@@ -218,7 +218,8 @@ export const greeter = definePlugin({
   that knows a game comes from a module.
 - **Standard services,** implemented once by the shell (D52): SVG to PNG in every plugin's context
   (`ctx.render.svgToPng`), and asking an LLM through the `anthropic` connector (`ask`, with
-  structured output), for the plugins an edge binds to it.
+  structured output, and images the model sees beside the prompt, D152), for the plugins an edge
+  binds to it.
 - **States and dry runs** (D64): a node is **enabled**, **disabled** by the owner (in the graph:
   never started, still checked), **stopped** by exception (a safety stop, drift, the send-queue
   watchdog, the owner's kill or Telegram's stop; kept in its instance across restarts until the

@@ -4,7 +4,8 @@
  * P9) and offers one higher-order call, `ask`: a prompt, an optional system prompt, and optionally a
  * zod schema that the answer must fit (structured output). A plugin reaches it through an interface
  * input bound to it (`ctx.use(port).actions.ask`), so that the edge is the permission (P6, P17).
- * Nobody gets the key.
+ * Nobody gets the key. A request may show the model images (`images`, bot-os.md D152), sent before
+ * the prompt's text, checked against the API's limits before the call.
  *
  * A refusal, an answer cut short, an unreadable one or an error of the API is a failed answer
  * (`ok: false`, with why), never an exception, so that a plugin's loop survives the network.
@@ -19,7 +20,7 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import { type ActionCall, definePlugin, type Plugin } from '@megabottron1999/core';
+import { type ActionCall, definePlugin, imageMime, type Plugin } from '@megabottron1999/core';
 import { z } from 'zod';
 import { ServiceConnector } from './service.ts';
 import {
@@ -108,11 +109,43 @@ export const anthropicConfig = z.object({
   // still loads: this schema, not a strict one, drops a key it does not know.
 });
 
+/** The media types an image may have (bot-os.md D152): the Messages API's. */
+export const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
+export type ImageType = (typeof IMAGE_TYPES)[number];
+
+/**
+ * The Messages API's limits on images, checked before the call (D152), from Anthropic's vision
+ * guide, "Request limits" (https://platform.claude.com/docs/en/build-with-claude/vision, read on
+ * 2026-11-21), each the lowest that holds for every model, so that a release updates them:
+ * - `IMAGES_MAX`: images per request: 100 for a model with a 200K-token context window, 600 for the
+ *   others.
+ * - `IMAGE_MAX_BASE64`: an image's size, base64-encoded: 10 MB on the Claude API, taken as
+ *   10,000,000 bytes.
+ * - `REQUEST_MAX`: the whole request: 128 MB on the Claude API, counted as the images base64-encoded
+ *   and the prompts' UTF-8, taken as 128,000,000 bytes less a margin for the rest of the request.
+ * Not checked here: an image's size in pixels (8000 by 8000 at most, and less in a request of more
+ * than 20 images), which only decoding it tells; the API refuses it, and its error is the answer.
+ */
+export const IMAGES_MAX = 100;
+export const IMAGE_MAX_BASE64 = 10_000_000;
+export const REQUEST_MAX = 128_000_000 - 1_000_000;
+
+/** An image shown to the model with the prompt (D152): its bytes and its media type. */
+export interface AskImage {
+  data: Uint8Array;
+  mime: string;
+}
+
 /** What `ask` asks. */
 export interface AskRequest<T = unknown> {
   /** The fixed instructions, cached by the API between calls that share them. */
   system?: string;
   prompt: string;
+  /**
+   * Images the model sees with the prompt (D152), sent before its text in the user's turn: JPEG,
+   * PNG, GIF or WebP, within the API's limits (`IMAGES_MAX`, `IMAGE_MAX_BASE64`, `REQUEST_MAX`).
+   */
+  images?: readonly AskImage[];
   model?: string;
   maxTokens?: number;
   effort?: Effort;
@@ -143,6 +176,14 @@ export type AnthropicClient = Pick<Anthropic, 'messages'>;
 const askInput = z.object({
   system: z.string().optional(),
   prompt: z.string().min(1),
+  images: z
+    .array(
+      z.object({
+        data: z.custom<Uint8Array>((v) => v instanceof Uint8Array, 'bytes'),
+        mime: z.string(),
+      })
+    )
+    .optional(),
   model: z.string().min(1).optional(),
   maxTokens: z.number().int().positive().optional(),
   effort: z.enum(EFFORTS).optional(),
@@ -168,9 +209,64 @@ const askOutput = z.union([
   z.object({ ok: z.literal(false), error: z.string(), usage: usage.optional() }),
 ]);
 
+/** An image's size base64-encoded, in bytes. */
+const base64Size = (n: number): number => 4 * Math.ceil(n / 3);
+
+/** A size in words: `512 B`, `1.2 MB`. */
+const mb = (n: number): string => (n < 1_000_000 ? `${n} B` : `${(n / 1_000_000).toFixed(1)} MB`);
+
+/**
+ * Why the images of a request cannot go (D152), checked before the call: their number, each one's
+ * type (as said, and as its bytes are) and size, and the request's; undefined when they can.
+ */
+export function imagesRefusal(
+  r: Pick<AskRequest, 'images' | 'prompt' | 'system'>
+): string | undefined {
+  const images = r.images ?? [];
+  if (images.length > IMAGES_MAX)
+    return `${images.length} images, more than the ${IMAGES_MAX} a request may carry`;
+  let total = Buffer.byteLength(r.prompt) + Buffer.byteLength(r.system ?? '');
+  for (const [i, image] of images.entries()) {
+    const which = `image ${i + 1}`;
+    if (!(IMAGE_TYPES as readonly string[]).includes(image.mime))
+      return `${which}: ${image.mime || 'no type'} is not a type the API takes (${IMAGE_TYPES.join(', ')})`;
+    const read = imageMime(image.data);
+    if (read !== image.mime)
+      return `${which}: its bytes are ${read === undefined ? 'no JPEG, PNG, GIF or WebP image' : `${read}`}, not the ${image.mime} it says`;
+    const size = base64Size(image.data.byteLength);
+    if (size > IMAGE_MAX_BASE64)
+      return `${which}: ${mb(size)} base64-encoded, more than the ${mb(IMAGE_MAX_BASE64)} the API takes`;
+    total += size;
+  }
+  if (total > REQUEST_MAX)
+    return `the request would be ${mb(total)}, more than the ${mb(REQUEST_MAX)} the API takes`;
+  return undefined;
+}
+
+/**
+ * The user's turn: the prompt's text alone, or the images first, each a base64 image block, then
+ * the text (D152).
+ */
+function contentOf(r: Pick<AskRequest, 'images' | 'prompt'>): Anthropic.MessageParam['content'] {
+  if (r.images === undefined || r.images.length === 0) return r.prompt;
+  return [
+    ...r.images.map((image) => ({
+      type: 'image' as const,
+      source: {
+        type: 'base64' as const,
+        media_type: image.mime as ImageType,
+        data: Buffer.from(image.data).toString('base64'),
+      },
+    })),
+    { type: 'text' as const, text: r.prompt },
+  ];
+}
+
 /** The `ask` of a client, with the configuration's defaults. */
 export function askWith(client: AnthropicClient, defaults: z.infer<typeof anthropicConfig>): Ask {
   return async <T>(r: AskRequest<T>): Promise<AskResult<T>> => {
+    const refused = imagesRefusal(r);
+    if (refused !== undefined) return { ok: false, error: refused };
     const effort = r.effort ?? defaults.effort;
     // The breakpoint after the system prompt: five minutes is the API's own default, so only an
     // hour is written out.
@@ -188,7 +284,7 @@ export function askWith(client: AnthropicClient, defaults: z.infer<typeof anthro
         ...(r.system === undefined
           ? {}
           : { system: [{ type: 'text', text: r.system, cache_control }] }),
-        messages: [{ role: 'user', content: r.prompt }],
+        messages: [{ role: 'user', content: contentOf(r) }],
         ...(Object.keys(output_config).length === 0 ? {} : { output_config }),
       });
       const u = response.usage;
@@ -254,7 +350,7 @@ export function anthropicPlugin(o: AnthropicPluginOptions = {}): Plugin {
         },
         actions: {
           ask: {
-            help: 'Asks a model: a prompt, an optional system prompt and a schema for the answer',
+            help: 'Asks a model: a prompt, optional images, an optional system prompt and a schema for the answer',
             input: askInput,
             output: askOutput,
           },
@@ -290,7 +386,17 @@ export function anthropicPlugin(o: AnthropicPluginOptions = {}): Plugin {
           ...used,
           usd: price === undefined ? null : costOf(price, used, r.cacheTtl ?? config.cacheTtl),
         };
-        ctx.record(`${ANTHROPIC}.call`, { ...record });
+        // The images' count and bytes, never their content (D152).
+        const images = r.images ?? [];
+        ctx.record(`${ANTHROPIC}.call`, {
+          ...record,
+          ...(images.length === 0
+            ? {}
+            : {
+                images: images.length,
+                imageBytes: images.reduce((n, image) => n + image.data.byteLength, 0),
+              }),
+        });
         ledger.add(record);
       };
       const ask: Ask = async <T>(r: AskRequest<T>, call?: ActionCall): Promise<AskResult<T>> => {

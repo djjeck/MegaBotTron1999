@@ -2207,6 +2207,7 @@ if (r.ok) use(r.output); // typed by the schema; else r.error says why
 interface AskRequest<T> {
   system?: string; // the fixed instructions, cached by the API between the calls that share them
   prompt: string; // the user's turn
+  images?: { data: Uint8Array; mime: string }[]; // shown before the prompt's text (bot-os.md D152)
   model?: string; // the configuration's `model` by default (claude-opus-5-5)
   maxTokens?: number; // the configuration's `maxTokens` by default (16000)
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'; // the configuration's, or the model's
@@ -2221,10 +2222,20 @@ type AskResult<T> =
 
 `ask` never throws: a refusal (`refused`), an answer cut short (`answer cut short`), an answer that
 does not fit the schema (`unreadable answer`) and an error of the API or the network
-(`API error 429 …`) are failed answers, so that a plugin's loop survives them. The owner may call it
-too, as the action `ask` of the control API (without a schema, which JSON cannot carry). Every call,
-failed ones included, is logged by the connector with its caller and its cost (§5, bot-os.md D117):
-a plugin need not count what it asks.
+(`API error 429 …`) are failed answers, so that a plugin's loop survives them. **Images** (bot-os.md
+D152): `images` go as base64 image blocks before the prompt's text, in the user's turn; `mime` is
+`image/jpeg`, `image/png`, `image/gif` or `image/webp`, and the bytes must be of that type (read
+from them). Checked before the call against the Messages API's limits, as Anthropic's vision guide
+states them (`IMAGES_MAX`, `IMAGE_MAX_BASE64`, `REQUEST_MAX` in the code, each the lowest that holds
+for every model): at most 100 images, each at most 10 MB base64-encoded (about 7.5 MB of bytes), the
+request at most 128 MB; a request that breaks one is a failed answer saying which
+(`image 2: image/bmp is not a type the API takes (…)`,
+`101 images, more than the 100 a request may carry`), and no call is made. An image too large in
+pixels (over 8000 by 8000, or over a stricter limit, which its error states, in a request of more
+than 20) the API refuses, its error the answer. The model pays for an image by its pixels: a plugin
+resizes what it need not show whole. The owner may call it too, as the action `ask` of the control
+API (without a schema, which JSON cannot carry). Every call, failed ones included, is logged by the
+connector with its caller and its cost (§5, bot-os.md D117): a plugin need not count what it asks.
 
 ### 4.14 From closures to the context
 
@@ -2527,8 +2538,9 @@ its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(
   costs more, reading it the same), and a request may ask its own. **A model connector**
   (`model: true`, §4.5, bot-os.md D117): it logs each call, whoever asked, as an `anthropic.call`
   record,
-  `{ node, model, ok, error?, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, usd }`
-  (`node` the calling node, `(owner)` for the panel; never the prompt or the answer), its cost from
+  `{ node, model, ok, error?, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, usd, images?, imageBytes? }`
+  (`node` the calling node, `(owner)` for the panel; `images` and `imageBytes`, the count and the
+  bytes of the images it showed, D152; never the prompt, the images or the answer), its cost from
   its price table, `PRICES` in its code (not its config, so that a release updates it): USD per
   million tokens by model id, `{ input, output, cacheWrite5m, cacheWrite1h, cacheRead, over? }`
   (`over`, `{ promptTokens, …the same }`, the prices of a prompt longer than that), a dated snapshot

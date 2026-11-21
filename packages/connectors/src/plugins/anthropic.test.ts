@@ -10,6 +10,10 @@ import {
   type Ask,
   askWith,
   DEFAULT_MODEL,
+  IMAGE_MAX_BASE64,
+  IMAGES_MAX,
+  imagesRefusal,
+  REQUEST_MAX,
 } from './anthropic.ts';
 
 interface Reply {
@@ -149,6 +153,112 @@ describe('askWith', () => {
   });
 });
 
+describe('ask with images (D152)', () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 2]);
+
+  it('sends each image as a base64 block, before the prompt’s text, in the user’s turn', async () => {
+    const requests: { messages?: unknown }[] = [];
+    const ask = askWith(fakeClient({ text: 'a dungeon' }, requests), defaults);
+    const r = await ask({
+      prompt: 'Where is this?',
+      images: [
+        { data: PNG, mime: 'image/png' },
+        { data: JPEG, mime: 'image/jpeg' },
+      ],
+    });
+    expect(r).toMatchObject({ ok: true, text: 'a dungeon' });
+    expect(requests[0]?.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/png',
+              data: Buffer.from(PNG).toString('base64'),
+            },
+          },
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/jpeg',
+              data: Buffer.from(JPEG).toString('base64'),
+            },
+          },
+          { type: 'text', text: 'Where is this?' },
+        ],
+      },
+    ]);
+    // No images: the prompt alone, as a text.
+    await ask({ prompt: 'hi', images: [] });
+    expect(requests[1]?.messages).toEqual([{ role: 'user', content: 'hi' }]);
+  });
+
+  it('refuses before the call, with why: a type, bytes of another, the count, the sizes', async () => {
+    const requests: unknown[] = [];
+    const ask = askWith(fakeClient({ text: 'no' }, requests), defaults);
+    const gif = new TextEncoder().encode('GIF89a');
+    const webp = new TextEncoder().encode('RIFF\0\0\0\0WEBPVP8 ');
+    expect(
+      imagesRefusal({
+        prompt: 'p',
+        images: [
+          { data: gif, mime: 'image/gif' },
+          { data: webp, mime: 'image/webp' },
+        ],
+      })
+    ).toBeUndefined();
+    expect(await ask({ prompt: 'p', images: [{ data: PNG, mime: 'image/bmp' }] })).toEqual({
+      ok: false,
+      error:
+        'image 1: image/bmp is not a type the API takes (image/jpeg, image/png, image/gif, image/webp)',
+    });
+    expect(
+      imagesRefusal({
+        prompt: 'p',
+        images: [
+          { data: PNG, mime: 'image/png' },
+          { data: PNG, mime: '' },
+        ],
+      })
+    ).toBe(
+      'image 2: no type is not a type the API takes (image/jpeg, image/png, image/gif, image/webp)'
+    );
+    expect(imagesRefusal({ prompt: 'p', images: [{ data: PNG, mime: 'image/jpeg' }] })).toBe(
+      'image 1: its bytes are image/png, not the image/jpeg it says'
+    );
+    expect(
+      imagesRefusal({ prompt: 'p', images: [{ data: new Uint8Array([1, 2]), mime: 'image/png' }] })
+    ).toBe('image 1: its bytes are no JPEG, PNG, GIF or WebP image, not the image/png it says');
+    const many = Array.from({ length: IMAGES_MAX + 1 }, () => ({ data: PNG, mime: 'image/png' }));
+    expect(imagesRefusal({ prompt: 'p', images: many })).toBe(
+      `${IMAGES_MAX + 1} images, more than the ${IMAGES_MAX} a request may carry`
+    );
+    expect(imagesRefusal({ prompt: 'p', images: many.slice(1) })).toBeUndefined();
+    // 7.5 MB of bytes is 10 MB base64-encoded: the most an image may be.
+    const at = (n: number) => {
+      const data = new Uint8Array(n);
+      data.set(JPEG);
+      return { data, mime: 'image/jpeg' };
+    };
+    expect(
+      imagesRefusal({ prompt: 'p', images: [at((IMAGE_MAX_BASE64 / 4) * 3)] })
+    ).toBeUndefined();
+    expect(imagesRefusal({ prompt: 'p', images: [at((IMAGE_MAX_BASE64 / 4) * 3 + 1)] })).toBe(
+      'image 1: 10.0 MB base64-encoded, more than the 10.0 MB the API takes'
+    );
+    const big = at(7_000_000);
+    const filled = Array.from({ length: 19 }, () => big);
+    expect(imagesRefusal({ prompt: 'p', images: filled })).toBe(
+      `the request would be 177.3 MB, more than the ${(REQUEST_MAX / 1_000_000).toFixed(1)} MB the API takes`
+    );
+    expect(requests).toEqual([]);
+  }, 30_000);
+});
+
 describe('the anthropic plugin', () => {
   it('is a service connector: no chat in or out, its interface alone (D148)', () => {
     const manifest = parseManifest(anthropicPlugin().manifest);
@@ -259,6 +369,37 @@ describe('the anthropic plugin', () => {
     ]);
     expect(node?.cost?.own?.spend).toMatchObject({ calls: 4, unpriced: 2 });
     expect(node?.cost?.own?.spend?.usd).toBeCloseTo(2 * usd);
+    await core.stop();
+  });
+
+  it('logs the images’ count and bytes, never their content (D152)', async () => {
+    const records: Record<string, unknown>[] = [];
+    const core = new Core({
+      clock: new VirtualClock(),
+      secrets: secretsWith({ anthropic_api_key: 'sk-example-key' }),
+      record: (r) => {
+        if (r.type === 'anthropic.call') records.push(r as unknown as Record<string, unknown>);
+      },
+    });
+    core.register(anthropicPlugin({ client: () => fakeClient({ text: 'a room' }) }));
+    await core.start();
+    const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
+    await core.controls.act('anthropic', 'ask', {
+      prompt: 'hi',
+      images: [
+        { data: PNG, mime: 'image/png' },
+        { data: PNG, mime: 'image/png' },
+      ],
+    });
+    await core.controls.act('anthropic', 'ask', {
+      prompt: 'hi',
+      images: [{ data: PNG, mime: 'image/tiff' }],
+    });
+    expect(records).toEqual([
+      expect.objectContaining({ ok: true, images: 2, imageBytes: 20 }),
+      expect.objectContaining({ ok: false, images: 1, imageBytes: 10, usd: 0 }),
+    ]);
+    expect(JSON.stringify(records)).not.toContain('137');
     await core.stop();
   });
 
