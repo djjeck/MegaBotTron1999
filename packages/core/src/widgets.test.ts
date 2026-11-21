@@ -208,3 +208,169 @@ describe('a widget’s value in the controls’ status', () => {
     expect(failing[0]).not.toHaveProperty('widget');
   });
 });
+
+/** A made-up postcard's cards, each a place, a prompt, a picture and a host; its hosts to pick. */
+const cards = {
+  id: 'postcard',
+  version: '0.1.0',
+  kinds: ['actor' as const],
+  description: 'Paints a card per place',
+  interface: {
+    state: {
+      cards: {
+        help: 'Its cards',
+        output: z.array(
+          z.object({
+            place: z.string(),
+            prompt: z.string(),
+            picture: z.string().optional(),
+            face: z.unknown().optional(),
+            host: z.string().optional(),
+          })
+        ),
+      },
+      hosts: {
+        help: 'Who may host a card',
+        output: z.object({ hosts: z.array(z.object({ id: z.string(), name: z.string() })) }),
+      },
+    },
+    actions: {
+      repaint: {
+        help: 'Paints a card again',
+        input: z.strictObject({ place: z.string(), what: z.enum(['ad', 'scene']) }),
+      },
+      rehost: {
+        help: 'Gives a card another host',
+        input: z.strictObject({
+          place: z.string(),
+          host: z
+            .string()
+            .meta({ options: { read: 'hosts', path: 'hosts', value: 'id', label: 'name' } }),
+        }),
+      },
+    },
+  },
+};
+
+const table = (more: Record<string, unknown>) => ({
+  page: {
+    title: 'Cards',
+    sections: [
+      {
+        show: 'table',
+        read: 'cards',
+        columns: ['place', 'prompt', { path: 'picture', label: 'Picture', show: 'image' }],
+        ...more,
+      },
+    ],
+  },
+});
+
+function cardsRefused(more: Record<string, unknown>): string {
+  try {
+    parseManifest({ ...cards, ...more });
+    return '';
+  } catch (e) {
+    return (e as Error).message;
+  }
+}
+
+describe('a table’s pictures and row actions (D157)', () => {
+  it('takes a picture column, from the files by default, and row actions built from the row', () => {
+    const m = parseManifest({
+      ...cards,
+      ...table({
+        actions: [
+          {
+            label: 'Re-roll',
+            action: 'repaint',
+            input: { place: '$row.place', what: 'ad' },
+            confirm: 'Re-roll this picture?',
+          },
+          {
+            label: 'Rehost',
+            action: 'rehost',
+            input: { place: '$row.place' },
+            current: { host: '$row.host' },
+          },
+        ],
+      }),
+    });
+    const section = m.page?.sections[0] as Widget & { show: 'table' };
+    expect(section.columns[2]).toEqual({
+      path: 'picture',
+      label: 'Picture',
+      show: 'image',
+      from: 'files',
+    });
+    expect(section.actions?.map((a) => a.label)).toEqual(['Re-roll', 'Rehost']);
+    // A media column, too.
+    expect(cardsRefused(table({ columns: [{ path: 'face', show: 'image', from: 'media' }] }))).toBe(
+      ''
+    );
+    // The options travel to the editor with the action's input schema.
+    const rehost = describePlugin(m).interface.actions.find((a) => a.name === 'rehost');
+    expect(
+      (rehost?.input?.['properties'] as Record<string, Record<string, unknown>>)['host']?.[
+        'options'
+      ]
+    ).toEqual({ read: 'hosts', path: 'hosts', value: 'id', label: 'name' });
+  });
+
+  it('refuses an action not declared, a key or a constant its input refuses, a row path the rows have not', () => {
+    const why = (actions: unknown[]) => cardsRefused(table({ actions }));
+    expect(why([{ label: 'Go', action: 'fly' }])).toContain(
+      'page.sections.0.actions.0.action: fly is not among its actions (interface.actions)'
+    );
+    expect(why([{ label: 'Go', action: 'repaint', input: { colour: 'red' } }])).toContain(
+      'page.sections.0.actions.0.input.colour: the action repaint takes no colour'
+    );
+    expect(why([{ label: 'Go', action: 'repaint', input: { what: 'poster' } }])).toContain(
+      'page.sections.0.actions.0.input.what: the action repaint refuses "poster"'
+    );
+    expect(why([{ label: 'Go', action: 'repaint', input: { place: '$row.town' } }])).toContain(
+      'page.sections.0.actions.0.input.place: its rows have no town'
+    );
+    expect(why([{ label: 'Go', action: 'repaint', input: { place: '$rows' } }])).toContain(
+      'expected $row.<path>, as $row.place'
+    );
+    expect(
+      why([{ label: 'Go', action: 'rehost', input: { host: 'x' }, current: { host: '$row.host' } }])
+    ).toContain(
+      'page.sections.0.actions.0.current.host: host is given by input: the owner picks none'
+    );
+    expect(why([{ label: 'Go', action: 'rehost', current: { host: '$row.who' } }])).toContain(
+      'its rows have no who'
+    );
+    expect(why([{ label: 'Go', action: 'rehost', current: { host: 'host' } }])).toContain(
+      'expected $row.<path>'
+    );
+    // A row of its own, whole: `$row`.
+    expect(why([{ label: 'Go', action: 'repaint', input: { place: '$row' } }])).toBe('');
+    // A picture column's path is checked as any column's.
+    expect(cardsRefused(table({ columns: [{ path: 'photo', show: 'image' }] }))).toContain(
+      'page.sections.0.columns.0: the read cards has no photo'
+    );
+  });
+
+  it('refuses options naming a read it does not declare, or a path its output has not', () => {
+    const withOptions = (options: unknown) =>
+      cardsRefused({
+        interface: {
+          ...cards.interface,
+          actions: {
+            rehost: { help: 'h', input: z.object({ host: z.string().meta({ options }) }) },
+          },
+        },
+      });
+    expect(withOptions({ read: 'people' })).toContain(
+      'interface.actions.rehost.input.host.options: people is not among its reads (interface.state)'
+    );
+    expect(withOptions({ read: 'hosts', path: 'guests' })).toContain(
+      'the read hosts has no guests'
+    );
+    expect(withOptions({ read: 'hosts' })).toContain('the read hosts is not a list or a map');
+    expect(withOptions({ list: ['a'] })).toContain('expected { read, path?, value?, label? }');
+    expect(withOptions({ read: 'cards', value: 'place' })).toBe('');
+  });
+});

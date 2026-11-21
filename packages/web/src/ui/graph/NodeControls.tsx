@@ -138,7 +138,13 @@ export function MemberCall(props: { node: string; kind: 'read' | 'action'; membe
   return (
     <div className="member-call">
       {m.input === undefined || m.input['properties'] === undefined ? null : (
-        <SchemaForm legend={`${m.name} input`} schema={m.input} value={input} onChange={setInput} />
+        <SchemaForm
+          legend={`${m.name} input`}
+          schema={m.input}
+          value={input}
+          onChange={setInput}
+          node={node}
+        />
       )}
       <button type="button" onClick={call}>
         {verb} {m.name}

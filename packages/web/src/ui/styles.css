@@ -2111,3 +2111,28 @@ textarea.long {
 .record-form {
   margin-top: 0.5rem;
 }
+
+/* A node page's table (D157): a picture's thumbnail, and its row actions, each with its form. */
+.widget-section img.thumb {
+  width: 4rem;
+  height: 4rem;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  display: block;
+}
+.widget-section td.row-actions {
+  white-space: nowrap;
+}
+.row-action {
+  display: inline-block;
+  margin-right: 0.3rem;
+  vertical-align: top;
+}
+.row-action .said {
+  display: block;
+  white-space: normal;
+}
+.row-action-form {
+  white-space: normal;
+  margin-top: 0.3rem;
+}

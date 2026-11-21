@@ -185,6 +185,10 @@ A section, in full:
   fields?: ['gold', { path: 'name', label: 'Who' }], // keyValue: the fields shown (none: every key)
   item?: 'name', max?: 20,                            // list: each item's path, at most so many
   columns: ['what', 'n'], max?: 20,                   // table: a column each, within each row
+  //   a column may be a picture (D157): { path: 'picture', label?: 'Picture', show: 'image',
+  //   from?: 'files' | 'media' }; and a table may have row actions (D157):
+  //   actions?: [{ label: 'Re-roll', action: 'repaint', input?: { place: '$row.place', what: 'ad' },
+  //                current?: { host: '$row.host' }, confirm?: 'Re-roll this picture?' }]
   of: 'cap' | 100,                                    // progress: the total, a path or a number
 }
 ```
@@ -207,8 +211,67 @@ a `.describe()`: it is their label. The core reads the widget's read for each ru
 every five seconds; the page asks each of its reads (once, however many sections show it) every five
 seconds while it is open. The player's, for one (§5):
 `widget: { show: 'until', read: 'status', path: 'next' }`, and a page **Plays** with its chat and
-commands, its last play and its next. A script node declares neither: it offers no reads (§5), its
-code running in a worker thread that a synchronous read could not ask.
+commands, its last play and its next.
+
+**A table's pictures and row actions** (bot-os.md D157). A column `show: 'image'` shows its value as
+a thumbnail that opens it whole, an empty value an empty cell: `from: 'files'` (the default), a file
+name in the node's own files (§4.2, D149), served as `GET /plugins/<id>/files/<name>`;
+`from: 'media'`, a `Media` as JSON carries it (its bytes shown as they are), or a kept one's
+reference `{ id: 'sha256:<hex>', mime }`, whose file is `sha256-<hex>` (a collection's, D155). A
+table's `actions` give each row a button per action, running the node's action of that name
+(`interface.actions`) through the control API, so its schema checks the input as any call's:
+`input`'s keys are constants, or a row's values (a string `'$row.<path>'`, `'$row'` the row itself);
+the action's other input fields are the owner's, in a small form the button opens under the row,
+drawn by the same form builder as every action's and setting's (`SchemaForm`), each key of `current`
+preselected with the row's value at its path. With no field left the button runs at once. `confirm`
+is asked first. While it runs the button is busy; then its answer, or why not, is said under it, and
+the page's reads are asked again. An action's input field may take its **options from a read** of
+the node, since a manifest cannot list what changes while it runs (a cast edited in a collection):
+`.meta({ options: { read, path?, value?, label? } })` on a `z.string()`, the items at `path` of the
+read's output (all of it for none, a list or a map), each option's value at `value` (the item itself
+for none) and its label at `label` (its value for none). Every form that knows its node draws it as
+a choice of them, the value it has (gone since) kept; the action still checks what it gets. A
+made-up `postcard` that paints a card per place:
+
+```ts
+interface: {
+  state: {
+    cards: { help: 'Its cards', output: z.array(z.object({ place: z.string(), prompt: z.string(), picture: z.string().optional(), host: z.string().optional() })) },
+    hosts: { help: 'Who may host', output: z.object({ hosts: z.array(z.object({ id: z.string(), name: z.string() })) }) },
+  },
+  actions: {
+    repaint: { help: 'Paints a card again', input: z.strictObject({ place: z.string(), what: z.enum(['ad', 'scene']) }) },
+    rehost: {
+      help: 'Gives a card another host',
+      input: z.strictObject({
+        place: z.string(),
+        host: z.string().meta({ options: { read: 'hosts', path: 'hosts', value: 'id', label: 'name' } }),
+      }),
+    },
+  },
+},
+page: {
+  title: 'Cards',
+  sections: [{
+    show: 'table', read: 'cards',
+    columns: ['place', 'prompt', { path: 'picture', label: 'Picture', show: 'image' }],
+    actions: [
+      { label: 'Re-roll', action: 'repaint', input: { place: '$row.place', what: 'ad' }, confirm: 'Re-roll this picture?' },
+      { label: 'Rehost', action: 'rehost', input: { place: '$row.place' }, current: { host: '$row.host' } },
+    ],
+  }],
+},
+```
+
+The manifest's check refuses a picture column's path its rows have not (as any column's), a row
+action whose action it does not declare
+(`page.sections.0.actions.0.action: fly is not among its actions (interface.actions)`), an `input`
+key its action's object schema does not take, a constant its schema refuses, a row path its rows
+have not (`its rows have no town`), a `current` key that `input` gives already, and options that
+name a read it does not declare
+(`interface.actions.rehost.input.host.options: people is not among its reads (interface.state)`), or
+a path its output has not or that is no list. A script node declares neither: it offers no reads
+(§5), its code running in a worker thread that a synchronous read could not ask.
 
 **Chat commands (P11).** A command of `interface.commands` has its `help` (the owner's words: the
 owner's menu, the UI, the agents), its `args`, its `aliases` (other names it answers to, in no menu)

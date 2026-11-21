@@ -11,7 +11,9 @@
  * config with its defaults, `defaults.ts`); its description, the schema's, is its help. A media
  * (its schema says `media`, the core's `mediaSchema`, bot-os.md D155) is a file picked, previewed,
  * replaced or removed (`MediaField.tsx`); a text whose schema says `long` a larger box; a list of
- * objects a form per item, each moved or removed, and added to.
+ * objects a form per item, each moved or removed, and added to; a field whose schema says
+ * `options` (D157), in a form that knows its node, a choice of what that node's read gives
+ * (`OptionsField.tsx`).
  *
  * Editable when given `onChange` (the editor's draft, D55): a field emptied (once left) is taken
  * away, so that its default holds; a key of `secretKeys` (a connector's `configSecrets`, bot-os-api.md §4.9) is a
@@ -27,6 +29,7 @@ import { plain } from './defaults.ts';
 import type { Scalar } from './ListFields.tsx';
 import { ListField, listItems, RecordField, recordValues } from './ListFields.tsx';
 import { deref, MediaField, mediaLimits } from './MediaField.tsx';
+import { OptionsField, optionsSource } from './OptionsField.tsx';
 
 const show = (v: unknown): string => JSON.stringify(v, null, 2) ?? '';
 
@@ -201,6 +204,7 @@ function ObjectListField(props: {
   set: ((v: unknown) => void) | undefined;
   mediaSrc: MediaSrc | undefined;
   root: JsonSchema | undefined;
+  node: string | undefined;
 }) {
   const { name, set } = props;
   const rows = Array.isArray(props.value) ? (props.value as unknown[]) : [];
@@ -220,6 +224,7 @@ function ObjectListField(props: {
             legend={`${name} ${i + 1}`}
             schema={props.items}
             root={props.root}
+            node={props.node}
             value={isObject(row) ? row : {}}
             mediaSrc={props.mediaSrc}
             {...(set === undefined
@@ -287,8 +292,9 @@ function Field(props: {
   editing: Editing | undefined;
   mediaSrc: MediaSrc | undefined;
   root: JsonSchema | undefined;
+  node: string | undefined;
 }) {
-  const { name, set, editing, root } = props;
+  const { name, set, editing, root, node } = props;
   // Its schema as drawn: behind a `$ref` into the root's definitions, a null branch aside.
   const schema = deref(plain(deref(props.schema, root)), root);
   const type = schema['type'];
@@ -305,6 +311,7 @@ function Field(props: {
           legend={name}
           schema={schema}
           root={root}
+          node={node}
           value={props.value as Record<string, unknown> | undefined}
           mediaSrc={props.mediaSrc}
           {...(set === undefined ? {} : { onChange: (v) => set(v) })}
@@ -316,7 +323,12 @@ function Field(props: {
   const custom = editing?.custom[name];
   const labels = choicesOf(props.schema);
   const items = objectItems(schema, root);
+  // A choice whose options a read of its node gives (D157): known only where its node is.
+  const options =
+    node === undefined ? undefined : (optionsSource(props.schema) ?? optionsSource(schema));
   if (custom !== undefined && set !== undefined) control = custom(props.value, set);
+  else if (options !== undefined && node !== undefined)
+    control = <OptionsField name={name} node={node} spec={options} value={value} set={set} />;
   else if (media !== undefined)
     control = (
       <MediaField name={name} limits={media} value={props.value} set={set} src={props.mediaSrc} />
@@ -330,6 +342,7 @@ function Field(props: {
         set={set}
         mediaSrc={props.mediaSrc}
         root={root}
+        node={node}
       />
     );
   else if (enumOf !== undefined && labels !== undefined)
@@ -462,6 +475,11 @@ export function SchemaForm(props: {
    * the form's own schema when unset.
    */
   root?: JsonSchema | undefined;
+  /**
+   * The node the form's values go to, whose reads a field's `options` name (D157): a choice of
+   * them; without it, such a field is a text.
+   */
+  node?: string | undefined;
 }) {
   const root = props.root ?? props.schema;
   const properties = (props.schema['properties'] ?? {}) as Record<string, JsonSchema>;
@@ -509,6 +527,7 @@ export function SchemaForm(props: {
           editing={editing}
           mediaSrc={props.mediaSrc}
           root={root}
+          node={props.node}
         />
       ))}
       {folded.length === 0 ? null : (
@@ -525,6 +544,7 @@ export function SchemaForm(props: {
               editing={editing}
               mediaSrc={props.mediaSrc}
               root={root}
+              node={props.node}
             />
           ))}
         </details>

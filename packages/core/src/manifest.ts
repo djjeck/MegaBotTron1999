@@ -15,7 +15,7 @@ import {
   outputSchema,
   PORT_NAME,
 } from './ports.ts';
-import { pageSchema, widgetIssues, widgetSchema } from './widgets.ts';
+import { optionsIssues, pageSchema, widgetIssues, widgetSchema } from './widgets.ts';
 
 export const KINDS = ['connector', 'parser', 'actor', 'stats', 'agent', 'simulator'] as const;
 export type Kind = (typeof KINDS)[number];
@@ -345,17 +345,26 @@ export const manifestSchema = z
   })
   .superRefine((m, ctx) => {
     const reads = m.interface.state ?? {};
+    const actions = m.interface.actions ?? {};
     if (m.widget !== undefined)
-      for (const i of widgetIssues(m.widget, reads))
+      for (const i of widgetIssues(m.widget, reads, actions))
         ctx.addIssue({ code: 'custom', path: ['widget', ...i.path], message: i.message });
     m.page?.sections.forEach((s, n) => {
-      for (const i of widgetIssues(s, reads))
+      for (const i of widgetIssues(s, reads, actions))
         ctx.addIssue({
           code: 'custom',
           path: ['page', 'sections', n, ...i.path],
           message: i.message,
         });
     });
+    // An action's field whose options a read gives (D157) names a read it declares.
+    for (const [name, a] of Object.entries(actions))
+      for (const i of optionsIssues(a.input, reads))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['interface', 'actions', name, 'input', ...i.path],
+          message: i.message,
+        });
     const connector = m.kinds.includes('connector');
     if (m.secrets.length > 0 && !connector)
       ctx.addIssue({

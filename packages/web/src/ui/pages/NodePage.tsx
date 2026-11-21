@@ -3,8 +3,10 @@
  * graph editor: the page its plugin declares (`page`: a title and its sections), each section
  * drawn from the output of the read it names (`GET /plugins/<id>/state/<read>`, its input as the
  * query's fields), every read asked once however many sections show it, and asked again every
- * five seconds while the page is open. The node is the running graph's (`GET /graph/view`): its
- * page is its node's, two nodes of one plugin each showing their own.
+ * five seconds while the page is open, and at once after a table's row action ran (D157: its
+ * pictures from the node's files, its buttons running the node's actions). The node is the
+ * running graph's (`GET /graph/view`): its page is its node's, two nodes of one plugin each
+ * showing their own.
  */
 import { useEffect, useState } from 'react';
 import type { GraphViewData, Widget } from '#src/ui/api.ts';
@@ -29,6 +31,8 @@ export function NodePage(props: PageProps) {
   const node = view.data?.nodes.find((n) => n.id === id);
   const page = node?.page;
   const [answers, setAnswers] = useState<Answers>({});
+  // Bumped after a row's action ran (D157): the reads asked again at once.
+  const [asked, setAsked] = useState(0);
   const keys = page === undefined ? '' : JSON.stringify(page.sections.map(readKey));
 
   useEffect(() => {
@@ -56,8 +60,8 @@ export function NodePage(props: PageProps) {
       live = false;
       clearInterval(timer);
     };
-    // The reads are the page's: asked anew when its node or its sections change.
-  }, [id, keys]);
+    // The reads are the page's: asked anew when its node or its sections change, or after an action.
+  }, [id, keys, asked]);
 
   const back = <a href="#/graph">← Graph</a>;
   if (view.data === undefined)
@@ -93,6 +97,9 @@ export function NodePage(props: PageProps) {
             reads={node.interface.reads}
             value={a !== undefined && 'value' in a ? a.value : undefined}
             error={a !== undefined && 'error' in a ? a.error : undefined}
+            node={id}
+            actions={node.interface.actions}
+            reload={() => setAsked((n) => n + 1)}
           />
         );
       })}

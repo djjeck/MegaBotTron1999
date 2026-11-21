@@ -2,10 +2,13 @@
  * A node's widget and its page's sections, drawn (docs/bot-os.md D112): the line its card shows
  * (`WidgetLine`), and a section in full (`WidgetSection`): fields as a list of terms, a count, a
  * list, a table, an amount out of its total as a bar, or a time as how long until it. What each
- * shows is the plugin's declaration and its read's output; nothing here knows a plugin.
+ * shows is the plugin's declaration and its read's output; nothing here knows a plugin. On a page,
+ * a table's picture columns show thumbnails, and its row actions a button per row (D157,
+ * `TableRow.tsx`).
  */
 import { useEffect, useState } from 'react';
 import type { MemberView, Widget } from '#src/ui/api.ts';
+import { PictureCell, pictureSrc, RowActionButton } from './TableRow.tsx';
 import {
   at,
   countOf,
@@ -70,6 +73,12 @@ export function WidgetSection(props: {
   value: unknown;
   /** Why its read did not answer, if it did not. */
   error?: string | undefined;
+  /** Its node, whose files a picture is and whose actions a row runs (D157); none: text alone. */
+  node?: string | undefined;
+  /** Its node's actions, as the graph view describes them, for a row action's form. */
+  actions?: readonly MemberView[] | undefined;
+  /** Asks the page's reads again, after a row's action ran. */
+  reload?: (() => void) | undefined;
 }) {
   const { widget: w, reads, value, error } = props;
   const now = useNow(w.show === 'until');
@@ -79,7 +88,16 @@ export function WidgetSection(props: {
     <section className="widget-section" aria-label={title}>
       <h3>{title}</h3>
       {error === undefined ? (
-        <SectionBody widget={w} reads={reads} output={value} now={now} label={title} />
+        <SectionBody
+          widget={w}
+          reads={reads}
+          output={value}
+          now={now}
+          label={title}
+          node={props.node}
+          actions={props.actions ?? []}
+          reload={props.reload}
+        />
       ) : (
         <p className="error">{error}</p>
       )}
@@ -93,8 +111,11 @@ function SectionBody(props: {
   output: unknown;
   now: number;
   label: string;
+  node: string | undefined;
+  actions: readonly MemberView[];
+  reload: (() => void) | undefined;
 }) {
-  const { widget: w, reads, output, now } = props;
+  const { widget: w, reads, output, now, node } = props;
   const v = at(output, w.path);
   if (v === undefined) return <p className="muted">—</p>;
   switch (w.show) {
@@ -136,7 +157,12 @@ function SectionBody(props: {
     case 'table': {
       const rows = itemsOf(v) ?? [];
       const shown = rows.slice(0, w.max ?? rows.length);
-      const columns = fieldsOf(w, reads, v, w.columns, '0');
+      const columns = fieldsOf(w, reads, v, w.columns, '0').map((c, i) => {
+        const spec = w.columns[i];
+        return typeof spec === 'object' && 'show' in spec ? { ...c, from: spec.from } : c;
+      });
+      // Row actions need the node to run on: none outside a page.
+      const rowActions = node === undefined ? [] : (w.actions ?? []);
       if (rows.length === 0) return <p className="muted">none</p>;
       return (
         <>
@@ -148,16 +174,52 @@ function SectionBody(props: {
                     {c.label}
                   </th>
                 ))}
+                {rowActions.length === 0 ? null : (
+                  <th scope="col">
+                    <span className="visually-hidden">Actions</span>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
-              {shown.map((row, i) => (
-                <tr key={i}>
-                  {columns.map((c) => (
-                    <td key={c.path}>{words(at(row, c.path))}</td>
-                  ))}
-                </tr>
-              ))}
+              {shown.map((row, i) => {
+                // The row's name: its first column's text, for its buttons and pictures.
+                const first = columns[0];
+                const name = first === undefined ? `row ${i + 1}` : words(at(row, first.path));
+                return (
+                  <tr key={i}>
+                    {columns.map((c) => (
+                      <td key={c.path}>
+                        {'from' in c && c.from !== undefined ? (
+                          node === undefined ? null : (
+                            <PictureCell
+                              src={pictureSrc(node, c.from, at(row, c.path))}
+                              alt={`${c.label} of ${name}`}
+                            />
+                          )
+                        ) : (
+                          words(at(row, c.path))
+                        )}
+                      </td>
+                    ))}
+                    {rowActions.length === 0 || node === undefined ? null : (
+                      <td className="row-actions">
+                        {rowActions.map((a) => (
+                          <RowActionButton
+                            key={a.label}
+                            node={node}
+                            action={a}
+                            row={row}
+                            rowName={name}
+                            members={props.actions}
+                            done={props.reload}
+                          />
+                        ))}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           <More shown={shown.length} all={rows.length} />

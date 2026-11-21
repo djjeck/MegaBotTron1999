@@ -8,6 +8,13 @@
  * output (`path`, dotted), and how to show it (`show`): `keyValue`, `counter`, `list`, `table`,
  * `progress` or `until`. The manifest's check refuses a read it does not declare, an input its
  * schema refuses, and a path its output's schema has not, or of a kind the section cannot show.
+ *
+ * A table (D157) may show a column as a picture (`show: 'image'`: a file of the node's own, or a
+ * media), and give each row buttons that run one of the node's actions (`actions`), their input
+ * built from the row (`'$row.<path>'`) and constants, the rest picked by the owner in a form; the
+ * check refuses an action not declared, a key its input has not, a constant its schema refuses and
+ * a row path the rows have not. An action's input field may take its options from a read
+ * (`.meta({ options: { read, path?, value?, label? } })`, `optionsIssues`).
  */
 import { z } from 'zod';
 
@@ -44,6 +51,38 @@ const label = z.string().min(1);
 /** A key/value section's field, or a table's column: its path, and a label if not its schema's. */
 const field = z.union([path, z.strictObject({ path, label: label.optional() })]);
 
+/**
+ * A table's column shown as a picture (D157), a thumbnail that opens it whole: its value a file
+ * name in its node's own files (`from: 'files'`, the default, D149), or a media (`from: 'media'`:
+ * a `Media` as JSON carries it, or a kept one's reference `{ id: 'sha256:<hex>', mime }`, whose
+ * file is `sha256-<hex>`, as a collection keeps it, D155). An empty value, an empty cell.
+ */
+const pictureColumn = z.strictObject({
+  path,
+  label: label.optional(),
+  show: z.literal('image'),
+  from: z.enum(['files', 'media']).default('files'),
+});
+const column = z.union([path, z.strictObject({ path, label: label.optional() }), pictureColumn]);
+
+/** A value of a row's: `$row` (the row itself) or `$row.<path>`. */
+export const ROW_REF = /^\$row(?:\.[A-Za-z0-9_$-]+)*$/u;
+const rowRef = z.string().regex(ROW_REF, 'expected $row.<path>, as $row.place');
+
+/**
+ * A button on each row of a table (D157) that runs an action of its node's interface: its input's
+ * keys from `input`, each a constant or a row's value (a string `'$row.<path>'`), the others the
+ * owner picks in a form the button opens (drawn from the action's input schema, as every form),
+ * each of `current` preselected with the row's value; `confirm`, asked first.
+ */
+const rowAction = z.strictObject({
+  label,
+  action: z.string().regex(/^[a-z][A-Za-z0-9_]*$/u, 'expected an action’s name such as repaint'),
+  input: z.record(z.string(), z.unknown()).optional(),
+  current: z.record(z.string(), rowRef).optional(),
+  confirm: z.string().min(1).optional(),
+});
+
 /** What every section says: the read, its input, where its value is in the output, its label. */
 const base = {
   /** The read of its plugin's `interface.state` it shows. */
@@ -70,8 +109,17 @@ export const widgetSchema = z.discriminatedUnion('show', [
   z.strictObject({ show: z.literal('counter'), ...base }),
   /** A list's items (a map's values), each its `item` path's value, or itself; at most `max`. */
   z.strictObject({ show: z.literal('list'), ...base, item: path.optional(), max }),
-  /** A list's items (a map's values) as rows, a column each of `columns`; at most `max` rows. */
-  z.strictObject({ show: z.literal('table'), ...base, columns: z.array(field).min(1), max }),
+  /**
+   * A list's items (a map's values) as rows, a column each of `columns` (a picture, `show:
+   * 'image'`); at most `max` rows; a button per row for each of `actions` (D157).
+   */
+  z.strictObject({
+    show: z.literal('table'),
+    ...base,
+    columns: z.array(column).min(1),
+    max,
+    actions: z.array(rowAction).min(1).optional(),
+  }),
   /** An amount out of a total: `of`, a number, or the path to it in the read's output. */
   z.strictObject({
     show: z.literal('progress'),
@@ -91,8 +139,10 @@ export const pageSchema = z.strictObject({
 /** One section of a widget or a page, as a plugin declares it. */
 export type Widget = z.output<typeof widgetSchema>;
 export type WidgetShow = Widget['show'];
-/** A field or a column: a path, or a path with its label. */
-export type WidgetField = z.output<typeof field>;
+/** A field or a column: a path, or a path with its label (a column, maybe a picture's). */
+export type WidgetField = z.output<typeof column>;
+/** A table's row action (D157). */
+export type RowAction = z.output<typeof rowAction>;
 /** A plugin's full page. */
 export type WidgetPage = z.output<typeof pageSchema>;
 
@@ -157,6 +207,11 @@ export interface DeclaredRead {
   output: z.ZodType;
 }
 
+/** An action as the manifest declares it: its input's schema. */
+export interface DeclaredAction {
+  input: z.ZodType;
+}
+
 /** A read's output as a JSON Schema; open if zod cannot write it. */
 function outputSchema(read: DeclaredRead): JsonSchema {
   try {
@@ -173,7 +228,8 @@ function outputSchema(read: DeclaredRead): JsonSchema {
  */
 export function widgetIssues(
   w: Widget,
-  reads: Readonly<Record<string, DeclaredRead>>
+  reads: Readonly<Record<string, DeclaredRead>>,
+  actions: Readonly<Record<string, DeclaredAction>> = {}
 ): WidgetIssue[] {
   const read = Object.hasOwn(reads, w.read) ? reads[w.read] : undefined;
   if (read === undefined)
@@ -226,7 +282,13 @@ export function widgetIssues(
         break;
       }
       if (w.show === 'list' && w.item !== undefined) fieldsIn(items, [w.item], 'item');
-      if (w.show === 'table') fieldsIn(items, w.columns, 'columns');
+      if (w.show === 'table') {
+        fieldsIn(items, w.columns, 'columns');
+        (w.actions ?? []).forEach((a, i) => {
+          for (const issue of rowActionIssues(a, items, actions))
+            no(issue.message, ['actions', i, ...issue.path]);
+        });
+      }
       break;
     }
     case 'progress':
@@ -241,6 +303,149 @@ export function widgetIssues(
       if (!isNumber(at) && !types(at).includes('string'))
         no(`${where} is not a time (ms since the epoch, or an ISO string)`);
       break;
+  }
+  return issues;
+}
+
+/** The input keys of an action's schema, when it is an object that names them; undefined if open. */
+function inputKeys(schema: z.ZodType): { keys: string[]; closed: boolean } | undefined {
+  const json = (() => {
+    try {
+      return z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }) as JsonSchema;
+    } catch {
+      return {};
+    }
+  })();
+  const props = json['properties'] as Record<string, unknown> | undefined;
+  if (props === undefined) return undefined;
+  return { keys: Object.keys(props), closed: json['additionalProperties'] === false };
+}
+
+/** The schema of an object's key, for a constant's check; undefined when it cannot tell. */
+function keySchema(schema: z.ZodType, key: string): z.ZodType | undefined {
+  const shape = (schema as { shape?: Record<string, z.ZodType> }).shape;
+  return shape !== undefined && Object.hasOwn(shape, key) ? shape[key] : undefined;
+}
+
+/**
+ * What is wrong with a table's row action (D157), given its rows' schema and the node's actions:
+ * an action it does not declare, a key its input has not (an object that allows no other), a
+ * constant its schema refuses, a row path the rows have not, a key both given and preselected.
+ */
+export function rowActionIssues(
+  a: RowAction,
+  rows: JsonSchema | 'open',
+  actions: Readonly<Record<string, DeclaredAction>>
+): WidgetIssue[] {
+  const action = Object.hasOwn(actions, a.action) ? actions[a.action] : undefined;
+  if (action === undefined)
+    return [
+      { path: ['action'], message: `${a.action} is not among its actions (interface.actions)` },
+    ];
+  const issues: WidgetIssue[] = [];
+  const known = inputKeys(action.input);
+  const fromRow = (ref: string, where: (string | number)[]): void => {
+    const p = ref === '$row' ? undefined : ref.slice('$row.'.length);
+    if (p !== undefined && rows !== 'open' && schemaAt(rows, p) === undefined)
+      issues.push({ path: where, message: `its rows have no ${p}` });
+  };
+  const keyIn = (key: string, where: (string | number)[]): void => {
+    if (known?.closed === true && !known.keys.includes(key))
+      issues.push({ path: where, message: `the action ${a.action} takes no ${key}` });
+  };
+  for (const [key, v] of Object.entries(a.input ?? {})) {
+    keyIn(key, ['input', key]);
+    if (typeof v === 'string' && v.startsWith('$row')) {
+      if (ROW_REF.test(v)) fromRow(v, ['input', key]);
+      else issues.push({ path: ['input', key], message: `expected $row.<path>, as $row.place` });
+      continue;
+    }
+    const s = keySchema(action.input, key);
+    const parsed = s?.safeParse(v);
+    if (parsed !== undefined && !parsed.success)
+      issues.push({
+        path: ['input', key],
+        message: `the action ${a.action} refuses ${JSON.stringify(v)}: ${parsed.error.issues.map((i) => i.message).join('; ')}`,
+      });
+  }
+  for (const [key, ref] of Object.entries(a.current ?? {})) {
+    keyIn(key, ['current', key]);
+    if (Object.hasOwn(a.input ?? {}, key))
+      issues.push({
+        path: ['current', key],
+        message: `${key} is given by input: the owner picks none`,
+      });
+    fromRow(ref, ['current', key]);
+  }
+  return issues;
+}
+
+/**
+ * Where an action's input field takes its options from (D157): `.meta({ options })` on a field,
+ * `{ read, path?, value?, label? }`: the items at `path` of the read's output (the whole output
+ * for none), each option's value at `value` (the item itself for none), its label at `label` (its
+ * value for none). The form draws a choice of them; the action still checks what it gets.
+ */
+export const optionsSchema = z.strictObject({
+  read: z.string().regex(/^[a-z][A-Za-z0-9_]*$/u),
+  path: path.optional(),
+  value: path.optional(),
+  label: path.optional(),
+});
+export type OptionsSource = z.output<typeof optionsSchema>;
+
+/** Every `options` an input schema's fields declare, with where (D157). */
+function optionsIn(schema: JsonSchema, at: string[] = []): { at: string[]; options: unknown }[] {
+  const out: { at: string[]; options: unknown }[] = [];
+  if ('options' in schema) out.push({ at, options: schema['options'] });
+  const props = schema['properties'] as Record<string, JsonSchema> | undefined;
+  for (const [k, v] of Object.entries(props ?? {}))
+    if (typeof v === 'object' && v !== null) out.push(...optionsIn(v, [...at, k]));
+  for (const key of ['anyOf', 'oneOf', 'allOf'])
+    for (const v of (schema[key] as JsonSchema[] | undefined) ?? [])
+      if (typeof v === 'object' && v !== null) out.push(...optionsIn(v, at));
+  const items = schema['items'];
+  if (typeof items === 'object' && items !== null) out.push(...optionsIn(items as JsonSchema, at));
+  return out;
+}
+
+/**
+ * What is wrong with the options an action's input declares (D157): one that does not read as
+ * `{ read, path?, value?, label? }`, names a read it does not declare, or a path its output has
+ * not.
+ */
+export function optionsIssues(
+  input: z.ZodType,
+  reads: Readonly<Record<string, DeclaredRead>>
+): WidgetIssue[] {
+  let json: JsonSchema;
+  try {
+    json = z.toJSONSchema(input, { io: 'input', unrepresentable: 'any' }) as JsonSchema;
+  } catch {
+    return [];
+  }
+  const issues: WidgetIssue[] = [];
+  for (const found of optionsIn(json)) {
+    const where = [...found.at, 'options'];
+    const parsed = optionsSchema.safeParse(found.options);
+    if (!parsed.success) {
+      issues.push({ path: where, message: 'expected { read, path?, value?, label? }' });
+      continue;
+    }
+    const o = parsed.data;
+    const read = Object.hasOwn(reads, o.read) ? reads[o.read] : undefined;
+    if (read === undefined) {
+      issues.push({ path: where, message: `${o.read} is not among its reads (interface.state)` });
+      continue;
+    }
+    const at = schemaAt(outputSchema(read), o.path);
+    if (at === undefined)
+      issues.push({ path: where, message: `the read ${o.read} has no ${o.path ?? ''}` });
+    else if (at !== 'open' && itemsOf(at) === undefined)
+      issues.push({
+        path: where,
+        message: `${o.path ?? `the read ${o.read}`} is not a list or a map`,
+      });
   }
   return issues;
 }

@@ -11,7 +11,7 @@ import {
   type Status,
 } from '#src/ui/api.ts';
 
-const PORT_TYPES: GraphViewData['portTypes'] = {
+export const PORT_TYPES: GraphViewData['portTypes'] = {
   'chat-in': { id: 'chat-in', description: 'chats read', shape: 'circle', colour: '#2f7ed8' },
   'chat-out': { id: 'chat-out', description: 'chats sent', shape: 'circle', colour: '#8a4fd1' },
   events: { id: 'events', description: 'events', shape: 'diamond', colour: '#d97b29' },

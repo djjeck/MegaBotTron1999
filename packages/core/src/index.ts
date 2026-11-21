@@ -513,7 +513,11 @@ export {
 } from './summary.ts';
 export {
   fieldPath,
+  optionsSchema,
+  type OptionsSource,
   pageSchema,
+  ROW_REF,
+  type RowAction,
   schemaAt,
   type Widget,
   WIDGET_PATH,
