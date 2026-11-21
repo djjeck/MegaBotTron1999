@@ -24,10 +24,50 @@ export interface MediaLimits {
 /** The key bytes go under as JSON (the core's `BYTES_KEY`). */
 export const BYTES_KEY = '$bytes';
 
-/** The limits of a property whose schema says `media`; undefined for any other. */
-export function mediaLimits(schema: JsonSchema): MediaLimits | undefined {
+const isSchema = (v: unknown): v is JsonSchema =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * The schema a local `$ref` (`#/$defs/…`, `#/definitions/…`) points to in `root`; `schema` itself
+ * when it has none, or one that does not resolve.
+ */
+export function deref(schema: JsonSchema, root: JsonSchema | undefined): JsonSchema {
+  const ref = schema['$ref'];
+  if (typeof ref !== 'string' || !ref.startsWith('#/') || root === undefined) return schema;
+  let at: unknown = root;
+  for (const part of ref.slice(2).split('/'))
+    at = isSchema(at) ? at[part.replaceAll('~1', '/').replaceAll('~0', '~')] : undefined;
+  if (!isSchema(at)) return schema;
+  // The keywords beside the `$ref` (a description, a default) are the property's own: kept.
+  const { $ref: _, ...rest } = schema;
+  return { ...at, ...rest };
+}
+
+/**
+ * The limits of a property whose schema says `media`; undefined for any other. The key is looked
+ * for however the schema is wrapped (#74): on it, behind a `$ref` into `root`'s definitions, or in
+ * an `allOf`, `anyOf` or `oneOf` branch (an optional or nullable media, a refinement).
+ */
+export function mediaLimits(
+  schema: JsonSchema,
+  root?: JsonSchema,
+  seen: ReadonlySet<JsonSchema> = new Set()
+): MediaLimits | undefined {
+  if (seen.has(schema)) return undefined;
   const m = schema['media'];
-  return typeof m === 'object' && m !== null && !Array.isArray(m) ? (m as MediaLimits) : undefined;
+  if (isSchema(m)) return m as MediaLimits;
+  const next = new Set(seen).add(schema);
+  const target = deref(schema, root);
+  if (target !== schema) return mediaLimits(target, root, next);
+  for (const key of ['allOf', 'anyOf', 'oneOf']) {
+    const branches = schema[key];
+    if (!Array.isArray(branches)) continue;
+    for (const b of branches) {
+      const found = isSchema(b) ? mediaLimits(b, root, next) : undefined;
+      if (found !== undefined) return found;
+    }
+  }
+  return undefined;
 }
 
 /** A picked media's bytes, as JSON carries them; undefined for a value of another shape. */

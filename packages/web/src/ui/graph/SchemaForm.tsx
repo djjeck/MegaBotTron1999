@@ -26,7 +26,7 @@ import type { JsonSchema } from '#src/ui/api.ts';
 import { plain } from './defaults.ts';
 import type { Scalar } from './ListFields.tsx';
 import { ListField, listItems, RecordField, recordValues } from './ListFields.tsx';
-import { MediaField, mediaLimits } from './MediaField.tsx';
+import { deref, MediaField, mediaLimits } from './MediaField.tsx';
 
 const show = (v: unknown): string => JSON.stringify(v, null, 2) ?? '';
 
@@ -175,14 +175,15 @@ function TextField(props: {
 }
 
 /** The items' schema of a list of objects, drawn as a form each; undefined for any other. */
-export function objectItems(schema: JsonSchema): JsonSchema | undefined {
+export function objectItems(schema: JsonSchema, root?: JsonSchema): JsonSchema | undefined {
   if (schema['type'] !== 'array') return undefined;
-  const items = schema['items'] as JsonSchema | undefined;
-  return items !== undefined &&
-    plain(items)['type'] === 'object' &&
-    plain(items)['properties'] !== undefined &&
-    mediaLimits(plain(items)) === undefined
-    ? plain(items)
+  const given = schema['items'] as JsonSchema | undefined;
+  if (given === undefined) return undefined;
+  const items = deref(plain(deref(given, root)), root);
+  return items['type'] === 'object' &&
+    items['properties'] !== undefined &&
+    mediaLimits(given, root) === undefined
+    ? items
     : undefined;
 }
 
@@ -199,6 +200,7 @@ function ObjectListField(props: {
   value: unknown;
   set: ((v: unknown) => void) | undefined;
   mediaSrc: MediaSrc | undefined;
+  root: JsonSchema | undefined;
 }) {
   const { name, set } = props;
   const rows = Array.isArray(props.value) ? (props.value as unknown[]) : [];
@@ -217,6 +219,7 @@ function ObjectListField(props: {
           <SchemaForm
             legend={`${name} ${i + 1}`}
             schema={props.items}
+            root={props.root}
             value={isObject(row) ? row : {}}
             mediaSrc={props.mediaSrc}
             {...(set === undefined
@@ -283,22 +286,25 @@ function Field(props: {
   set: ((v: unknown) => void) | undefined;
   editing: Editing | undefined;
   mediaSrc: MediaSrc | undefined;
+  root: JsonSchema | undefined;
 }) {
-  const { name, set, editing } = props;
-  const schema = plain(props.schema);
+  const { name, set, editing, root } = props;
+  // Its schema as drawn: behind a `$ref` into the root's definitions, a null branch aside.
+  const schema = deref(plain(deref(props.schema, root)), root);
   const type = schema['type'];
   const enumOf = schema['enum'] as unknown[] | undefined;
   const fallback = props.schema['default'] ?? schema['default'];
   const value = props.value !== undefined ? props.value : fallback;
   const description = (props.schema['description'] ?? schema['description']) as string | undefined;
   const errors = editing?.errors[name] ?? [];
-  const media = mediaLimits(props.schema) ?? mediaLimits(schema);
+  const media = mediaLimits(props.schema, root);
   if (type === 'object' && schema['properties'] !== undefined && media === undefined)
     return (
       <div className="field">
         <SchemaForm
           legend={name}
           schema={schema}
+          root={root}
           value={props.value as Record<string, unknown> | undefined}
           mediaSrc={props.mediaSrc}
           {...(set === undefined ? {} : { onChange: (v) => set(v) })}
@@ -309,7 +315,7 @@ function Field(props: {
   let control;
   const custom = editing?.custom[name];
   const labels = choicesOf(props.schema);
-  const items = objectItems(schema);
+  const items = objectItems(schema, root);
   if (custom !== undefined && set !== undefined) control = custom(props.value, set);
   else if (media !== undefined)
     control = (
@@ -323,6 +329,7 @@ function Field(props: {
         value={props.value}
         set={set}
         mediaSrc={props.mediaSrc}
+        root={root}
       />
     );
   else if (enumOf !== undefined && labels !== undefined)
@@ -450,7 +457,13 @@ export function SchemaForm(props: {
   folded?: readonly string[];
   /** The address of a kept media's picture (D155), for a media field's preview. */
   mediaSrc?: MediaSrc | undefined;
+  /**
+   * The whole schema the form is part of, whose definitions a property's `$ref` points to (#74);
+   * the form's own schema when unset.
+   */
+  root?: JsonSchema | undefined;
 }) {
+  const root = props.root ?? props.schema;
   const properties = (props.schema['properties'] ?? {}) as Record<string, JsonSchema>;
   const required = (props.schema['required'] ?? []) as string[];
   // A field that does not apply now (`shownWhen`) is not drawn.
@@ -495,6 +508,7 @@ export function SchemaForm(props: {
           set={setter(name)}
           editing={editing}
           mediaSrc={props.mediaSrc}
+          root={root}
         />
       ))}
       {folded.length === 0 ? null : (
@@ -510,6 +524,7 @@ export function SchemaForm(props: {
               set={setter(name)}
               editing={editing}
               mediaSrc={props.mediaSrc}
+              root={root}
             />
           ))}
         </details>

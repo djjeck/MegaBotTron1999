@@ -7,6 +7,15 @@ import { fakeCore } from '#test/fake-core.ts';
 import { stubReactFlow } from '#test/react-flow.ts';
 import { App, health, NOTICE_MS, PAGES, release } from './App.tsx';
 
+/** A page's entry script, as the built page names it; typed once in, as happy-dom runs none. */
+function loaded(src: string): void {
+  const script = document.createElement('script');
+  script.setAttribute('type', 'text/plain');
+  script.setAttribute('src', src);
+  document.head.append(script);
+  script.setAttribute('type', 'module');
+}
+
 const HEALTH = {
   off: false,
   version: '1.2.3',
@@ -65,6 +74,34 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Graph' })).toBeDefined();
     expect(await screen.findByLabelText('node actor-a', {}, { timeout: 5000 })).toBeDefined();
     expect(api.calls).toContain('POST /login {"password":"right password"}');
+  });
+
+  it('says when the instance was upgraded under the page, and reloads it on the owner’s word (#74)', async () => {
+    fakeApi({
+      ...GRAPH(),
+      'GET /session': [200, { authenticated: true }],
+      'GET /instance': [200, HEALTH],
+    });
+    // The page loaded one app; the instance, upgraded since, serves another.
+    loaded('./assets/index-OLD.js');
+    const api = globalThis.fetch;
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
+      url === './'
+        ? Promise.resolve(
+            new Response('<script type="module" crossorigin src="./assets/index-NEW.js"></script>')
+          )
+        : api(url, init)
+    );
+    const reload = vi.fn();
+    vi.stubGlobal('location', { ...window.location, reload, hash: '' });
+    try {
+      render(<App />);
+      const banner = await screen.findByText(/The instance was upgraded/u);
+      fireEvent.click(within(banner).getByRole('button', { name: 'Reload the page' }));
+      expect(reload).toHaveBeenCalled();
+    } finally {
+      document.head.innerHTML = '';
+    }
   });
 
   it('shows the login when the session cannot be read', async () => {

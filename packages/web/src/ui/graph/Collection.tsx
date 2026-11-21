@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { JsonSchema, MemberView } from '#src/ui/api.ts';
 import { api, seg } from '#src/ui/api.ts';
+import { deref } from './MediaField.tsx';
 import type { MediaSrc } from './SchemaForm.tsx';
 import { SchemaForm } from './SchemaForm.tsx';
 
@@ -69,7 +70,10 @@ interface Editing {
 export function CollectionRecords(props: { node: string; actions: readonly MemberView[] }) {
   const { node } = props;
   const add = props.actions.find((a) => a.name === 'add');
-  const schema = (add?.input?.['properties'] as Record<string, JsonSchema> | undefined)?.['values'];
+  // Its form: the `values` of `add`'s input, behind a `$ref` into its definitions if it is one (#74).
+  const root = add?.input;
+  const given = (root?.['properties'] as Record<string, JsonSchema> | undefined)?.['values'];
+  const schema = given === undefined ? undefined : deref(given, root);
   const [records, setRecords] = useState<RecordView[]>();
   const [title, setTitle] = useState<string>();
   const [editing, setEditing] = useState<Editing>();
@@ -217,6 +221,7 @@ export function CollectionRecords(props: { node: string; actions: readonly Membe
           <SchemaForm
             legend={editing.id === undefined ? 'New record' : `Record ${editing.id}`}
             schema={schema}
+            root={root}
             value={editing.values}
             onChange={(values) => setEditing({ ...editing, values })}
             mediaSrc={mediaSrc}

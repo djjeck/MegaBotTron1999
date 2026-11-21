@@ -189,6 +189,41 @@ describe('collectionManifest', () => {
     ).toBeUndefined();
   });
 
+  it('says each media field’s limits on the field itself, as the control API serves it (#74)', () => {
+    const kit = new DevKit({ plugins: [collectionPlugin()] });
+    const fields = [
+      { name: 'face', type: 'media', kinds: ['image'], maxBytes: 10 * MB },
+      { name: 'badge', type: 'media', required: true },
+      { name: 'card', type: 'media', help: 'Its picture in the lists' },
+    ];
+    const served = JSON.parse(
+      JSON.stringify(
+        kit.core.nodeViews({
+          version: 2,
+          nodes: [{ id: 'cast', plugin: 'collection', config: { fields } }],
+          edges: [],
+        })
+      )
+    ) as Record<
+      string,
+      { interface: { actions: { name: string; input: Record<string, unknown> }[] } }
+    >;
+    for (const action of ['add', 'update']) {
+      const input = served['cast']?.interface.actions.find((a) => a.name === action)?.input ?? {};
+      const values = (input['properties'] as Record<string, Record<string, unknown>>)['values'] as {
+        properties: Record<string, Record<string, unknown>>;
+      };
+      // No definition to follow, no wrapper to look into: the key is where the form reads it.
+      expect(JSON.stringify(input)).not.toMatch(/\$ref|\$defs|allOf|anyOf/u);
+      expect(values.properties['face']?.['media']).toEqual({ kinds: ['image'], maxBytes: 10 * MB });
+      expect(values.properties['badge']?.['media']).toEqual({});
+      expect(values.properties['card']).toMatchObject({
+        media: {},
+        description: 'Its picture in the lists',
+      });
+    }
+  });
+
   it('makes what it can of a config its schema refuses', () => {
     const m = parseManifest(
       collectionManifest({ fields: [{ name: 'ok', type: 'text' }, { name: 'bad' }, 'x'] }, 'c')

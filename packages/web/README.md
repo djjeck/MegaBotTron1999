@@ -8,13 +8,18 @@ the server that guards them.
   a top bar, the tab selected being the page's title; a bottom bar holds small print, such as
   diagnostics: the release the instance runs and its commit, how long it has run and its memory
   (`GET /api/instance`, read every minute and again after a restart); both bars stay, and only the
-  page between them scrolls. The home page is the **Graph** (`#/graph`, `src/ui/graph/`), the graph
-  editor (docs/bot-os.md D55), drawn with React Flow (`@xyflow/react`): a draft of the saved graph,
-  each plugin instance a node with its input ports on the left (as the core's check resolves them
-  from its config, `POST /graph/check`'s `inputs`) and its output ports on the right, each port type
-  in its own shape and colour, each binding an edge in its type's colour, dashed when the input is
-  optional, and on each node its state and drift (docs/bot-os.md D64): disabled, greyed; stopped, in
-  red tones with a warning icon and its reason; inactive, greyed with the node it needs; loading,
+  page between them scrolls. With it the page reads `index.html` again (never cached) and compares
+  its entry script, named by its content's hash, with the one it loaded (`stale.ts`, #74): a page
+  left open across an upgrade keeps running the app it loaded, which may not draw what the new
+  instance sends (a 0.1.55 page drew a 0.1.56 collection's media field as four text fields), so a
+  banner then says the instance was upgraded, with **Reload the page** (not reloaded by itself: an
+  unsaved draft would be lost). The home page is the **Graph** (`#/graph`, `src/ui/graph/`), the
+  graph editor (docs/bot-os.md D55), drawn with React Flow (`@xyflow/react`): a draft of the saved
+  graph, each plugin instance a node with its input ports on the left (as the core's check resolves
+  them from its config, `POST /graph/check`'s `inputs`) and its output ports on the right, each port
+  type in its own shape and colour, each binding an edge in its type's colour, dashed when the input
+  is optional, and on each node its state and drift (docs/bot-os.md D64): disabled, greyed; stopped,
+  in red tones with a warning icon and its reason; inactive, greyed with the node it needs; loading,
   while the plugins load, and failed to load, naming the package or module and its error, with a
   banner of what failed and where to fix it (D143). The page is the map, filling the area between
   the bars: its minimap at the top right; what the draft needs (**Review changes**, the problems and
@@ -118,11 +123,12 @@ the server that guards them.
   its type picked where several are allowed (`ListFields.tsx`); JSON is typed only for what none of
   these draws; a list of objects (a collection's `fields`) as a form per item, added, moved up or
   down and removed; a text whose schema says `long` as a larger box; and a **media** (a property
-  whose schema says `media`, the core's `mediaSchema` or `mediaField(limits)`, docs/bot-os.md D155),
-  in a config or an action's input alike, as a file's picker (`MediaField.tsx`): **Choose a file**,
-  its picture previewed, **Replace**, **Remove**, a file past its `maxBytes` or of a kind or type it
-  does not take refused with why before it is sent, its size in pixels read from the picture; its
-  value is the `Media` as JSON carries it,
+  whose schema says `media`, the core's `mediaSchema` or `mediaField(limits)`, docs/bot-os.md D155,
+  found however the schema wraps it: behind a `$ref` into the form's definitions, or in an `allOf`,
+  `anyOf` or `oneOf` branch, #74), in a config or an action's input alike, as a file's picker
+  (`MediaField.tsx`): **Choose a file**, its picture previewed, **Replace**, **Remove**, a file past
+  its `maxBytes` or of a kind or type it does not take refused with why before it is sent, its size
+  in pixels read from the picture; its value is the `Media` as JSON carries it,
   `{ data: { "$bytes": "<base64>" }, mime, width?, height? }`, sent within the control API's body
   limit (64 MiB of JSON, about 48 MiB of bytes), and an answer's bytes are said by their size. A
   running **collection** (docs/bot-os.md D155) lists its **Records** (`Collection.tsx`): each named

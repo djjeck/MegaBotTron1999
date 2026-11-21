@@ -6,6 +6,7 @@
  * is left out, not made. A value given is never changed.
  */
 import type { JsonSchema } from '#src/ui/api.ts';
+import { mediaLimits } from './MediaField.tsx';
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -36,7 +37,7 @@ export function withDefaults(
     if (
       inner['type'] === 'object' &&
       inner['properties'] !== undefined &&
-      inner['media'] === undefined
+      mediaLimits(property) === undefined
     ) {
       if (given !== undefined && !isRecord(given)) continue;
       const base = given ?? (isRecord(fallback) ? fallback : undefined);

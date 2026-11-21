@@ -4,6 +4,8 @@
  * added, edited (only what changed sent), moved and removed through the node's actions, each
  * refusal shown. The cast is made up: `postcard`'s hosts.
  */
+import { DevKit } from '@megabottron1999/core';
+import { collectionPlugin } from '@megabottron1999/turns/collection.ts';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MemberView } from '#src/ui/api.ts';
@@ -200,5 +202,98 @@ describe('a collection’s records (D155)', () => {
       values: { b: [2], d: true },
       unset: ['c'],
     });
+  });
+});
+
+/**
+ * A collection node's `add`, as the control API serves it (#74): the shell's own collection,
+ * described by its core for a graph's node (`POST /graph/check`'s `views`), through JSON.
+ */
+function servedActions(): MemberView[] {
+  const kit = new DevKit({ plugins: [collectionPlugin()] });
+  const views = kit.core.nodeViews({
+    version: 2,
+    nodes: [
+      {
+        id: 'cast',
+        plugin: 'collection',
+        config: {
+          fields: [
+            { name: 'name', type: 'text', required: true },
+            { name: 'face', type: 'media', kinds: ['image'], maxBytes: 10485760 },
+            { name: 'badge', type: 'media', required: true },
+            { name: 'card', type: 'media', help: 'Its picture in the lists' },
+          ],
+        },
+      },
+    ],
+    edges: [],
+  });
+  const view = JSON.parse(JSON.stringify(views['cast'])) as {
+    interface: { actions: MemberView[] };
+  };
+  return view.interface.actions;
+}
+
+describe('a collection’s media fields, from the schema the control API serves (#74)', () => {
+  const pickers = (form: HTMLElement): string[] =>
+    within(form)
+      .queryAllByText('Choose a file')
+      .map((l) => l.closest('[role="group"]')?.getAttribute('aria-label') ?? '');
+
+  it('draws the file picker for an optional, a required and a helped one, in Add and in Edit', async () => {
+    const actions = servedActions();
+    serve([{ id: 'r1', position: 0, values: { name: 'Ada', face: FACE } }]);
+    render(<CollectionRecords node="cast" actions={actions} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a record' }));
+    const form = screen.getByRole('group', { name: 'New record' });
+    expect(pickers(form)).toEqual(['face', 'badge', 'card']);
+    expect(within(form).queryByLabelText('mime')).toBeNull();
+    expect(within(form).getByText('image, up to 10.0 MB')).toBeDefined();
+    expect(within(form).getByText('Its picture in the lists')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(
+      within(screen.getByLabelText('record r1')).getByRole('button', { name: 'Edit' })
+    );
+    const edit = screen.getByRole('group', { name: 'Record r1' });
+    // Its kept picture, to replace; the others to pick.
+    expect(within(edit).getByRole('img', { name: 'face preview' })).toBeDefined();
+    expect(within(edit).getByText('Replace')).toBeDefined();
+    expect(pickers(edit)).toEqual(['badge', 'card']);
+  });
+
+  it('finds the media however its schema is wrapped: nullable, a $ref, an allOf, its values a $ref', async () => {
+    const media = {
+      type: 'object',
+      properties: { data: {}, mime: { type: 'string' } },
+      media: { kinds: ['image'] },
+    };
+    const wrapped: MemberView[] = [
+      {
+        name: 'add',
+        help: 'Adds a record',
+        input: {
+          type: 'object',
+          $defs: {
+            media,
+            values: {
+              type: 'object',
+              properties: {
+                nullable: { anyOf: [media, { type: 'null' }] },
+                referred: { $ref: '#/$defs/media', description: 'By reference' },
+                refined: { allOf: [media] },
+              },
+            },
+          },
+          properties: { values: { $ref: '#/$defs/values' } },
+        },
+      },
+    ];
+    serve([]);
+    render(<CollectionRecords node="cast" actions={wrapped} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a record' }));
+    const form = screen.getByRole('group', { name: 'New record' });
+    expect(pickers(form)).toEqual(['nullable', 'referred', 'refined']);
+    expect(within(form).getByText('By reference')).toBeDefined();
   });
 });

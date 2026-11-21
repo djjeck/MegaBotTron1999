@@ -8,7 +8,9 @@
  * Its shell: a top bar whose tabs are the pages (the tab selected is the page's title), the page
  * between, which alone scrolls, and a bottom bar for small print, such as diagnostics: the release
  * the instance runs and its commit, how long it has run and its memory (`GET /instance`, read every
- * minute and after a restart). The bars stay where they are.
+ * minute and after a restart). The bars stay where they are. Read with it, whether the instance
+ * now serves another app than the page runs (`stale.ts`, an upgrade while the page stayed open):
+ * a banner then says so, with a button that reloads the page (#74).
  * Every page is reached by the URL's hash (`#/admin`); a page added here is a line of `PAGES`. A
  * node's own page (D112), declared by its plugin, is `#/node/<id>`, in no menu, opened from its
  * node's panel; its widget is on its card. Old routes keep leading somewhere: an admin section's (`#/graph-history`) to
@@ -28,6 +30,7 @@ import { DriftPage } from './pages/DriftPage.tsx';
 import { EventsPage } from './pages/EventsPage.tsx';
 import { ModulesPage } from './pages/ModulesPage.tsx';
 import { NodePage } from './pages/NodePage.tsx';
+import { appChanged } from './stale.ts';
 
 /**
  * What every page gets: the way to say the session is gone, and why (the login says it), and the
@@ -143,10 +146,13 @@ export function App() {
   }, []);
   // The instance as the bottom bar says it: read once logged in, after a restart, and every minute.
   const [instance, setInstance] = useState<InstanceHealth>();
+  // Whether the instance serves a newer app than this page runs (#74): read with it.
+  const [stale, setStale] = useState(false);
   useEffect(() => {
     if (session !== 'in') return undefined;
     const read = (): void => {
       api<InstanceHealth>('/instance').then(setInstance, () => setInstance(undefined));
+      void appChanged().then(setStale);
     };
     read();
     const timer = setInterval(read, 60_000);
@@ -197,6 +203,15 @@ export function App() {
       >
         {/* The tab selected is the page's title on screen; this heading names it to a screen reader. */}
         <h1 className="visually-hidden">{current.title}</h1>
+        {stale ? (
+          <p role="alert" className="banner warn">
+            The instance was upgraded: this page still runs the app it loaded before, which may draw
+            what the instance sends wrongly.{' '}
+            <button type="button" onClick={() => window.location.reload()}>
+              Reload the page
+            </button>
+          </p>
+        ) : null}
         {notice === undefined ? null : (
           <p role="status" className="banner good">
             {notice}{' '}
