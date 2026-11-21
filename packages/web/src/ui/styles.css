@@ -2114,9 +2114,12 @@ textarea.long {
 
 /* A node page's table (D157): a picture's thumbnail, and its row actions, each with its form. */
 .widget-section img.thumb {
-  width: 4rem;
-  height: 4rem;
-  object-fit: cover;
+  /* Large enough to judge a picture from the table: whole, not cropped, its own proportions. */
+  width: 14rem;
+  max-width: 40vw;
+  height: auto;
+  max-height: 14rem;
+  object-fit: contain;
   border: 1px solid var(--line);
   display: block;
 }
