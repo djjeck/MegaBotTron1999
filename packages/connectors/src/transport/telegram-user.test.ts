@@ -279,6 +279,7 @@ describe('TelegramUserConnector', () => {
         network: 'telegram',
         chat: GROUP,
         sender: 'LootBot',
+        senderBot: false,
         text: 'Troppo presto',
         time: 1_793_000_000_000,
         id: '1',
@@ -297,6 +298,27 @@ describe('TelegramUserConnector', () => {
     for (const [i, sender] of [undefined, null, {}, { username: null }].entries())
       await f.deliver(raw({ id: i + 1, sender }));
     expect(messages.map((m) => m.sender)).toEqual(['', '', '', '']);
+  });
+
+  it('gives the sender’s display name, a channel’s title, and whether it is a bot, where GramJS has them (D159)', async () => {
+    const { f, messages } = await connector();
+    const senders = [
+      { firstName: 'Ada', lastName: 'Lovelace' },
+      { firstName: 'Ada', lastName: null },
+      { username: 'quest_bot', firstName: 'Quest', bot: true },
+      { title: 'The Lobby' },
+      { firstName: '' },
+      undefined,
+    ];
+    for (const [i, sender] of senders.entries()) await f.deliver(raw({ id: i + 1, sender }));
+    expect(messages.map((m) => [m.senderName, m.senderBot])).toEqual([
+      ['Ada Lovelace', false],
+      ['Ada', false],
+      ['Quest', true],
+      ['The Lobby', false],
+      [undefined, false],
+      [undefined, undefined],
+    ]);
   });
 
   it('logs and drops a message whose sender cannot be fetched', async () => {

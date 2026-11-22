@@ -195,7 +195,10 @@ export interface GramClient {
 }
 
 /** A field of an entity GramJS returned, if it has one. */
-function field(entity: unknown, key: 'username' | 'bot' | 'migratedTo' | 'self'): unknown {
+function field(
+  entity: unknown,
+  key: 'username' | 'bot' | 'migratedTo' | 'self' | 'firstName' | 'lastName' | 'title'
+): unknown {
   if (typeof entity !== 'object' || entity === null || !(key in entity)) return undefined;
   return (entity as Record<string, unknown>)[key];
 }
@@ -204,6 +207,21 @@ function field(entity: unknown, key: 'username' | 'bot' | 'migratedTo' | 'self')
 function username(entity: unknown): string | undefined {
   const u = field(entity, 'username');
   return typeof u === 'string' ? u : undefined;
+}
+
+/**
+ * A sender's display name and whether it is a bot (D159): a user's first and last names, a
+ * channel's (or a group's, posting as itself) title; nothing for a sender GramJS did not give.
+ */
+function senderOf(entity: unknown): { senderName?: string; senderBot?: boolean } {
+  if (typeof entity !== 'object' || entity === null) return {};
+  const text = (key: 'firstName' | 'lastName' | 'title'): string => {
+    const v = field(entity, key);
+    return typeof v === 'string' ? v : '';
+  };
+  const name =
+    text('title') || [text('firstName'), text('lastName')].filter((n) => n !== '').join(' ');
+  return { ...(name === '' ? {} : { senderName: name }), senderBot: field(entity, 'bot') === true };
 }
 
 /**
@@ -1193,7 +1211,8 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     m: RawMessage,
     chat: string
   ): Promise<Omit<Inbound, 'account' | 'network'>> {
-    const sender = username(await m.getSender());
+    const entity = await m.getSender();
+    const sender = username(entity);
     const replyTo = m.replyTo?.replyToMsgId;
     const document = await this.document(m);
     const aliases = this.namesOf(chat).slice(1);
@@ -1202,6 +1221,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       ...(aliases.length === 0 ? {} : { aliases }),
       ...(m.isPrivate === undefined ? {} : { private: m.isPrivate }),
       sender: sender ?? '',
+      ...senderOf(entity),
       text: m.message,
       time: m.date * 1000,
       id: String(m.id),

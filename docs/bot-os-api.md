@@ -1228,7 +1228,9 @@ interface Inbound {
   chat: string; // '#lobby', a Telegram chat id or @username
   aliases?: readonly string[]; // the chat's other names (its @username, its id), bot-os.md D90
   private?: boolean; // a private chat (one user or bot), not a group, where the network says
-  sender: string; // a nick, a username
+  sender: string; // a nick, a username; '' for a sender without one
+  senderName?: string; // the sender's display name, where the network has one (bot-os.md D159)
+  senderBot?: boolean; // whether the sender is a bot, where the network says (bot-os.md D159)
   text: string;
   time: number;
   id?: string; // the network's message id, where it has one

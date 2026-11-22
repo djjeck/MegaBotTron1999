@@ -184,6 +184,27 @@ export const OWNER_UNREACHABLE =
   'the bot cannot message its owner yet: the owner must open the bot and send it /start';
 
 /** A sender as recorded: by `@username`, else by id; `?` for none. */
+/**
+ * A message's sender's display name and whether it is a bot (D159): a chat that sent it (a channel,
+ * a group's anonymous admin) by its title, and no bot, though Telegram puts its own bot in `from`;
+ * else the user's first and last names.
+ */
+function senderOf(m: {
+  from?: { first_name: string; last_name?: string | undefined; is_bot: boolean } | undefined;
+  sender_chat?: { title?: string | undefined } | undefined;
+}): { senderName?: string; senderBot?: boolean } {
+  if (m.sender_chat !== undefined)
+    return {
+      ...(m.sender_chat.title ? { senderName: m.sender_chat.title } : {}),
+      senderBot: false,
+    };
+  if (m.from === undefined) return {};
+  const name = [m.from.first_name, m.from.last_name]
+    .filter((n) => n !== undefined && n !== '')
+    .join(' ');
+  return { ...(name === '' ? {} : { senderName: name }), senderBot: m.from.is_bot };
+}
+
 const nameOf = (from: { id: number; username?: string } | undefined): string =>
   from === undefined ? '?' : from.username === undefined ? String(from.id) : `@${from.username}`;
 
@@ -365,6 +386,7 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
             ...(aliases.length === 0 ? {} : { aliases }),
             private: m.chat.type === 'private',
             sender: m.from?.username ?? '',
+            ...senderOf(m),
             text,
             time: m.date * 1000,
             id: String(m.message_id),

@@ -221,6 +221,8 @@ describe('TelegramBotConnector', () => {
       network: 'telegram',
       chat: '-100123',
       sender: 'ada',
+      senderName: 'Ada',
+      senderBot: false,
       text: '/map@ExampleBot',
       time: 0,
       id: expect.any(String) as string,
@@ -230,6 +232,55 @@ describe('TelegramBotConnector', () => {
     expect(heard[1]?.sender).toBe('');
     // User 5's own chat with the bot: private, by its id (D90).
     expect(heard[1]).toMatchObject({ chat: '5', private: true });
+  });
+
+  it('gives the sender’s display name and whether it is a bot; a chat that sent it by its title, no bot (D159)', async () => {
+    const { c, stub } = connector();
+    const heard: Inbound[] = [];
+    c.onMessage((m) => heard.push(m));
+    const said = (change: (m: Record<string, unknown>) => void) => {
+      const u = stub.command(-100123, 5, 'hello') as unknown as {
+        message: Record<string, unknown>;
+      };
+      delete u.message['entities'];
+      change(u.message);
+      return u as unknown as ReturnType<typeof stub.command>;
+    };
+    let id = 100;
+    const next = (m: Record<string, unknown>) => (m['message_id'] = id++);
+    await stub.bot.handleUpdate(
+      said(
+        (m) => (next(m), (m['from'] = { id: 5, is_bot: false, first_name: 'Ada', last_name: 'L' }))
+      )
+    );
+    await stub.bot.handleUpdate(
+      said((m) => (next(m), (m['from'] = { id: 6, is_bot: true, first_name: 'Quest' })))
+    );
+    // A group's anonymous admin: Telegram's own bot in `from`, the group in `sender_chat`.
+    await stub.bot.handleUpdate(
+      said((m) => {
+        next(m);
+        m['from'] = { id: 7, is_bot: true, first_name: 'Group' };
+        m['sender_chat'] = { id: -100123, type: 'supergroup', title: 'The Lobby' };
+      })
+    );
+    await stub.bot.handleUpdate(
+      said((m) => {
+        next(m);
+        m['from'] = { id: 8, is_bot: false, first_name: '' };
+        m['sender_chat'] = { id: -100124, type: 'channel' };
+      })
+    );
+    await stub.bot.handleUpdate(
+      said((m) => (next(m), (m['from'] = { id: 9, is_bot: false, first_name: '' })))
+    );
+    expect(heard.map((m) => [m.senderName, m.senderBot])).toEqual([
+      ['Ada L', false],
+      ['Quest', true],
+      ['The Lobby', false],
+      [undefined, false],
+      [undefined, false],
+    ]);
   });
 
   describe('a file (D82)', () => {

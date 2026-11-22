@@ -132,8 +132,15 @@ export interface Inbound {
    * be an id either way (D90). Undefined where the connector does not tell.
    */
   private?: boolean;
-  /** Who: a nick, a username. */
+  /** Who: a nick, a username; `''` for a sender without one. */
   sender: string;
+  /**
+   * The sender's display name, where the network has one (bot-os.md D159): a Telegram user's first
+   * and last names, a chat's title when a chat sent it (a channel, a group's anonymous admin).
+   */
+  senderName?: string;
+  /** Whether the sender is a bot, where the network says (bot-os.md D159). */
+  senderBot?: boolean;
   text: string;
   /** When it was sent, in milliseconds. */
   time: number;
