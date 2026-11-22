@@ -171,6 +171,25 @@ export interface Inbound {
   buttons?: readonly (readonly string[])[];
 }
 
+/**
+ * Messages deleted from a chat (bot-os.md D158), where the network says which: their ids, as
+ * `Inbound.id` gave them. Who wrote them, what they said and who deleted them are not told.
+ */
+export interface Deletion {
+  /** The account that saw it. */
+  account: string;
+  /** The network: `telegram`, … */
+  network: string;
+  /** Where: a chat's id, as its messages name it. */
+  chat: string;
+  /** The chat's other names, as its messages give them (D90). */
+  aliases?: readonly string[];
+  /** The ids of the messages deleted. */
+  ids: readonly string[];
+  /** When the connector heard of it, in milliseconds: the network does not date a deletion. */
+  time: number;
+}
+
 export type ConnectorState = 'connecting' | 'connected' | 'closed';
 
 export interface ConnectorStatus {
@@ -229,12 +248,20 @@ export function inChat(m: Pick<Inbound, 'chat' | 'aliases'>, chat: string): bool
 }
 
 /**
+ * Whether a read filter reads the chat of `m`: one of its chats (any, for `'*'`), by its name or any
+ * of its `aliases` (D90), without case. All a deletion is filtered by (D158): it has no sender.
+ */
+export function readsChat(filter: ReadFilter, m: Pick<Inbound, 'chat' | 'aliases'>): boolean {
+  return filter.reads === '*' || filter.reads.some((c) => inChat(m, c));
+}
+
+/**
  * Whether a read filter hears `m`: in one of its chats (any, for `'*'`), by the chat's name or any
  * of its `aliases` (D90), compared without case, and from one of its senders (anyone, without `senders`). `me` is the account's own messages
  * (`own`, or sent as the account's own name, `self`).
  */
 export function hears(filter: ReadFilter, m: Inbound, self?: string): boolean {
-  if (filter.reads !== '*' && !filter.reads.some((c) => inChat(m, c))) return false;
+  if (!readsChat(filter, m)) return false;
   if (filter.senders === undefined) return true;
   const sender = plainName(m.sender);
   return filter.senders.some((f) =>
@@ -262,6 +289,12 @@ export interface ConnectorHandle {
    * twice). Returns the way to stop; absent on a handle of a connector that has none.
    */
   onEdit?(handler: (m: Inbound) => void): () => void;
+  /**
+   * Hears every deletion of messages, live, where the network reports them (bot-os.md D158): the
+   * chat and the ids. Opt-in, as edits are. Its edge's chats filter it, not its senders: a deletion
+   * names none. Returns the way to stop; absent on a handle of a connector that has none.
+   */
+  onDelete?(handler: (d: Deletion) => void): () => void;
   /**
    * The chats its edge reads (bot-os.md D139): `'*'`, every chat, also for a handle that reads
    * unfiltered. A send it is told of elsewhere counts only in one of these.
@@ -400,6 +433,14 @@ export function handleOf(c: Connector, filter?: ReadFilter): ConnectorHandle {
               if (filter === undefined || hears(filter, m, c.self())) h(m);
             }),
         }),
+    ...(c.onDelete === undefined
+      ? {}
+      : {
+          onDelete: (h: (d: Deletion) => void) =>
+            (c.onDelete as NonNullable<Connector['onDelete']>)((d) => {
+              if (filter === undefined || readsChat(filter, d)) h(d);
+            }),
+        }),
     reads: () => filter?.reads ?? '*',
     ...(c.isAdmin === undefined
       ? {}
@@ -420,6 +461,7 @@ export class ConnectorBase {
   private name: string | undefined;
   private messages: ((m: Inbound) => void)[] = [];
   private edits: ((m: Inbound) => void)[] = [];
+  private deletions: ((d: Deletion) => void)[] = [];
   private statuses: ((s: ConnectorStatus) => void)[] = [];
 
   constructor(account: string, network: string) {
@@ -449,6 +491,13 @@ export class ConnectorBase {
     };
   }
 
+  onDelete(handler: (d: Deletion) => void): () => void {
+    this.deletions.push(handler);
+    return () => {
+      this.deletions = this.deletions.filter((h) => h !== handler);
+    };
+  }
+
   onStatus(handler: (s: ConnectorStatus) => void): () => void {
     this.statuses.push(handler);
     return () => {
@@ -466,6 +515,12 @@ export class ConnectorBase {
   protected reread(m: Omit<Inbound, 'account' | 'network'> & { edited: number }): void {
     const inbound: Inbound = { account: this.account, network: this.network, ...m };
     for (const h of [...this.edits]) h(inbound);
+  }
+
+  /** Messages deleted (D158): to every listener of deletions, in order. */
+  protected deleted(d: Omit<Deletion, 'account' | 'network'>): void {
+    const deletion: Deletion = { account: this.account, network: this.network, ...d };
+    for (const h of [...this.deletions]) h(deletion);
   }
 
   /** The account's own name on the network, as it learnt it. */

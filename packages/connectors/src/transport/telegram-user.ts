@@ -65,6 +65,7 @@ import {
 import { markdownToTelegramHtml } from 'grammy-switchboard';
 import { Api, TelegramClient } from 'telegram';
 import { CustomFile } from 'telegram/client/uploads.js';
+import { DeletedMessage } from 'telegram/events/DeletedMessage.js';
 import { EditedMessage } from 'telegram/events/EditedMessage.js';
 import { NewMessage } from 'telegram/events/index.js';
 import { Logger, LogLevel } from 'telegram/extensions/Logger.js';
@@ -111,6 +112,16 @@ export interface RawMessage {
   media?: unknown;
   getSender(): Promise<unknown>;
   getChat(): Promise<unknown>;
+}
+
+/**
+ * The fields of a GramJS deletion the connector reads (`DeletedMessageEvent`): the ids, and the
+ * chat, a `PeerChannel`, only for a supergroup's or a channel's (a basic group's and a private
+ * chat's carry ids alone).
+ */
+export interface RawDeletion {
+  deletedIds: number[];
+  peer?: unknown;
 }
 
 /** The fields of a GramJS dialog the connector reads: one chat of the account. */
@@ -175,6 +186,8 @@ export interface GramClient {
     handler: (event: { message: RawMessage }) => Promise<void>,
     builder: NewMessage
   ): void;
+  /** Deletions (D158): the ids, and the chat for a supergroup's or a channel's alone. */
+  addEventHandler(handler: (event: RawDeletion) => Promise<void>, builder: DeletedMessage): void;
   /** A message's file, downloaded whole (a `Buffer`); a photo's size `thumb` (D151). */
   downloadMedia(message: never, params: { thumb?: never }): Promise<unknown>;
   /** A raw request: the logout (`auth.logOut`). */
@@ -748,6 +761,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       if (!this.listening) {
         client.addEventHandler((e) => this.heard(e.message), new NewMessage({}));
         client.addEventHandler((e) => this.reheard(e.message), new EditedMessage({}));
+        client.addEventHandler((e) => this.unheard(e), new DeletedMessage({}));
       }
       this.listening = true;
       const dialogs = [...(await client.getDialogs({}))];
@@ -827,6 +841,34 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     } catch (err) {
       this.o.log(`edit of message ${m.id} dropped: ${String(err)}`);
     }
+  }
+
+  /**
+   * A deletion the account heard of (bot-os.md D158): passed on, live, to the plugins that hear
+   * deletions, if in one of its chats. Only a supergroup's or a channel's names its chat; a basic
+   * group's or a private chat's, ids alone, is not passed on. Deletions are not accounted for: one
+   * made while the instance was down is lost.
+   */
+  private unheard(e: RawDeletion): Promise<void> {
+    if (!this.started) return Promise.resolve();
+    const channel =
+      typeof e.peer === 'object' && e.peer !== null
+        ? (e.peer as { channelId?: unknown }).channelId
+        : undefined;
+    if (channel === undefined || channel === null || e.deletedIds.length === 0)
+      return Promise.resolve();
+    const chat = this.chatName(`-100${String(channel)}`, undefined);
+    if (chat === undefined) return Promise.resolve();
+    const aliases = this.namesOf(chat).slice(1);
+    const ids = e.deletedIds.map(String);
+    this.raw.add({ via: 'delete', chat, ids });
+    this.deleted({
+      chat,
+      ...(aliases.length === 0 ? {} : { aliases }),
+      ids,
+      time: this.o.clock.now(),
+    });
+    return Promise.resolve();
   }
 
   /** An id delivered in a chat, remembered; false if it was already. */

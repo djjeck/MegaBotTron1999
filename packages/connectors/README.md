@@ -54,18 +54,20 @@ config's `liveGraceS` (120 s by default, D83), so that a quick restart costs not
 edited (`telegram-user`, D144: a bot's menu that its buttons change) comes as the message it now
 reads, with when it was edited (`edited`), live only and once per edit, to the plugins that ask for
 edits (`onEdit`) alone: none hears it as a message. The catch-up gives each message as it now reads,
-and no edit made while the instance was down. A bot's message with inline buttons gives their
-labels, row by row (`buttons`, `telegram-user`, D145; `[]` when it has none), and an edit gives them
-as they now are. Both Telegram connectors send photos through the outbox (`deliverPhoto`, D150),
-with a caption, plain or Markdown, in reply to a message: `telegram-bot` with the Bot API's
-`sendPhoto`, answering the photo's `file_id`; `telegram-user` with GramJS's `sendFile`, answering
-`<id>:<access hash>:<file reference>`; each sends one again by the id it gave. `irc` sends none, and
-the outbox refuses them with why. Both fetch a message's photo on demand (D151), for a plugin an
-edge binds to their node's interface (`actions.photo`, answering a `MediaResult`, D153: its `media`,
-the largest size, at most 10 MiB; `null` for none; else why not): `telegram-user` fetches the
-message by its id (GramJS's `getMessages`, `downloadMedia`); `telegram-bot`, which the Bot API lets
-fetch no message by its id, only the photos of the messages it heard or sent, the latest 1000 kept
-by their `file_id` in its store.
+and no edit made while the instance was down. A deletion (`telegram-user`, D158: a supergroup's or a
+channel's) comes as its chat and the deleted ids, live only, to the plugins that ask for deletions
+(`onDelete`) alone; a basic group's or a private chat's, which name no chat, are not passed on. A
+bot's message with inline buttons gives their labels, row by row (`buttons`, `telegram-user`, D145;
+`[]` when it has none), and an edit gives them as they now are. Both Telegram connectors send photos
+through the outbox (`deliverPhoto`, D150), with a caption, plain or Markdown, in reply to a message:
+`telegram-bot` with the Bot API's `sendPhoto`, answering the photo's `file_id`; `telegram-user` with
+GramJS's `sendFile`, answering `<id>:<access hash>:<file reference>`; each sends one again by the id
+it gave. `irc` sends none, and the outbox refuses them with why. Both fetch a message's photo on
+demand (D151), for a plugin an edge binds to their node's interface (`actions.photo`, answering a
+`MediaResult`, D153: its `media`, the largest size, at most 10 MiB; `null` for none; else why not):
+`telegram-user` fetches the message by its id (GramJS's `getMessages`, `downloadMedia`);
+`telegram-bot`, which the Bot API lets fetch no message by its id, only the photos of the messages
+it heard or sent, the latest 1000 kept by their `file_id` in its store.
 
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
   structured output by a zod schema, and images the model sees before the prompt's text (each a

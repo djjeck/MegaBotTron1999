@@ -34,6 +34,9 @@ class TestConnector extends ConnectorBase implements Connector {
   edit(text: string, chat = 'c', edited = 2): void {
     this.reread({ chat, sender: 's', text, time: 1, playback: false, id: '1', edited });
   }
+  drop(ids: string[], chat = 'c', aliases?: string[]): void {
+    this.deleted({ chat, ids, time: 3, ...(aliases === undefined ? {} : { aliases }) });
+  }
   call(name: string): void {
     this.named(name);
   }
@@ -312,6 +315,81 @@ describe('connectors', () => {
       'a re-read menu, chosen again at 9',
     ]);
     await core.stop();
+  });
+
+  it('give a deletion only to a reader that asks for them, by its edge’s chats alone, while it is up (D158)', async () => {
+    const c = new TestConnector('test:me', 'test');
+    const heard: string[] = [];
+    const reader = (id: string, deletions: boolean) =>
+      definePlugin({
+        manifest: {
+          id,
+          version: '0.1.0',
+          kinds: ['parser'],
+          description: id,
+          inputs: { chat: { type: 'chat-in' } },
+        },
+        create: (ctx) => {
+          const chat = ctx.connector('chat');
+          chat.onMessage((m) => heard.push(`${id} heard ${m.text}`));
+          if (deletions)
+            chat.onDelete?.((d) =>
+              heard.push(`${id} lost ${d.ids.join(',')} in ${d.chat} at ${d.time}`)
+            );
+          return {};
+        },
+      });
+    const core = new Core({
+      clock: new VirtualClock(),
+      graph: {
+        version: 2,
+        nodes: [
+          { id: 'test', plugin: 'test', account: 'test:me' },
+          { id: 'a', plugin: 'a' },
+          { id: 'b', plugin: 'b' },
+          { id: 'c', plugin: 'c' },
+        ],
+        edges: [
+          // Its senders filter its messages, not its deletions: a deletion names no sender.
+          { from: 'test.chat', to: 'a.chat', reads: ['#lobby'], senders: ['bob'] },
+          { from: 'test.chat', to: 'b.chat', reads: '*' },
+          { from: 'test.chat', to: 'c.chat', reads: '*' },
+        ],
+      },
+    });
+    core.register(
+      definePlugin({ manifest: manifest('test', 'test:me'), create: () => ({ connector: c }) }),
+      reader('a', true),
+      reader('b', false),
+      reader('c', true)
+    );
+    await core.start();
+    c.drop(['7', '8'], '#lobby');
+    c.drop(['9'], '#other');
+    c.drop(['10'], '-1001', ['#Lobby']);
+    expect(heard).toEqual([
+      'a lost 7,8 in #lobby at 3',
+      'c lost 7,8 in #lobby at 3',
+      'c lost 9 in #other at 3',
+      'a lost 10 in -1001 at 3',
+      'c lost 10 in -1001 at 3',
+    ]);
+    // Shut down, they hear none.
+    await core.stop();
+    heard.length = 0;
+    c.drop(['11'], '#lobby');
+    expect(heard).toEqual([]);
+  });
+
+  it('stop giving a deletion to a listener that stopped hearing them', () => {
+    const c = new TestConnector('test:me', 'test');
+    const lost: string[] = [];
+    const stop = handleOf(c, { reads: ['c'] }).onDelete?.((d) => lost.push(d.ids.join()));
+    c.drop(['1']);
+    c.drop(['2'], 'elsewhere');
+    stop?.();
+    c.drop(['3']);
+    expect(lost).toEqual(['1']);
   });
 
   it('stop giving an edit to a listener that stopped hearing them', () => {

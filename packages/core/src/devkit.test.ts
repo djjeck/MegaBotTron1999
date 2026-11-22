@@ -144,6 +144,28 @@ describe('DevKit', () => {
     ]);
   });
 
+  it('hears a deletion it is told, to its listeners of deletions alone (D158)', () => {
+    const c = new FakeConnector({ account: 'telegram:alice' });
+    const heard: unknown[] = [];
+    const lost: unknown[] = [];
+    c.onMessage((m) => heard.push(m));
+    c.onDelete((d) => lost.push(d));
+    c.hearDelete({ chat: '-1001', ids: ['3', '4'] });
+    c.hearDelete({ chat: '-1001', ids: ['5'], aliases: ['@lobby'], time: 9 });
+    expect(heard).toEqual([]);
+    expect(lost).toEqual([
+      { account: 'telegram:alice', network: 'telegram', chat: '-1001', ids: ['3', '4'], time: 0 },
+      {
+        account: 'telegram:alice',
+        network: 'telegram',
+        chat: '-1001',
+        ids: ['5'],
+        aliases: ['@lobby'],
+        time: 9,
+      },
+    ]);
+  });
+
   it('runs a plugin on a virtual clock, with its configuration, settings and documents', async () => {
     const records: { type: string }[] = [];
     const fake = new FakeConnector({ account: 'irc:alice' });

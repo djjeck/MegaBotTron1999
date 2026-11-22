@@ -257,6 +257,19 @@ export class FakeConnector extends ConnectorBase implements Connector {
     this.reread({ ...m, playback: m.playback ?? false, edited: m.edited ?? m.time });
   }
 
+  /**
+   * Messages deleted on the network (D158): their `chat` and `ids`; `time` when it was heard of
+   * (0, by default).
+   */
+  hearDelete(d: {
+    chat: string;
+    ids: readonly string[];
+    aliases?: readonly string[];
+    time?: number;
+  }): void {
+    this.deleted({ ...d, time: d.time ?? 0 });
+  }
+
   send(chat: string, text: string, options?: ConnectorSendOptions): boolean {
     this.sent.push({
       chat,

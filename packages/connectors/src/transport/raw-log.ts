@@ -1,7 +1,7 @@
 /**
  * The last hours of what a connector saw and did, raw, for debugging (bot-os.md D147): every
- * message it heard live, fetched back (a catch-up, a look) or sent, and every gap it found, each
- * with when it happened. Kept in its store (`RAW_LOG_DOC`), at most `RAW_LOG_MS` back, written at
+ * message it heard live, fetched back (a catch-up, a look) or sent, every gap it found and every
+ * deletion it heard of, each with when it happened. Kept in its store (`RAW_LOG_DOC`), at most `RAW_LOG_MS` back, written at
  * most every `RAW_LOG_FLUSH_MS`; shown nowhere, read on the instance's volume
  * (`/data/instances/<connector>/raw-log.json`). It holds the chats' text: it never leaves the
  * volume.
@@ -19,7 +19,7 @@ export const RAW_LOG_FLUSH_MS = 30_000;
 /** One entry: when (`at`, in ms), how (`via`), and what. */
 export interface RawEntry {
   at: number;
-  via: 'live' | 'edit' | 'catch-up' | 'look' | 'sent' | 'gap';
+  via: 'live' | 'edit' | 'delete' | 'catch-up' | 'look' | 'sent' | 'gap';
   chat: string;
   [field: string]: unknown;
 }

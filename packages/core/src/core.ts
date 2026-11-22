@@ -40,7 +40,13 @@ import {
   photoLabel,
   photoRefusal,
 } from './commands.ts';
-import { type Connector, handleOf, type Inbound, type ReadFilter } from './connector.ts';
+import {
+  type Connector,
+  type Deletion,
+  handleOf,
+  type Inbound,
+  type ReadFilter,
+} from './connector.ts';
 import { Controls, type StopRecord, type StopSource } from './controls.ts';
 import { Costs, type NodeCost, type OwnCost } from './costs.ts';
 import { DEFAULT_DRIFT, type DriftCounts, DriftMonitor, type DriftRecord } from './drift.ts';
@@ -2120,6 +2126,16 @@ export class Core {
                   (handle.onEdit as NonNullable<typeof handle.onEdit>)((m) => {
                     if (entry.up !== true) return;
                     this.costs.time(id, () => h(m));
+                  }),
+              }),
+          // Deletions, the same way (D158).
+          ...(handle.onDelete === undefined
+            ? {}
+            : {
+                onDelete: (h: (d: Deletion) => void) =>
+                  (handle.onDelete as NonNullable<typeof handle.onDelete>)((d) => {
+                    if (entry.up !== true) return;
+                    this.costs.time(id, () => h(d));
                   }),
               }),
         };

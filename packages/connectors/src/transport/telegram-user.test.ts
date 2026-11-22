@@ -1,6 +1,14 @@
-import { FloodWait, type Inbound, type ReadFilter, VirtualClock } from '@megabottron1999/core';
+import {
+  type Deletion,
+  FloodWait,
+  type Inbound,
+  type ReadFilter,
+  VirtualClock,
+} from '@megabottron1999/core';
 import { Api } from 'telegram';
+import { DeletedMessage } from 'telegram/events/DeletedMessage.js';
 import { EditedMessage } from 'telegram/events/EditedMessage.js';
+import { type NewMessage } from 'telegram/events/index.js';
 import { returnBigInt } from 'telegram/Helpers.js';
 import { describe, expect, it } from 'vitest';
 import { RAW_LOG_DOC, RAW_LOG_FLUSH_MS, RAW_LOG_MS } from './raw-log.ts';
@@ -16,6 +24,7 @@ import {
   LOOK_AFTER_SEND_MS,
   LOOK_LIMIT,
   photoId,
+  type RawDeletion,
   type RawDialog,
   type RawMessage,
   RETRY_MS,
@@ -67,6 +76,7 @@ function fake(
   let failures = o.failConnect ?? 0;
   let handler: ((event: { message: RawMessage }) => Promise<void>) | undefined;
   let editHandler: ((event: { message: RawMessage }) => Promise<void>) | undefined;
+  let deleteHandler: ((event: RawDeletion) => Promise<void>) | undefined;
   let handlers = 0;
   const client: GramClient = {
     connect: () => {
@@ -100,9 +110,10 @@ function fake(
         })
       );
     },
-    addEventHandler: (h, builder) => {
-      if (builder instanceof EditedMessage) editHandler = h;
-      else handler = h;
+    addEventHandler: (h: (event: never) => Promise<void>, builder: NewMessage | DeletedMessage) => {
+      if (builder instanceof DeletedMessage) deleteHandler = h as typeof deleteHandler;
+      else if (builder instanceof EditedMessage) editHandler = h as typeof editHandler;
+      else handler = h as typeof handler;
       handlers++;
     },
     getMessages: (entity, params) => {
@@ -133,7 +144,8 @@ function fake(
   };
   const deliver = (message: RawMessage) => handler?.({ message }) ?? Promise.resolve();
   const edit = (message: RawMessage) => editHandler?.({ message }) ?? Promise.resolve();
-  return { client, calls, sent, media, deliver, edit, handlers: () => handlers };
+  const drop = (event: RawDeletion) => deleteHandler?.(event) ?? Promise.resolve();
+  return { client, calls, sent, media, deliver, edit, drop, handlers: () => handlers };
 }
 
 const flush = () => new Promise((r) => setImmediate(r));
@@ -190,7 +202,7 @@ describe('TelegramUserConnector', () => {
   it('connects, fills the entity cache, then resolves its chats, once', async () => {
     const { c, f, logs } = await connector();
     expect(f.calls).toEqual(['connect', 'dialogs', `entity ${GROUP}`, 'entity @Quiz_bot', 'me']);
-    expect(f.handlers()).toBe(2);
+    expect(f.handlers()).toBe(3);
     expect(c.status()).toEqual({ state: 'connected', phase: 'ready' });
     expect(c.self()).toBe('alice');
     expect(logs).toEqual([`connected as alice, reading ${GROUP}, @Quiz_bot`]);
@@ -211,7 +223,7 @@ describe('TelegramUserConnector', () => {
     expect(told).toEqual([
       "the owner's Telegram session failed to start: Error: AUTH_KEY_UNREGISTERED",
     ]);
-    expect(f.handlers()).toBe(2);
+    expect(f.handlers()).toBe(3);
   });
 
   it('stops retrying, and closes, when stopped', async () => {
@@ -1255,6 +1267,27 @@ describe('the catch-up', () => {
       { id: '4', text: 'Scelto ancora', edited: SAID + 90_000 },
     ]);
     expect(edits[0]).not.toHaveProperty('missed');
+  });
+
+  it('passes on a supergroup’s deletions, live, to the listeners of deletions alone; a basic group’s, ids alone, never (D158)', async () => {
+    const { c, f, clock, messages } = await connector();
+    const lost: Deletion[] = [];
+    c.onDelete((d) => lost.push(d));
+    clock.advance(5_000);
+    // GramJS's PeerChannel: the channel's id unmarked (a BigInteger), its chat `-100<id>`.
+    await f.drop({ deletedIds: [4, 5], peer: { channelId: { toString: () => '1000000001' } } });
+    // Ids alone (a basic group's, a private chat's): no chat to name.
+    await f.drop({ deletedIds: [6] });
+    // Another chat's: not one of its chats.
+    await f.drop({ deletedIds: [7], peer: { channelId: 999 } });
+    await f.drop({ deletedIds: [], peer: { channelId: 1000000001 } });
+    expect(messages).toEqual([]);
+    expect(lost).toEqual([
+      { account: 'telegram:alice', network: 'telegram', chat: GROUP, ids: ['4', '5'], time: 5_000 },
+    ]);
+    await c.stop();
+    await f.drop({ deletedIds: [8], peer: { channelId: 1000000001 } });
+    expect(lost).toHaveLength(1);
   });
 
   it('gives the labels of a message’s inline buttons, row by row, none as none, and as an edit sets them (D145)', async () => {

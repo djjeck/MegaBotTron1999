@@ -10,7 +10,9 @@ import {
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DeletedMessage } from 'telegram/events/DeletedMessage.js';
 import { EditedMessage } from 'telegram/events/EditedMessage.js';
+import { type NewMessage } from 'telegram/events/index.js';
 import { describe, expect, it } from 'vitest';
 import {
   type GramClient,
@@ -147,9 +149,13 @@ describe('the telegram-user plugin', () => {
     const heard: string[] = [];
     let deliver: ((e: { message: RawMessage }) => Promise<void>) | undefined;
     const c = client();
-    c.addEventHandler = (h, builder) => {
-      // The messages' handler; the edits' is another (D144).
-      if (!(builder instanceof EditedMessage)) deliver = h;
+    c.addEventHandler = (
+      h: (event: never) => Promise<void>,
+      builder: NewMessage | DeletedMessage
+    ) => {
+      // The messages' handler; the edits' (D144) and the deletions' (D158) are others.
+      if (!(builder instanceof EditedMessage) && !(builder instanceof DeletedMessage))
+        deliver = h as typeof deliver;
     };
     const core = new Core({
       clock: new VirtualClock(),
@@ -199,9 +205,13 @@ describe('the telegram-user plugin', () => {
     const heard: string[] = [];
     let deliver: ((e: { message: RawMessage }) => Promise<void>) | undefined;
     const c = client();
-    c.addEventHandler = (h, builder) => {
-      // The messages' handler; the edits' is another (D144).
-      if (!(builder instanceof EditedMessage)) deliver = h;
+    c.addEventHandler = (
+      h: (event: never) => Promise<void>,
+      builder: NewMessage | DeletedMessage
+    ) => {
+      // The messages' handler; the edits' (D144) and the deletions' (D158) are others.
+      if (!(builder instanceof EditedMessage) && !(builder instanceof DeletedMessage))
+        deliver = h as typeof deliver;
     };
     c.getDialogs = () =>
       Promise.resolve([

@@ -1256,6 +1256,15 @@ interface Surface {
   lastActive?: number; // ms
 }
 
+interface Deletion {
+  account: string;
+  network: string;
+  chat: string; // as its messages name it
+  aliases?: readonly string[]; // the chat's other names (D90)
+  ids: readonly string[]; // the messages deleted, as `Inbound.id` gave them
+  time: number; // when the connector heard of it, ms: the network does not date a deletion
+}
+
 interface ConnectorHandle {
   account: string;
   status(): ConnectorStatus; // 'connecting' | 'connected' | 'closed', with the network's phase
@@ -1263,6 +1272,7 @@ interface ConnectorHandle {
   onMessage(handler: (m: Inbound) => void): () => void;
   onStatus(handler: (s: ConnectorStatus) => void): () => void;
   onEdit?(handler: (m: Inbound) => void): () => void; // edits, opt-in (bot-os.md D144)
+  onDelete?(handler: (d: Deletion) => void): () => void; // deletions, opt-in (bot-os.md D158)
   reads?(): readonly string[] | '*'; // the chats its edge reads (bot-os.md D139)
   isAdmin?(chat: string): Promise<boolean>; // where the network can say
 }
@@ -1278,6 +1288,16 @@ after it was sent is not played again (the bots ignore edits too), and no answer
 absent, or never called). Edits are not accounted for (D66): one made while the instance was down is
 not caught up, the catch-up giving each message as it now reads. `FakeConnector.hearEdit(m)` says
 one in a test. No answer is paired from an edit (D98).
+
+**Deletions** (bot-os.md D158): a plugin that wants to know which of the messages it read were
+deleted asks for them: `ctx.connector(port).onDelete(handler)` hears each deletion, live, through
+the same edge, as a `Deletion`: the `chat` and the deleted `ids`, with `time` when the connector
+heard of it. Its edge's chats filter it, not its senders: a deletion names none (nor who deleted,
+nor what was said), so a plugin matches the ids against what it kept of the messages. Opt-in, as
+edits are. `telegram-user` has them (GramJS's `DeletedMessage`) for a supergroup or a channel; a
+basic group's or a private chat's carry ids alone and are not delivered; the others have none
+(`onDelete` absent, or never called). Deletions are not accounted for (D66): one made while the
+instance was down is lost. `FakeConnector.hearDelete({ chat, ids, time? })` says one in a test.
 
 **Buttons** (bot-os.md D145): a bot's message with inline buttons gives their labels, row by row, as
 its `buttons` (`[['◀️', '▶️']]`), and an edit gives them as they now are: a parser reads which
