@@ -15,6 +15,7 @@ import { fakeApi } from '#test/fake-api.ts';
 import { PORT_TYPES } from '#test/graph-view.ts';
 import { optionsOf } from './OptionsField.tsx';
 import { fromRow, ownerFields, pictureSrc } from './TableRow.tsx';
+import { rowKeys } from './Widget.tsx';
 
 afterEach(() => {
   cleanup();
@@ -177,6 +178,32 @@ describe('a node page’s table (D157)', () => {
         api.calls.filter((c) => c === 'GET /plugins/postcard/state/cards').length
       ).toBeGreaterThan(before)
     );
+  });
+
+  it('says an action’s answer under its own row: a row gone takes it along, not to the next', async () => {
+    let gone = false;
+    fakeApi({
+      'GET /graph/view': [200, VIEW],
+      'GET /plugins/postcard/state/cards': () => [200, gone ? CARDS.slice(1) : CARDS],
+      'GET /plugins/postcard/state/hosts': [200, { hosts: [] }],
+      'POST /plugins/postcard/actions/repaint': () => ((gone = true), [200, { removed: true }]),
+    });
+    vi.stubGlobal('confirm', () => true);
+    render(<NodePage loggedOut={() => {}} section="postcard" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Re-roll harbour' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Re-roll harbour' })).toBeNull()
+    );
+    expect(screen.getByRole('button', { name: 'Re-roll market' })).toBeDefined();
+    expect(screen.queryByText('{"removed":true}')).toBeNull();
+  });
+
+  it('keys each row by what it holds, a repeat apart', () => {
+    expect(rowKeys([{ a: 1 }, { a: 2 }, { a: 1 }])).toEqual([
+      '0:{"a":1}',
+      '0:{"a":2}',
+      '1:{"a":1}',
+    ]);
   });
 
   it('says why an action refused', async () => {

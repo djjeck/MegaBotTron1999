@@ -157,6 +157,7 @@ function SectionBody(props: {
     case 'table': {
       const rows = itemsOf(v) ?? [];
       const shown = rows.slice(0, w.max ?? rows.length);
+      const keys = rowKeys(shown);
       const columns = fieldsOf(w, reads, v, w.columns, '0').map((c, i) => {
         const spec = w.columns[i];
         return typeof spec === 'object' && 'show' in spec ? { ...c, from: spec.from } : c;
@@ -187,7 +188,7 @@ function SectionBody(props: {
                 const first = columns[0];
                 const name = first === undefined ? `row ${i + 1}` : words(at(row, first.path));
                 return (
-                  <tr key={i}>
+                  <tr key={keys[i]}>
                     {columns.map((c) => (
                       <td key={c.path}>
                         {'from' in c && c.from !== undefined ? (
@@ -248,6 +249,20 @@ function SectionBody(props: {
 }
 
 /** How many more items there are than shown. */
+/**
+ * Each row's key, by what it holds (a repeat counted apart): a row keyed by its place would hand its
+ * buttons' state, an action's answer among it, to the row that takes its place when it goes.
+ */
+export function rowKeys(rows: readonly unknown[]): string[] {
+  const seen = new Map<string, number>();
+  return rows.map((row) => {
+    const text = JSON.stringify(row) ?? String(row);
+    const n = seen.get(text) ?? 0;
+    seen.set(text, n + 1);
+    return `${String(n)}:${text}`;
+  });
+}
+
 function More(props: { shown: number; all: number }) {
   return props.all > props.shown ? (
     <p className="muted small">and {props.all - props.shown} more</p>
