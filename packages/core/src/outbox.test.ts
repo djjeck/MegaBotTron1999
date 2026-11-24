@@ -21,6 +21,7 @@ import {
 class LaterConnector extends ConnectorBase implements Connector {
   answers: (() => Promise<{ id?: string }>)[] = [];
   formats: (string | undefined)[] = [];
+  texts: string[] = [];
   buttons: unknown[] = [];
   constructor() {
     super('test:me', 'test');
@@ -31,9 +32,10 @@ class LaterConnector extends ConnectorBase implements Connector {
   }
   deliver(
     _chat: string,
-    _text: string,
+    text: string,
     options?: { format?: string; buttons?: unknown }
   ): Promise<{ id?: string }> {
+    this.texts.push(text);
     this.formats.push(options?.format);
     if (options?.buttons !== undefined) this.buttons.push(options.buttons);
     return (this.answers.shift() ?? (() => Promise.resolve({})))();
@@ -139,6 +141,24 @@ describe('deliver', () => {
     clock.advance(5000);
     await p.deliver('#c', 'b');
     expect(connector.formats).toEqual(['markdown', undefined]);
+  });
+
+  it('hands the connector an HTML text as written, with its format (D164)', async () => {
+    const { connector, p } = later();
+    await p.deliver('#c', '<u>a</u> &amp; b', { format: 'html' });
+    expect(connector.texts).toEqual(['<u>a</u> &amp; b']);
+    expect(connector.formats).toEqual(['html']);
+  });
+
+  it('sends HTML without its format as the text it shows (D164)', async () => {
+    const { connector, p } = later();
+    p.send('#c', '<b>a &lt;3</b>', { format: 'html' });
+    expect(connector.texts).toEqual(['a <3']);
+    expect(connector.formats).toEqual([undefined]);
+    const plain = setup({ limits: false });
+    await plain.p.deliver('#c', '<b>x</b> &amp; y', { format: 'html' });
+    plain.p.send('#c', '**z**', { format: 'markdown' });
+    expect(plain.connector.sent).toEqual(['#c x & y', '#c **z**']);
   });
 
   it('hands the connector the buttons of a send (D94)', async () => {

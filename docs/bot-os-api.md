@@ -301,21 +301,23 @@ where (`where`: the edge's `chats` and `privateChats`, `inScope`), its `allow` t
 then the plugin's own, and its answers held by the edge, then the core's own. The surface registers
 each in the menus of the chats it is served in, and answers it there alone, with the chat asked in
 (`Request.chat`) (`packages/core/src/commands.ts`). The answer is the surface's (D29), within the
-edge: the handler says what to answer (`Answer`: a text, plain or Markdown, with buttons that each
-run a command again and an expiry in a group; a photo, as a `Media` (§4.18) or by the network's id
-of one sent before, with a caption under it if given, plain or Markdown as a text is,
-`photo(photo, caption?, format?)`: a caption over `CAPTION_MAX`, Telegram's 1024 characters, and
-bytes no JPEG, PNG, GIF or WebP or not the type they say (`photoRefusal`, bot-os.md D153), are
-refused, thrown and logged `refused`, before anything is sent, bot-os.md D150), and the surface
-sends it in reply to the asker (`Asker`: the network's id and username, and whether it is the
-owner), in the chat asked; each answer is recorded as a send (`core.send`, its `origin`
-`command /<name>`, `sent` or `failed`), and a dry-run edge logs it (`dry-run`) and sends nothing.
-What a plugin sends on its own goes through its outbox, within its chat-out edges, each sending for
-real or as a dry run (§4.6). The surface is a connector's (`ChatSurface`): the core serves every
-running connector that offers one its commands (`serve(core.served(node))`), once every plugin has
-started, the core's own cards ending with that surface's way home (`home`, §4.11). A surface is the
-owner's interactive control (commands, cards and their buttons), not a report channel: it tells the
-owner nothing on its own (bot-os.md D94).
+edge: the handler says what to answer (`Answer`: a text, plain, Markdown (`'markdown'`) or Telegram
+HTML (`'html'`, §4.6, bot-os.md D164), `text(text, format?, options?)`, with buttons that each run a
+command again and an expiry in a group; a photo, as a `Media` (§4.18) or by the network's id of one
+sent before, with a caption under it if given, plain, Markdown or HTML as a text is,
+`photo(photo, caption?, format?)`, as `answer.photo(photo, caption, 'html')`: a caption over
+`CAPTION_MAX`, Telegram's 1024 characters (an HTML caption's, those of the text it shows), and bytes
+no JPEG, PNG, GIF or WebP or not the type they say (`photoRefusal`, bot-os.md D153), are refused,
+thrown and logged `refused`, before anything is sent, bot-os.md D150), and the surface sends it in
+reply to the asker (`Asker`: the network's id and username, and whether it is the owner), in the
+chat asked; each answer is recorded as a send (`core.send`, its `origin` `command /<name>`, `sent`
+or `failed`), and a dry-run edge logs it (`dry-run`) and sends nothing. What a plugin sends on its
+own goes through its outbox, within its chat-out edges, each sending for real or as a dry run
+(§4.6). The surface is a connector's (`ChatSurface`): the core serves every running connector that
+offers one its commands (`serve(core.served(node))`), once every plugin has started, the core's own
+cards ending with that surface's way home (`home`, §4.11). A surface is the owner's interactive
+control (commands, cards and their buttons), not a report channel: it tells the owner nothing on its
+own (bot-os.md D94).
 
 **The owner's commands.** A command may be the owner's (`owner: true`): the core answers it to the
 owner only (`Asker.owner`), and the surface only in the owner's chat, never in a group; it needs a
@@ -1622,8 +1624,9 @@ connector (§2.1):
 **A photo** (bot-os.md D150): `send`, `enqueue` and `deliver` take a photo where they take a text,
 `{ photo, caption?, replyTo? }` (`PhotoSend`): `photo` a `Media` (§4.18, bot-os.md D153; uploaded
 named by its type, `photo.png`) or the network's id of one sent before (`CommandPhoto`, §2);
-`caption`, the words under it, plain, or Markdown with `format: 'markdown'` as a text takes it (here
-in `send` and `enqueue` too); `replyTo`, the network's id of a message in that chat it answers.
+`caption`, the words under it, plain, or Markdown with `format: 'markdown'`, or Telegram HTML with
+`format: 'html'`, as a text takes it (here in `send` and `enqueue` too); `replyTo`, the network's id
+of a message in that chat it answers.
 
 ```ts
 const r = await ctx
@@ -1635,6 +1638,15 @@ const r = await ctx
   );
 // { text: '[photo image/png, 48213 bytes]', outcome: 'sent', id: '<message id>', photo: '<photo id>' }
 await ctx.outbox('chat').deliver('#lobby', { photo: r.photo as string }); // again, by its id
+// Telegram HTML the plugin writes (D164), a player's words escaped with `escapeHtml`:
+await ctx.outbox('chat').deliver(
+  '#lobby',
+  {
+    photo: r.photo as string,
+    caption: `<u>Wanted:</u>\n<blockquote><b>${escapeHtml(name)}</b></blockquote>`,
+  },
+  { format: 'html' }
+);
 ```
 
 It runs every check a text does, in the same order, but a command's: the reach (its chat in the
@@ -1643,14 +1655,16 @@ or its output, §2.1: `a photo is not among <node>'s commands: its edge or outpu
 a dry run, the node's state, a flood wait, the rate and the connection. It is no command: no
 watchdog (D93), no answer waited for (D98), no command's interval (D73), and a queued photo is never
 coalesced. Refused at once, before anything is sent: a caption over `CAPTION_MAX` (1024 characters,
-Telegram's, counted as written: `a caption of 1100 characters, over the 1024 a photo may carry`),
-bytes that are no photo (`PHOTO_MIMES`: JPEG, PNG, GIF or WebP) or not the type they say
-(`photoRefusal`, D153: `the photo: its bytes are image/jpeg, not the image/png it says`), and a
-connector that cannot send photos (`<account> cannot send photos`: one with no `deliverPhoto`, such
-as `irc`). `deliver` answers the network's id of the photo sent (`photo`), beside the message's
-(`id`), to send it again by; a queued photo settles with it too (`QueuedResult.photo`). Its result's
-and its record's `text` is its label, `[photo <mime>, <n> bytes]` (`[photo]` by an id); the record
-(`core.send`) has its caption's length (`caption`), never its bytes nor its caption.
+Telegram's, counted as written, an HTML caption's as Telegram counts it, by the text it shows (its
+tags left out, an entity one character, D164):
+`a caption of 1100 characters, over the 1024 a photo may carry`), bytes that are no photo
+(`PHOTO_MIMES`: JPEG, PNG, GIF or WebP) or not the type they say (`photoRefusal`, D153:
+`the photo: its bytes are image/jpeg, not the image/png it says`), and a connector that cannot send
+photos (`<account> cannot send photos`: one with no `deliverPhoto`, such as `irc`). `deliver`
+answers the network's id of the photo sent (`photo`), beside the message's (`id`), to send it again
+by; a queued photo settles with it too (`QueuedResult.photo`). Its result's and its record's `text`
+is its label, `[photo <mime>, <n> bytes]` (`[photo]` by an id); the record (`core.send`) has its
+caption's length (`caption`), never its bytes nor its caption.
 
 As built (`packages/core/src/outbox.ts`): the checks run in a fixed order, each refusal with its
 reason: the caller's own refusal (`refuse`, for a game's grammar), the reach
@@ -1667,7 +1681,14 @@ dry run does not wait. With no connector running (stopped, disabled, failed) it 
 once. `deliver(chat, text)` runs the same checks, then awaits the connector's `deliver`: `sent` with
 the network's id of the message, `refused`, or `failed` with why the network refused it; the rate
 counts the send when it leaves. A send may say its text is Markdown (`format: 'markdown'`): a
-connector of a network that formats sends it formatted, any other as written. Every attempt's record
+connector of a network that formats sends it formatted, any other as written. Or that it is Telegram
+HTML the plugin wrote (`format: 'html'`, bot-os.md D164), for what Markdown cannot say (an
+underline, `<u>`; a quote, `<blockquote>`; Markdown's `__x__` stays bold): the plugin escapes `&`,
+`<` and `>` in any words it did not write with `escapeHtml` (from `@megabottron1999/core`, beside
+`TextFormat`), and a Telegram connector sends it as written, as HTML, and again as the text it shows
+if Telegram cannot parse it; a connector that formats nothing (`irc`) sends that text,
+`htmlToPlain(html)` (its tags removed, `&lt;`, `&gt;`, `&quot;` and `&amp;` unescaped), and so does
+the outbox for a text sent without its format (`send`, `enqueue`). Every attempt's record
 (`core.send`) has the `mode` it went in (`dry-run` or `live`).
 
 **A send the network refuses** (bot-os.md D95): a live send, queued or not, goes through the
@@ -2713,9 +2734,10 @@ its bytes is for later.
   command (`commandIntervalS`, D73) and its watchdog's threshold (`unansweredAt`, `unansweredAtBy`,
   §4.6, D93); its password is the `znc_password` secret. It opens one connection however often it is
   started (networks' clone limits). It logs each line of the channel, played back or live, as
-  `irc.line`, and each step of the connection as `irc.status`. With `healthPort` it serves
-  `GET /health`: 200 while it is in the channel, 503 when not; kept for the configs that set it,
-  though the shell's own health endpoint (§4.11) covers every connector.
+  `irc.line`, and each step of the connection as `irc.status`. It formats nothing: a Markdown text
+  goes as written, an HTML one as the text it shows (`htmlToPlain`, D164). With `healthPort` it
+  serves `GET /health`: 200 while it is in the channel, 503 when not; kept for the configs that set
+  it, though the shell's own health endpoint (§4.11) covers every connector.
 - **`telegram-bot`** (`packages/connectors/src/plugins/telegram-bot.ts`, on grammY in
   `packages/connectors/src/transport/telegram-bot.ts`): a bot, made at `create` (with auto-retry)
   from the token pasted in its node's panel (§4.5, D116: `bot-login.ts`, checked with `getMe`, kept
@@ -2724,19 +2746,19 @@ its bytes is for later.
   `connected` while it polls; its own name is the bot's username. It hears every message Telegram
   delivers the bot and sends through the account's outbox (`deliver`, to a chat id or an
   `@username`; a 429 longer than auto-retry waits out becomes `FloodWait`); a photo with `sendPhoto`
-  (D150: its `caption`, Markdown as Telegram HTML and as written if Telegram cannot parse it,
-  `reply_parameters` sent all the same if the message answered is gone), answering the `file_id` of
-  its largest size; its interface's action `photo` (§4.5, D151) fetches the photo of a message it
-  heard or sent, the latest 1000 kept by their `file_id` in its store (`photos`), any other refused
-  with why (the Bot API fetches no message by its id); `commandIntervalS` in its config is its
-  queue's default interval between two sends of a command (D73), and `unansweredAt`,
-  `unansweredAtBy` its watchdog's threshold (§4.6, D93). With `chats` in its config (picked among
-  its chats, D96) it monitors only those for the plugins; its surfaces are the chats it has seen and
-  its owner (§4.5), and the updates Telegram kept while it was down come marked `missed` (and
-  `playback` once older than its config's `liveGraceS`, 120 s by default, D83). Configured with its
-  owner (`owner`, in its node's config, picked among its chats and kept by id, D96), it is the
-  instance's chat surface, the owner's interactive control (§4.8, bot-os.md D56)
-  (`telegram-surface.ts`): the switchboard on its bot (`telegram-switchboard.ts`, on
+  (D150: its `caption`, Markdown as Telegram HTML and HTML as written (D164), plain if Telegram
+  cannot parse it (HTML as the text it shows), `reply_parameters` sent all the same if the message
+  answered is gone), answering the `file_id` of its largest size; its interface's action `photo`
+  (§4.5, D151) fetches the photo of a message it heard or sent, the latest 1000 kept by their
+  `file_id` in its store (`photos`), any other refused with why (the Bot API fetches no message by
+  its id); `commandIntervalS` in its config is its queue's default interval between two sends of a
+  command (D73), and `unansweredAt`, `unansweredAtBy` its watchdog's threshold (§4.6, D93). With
+  `chats` in its config (picked among its chats, D96) it monitors only those for the plugins; its
+  surfaces are the chats it has seen and its owner (§4.5), and the updates Telegram kept while it
+  was down come marked `missed` (and `playback` once older than its config's `liveGraceS`, 120 s by
+  default, D83). Configured with its owner (`owner`, in its node's config, picked among its chats
+  and kept by id, D96), it is the instance's chat surface, the owner's interactive control (§4.8,
+  bot-os.md D56) (`telegram-surface.ts`): the switchboard on its bot (`telegram-switchboard.ts`, on
   grammy-switchboard), the owner's controls answered in the owner's chat, and the plugins' commands
   that the commands edges from its `commands` output serve (D109), each answered only in the chats
   its edge names (a group, the owner's chat, every private chat with `privateChats`) and listed in
@@ -2779,9 +2801,10 @@ its bytes is for later.
   failure (`ctx.notify`, §4.8); a message carries its id, the one it replies to, and `own` for the
   owner's own from any device. It sends only through the account's outbox (`deliver`, with the
   message's id; a photo with GramJS's `sendFile`, D150, its bytes uploaded as a photo, named by its
-  type, its caption Markdown as Telegram HTML or plain, in reply to `replyTo`; the photo's id it
-  answers is `<id>:<access hash>:<file reference>`, by which it sends it again, a Bot API `file_id`
-  refused with why; Telegram's file reference may expire, and a send by it then fails
+  type, its caption Markdown as Telegram HTML, HTML as written (D164) or plain, in reply to
+  `replyTo`; a text in HTML parsed as HTML; the photo's id it answers is
+  `<id>:<access hash>:<file reference>`, by which it sends it again, a Bot API `file_id` refused
+  with why; Telegram's file reference may expire, and a send by it then fails
   `FILE_REFERENCE_EXPIRED`, the bytes to send again), its queue's default interval between two sends
   of a command its config's `commandIntervalS` (D73), its watchdog's threshold `unansweredAt` and
   `unansweredAtBy` (§4.6, D93); GramJS's flood waits become `FloodWait`. Its interface's action

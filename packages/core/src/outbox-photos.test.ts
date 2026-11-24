@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { VirtualClock } from './clock.ts';
-import { CAPTION_MAX, type CommandPhoto } from './commands.ts';
+import { CAPTION_MAX, captionRefusal, type CommandPhoto, photoRefusal } from './commands.ts';
 import { type Connector, ConnectorBase, type ConnectorPhotoOptions } from './connector.ts';
 import { Core } from './core.ts';
 import { FakeConnector, fakeMedia } from './devkit.ts';
@@ -171,6 +171,26 @@ describe('a photo through the outbox (D150)', () => {
     expect(records.map((r) => r.caption)).toEqual([1025, 1025, 1025]);
     const fits = await p.deliver('#lobby', { ...BYTES, caption: 'x'.repeat(CAPTION_MAX) });
     expect(fits.outcome).toBe('sent');
+  });
+
+  it('counts an HTML caption by the text it shows, as Telegram does (D164)', async () => {
+    const { p, connector } = setup();
+    const shown = `<blockquote><b>${'x'.repeat(CAPTION_MAX - 1)}&amp;</b></blockquote>`;
+    const fits = await p.deliver('#lobby', { ...BYTES, caption: shown }, { format: 'html' });
+    expect(fits.outcome).toBe('sent');
+    expect(connector?.calls[0]?.options).toEqual({ caption: shown, format: 'html' });
+    const over = await p.deliver(
+      '#lobby',
+      { ...BYTES, caption: `<b>${'x'.repeat(CAPTION_MAX + 1)}</b>` },
+      { format: 'html' }
+    );
+    expect(over.reason).toBe(
+      `a caption of ${CAPTION_MAX + 1} characters, over the ${CAPTION_MAX} a photo may carry`
+    ); // As a command's answer checks it (Answer.photo), and Markdown's marks still count.
+    expect(photoRefusal('file-1', shown, 'html')).toBeUndefined();
+    expect(captionRefusal(`**${'x'.repeat(CAPTION_MAX - 1)}**`, 'markdown')).toBe(
+      `a caption of ${CAPTION_MAX + 3} characters, over the ${CAPTION_MAX} a photo may carry`
+    );
   });
 
   it('refuses bytes that are no photo, or not the type they say, before sending (D153)', async () => {

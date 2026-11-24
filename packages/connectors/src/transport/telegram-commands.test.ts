@@ -207,6 +207,26 @@ describe('installPublicCommands', () => {
     ]);
   });
 
+  it('sends HTML as written, a text or a caption, wherever it answers (D164)', async () => {
+    const c = chats({
+      quote: (a) => a.text('<u>Menu:</u>\n<blockquote>a &lt;b&gt;</blockquote>', 'html'),
+      card: async (a) =>
+        void (await a.photo({ data: Buffer.from([1]), mime: 'image/png' }, '<b>x</b>', 'html')),
+    });
+    await c.feed(GROUP, 1, '/quote');
+    await c.feed(PLAYER, PLAYER, '/quote');
+    await c.feed(GROUP, 2, '/card');
+    await c.feed(PLAYER, PLAYER, '/card');
+    const html = { text: '<u>Menu:</u>\n<blockquote>a &lt;b&gt;</blockquote>', parse_mode: 'HTML' };
+    const caption = { caption: '<b>x</b>', parse_mode: 'HTML' };
+    expect(c.sent().map((s) => s.payload)).toMatchObject([
+      { chat_id: GROUP, ...html },
+      { chat_id: PLAYER, ...html },
+      { chat_id: GROUP, ...caption },
+      { chat_id: PLAYER, ...caption },
+    ]);
+  });
+
   it('deletes an answer from the group when its handler asks, and keeps it in private chats', async () => {
     const c = chats({
       brief: (a) => a.text('gone soon', undefined, { deleteInGroupAfterMs: 60_000 }),

@@ -64,6 +64,7 @@ import {
 import { type Clock, type TimerHandle } from './clock.ts';
 import { type Buttons, type CommandPhoto, photoLabel, photoRefusal } from './commands.ts';
 import { type Connector } from './connector.ts';
+import { htmlToPlain } from './html.ts';
 import { type Notice } from './notices.ts';
 
 /**
@@ -103,8 +104,9 @@ export type SendResult = {
 
 /**
  * A photo to send (bot-os.md D150): a `Media` (D153), or the network's id of one sent before
- * (`CommandPhoto`); the words under it, plain unless `SendOptions.format` says Markdown, at
- * most `CAPTION_MAX` characters; and the network's id of a message in that chat it answers.
+ * (`CommandPhoto`); the words under it, plain unless `SendOptions.format` says Markdown or HTML,
+ * at most `CAPTION_MAX` characters (an HTML caption's, those it shows); and the network's id of a
+ * message in that chat it answers.
  */
 export interface PhotoSend {
   photo: CommandPhoto;
@@ -117,6 +119,10 @@ export type Outgoing = string | PhotoSend;
 
 /** A send's text as results and the log give it: the text, or the photo's label, never its bytes. */
 const textOf = (m: Outgoing): string => (typeof m === 'string' ? m : photoLabel(m.photo));
+
+/** A text as it goes without its format (D164): HTML as the text it shows, any other as written. */
+const unformatted = (text: string, options: SendOptions): string =>
+  options.format === 'html' ? htmlToPlain(text) : text;
 
 /** A send that waited for the network's answer (`deliver`): its id, or why it failed there. */
 export type DeliverResult = {
@@ -269,8 +275,10 @@ export interface SendOptions {
   /** The caller's own reason to refuse it, logged as every attempt is. */
   refuse?: string;
   /**
-   * The text is Markdown (`deliver` only): a connector that formats sends it formatted (Telegram's
-   * as HTML), any other as written.
+   * How the text, or a photo's caption, is written (`deliver`, and a photo's caption): a connector
+   * that formats sends it formatted (Telegram's as HTML); any other sends Markdown as written and
+   * HTML as the text it shows (`htmlToPlain`, D164). A text sent without its format (`send`,
+   * `enqueue`) goes so too.
    */
   format?: TextFormat;
   /**
@@ -286,8 +294,11 @@ export interface SendOptions {
   buttons?: Buttons;
 }
 
-/** How a text is written: Markdown, or plain when not said. */
-export type TextFormat = 'markdown';
+/**
+ * How a text is written: Markdown; Telegram HTML the plugin wrote, what it did not write escaped
+ * with `escapeHtml` (bot-os.md D164); or plain when not said.
+ */
+export type TextFormat = 'markdown' | 'html';
 
 /** A plugin's way out through one account's outbox. */
 export interface OutboxHandle {
@@ -755,7 +766,8 @@ export class Outbox {
 
   /**
    * A send through the connector, awaited: a text through its `deliver` (its `format` only where
-   * `format` says, as `deliver` alone sends it formatted), a photo through its `deliverPhoto`.
+   * `format` says, as `deliver` alone sends it formatted; HTML without it, as the text it shows), a
+   * photo through its `deliverPhoto`.
    */
   private transmit(
     connector: Connector,
@@ -765,6 +777,7 @@ export class Outbox {
     format: boolean
   ): Promise<{ id?: string; photo?: string }> {
     if (typeof message === 'string') {
+      const text = format ? message : unformatted(message, options);
       const extra = {
         ...(!format || options.format === undefined ? {} : { format: options.format }),
         ...(options.buttons === undefined ? {} : { buttons: options.buttons }),
@@ -772,7 +785,7 @@ export class Outbox {
       return (connector.deliver as NonNullable<Connector['deliver']>).call(
         connector,
         chat,
-        message,
+        text,
         Object.keys(extra).length === 0 ? undefined : extra
       );
     }
@@ -1294,7 +1307,7 @@ export class Outbox {
         );
     }
     if (photo !== undefined) {
-      const why = photoRefusal(photo.photo, photo.caption);
+      const why = photoRefusal(photo.photo, photo.caption, options.format);
       if (why !== undefined) return refuse(why);
       const connector = this.o.connector();
       if (connector !== undefined && connector.deliverPhoto === undefined)
@@ -1379,12 +1392,13 @@ export class Outbox {
       return { result: { text, outcome: 'sent' }, answer };
     }
     const { buttons } = options;
+    const plain = unformatted(text, options);
     let sent: boolean;
     try {
       sent =
         (buttons === undefined
-          ? connector?.send(chat, text)
-          : connector?.send(chat, text, { buttons })) ?? false;
+          ? connector?.send(chat, plain)
+          : connector?.send(chat, plain, { buttons })) ?? false;
     } catch (e) {
       if (!(e instanceof FloodWait)) throw e;
       this.heldUntil = now + e.ms;

@@ -61,9 +61,9 @@ import {
   sniffMime,
   type Surface,
   type SurfaceQuery,
+  type TextFormat,
   type TimerHandle,
 } from '@megabottron1999/core';
-import { markdownToTelegramHtml } from 'grammy-switchboard';
 import { Api, TelegramClient } from 'telegram';
 import { CustomFile } from 'telegram/client/uploads.js';
 import { DeletedMessage } from 'telegram/events/DeletedMessage.js';
@@ -74,6 +74,7 @@ import { returnBigInt } from 'telegram/Helpers.js';
 import { StringSession } from 'telegram/sessions/index.js';
 import { RawLog } from './raw-log.ts';
 import { LAST_SEEN_DOC, type LedgerStore, SEEN_ABOVE_DOC, SeenLedger } from './seen-ledger.ts';
+import { telegramHtml } from './telegram-commands.ts';
 
 export { LAST_SEEN_DOC, SEEN_ABOVE_DOC };
 
@@ -160,7 +161,7 @@ export interface GramClient {
   /** The message sent: its id, and its chat's marked id (GramJS's `Message.chatId`). */
   sendMessage(
     entity: never,
-    params: { message: string }
+    params: { message: string; parseMode?: 'html' }
   ): Promise<{ id: number; chatId?: { toString(): string } | undefined }>;
   /** A file's bytes uploaded (a photo's, D150): the handle a media message sends it by. */
   uploadFile(params: { file: CustomFile; workers: number }): Promise<Api.TypeInputFile>;
@@ -622,11 +623,21 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     return true;
   }
 
-  async deliver(chat: string, text: string): Promise<{ id?: string }> {
+  /**
+   * Sends `text` and waits for Telegram's answer: HTML (D164) parsed as HTML, by GramJS, into the
+   * message's entities; any other as GramJS sends it.
+   */
+  async deliver(
+    chat: string,
+    text: string,
+    options: { format?: TextFormat } = {}
+  ): Promise<{ id?: string }> {
     if (!this.monitors(chat)) throw new Error(`${chat} is not a chat of ${this.account}`);
+    const html = options.format === 'html';
     try {
       const sent = await this.o.client.sendMessage((await this.peer(chat)) as never, {
         message: text,
+        ...(html && { parseMode: 'html' as const }),
       });
       this.own(chat, sent, text);
       return { id: String(sent.id) };
@@ -657,7 +668,8 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
   /**
    * Sends a photo with GramJS's `sendFile` (bot-os.md D150): its bytes uploaded, or by an id this
    * connector gave one before (`photoId`: Telegram's photo id, access hash and file reference); a
-   * Markdown caption as Telegram HTML, a plain one as written; in reply to `replyTo`. The message's
+   * Markdown caption as Telegram HTML, an HTML one as written (D164), a plain one as written; in
+   * reply to `replyTo`. The message's
    * id, and the photo's, to send it again by. Telegram's file reference in that id may expire: a
    * send by it then fails with Telegram's `FILE_REFERENCE_EXPIRED`, and the bytes go again.
    */
@@ -686,12 +698,13 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
                 workers: 1,
               }),
             });
-      const markdown = options.format === 'markdown' && options.caption !== undefined;
+      const { format } = options;
       const caption = options.caption ?? '';
+      const html = options.caption === undefined ? undefined : telegramHtml(caption, format);
       const sent = await client.sendFile((await this.peer(chat)) as never, {
         file,
-        caption: markdown ? markdownToTelegramHtml(caption) : caption,
-        parseMode: markdown ? 'html' : false,
+        caption: html ?? caption,
+        parseMode: html === undefined ? false : 'html',
         ...(options.replyTo === undefined ? {} : { replyTo: Number(options.replyTo) }),
       });
       this.own(chat, sent, caption);

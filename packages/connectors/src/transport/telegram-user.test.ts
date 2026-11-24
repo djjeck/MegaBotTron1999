@@ -72,7 +72,7 @@ function fake(
   } = {}
 ) {
   const calls: string[] = [];
-  const sent: { entity: unknown; message: string }[] = [];
+  const sent: { entity: unknown; message: string; parseMode?: 'html' }[] = [];
   const media: { entity: unknown; params: Parameters<GramClient['sendFile']>[1] }[] = [];
   let failures = o.failConnect ?? 0;
   let handler: ((event: { message: RawMessage }) => Promise<void>) | undefined;
@@ -92,8 +92,8 @@ function fake(
     ),
     getInputEntity: (id) => (calls.push(`entity ${id}`), Promise.resolve({ peer: id })),
     getMe: () => (calls.push('me'), Promise.resolve({ username: 'alice' })),
-    sendMessage: (entity, { message }) => {
-      sent.push({ entity, message });
+    sendMessage: (entity, params) => {
+      sent.push({ entity, ...params });
       return o.send?.() ?? Promise.resolve({ id: 99 });
     },
     uploadFile: ({ file }) => {
@@ -415,6 +415,13 @@ describe('TelegramUserConnector', () => {
       { entity: { peer: '@Quiz_bot' }, message: '/quiz' },
       { entity: { peer: Number(GROUP) }, message: '/play' },
     ]);
+    // HTML parsed as HTML (D164).
+    await c.deliver(GROUP, '<b>a</b> &amp; b', { format: 'html' });
+    expect(f.sent.at(-1)).toEqual({
+      entity: { peer: Number(GROUP) },
+      message: '<b>a</b> &amp; b',
+      parseMode: 'html',
+    });
     await expect(c.deliver('-100999', 'x')).rejects.toThrow(
       '-100999 is not a chat of telegram:alice'
     );
@@ -444,6 +451,9 @@ describe('TelegramUserConnector', () => {
       caption: '**as is**',
       parseMode: false,
     });
+    // An HTML caption as written (D164).
+    await c.deliverPhoto('@quiz_bot', id, { caption: '<u>a</u>', format: 'html' });
+    expect(f.media.at(-1)?.params).toMatchObject({ caption: '<u>a</u>', parseMode: 'html' });
     const photo = (again?.params.file as Api.InputMediaPhoto).id as Api.InputPhoto;
     expect([String(photo.id), String(photo.accessHash), [...photo.fileReference]]).toEqual([
       '7',

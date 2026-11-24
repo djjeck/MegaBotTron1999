@@ -123,6 +123,10 @@ describe('IrcConnector', () => {
     await expect(f.connector.deliver('alice', 'hi')).rejects.toThrow(
       'it sends only to its channel #lobby, not alice'
     );
+    // No formatting on IRC: Markdown as written, HTML as the text it shows (D164).
+    await f.connector.deliver('#lobby', '**a**', { format: 'markdown' });
+    await f.connector.deliver('#lobby', '<u>b</u> &lt;3', { format: 'html' });
+    expect(f.calls.slice(-2)).toEqual(['say **a**', 'say b <3']);
     f.disconnect();
     await expect(f.connector.deliver('#lobby', 'hi')).rejects.toThrow('not connected');
   });

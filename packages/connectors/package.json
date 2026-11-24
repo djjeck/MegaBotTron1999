@@ -21,7 +21,7 @@
     "@grammyjs/auto-retry": "2.0.2",
     "@megabottron1999/core": "0.1.65",
     "grammy": "1.46.0",
-    "grammy-switchboard": "0.2.0",
+    "grammy-switchboard": "0.3.0",
     "telegram": "2.26.22",
     "zod": "4.6.7"
   }

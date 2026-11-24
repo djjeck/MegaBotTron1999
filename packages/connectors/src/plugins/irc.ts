@@ -17,12 +17,15 @@ import {
   commandIntervalS,
   type Connector,
   ConnectorBase,
+  type ConnectorSendOptions,
   type ConnectorStatus,
   definePlugin,
+  htmlToPlain,
   type Limits,
   type Plugin,
   type Surface,
   type SurfaceQuery,
+  type TextFormat,
   unansweredAt,
   unansweredAtBy,
 } from '@megabottron1999/core';
@@ -118,12 +121,18 @@ export class IrcConnector extends ConnectorBase implements Connector {
 
   /**
    * Sends to its channel, the one chat it can reach; any other refused with why (bot-os.md D95), so
-   * that the outbox records it and the owner is told, rather than a silent `false`.
+   * that the outbox records it and the owner is told, rather than a silent `false`. IRC shows no
+   * formatting: Markdown goes as written, HTML as the text it shows (`htmlToPlain`, D164).
    */
-  deliver(chat: string, text: string): Promise<{ id?: string }> {
+  deliver(
+    chat: string,
+    text: string,
+    options: ConnectorSendOptions & { format?: TextFormat } = {}
+  ): Promise<{ id?: string }> {
     if (chat.toLowerCase() !== this.channel.toLowerCase())
       return Promise.reject(new Error(`it sends only to its channel ${this.channel}, not ${chat}`));
-    return this.client.say(text) ? Promise.resolve({}) : Promise.reject(new Error('not connected'));
+    const line = options.format === 'html' ? htmlToPlain(text) : text;
+    return this.client.say(line) ? Promise.resolve({}) : Promise.reject(new Error('not connected'));
   }
 }
 

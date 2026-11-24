@@ -583,6 +583,16 @@ describe('TelegramBotConnector', () => {
     expect(stub.calls.at(-1)?.payload).toMatchObject({ text: '**b**' });
     expect(stub.calls.at(-1)?.payload['parse_mode']).toBeUndefined();
     expect(logs.at(-1)).toMatch(/^formatting refused, sending plain text: /u);
+    // HTML as written (D164); refused, as the text it shows.
+    await c.deliver('1', '<u>c</u> &amp; d', { format: 'html' });
+    expect(stub.calls.at(-1)?.payload).toMatchObject({
+      text: '<u>c</u> &amp; d',
+      parse_mode: 'HTML',
+    });
+    first = true;
+    await c.deliver('1', '<u>c</u> &amp; d', { format: 'html' });
+    expect(stub.calls.at(-1)?.payload).toMatchObject({ text: 'c & d' });
+    expect(stub.calls.at(-1)?.payload['parse_mode']).toBeUndefined();
   });
 
   it('sends a photo with sendPhoto: its caption, as HTML from Markdown, in reply; its file id (D150)', async () => {
@@ -635,6 +645,19 @@ describe('TelegramBotConnector', () => {
       caption: '**b**',
     });
     expect(logs.at(-1)).toMatch(/^formatting refused, sending the caption plain: /u);
+    // An HTML caption as written (D164); refused, as the text it shows.
+    await c.deliverPhoto('1', 'photo-101', { caption: '<b>x &lt; y</b>', format: 'html' });
+    expect(stub.calls.at(-1)?.payload).toMatchObject({
+      caption: '<b>x &lt; y</b>',
+      parse_mode: 'HTML',
+    });
+    first = true;
+    await c.deliverPhoto('1', 'photo-101', { caption: '<b>x &lt; y</b>', format: 'html' });
+    expect(stub.calls.at(-1)?.payload).toEqual({
+      chat_id: 1,
+      photo: 'photo-101',
+      caption: 'x < y',
+    });
     // Any other refusal, and a flood wait, as a text's.
     stub.bot.api.sendPhoto = (() =>
       Promise.reject(

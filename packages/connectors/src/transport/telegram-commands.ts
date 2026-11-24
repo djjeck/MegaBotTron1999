@@ -57,7 +57,12 @@ import {
   type TextFormat,
 } from '@megabottron1999/core';
 import { type Api, type Bot, InputFile } from 'grammy';
-import { type Command, markdownToTelegramHtml, type Switchboard } from 'grammy-switchboard';
+import {
+  type Command,
+  htmlToPlain,
+  markdownToTelegramHtml,
+  type Switchboard,
+} from 'grammy-switchboard';
 import { AUTHOR_TOPIC, type ChatMenu } from './telegram-switchboard.ts';
 
 export const PER_USER_MS = 2_000;
@@ -208,18 +213,31 @@ export const media = (photo: CommandPhoto): string | InputFile =>
   typeof photo === 'string' ? photo : new InputFile(photo.data, photoFilename(photo));
 
 /**
+ * A text as Telegram HTML (bot-os.md D164): Markdown converted, HTML as the plugin wrote it;
+ * undefined for a plain one.
+ */
+export const telegramHtml = (text: string, format: TextFormat | undefined): string | undefined =>
+  format === 'markdown' ? markdownToTelegramHtml(text) : format === 'html' ? text : undefined;
+
+/**
+ * A text as it goes when Telegram refused its formatting: HTML as the text it shows
+ * (`htmlToPlain`), Markdown and plain as written.
+ */
+export const plainOf = (text: string, format: TextFormat | undefined): string =>
+  format === 'html' ? htmlToPlain(text) : text;
+
+/**
  * A photo's caption as the Bot API takes it (bot-os.md D150): Markdown as Telegram HTML, as a
- * text's; plain as written; none, nothing.
+ * text's, and HTML as written (D164); plain as written; none, nothing.
  */
 export const captionOf = (
   caption: string | undefined,
   format: TextFormat | undefined
-): { caption?: string; parse_mode?: 'HTML' } =>
-  caption === undefined
-    ? {}
-    : format === 'markdown'
-      ? { caption: markdownToTelegramHtml(caption), parse_mode: 'HTML' }
-      : { caption };
+): { caption?: string; parse_mode?: 'HTML' } => {
+  if (caption === undefined) return {};
+  const html = telegramHtml(caption, format);
+  return html === undefined ? { caption } : { caption: html, parse_mode: 'HTML' };
+};
 
 export interface PublicCommandsOptions {
   handlers: Handlers;
@@ -494,17 +512,12 @@ export function installPublicCommands(
     run(
       t.command,
       redraw(async (text, format, options) => {
-        const html = format === 'markdown';
+        const html = telegramHtml(text, format);
         await unlessUnchanged(
-          ctx.api.editMessageText(
-            chat,
-            message.message_id,
-            html ? markdownToTelegramHtml(text) : text,
-            {
-              ...(html && { parse_mode: 'HTML' as const }),
-              reply_markup: keyboard(options?.buttons),
-            }
-          )
+          ctx.api.editMessageText(chat, message.message_id, html ?? text, {
+            ...(html !== undefined && { parse_mode: 'HTML' as const }),
+            reply_markup: keyboard(options?.buttons),
+          })
         );
         remove(options, `${chat}:${message.message_id}`, () =>
           ctx.api.deleteMessage(chat, message.message_id)
@@ -607,17 +620,12 @@ function inChat(api: Api, chatId: number, replyTo: number, expire: Expire): Answ
   const reply = { reply_parameters: { message_id: replyTo } };
   return {
     text: async (text, format, options) => {
-      const sent =
-        format === 'markdown'
-          ? await api.sendMessage(chatId, markdownToTelegramHtml(text), {
-              ...reply,
-              parse_mode: 'HTML',
-              ...(options?.buttons && { reply_markup: keyboard(options.buttons) }),
-            })
-          : await api.sendMessage(chatId, text, {
-              ...reply,
-              ...(options?.buttons && { reply_markup: keyboard(options.buttons) }),
-            });
+      const html = telegramHtml(text, format);
+      const sent = await api.sendMessage(chatId, html ?? text, {
+        ...reply,
+        ...(html !== undefined && { parse_mode: 'HTML' as const }),
+        ...(options?.buttons && { reply_markup: keyboard(options.buttons) }),
+      });
       expire(options, `${chatId}:${sent.message_id}`, () =>
         api.deleteMessage(chatId, sent.message_id)
       );

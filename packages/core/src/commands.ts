@@ -11,10 +11,11 @@
  * (`core.send`, its origin `command /name`) and, on a dry-run edge, logs it and sends nothing.
  * What a plugin sends on its own goes through the outbox, within its chat-out edges (§4.6, P10).
  *
- * The types are the network's least: a text, plain or Markdown, with buttons that each run a
+ * The types are the network's least: a text, plain, Markdown or HTML, with buttons that each run a
  * command again; a photo, as bytes or by the id the network gave it once sent. Nothing in here
  * knows of any network.
  */
+import { htmlToPlain } from './html.ts';
 import { type Media, mediaRefusal } from './media.ts';
 import { type TextFormat } from './outbox.ts';
 
@@ -63,15 +64,22 @@ export type CommandPhoto = string | Media;
 export const PHOTO_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
 
 /**
- * The longest caption a photo may carry (bot-os.md D150): Telegram's, 1024 characters, counted as
- * written (UTF-16 code units, Markdown's marks included). A longer one is refused before sending.
+ * The longest caption a photo may carry (bot-os.md D150): Telegram's, 1024 characters, counted in
+ * UTF-16 code units: an HTML caption's as Telegram counts them, those of the text it shows (its
+ * tags left out, an entity one character; D164); any other's as written (Markdown's marks
+ * included). A longer one is refused before sending.
  */
 export const CAPTION_MAX = 1024;
 
 /** Why a photo's caption cannot go (longer than `CAPTION_MAX`); undefined when it can. */
-export function captionRefusal(caption: string | undefined): string | undefined {
-  return caption !== undefined && caption.length > CAPTION_MAX
-    ? `a caption of ${caption.length} characters, over the ${CAPTION_MAX} a photo may carry`
+export function captionRefusal(
+  caption: string | undefined,
+  format?: TextFormat
+): string | undefined {
+  if (caption === undefined) return undefined;
+  const length = (format === 'html' ? htmlToPlain(caption) : caption).length;
+  return length > CAPTION_MAX
+    ? `a caption of ${length} characters, over the ${CAPTION_MAX} a photo may carry`
     : undefined;
 }
 
@@ -79,8 +87,12 @@ export function captionRefusal(caption: string | undefined): string | undefined 
  * Why a photo cannot go (D150, D153): its caption longer than `CAPTION_MAX`, or its bytes no image
  * of `PHOTO_MIMES`, or not of the type they say (`mediaRefusal`); undefined when it can.
  */
-export function photoRefusal(photo: CommandPhoto, caption?: string): string | undefined {
-  const long = captionRefusal(caption);
+export function photoRefusal(
+  photo: CommandPhoto,
+  caption?: string,
+  format?: TextFormat
+): string | undefined {
+  const long = captionRefusal(caption, format);
   if (long !== undefined || typeof photo === 'string') return long;
   const refused = mediaRefusal(photo, { mimes: PHOTO_MIMES });
   return refused === undefined ? undefined : `the photo: ${refused}`;
@@ -104,10 +116,14 @@ export function photoFilename(photo: Media): string {
 
 /** How a handler answers, in reply to the command, in the chat it came from. */
 export interface Answer {
-  /** Sends `text`, plain unless `format` says it is Markdown. */
+  /**
+   * Sends `text`, plain unless `format` says it is Markdown or Telegram HTML (`'html'`, D164), which
+   * a network that cannot show it gets as the text it shows.
+   */
   text(text: string, format?: TextFormat, options?: AnswerOptions): Promise<void>;
   /**
-   * Sends a photo, with `caption` under it if given, plain unless `format` says it is Markdown (a
+   * Sends a photo, with `caption` under it if given, plain unless `format` says it is Markdown or
+   * HTML (a
    * caption over `CAPTION_MAX`, or a photo `photoRefusal` refuses, is thrown, before sending); the network's id for the photo,
    * if it gives one, to send it again by.
    */

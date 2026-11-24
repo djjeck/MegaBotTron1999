@@ -390,7 +390,10 @@ export interface ConnectorSendOptions {
 export interface ConnectorPhotoOptions {
   /** The words under it, at most `CAPTION_MAX` characters (the outbox has checked). */
   caption?: string;
-  /** The caption is Markdown: a connector that formats sends it formatted. */
+  /**
+   * The caption is Markdown or Telegram HTML (D164): a connector that formats sends it formatted,
+   * any other HTML as the text it shows (`htmlToPlain`).
+   */
   format?: TextFormat;
   /** The network's id of a message in that chat it answers. */
   replyTo?: string;
@@ -410,8 +413,9 @@ export interface Connector extends ConnectorHandle {
    * Sends `text` to `chat` and waits for the network's answer: the message's id, where it has one.
    * Rejects if the network refused it (a `FloodWait` when it asks to wait). For networks whose
    * sends answer later (Telegram); only the outbox calls it, through `Outbox.deliver`. With
-   * `format`, the text is Markdown, which a network that formats sends formatted; `buttons`, as
-   * `send` takes them.
+   * `format`, the text is Markdown or Telegram HTML (D164), which a network that formats sends
+   * formatted, and any other sends Markdown as written and HTML as the text it shows
+   * (`htmlToPlain`); `buttons`, as `send` takes them.
    */
   deliver?(
     chat: string,

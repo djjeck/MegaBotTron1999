@@ -234,6 +234,7 @@ export {
   healthServer,
   type HealthSource,
 } from './health.ts';
+export { escapeHtml, htmlToPlain } from './html.ts';
 export {
   INSTANCE_DOC,
   type InstanceInfo,

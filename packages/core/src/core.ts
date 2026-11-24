@@ -1087,7 +1087,7 @@ export class Core {
         await held(text, () => answer.text(text, format, options));
       },
       photo: (photo, caption, format) => {
-        const long = photoRefusal(photo, caption);
+        const long = photoRefusal(photo, caption, format);
         if (long !== undefined) {
           log(photoLabel(photo), 'refused', long, caption);
           return Promise.reject(new Error(long));

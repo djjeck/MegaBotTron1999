@@ -53,9 +53,8 @@ import {
 } from '@megabottron1999/core';
 import { Bot, GrammyError } from 'grammy';
 import { type Chat, type Document, type Message, type UserFromGetMe } from 'grammy/types';
-import { markdownToTelegramHtml } from 'grammy-switchboard';
 import { SeenLedger } from './seen-ledger.ts';
-import { captionOf, media } from './telegram-commands.ts';
+import { captionOf, media, plainOf, telegramHtml } from './telegram-commands.ts';
 import { commandOf, type Denied, type DenyCount, type Gate } from './telegram-gate.ts';
 
 // A 429 is waited out as Telegram asks, a few times; network errors and 5xx fail the call, so the
@@ -705,8 +704,9 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
 
   /**
    * Sends `text` and waits for Telegram's answer. Markdown goes as Telegram HTML, as the
-   * switchboard sends it: if Telegram cannot parse the HTML, the text goes again as written, so a
-   * slip of the formatting never costs the message. Buttons go only to the owner's chat, through
+   * switchboard sends it, and HTML as written (D164): if Telegram cannot parse the HTML, the text
+   * goes again plain (Markdown as written, HTML as the text it shows), so a slip of the formatting
+   * never costs the message. Buttons go only to the owner's chat, through
    * its chat surface, where a tap runs the owner's command (`ownerChat`); elsewhere, the text alone.
    */
   async deliver(
@@ -719,17 +719,16 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
       const owner = this.o.ownerChat;
       if (owner !== undefined && String(to) === owner.chat && (options.buttons?.length ?? 0) > 0)
         return await owner.send(text, options.buttons ?? [], options.format);
-      if (options.format === 'markdown')
+      const html = telegramHtml(text, options.format);
+      if (html !== undefined)
         try {
-          const sent = await this.bot.api.sendMessage(to, markdownToTelegramHtml(text), {
-            parse_mode: 'HTML',
-          });
+          const sent = await this.bot.api.sendMessage(to, html, { parse_mode: 'HTML' });
           return { id: String(sent.message_id) };
         } catch (e) {
           if (!(e instanceof GrammyError && /can't parse entities/iu.test(e.description))) throw e;
           this.o.log(`formatting refused, sending plain text: ${e.description}`);
         }
-      const sent = await this.bot.api.sendMessage(to, text);
+      const sent = await this.bot.api.sendMessage(to, plainOf(text, options.format));
       return { id: String(sent.message_id) };
     } catch (e) {
       const ms = floodMs(e);
@@ -749,8 +748,8 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
 
   /**
    * Sends a photo with `sendPhoto` and waits for Telegram's answer (bot-os.md D150): the message's
-   * id, and the photo's `file_id` (its largest size), to send it again by. A Markdown caption goes
-   * as Telegram HTML, and as written if Telegram cannot parse it, as a text does; in reply to
+   * id, and the photo's `file_id` (its largest size), to send it again by. A Markdown or HTML
+   * caption goes as Telegram HTML, and plain if Telegram cannot parse it, as a text does; in reply to
    * `replyTo`, sent all the same if that message is gone.
    */
   async deliverPhoto(
@@ -769,11 +768,12 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
             },
           };
     const send = async (
+      caption: string | undefined,
       format: TextFormat | undefined
     ): Promise<{ id: string; photo?: string }> => {
       const sent = await this.bot.api.sendPhoto(to, media(photo), {
         ...reply,
-        ...captionOf(options.caption, format),
+        ...captionOf(caption, format),
       });
       // Its chat by id, as Telegram answers it (a `@username` sent to, as written otherwise).
       this.keep((sent.chat as Chat | undefined)?.id ?? to, sent.message_id, sent.photo);
@@ -781,14 +781,15 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
       return { id: String(sent.message_id), ...(file === undefined ? {} : { photo: file }) };
     };
     try {
-      if (options.format === 'markdown' && options.caption !== undefined)
+      const { caption, format } = options;
+      if (format !== undefined && caption !== undefined)
         try {
-          return await send('markdown');
+          return await send(caption, format);
         } catch (e) {
           if (!(e instanceof GrammyError && /can't parse entities/iu.test(e.description))) throw e;
           this.o.log(`formatting refused, sending the caption plain: ${e.description}`);
         }
-      return await send(undefined);
+      return await send(caption === undefined ? undefined : plainOf(caption, format), undefined);
     } catch (e) {
       const ms = floodMs(e);
       throw ms === undefined ? e : new FloodWait(ms);
