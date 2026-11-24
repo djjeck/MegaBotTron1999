@@ -22,8 +22,8 @@
  * the throttles. The author is the instance's owner (`Asker.owner`).
  *
  * Throttles keep a chat from filling with answers, each command its own: in a group, one answer
- * per user a minute and one every 10 s, each group its own; in another user's private chat, one
- * per user a minute; the author's chat has none. The rest are ignored without a word. The throttles keep the senders' ids
+ * per user every 2 s and one a second, each group its own (D160); in another user's private chat,
+ * one per user every 2 s; the author's chat has none. The rest are ignored without a word. The throttles keep the senders' ids
  * in memory only, never on disk or in a log line.
  *
  * A handler may ask for its answer to be deleted from a group after a while
@@ -53,8 +53,8 @@ import { type Api, type Bot, InputFile } from 'grammy';
 import { type Command, markdownToTelegramHtml, type Switchboard } from 'grammy-switchboard';
 import { AUTHOR_TOPIC, type ChatMenu } from './telegram-switchboard.ts';
 
-export const PER_USER_MS = 60_000;
-export const PER_CHAT_MS = 10_000;
+export const PER_USER_MS = 2_000;
+export const PER_CHAT_MS = 1_000;
 
 /**
  * Schedules `remove` of the answer `key` (its chat and message) as `options` ask, in place of any

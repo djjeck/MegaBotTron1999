@@ -2704,14 +2704,14 @@ its bytes is for later.
   those chats' menus alone (the switchboard's, the owner's chat; every private chat's; Telegram's
   `chat` scope for each other chat, a group's included, but a group its gate refuses)
   (`telegram-commands.ts`), the menus kept registered, a refused one retried and one set again when
-  the bot joins its chat; in any group, one answer per user a minute and one every 10 s, each group
-  its own throttles, and an answer deleted when its handler asks (`deleteInGroupAfterMs`). Without
-  an `owner` it is no surface, and its commands edges answer nothing. It tells the owner nothing on
-  its own (D94): a send with buttons (`SendOptions.buttons`, an `owner-notice` telling a `told`
-  notice) to the owner's chat goes through the surface's switchboard, whose taps run the owner's
-  commands as a card's do; to any other chat, the text alone. Nothing hands its bot out (P9). Its
-  gate (D128, `telegram-gate.ts`), each list picked among its chats: `groups`, `any` group it is
-  added to (default; `blockGroups` the ones it ignores even so) or `only` the groups in
+  the bot joins its chat; in any group, one answer per user every 2 s and one a second (D160), each
+  group its own throttles, and an answer deleted when its handler asks (`deleteInGroupAfterMs`).
+  Without an `owner` it is no surface, and its commands edges answer nothing. It tells the owner
+  nothing on its own (D94): a send with buttons (`SendOptions.buttons`, an `owner-notice` telling a
+  `told` notice) to the owner's chat goes through the surface's switchboard, whose taps run the
+  owner's commands as a card's do; to any other chat, the text alone. Nothing hands its bot out
+  (P9). Its gate (D128, `telegram-gate.ts`), each list picked among its chats: `groups`, `any` group
+  it is added to (default; `blockGroups` the ones it ignores even so) or `only` the groups in
   `onlyGroups`; `people`, `anyone` (default; `blockPeople`, never its owner) or `only` the people
   and bots in `onlyPeople`, its owner always allowed, listed or not; a list of the choice not made
   is refused by its check. In a group it does not work in, nothing goes further: no message reaches

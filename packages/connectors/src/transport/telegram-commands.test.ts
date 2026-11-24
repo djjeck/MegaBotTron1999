@@ -167,7 +167,7 @@ describe('installPublicCommands', () => {
     expect(c.sent()[1]?.payload).toMatchObject({ caption: 'the <b>map</b>', parse_mode: 'HTML' });
   });
 
-  it("answers in anyone's private chat, once per user a minute", async () => {
+  it("answers in anyone's private chat, once per user every 2 s", async () => {
     const c = chats();
     await c.feed(PLAYER, PLAYER, '/map');
     await c.feed(PLAYER, PLAYER, '/map');
@@ -258,7 +258,7 @@ describe('installPublicCommands', () => {
     expect(c.sent()).toEqual([]);
   });
 
-  it('answers in the group once per user a minute and once in 10 s, each command apart', async () => {
+  it('answers in the group once per user every 2 s and once a second, each command apart', async () => {
     const c = chats();
     await c.feed(GROUP, 1, '/map');
     await c.feed(GROUP, 2, '/map');
