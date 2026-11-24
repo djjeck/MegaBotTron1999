@@ -64,11 +64,11 @@ Address every error before marking a sub-task complete.
   for each package's `src/` on its own (`vitest.config.ts` sets a threshold per workspace), so that
   each package's own tests keep it covered.
 - **Dependencies:** as few as possible, each justified in the commit that adds it, pinned to exact
-  versions at least two weeks old, with `package-lock.json` committed; the same rule for the GitHub
-  Actions the workflows use (pinned to an exact release) and for the Node base image. The web UI's
-  build tools (React, React DOM, React Flow, Vite, Monaco, qrcode-generator) are
-  `@megabottron1999/web`'s own `devDependencies`, so that the image's build stage installs them
-  alone; the test and type tools stay at the root.
+  versions, with `package-lock.json` committed; the same rule for the GitHub Actions the workflows
+  use (pinned to an exact release) and for the Node base image. The web UI's build tools (React,
+  React DOM, React Flow, Vite, Monaco, qrcode-generator) are `@megabottron1999/web`'s own
+  `devDependencies`, so that the image's build stage installs them alone; the test and type tools
+  stay at the root.
 - **Secrets** are Docker secrets (files under `/run/secrets`, `packages/core/src/secrets.ts`), never
   environment variables, and go only to the connector plugin that declares them; a connector that
   logs in from its node keeps its credentials in its own store instead, never in secrets, sealed at
