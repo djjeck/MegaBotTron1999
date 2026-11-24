@@ -59,18 +59,22 @@ channel's) comes as its chat and the deleted ids, live only, to the plugins that
 (`onDelete`) alone; a basic group's or a private chat's, which name no chat, are not passed on. Both
 Telegram connectors give a message's sender's display name (`senderName`: a user's first and last
 names, a chat's title when a chat sent it) and whether the sender is a bot (`senderBot`, D159);
-`irc` gives neither. A bot's message with inline buttons gives their labels, row by row (`buttons`,
-`telegram-user`, D145; `[]` when it has none), and an edit gives them as they now are. Both Telegram
-connectors send photos through the outbox (`deliverPhoto`, D150), with a caption, plain or Markdown,
-in reply to a message: `telegram-bot` with the Bot API's `sendPhoto`, answering the photo's
-`file_id`; `telegram-user` with GramJS's `sendFile`, answering
-`<id>:<access hash>:<file reference>`; each sends one again by the id it gave. `irc` sends none, and
-the outbox refuses them with why. Both fetch a message's photo on demand (D151), for a plugin an
-edge binds to their node's interface (`actions.photo`, answering a `MediaResult`, D153: its `media`,
-the largest size, at most 10 MiB; `null` for none; else why not): `telegram-user` fetches the
-message by its id (GramJS's `getMessages`, `downloadMedia`); `telegram-bot`, which the Bot API lets
-fetch no message by its id, only the photos of the messages it heard or sent, the latest 1000 kept
-by their `file_id` in its store.
+`irc` gives neither. Both say what a message carries besides its text (`media`, D161): a photo, a
+sticker and its emoji, a GIF, a video, a video note, a voice note, an audio's performer and title, a
+file, a poll's question and answers, a location, a venue's title, a contact's name (never a number
+or coordinates), a die and its emoji, a game, a story; described, never downloaded, its caption the
+text (`''` without one), so `telegram-bot` passes on a sticker or a photo without a caption too. A
+bot's message with inline buttons gives their labels, row by row (`buttons`, `telegram-user`, D145;
+`[]` when it has none), and an edit gives them as they now are. Both Telegram connectors send photos
+through the outbox (`deliverPhoto`, D150), with a caption, plain or Markdown, in reply to a message:
+`telegram-bot` with the Bot API's `sendPhoto`, answering the photo's `file_id`; `telegram-user` with
+GramJS's `sendFile`, answering `<id>:<access hash>:<file reference>`; each sends one again by the id
+it gave. `irc` sends none, and the outbox refuses them with why. Both fetch a message's photo on
+demand (D151), for a plugin an edge binds to their node's interface (`actions.photo`, answering a
+`MediaResult`, D153: its `media`, the largest size, at most 10 MiB; `null` for none; else why not):
+`telegram-user` fetches the message by its id (GramJS's `getMessages`, `downloadMedia`);
+`telegram-bot`, which the Bot API lets fetch no message by its id, only the photos of the messages
+it heard or sent, the latest 1000 kept by their `file_id` in its store.
 
 - `anthropic`: the Claude API (the Anthropic SDK), whose `ask` the plugins bound to it call, with
   structured output by a zod schema, and images the model sees before the prompt's text (each a

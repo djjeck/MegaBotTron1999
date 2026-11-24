@@ -23,6 +23,7 @@ import {
   LAST_SEEN_DOC,
   LOOK_AFTER_SEND_MS,
   LOOK_LIMIT,
+  mediaOf,
   photoId,
   type RawDeletion,
   type RawDialog,
@@ -385,6 +386,25 @@ describe('TelegramUserConnector', () => {
         'message 8: download of satchel.txt failed: Error: FILE_REFERENCE_EXPIRED'
       );
     });
+  });
+
+  it('says what a message carries besides its text, a sticker with its emoji (D161)', async () => {
+    const f = fake();
+    const { messages } = await connector(f);
+    const sticker = {
+      mimeType: 'image/webp',
+      size: 900,
+      attributes: [
+        { className: 'DocumentAttributeFilename', fileName: 'sticker.webp' },
+        { className: 'DocumentAttributeSticker', alt: '😂' },
+      ],
+    };
+    await f.deliver(raw({ id: 8, message: '', document: sticker }));
+    await f.deliver(raw({ id: 9, message: 'hi' }));
+    expect(messages.map((m) => [m.text, m.media, m.document?.name])).toEqual([
+      ['', { kind: 'sticker', emoji: '😂' }, 'sticker.webp'],
+      ['hi', undefined, undefined],
+    ]);
   });
 
   it("sends any text to its chats, with the message's id", async () => {
@@ -1789,5 +1809,89 @@ describe('TelegramUserConnector.photo (D151)', () => {
     await expect(c.photo(GROUP, '1')).rejects.toThrow('Telegram asks to wait 7 s');
     f.client.getMessages = () => Promise.reject(new Error('CHANNEL_PRIVATE'));
     await expect(c.photo(GROUP, '1')).rejects.toThrow('CHANNEL_PRIVATE');
+  });
+});
+
+describe('mediaOf (D161)', () => {
+  const doc = (...attributes: unknown[]) => ({
+    media: { className: 'MessageMediaDocument', document: { attributes } },
+  });
+  const of = (className: string, fields: Record<string, unknown> = {}) =>
+    mediaOf({ media: { className, ...fields } });
+
+  it('tells a document by its attributes', () => {
+    expect(mediaOf(doc({ className: 'DocumentAttributeSticker', alt: ' 🙈 ' }))).toEqual({
+      kind: 'sticker',
+      emoji: '🙈',
+    });
+    expect(mediaOf(doc({ className: 'DocumentAttributeSticker', alt: '' }))).toEqual({
+      kind: 'sticker',
+    });
+    expect(
+      mediaOf(
+        doc({ className: 'DocumentAttributeVideo' }, { className: 'DocumentAttributeAnimated' })
+      )
+    ).toEqual({ kind: 'animation' });
+    expect(mediaOf(doc({ className: 'DocumentAttributeVideo', roundMessage: true }))).toEqual({
+      kind: 'round',
+    });
+    expect(mediaOf(doc({ className: 'DocumentAttributeVideo' }))).toEqual({ kind: 'video' });
+    expect(mediaOf(doc({ className: 'DocumentAttributeAudio', voice: true }))).toEqual({
+      kind: 'voice',
+    });
+    expect(
+      mediaOf(doc({ className: 'DocumentAttributeAudio', performer: 'The Band', title: 'Song' }))
+    ).toEqual({ kind: 'audio', title: 'The Band Song' });
+    expect(mediaOf(doc({ className: 'DocumentAttributeAudio' }))).toEqual({ kind: 'audio' });
+    expect(
+      mediaOf(doc(null, { className: 'DocumentAttributeFilename', fileName: 'a.pdf' }))
+    ).toEqual({
+      kind: 'file',
+    });
+    expect(mediaOf({ media: { className: 'MessageMediaDocument' } })).toEqual({ kind: 'file' });
+    // Without its media, by the message's document.
+    expect(
+      mediaOf({ document: { attributes: [{ className: 'DocumentAttributeSticker' }] } })
+    ).toEqual({ kind: 'sticker' });
+    expect(mediaOf({ document: {} })).toEqual({ kind: 'file' });
+  });
+
+  it('describes the rest, a contact by name alone, a place without its coordinates', () => {
+    expect(mediaOf({})).toBeUndefined();
+    expect(of('MessageMediaEmpty')).toBeUndefined();
+    expect(of('MessageMediaWebPage')).toBeUndefined();
+    expect(of('MessageMediaPhoto')).toEqual({ kind: 'photo' });
+    expect(
+      of('MessageMediaPoll', {
+        poll: {
+          question: { text: 'Pizza?' },
+          answers: [{ text: { text: 'Yes' } }, { text: 'No' }, null, { text: { text: ' ' } }],
+        },
+      })
+    ).toEqual({ kind: 'poll', title: 'Pizza?', options: ['Yes', 'No'] });
+    expect(of('MessageMediaPoll')).toEqual({ kind: 'poll' });
+    expect(of('MessageMediaGeo', { geo: { lat: 1, long: 2 } })).toEqual({ kind: 'location' });
+    expect(of('MessageMediaGeoLive')).toEqual({ kind: 'location' });
+    expect(of('MessageMediaVenue', { title: 'The Inn', address: '1 Road' })).toEqual({
+      kind: 'venue',
+      title: 'The Inn',
+    });
+    expect(of('MessageMediaVenue')).toEqual({ kind: 'venue' });
+    expect(
+      of('MessageMediaContact', { firstName: 'Alice', lastName: '', phoneNumber: '555' })
+    ).toEqual({ kind: 'contact', title: 'Alice' });
+    expect(of('MessageMediaContact')).toEqual({ kind: 'contact' });
+    expect(of('MessageMediaDice', { emoticon: '🎲', value: 4 })).toEqual({
+      kind: 'dice',
+      emoji: '🎲',
+    });
+    expect(of('MessageMediaDice')).toEqual({ kind: 'dice' });
+    expect(of('MessageMediaGame', { game: { title: 'Quest' } })).toEqual({
+      kind: 'game',
+      title: 'Quest',
+    });
+    expect(of('MessageMediaGame')).toEqual({ kind: 'game' });
+    expect(of('MessageMediaStory')).toEqual({ kind: 'story' });
+    expect(of('MessageMediaInvoice')).toEqual({ kind: 'other' });
   });
 });

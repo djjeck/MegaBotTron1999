@@ -1239,6 +1239,7 @@ interface Inbound {
   missed?: boolean; // said while the instance was down, delivered once by the connector
   own?: boolean; // sent by the account itself, from any of its devices
   document?: InboundDocument; // the file it carries; `text` is then its caption ('' without one)
+  media?: InboundMedia; // what it carries besides text (D161); `text` is then its caption ('' without one)
   edited?: number; // an edit of message `id` (bot-os.md D144): when, ms; `text` its text now
   buttons?: readonly (readonly string[])[]; // its inline buttons' labels, by row; [] none; absent unknown (D145)
 }
@@ -1249,6 +1250,30 @@ interface InboundDocument {
   size: number; // bytes
   text?: string; // its content, UTF-8 decoded: a text file of at most 256 KiB
   skipped?: 'type' | 'size' | 'encoding' | 'failed'; // why it has no text
+}
+
+interface InboundMedia {
+  // described, never downloaded (D161); a file of any kind is in `document` as well
+  kind:
+    | 'photo'
+    | 'sticker'
+    | 'animation'
+    | 'video'
+    | 'round'
+    | 'voice'
+    | 'audio'
+    | 'file'
+    | 'poll'
+    | 'location'
+    | 'venue'
+    | 'contact'
+    | 'dice'
+    | 'game'
+    | 'story'
+    | 'other';
+  emoji?: string; // a sticker's, a die's
+  title?: string; // a poll's question, an audio's performer and title, a venue's, a game's, a contact's name
+  options?: readonly string[]; // a poll's answers
 }
 
 interface Surface {

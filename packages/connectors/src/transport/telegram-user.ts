@@ -50,6 +50,7 @@ import {
   FloodWait,
   type Inbound,
   type InboundDocument,
+  type InboundMedia,
   LIVE_GRACE_S,
   type Media,
   NEEDS_LOGIN,
@@ -353,6 +354,104 @@ function fileName(attributes: readonly unknown[] | undefined): string | undefine
     if (className === 'DocumentAttributeFilename' && typeof name === 'string') return name;
   }
   return undefined;
+}
+
+/** A GramJS object's class name, read defensively. */
+function classOf(o: unknown): string | undefined {
+  const c =
+    typeof o === 'object' && o !== null ? (o as { className?: unknown }).className : undefined;
+  return typeof c === 'string' ? c : undefined;
+}
+
+/** A string field, or a `TextWithEntities`'s text (a poll's question and answers); `''` is none. */
+function textOf(o: unknown): string | undefined {
+  const t = typeof o === 'object' && o !== null && 'text' in o ? (o as { text?: unknown }).text : o;
+  return typeof t === 'string' && t.trim() !== '' ? t.trim() : undefined;
+}
+
+/** Names joined with a space, those missing left out; undefined when none is there. */
+function joined(...names: unknown[]): string | undefined {
+  const s = names.map(textOf).filter((n) => n !== undefined);
+  return s.length === 0 ? undefined : s.join(' ');
+}
+
+/** A document's media, from its attributes (D161): a sticker, a GIF, a video, a voice note… */
+function documentMedia(attributes: readonly unknown[] | undefined): InboundMedia {
+  const all = attributes ?? [];
+  const find = (name: string): Record<string, unknown> | undefined =>
+    all.find((a) => classOf(a) === name) as Record<string, unknown> | undefined;
+  const sticker = find('DocumentAttributeSticker');
+  if (sticker !== undefined) {
+    const emoji = textOf(sticker['alt']);
+    return { kind: 'sticker', ...(emoji === undefined ? {} : { emoji }) };
+  }
+  if (find('DocumentAttributeAnimated') !== undefined) return { kind: 'animation' };
+  const video = find('DocumentAttributeVideo');
+  if (video !== undefined) return { kind: video['roundMessage'] === true ? 'round' : 'video' };
+  const audio = find('DocumentAttributeAudio');
+  if (audio !== undefined) {
+    if (audio['voice'] === true) return { kind: 'voice' };
+    const title = joined(audio['performer'], audio['title']);
+    return { kind: 'audio', ...(title === undefined ? {} : { title }) };
+  }
+  return { kind: 'file' };
+}
+
+/**
+ * What a message carries besides its text (D161), from GramJS's `Message.media`, read
+ * defensively: none for a text alone or a link's preview (the link is in the text).
+ */
+export function mediaOf(m: Pick<RawMessage, 'media' | 'document'>): InboundMedia | undefined {
+  const media = m.media as Record<string, unknown> | null | undefined;
+  switch (classOf(media)) {
+    case undefined:
+      return m.document === undefined ? undefined : documentMedia(m.document.attributes);
+    case 'MessageMediaEmpty':
+    case 'MessageMediaWebPage':
+      return undefined;
+    case 'MessageMediaPhoto':
+      return { kind: 'photo' };
+    case 'MessageMediaDocument': {
+      const d = (media?.['document'] ?? m.document) as { attributes?: unknown } | undefined;
+      return documentMedia(Array.isArray(d?.attributes) ? d.attributes : undefined);
+    }
+    case 'MessageMediaPoll': {
+      const poll = media?.['poll'] as { question?: unknown; answers?: unknown } | undefined;
+      const title = textOf(poll?.question);
+      const answers = Array.isArray(poll?.answers) ? poll.answers : [];
+      const options = answers
+        .map((a) => textOf((a as { text?: unknown } | null)?.text))
+        .filter((t) => t !== undefined);
+      return {
+        kind: 'poll',
+        ...(title === undefined ? {} : { title }),
+        ...(options.length === 0 ? {} : { options }),
+      };
+    }
+    case 'MessageMediaGeo':
+    case 'MessageMediaGeoLive':
+      return { kind: 'location' };
+    case 'MessageMediaVenue': {
+      const title = textOf(media?.['title']);
+      return { kind: 'venue', ...(title === undefined ? {} : { title }) };
+    }
+    case 'MessageMediaContact': {
+      const title = joined(media?.['firstName'], media?.['lastName']);
+      return { kind: 'contact', ...(title === undefined ? {} : { title }) };
+    }
+    case 'MessageMediaDice': {
+      const emoji = textOf(media?.['emoticon']);
+      return { kind: 'dice', ...(emoji === undefined ? {} : { emoji }) };
+    }
+    case 'MessageMediaGame': {
+      const title = textOf((media?.['game'] as { title?: unknown } | undefined)?.title);
+      return { kind: 'game', ...(title === undefined ? {} : { title }) };
+    }
+    case 'MessageMediaStory':
+      return { kind: 'story' };
+    default:
+      return { kind: 'other' };
+  }
 }
 
 /** A message with text (perhaps empty, under a photo), not a service message (a join, a pin). */
@@ -1215,6 +1314,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
     const sender = username(entity);
     const replyTo = m.replyTo?.replyToMsgId;
     const document = await this.document(m);
+    const media = mediaOf(m);
     const aliases = this.namesOf(chat).slice(1);
     return {
       chat,
@@ -1229,6 +1329,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       playback: false,
       own: m.out === true,
       ...(document === undefined ? {} : { document }),
+      ...(media === undefined ? {} : { media }),
       ...buttonsOf(m),
     };
   }

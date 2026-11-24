@@ -41,6 +41,43 @@ export interface InboundDocument {
   skipped?: 'type' | 'size' | 'encoding' | 'failed';
 }
 
+/** What a message carries besides its text (bot-os.md D161). */
+export type InboundMediaKind =
+  | 'photo'
+  | 'sticker'
+  | 'animation'
+  | 'video'
+  | 'round'
+  | 'voice'
+  | 'audio'
+  | 'file'
+  | 'poll'
+  | 'location'
+  | 'venue'
+  | 'contact'
+  | 'dice'
+  | 'game'
+  | 'story'
+  | 'other';
+
+/**
+ * What a message carries besides its text (bot-os.md D161), described, never downloaded: a sticker
+ * and its emoji, a photo, a GIF (`animation`), a video note (`round`), a voice note, a poll and its
+ * question… A file of any of them is in `document` as well, with its name.
+ */
+export interface InboundMedia {
+  kind: InboundMediaKind;
+  /** A sticker's emoji, a die's (🎲, 🎯…). */
+  emoji?: string;
+  /**
+   * What names it: a poll's question, an audio's performer and title, a venue's, a game's, a
+   * contact's name (never a number or a place's coordinates).
+   */
+  title?: string;
+  /** A poll's answers. */
+  options?: readonly string[];
+}
+
 /**
  * How old a message delivered by a connector's catch-up may be and still count as news, in
  * seconds (bot-os.md D83): from its own time to its delivery. Older, it is played back (history);
@@ -164,6 +201,11 @@ export interface Inbound {
   own?: boolean;
   /** The file it carries, if any (D82); `text` is then its caption, `''` without one. */
   document?: InboundDocument;
+  /**
+   * What it carries besides its text, where the network says (D161): `text` is then its caption,
+   * `''` without one.
+   */
+  media?: InboundMedia;
   /**
    * An edit of the message `id` (bot-os.md D144): when it was edited, in milliseconds; `text` is
    * its text now, `time` still when it was sent. Only `onEdit` hears it, never `onMessage`.

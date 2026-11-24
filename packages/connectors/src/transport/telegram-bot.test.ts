@@ -7,6 +7,7 @@ import {
   adminIn,
   createBot,
   downloadFile,
+  mediaOf,
   MEMBER_UNREACHABLE,
   PHOTO_UNKNOWN,
   PHOTOS_DOC,
@@ -350,6 +351,26 @@ describe('TelegramBotConnector', () => {
       expect(heard.map((m) => m.document?.skipped)).toEqual(['failed']);
       expect(logs.at(-1)).toBe('download of crate.txt failed: Error: Bad Request: file is too big');
     });
+  });
+
+  it('passes a sticker or a photo on without a caption, saying what it is (D161)', async () => {
+    const { c, stub } = connector();
+    const heard: Inbound[] = [];
+    c.onMessage((m) => heard.push(m));
+    const media = (fields: Record<string, unknown>) => {
+      const u = stub.command(5, 5, 'x') as unknown as { message: Record<string, unknown> };
+      delete u.message['text'];
+      delete u.message['entities'];
+      Object.assign(u.message, fields);
+      return u as unknown as ReturnType<typeof stub.command>;
+    };
+    const sticker = { file_id: 's', file_unique_id: 's', type: 'regular', emoji: '😂' };
+    await stub.bot.handleUpdate(media({ sticker }));
+    await stub.bot.handleUpdate(media({ photo: [], caption: 'look' }));
+    expect(heard.map((m) => [m.text, m.media])).toEqual([
+      ['', { kind: 'sticker', emoji: '😂' }],
+      ['look', { kind: 'photo' }],
+    ]);
   });
 
   it('marks what Telegram kept while it was down as missed, and monitors only its chats', async () => {
@@ -1023,5 +1044,48 @@ describe('adminIn', () => {
       method: 'getChatMember',
       payload: { chat_id: -100, user_id: 1 },
     });
+  });
+});
+
+describe('mediaOf (D161)', () => {
+  const of = (fields: Record<string, unknown>) => mediaOf(fields as never);
+  const file = { file_id: 'f', file_unique_id: 'u' };
+
+  it('describes each kind, a contact by name alone, a place without its coordinates', () => {
+    expect(of({ text: 'hi' })).toBeUndefined();
+    expect(of({ sticker: { ...file, emoji: '🙈' } })).toEqual({ kind: 'sticker', emoji: '🙈' });
+    expect(of({ sticker: file })).toEqual({ kind: 'sticker' });
+    expect(of({ animation: file, document: file })).toEqual({ kind: 'animation' });
+    expect(of({ video_note: file })).toEqual({ kind: 'round' });
+    expect(of({ video: file })).toEqual({ kind: 'video' });
+    expect(of({ voice: file })).toEqual({ kind: 'voice' });
+    expect(of({ audio: { ...file, performer: 'The Band', title: 'Song' } })).toEqual({
+      kind: 'audio',
+      title: 'The Band Song',
+    });
+    expect(of({ audio: file })).toEqual({ kind: 'audio' });
+    expect(of({ photo: [] })).toEqual({ kind: 'photo' });
+    expect(of({ document: file })).toEqual({ kind: 'file' });
+    expect(
+      of({
+        poll: { question: 'Pizza?', options: [{ text: 'Yes' }, { text: ' ' }, { text: 'No' }] },
+      })
+    ).toEqual({ kind: 'poll', title: 'Pizza?', options: ['Yes', 'No'] });
+    expect(of({ poll: { question: '', options: [] } })).toEqual({ kind: 'poll' });
+    expect(of({ venue: { title: 'The Inn', location: {} }, location: {} })).toEqual({
+      kind: 'venue',
+      title: 'The Inn',
+    });
+    expect(of({ location: { latitude: 1, longitude: 2 } })).toEqual({ kind: 'location' });
+    expect(of({ contact: { first_name: 'Alice', phone_number: '555' } })).toEqual({
+      kind: 'contact',
+      title: 'Alice',
+    });
+    expect(of({ dice: { emoji: '🎯', value: 3 } })).toEqual({ kind: 'dice', emoji: '🎯' });
+    expect(of({ game: { title: 'Quest' } })).toEqual({ kind: 'game', title: 'Quest' });
+    expect(of({ story: {} })).toEqual({ kind: 'story' });
+    expect(of({ invoice: {} })).toEqual({ kind: 'other' });
+    expect(of({ paid_media: {} })).toEqual({ kind: 'other' });
+    expect(of({ giveaway: {} })).toEqual({ kind: 'other' });
   });
 });

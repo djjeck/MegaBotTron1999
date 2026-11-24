@@ -64,6 +64,8 @@ export {
   hears,
   type Inbound,
   type InboundDocument,
+  type InboundMedia,
+  type InboundMediaKind,
   inChat,
   isTextDocument,
   LIVE_GRACE_S,

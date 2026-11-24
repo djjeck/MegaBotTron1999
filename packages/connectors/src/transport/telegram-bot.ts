@@ -41,6 +41,7 @@ import {
   type ConnectorSendOptions,
   FloodWait,
   type InboundDocument,
+  type InboundMedia,
   LIVE_GRACE_S,
   type Media,
   photoTooLarge,
@@ -150,6 +151,50 @@ export async function startBotWithRetry(bot: Startable, o: StartOptions): Promis
 function floodMs(e: unknown): number | undefined {
   if (!(e instanceof GrammyError) || e.error_code !== 429) return undefined;
   return (e.parameters.retry_after ?? 0) * 1000;
+}
+
+/** Names joined with a space, the empty and missing left out; undefined when none is there. */
+function joined(...names: (string | undefined)[]): string | undefined {
+  const s = names.map((n) => n?.trim()).filter((n) => n !== undefined && n !== '');
+  return s.length === 0 ? undefined : s.join(' ');
+}
+
+/** The field, when there is one. */
+const opt = <K extends string>(key: K, v: string | undefined): Partial<Record<K, string>> =>
+  v === undefined ? {} : ({ [key]: v } as Record<K, string>);
+
+/**
+ * What a message carries besides its text (D161), from the Bot API's fields: none for a text
+ * alone (a link's preview is the link's).
+ */
+export function mediaOf(m: Message): InboundMedia | undefined {
+  if (m.sticker !== undefined) return { kind: 'sticker', ...opt('emoji', joined(m.sticker.emoji)) };
+  if (m.animation !== undefined) return { kind: 'animation' };
+  if (m.video_note !== undefined) return { kind: 'round' };
+  if (m.video !== undefined) return { kind: 'video' };
+  if (m.voice !== undefined) return { kind: 'voice' };
+  if (m.audio !== undefined)
+    return { kind: 'audio', ...opt('title', joined(m.audio.performer, m.audio.title)) };
+  if (m.photo !== undefined) return { kind: 'photo' };
+  if (m.document !== undefined) return { kind: 'file' };
+  if (m.poll !== undefined) {
+    const options = m.poll.options.map((o) => joined(o.text)).filter((t) => t !== undefined);
+    return {
+      kind: 'poll',
+      ...opt('title', joined(m.poll.question)),
+      ...(options.length === 0 ? {} : { options }),
+    };
+  }
+  if (m.venue !== undefined) return { kind: 'venue', ...opt('title', joined(m.venue.title)) };
+  if (m.location !== undefined) return { kind: 'location' };
+  if (m.contact !== undefined)
+    return { kind: 'contact', ...opt('title', joined(m.contact.first_name, m.contact.last_name)) };
+  if (m.dice !== undefined) return { kind: 'dice', ...opt('emoji', joined(m.dice.emoji)) };
+  if (m.game !== undefined) return { kind: 'game', ...opt('title', joined(m.game.title)) };
+  if (m.story !== undefined) return { kind: 'story' };
+  if (m.paid_media !== undefined || m.invoice !== undefined || m.giveaway !== undefined)
+    return { kind: 'other' };
+  return undefined;
 }
 
 /** The store's document of the chats the bot has seen, by id. */
@@ -372,8 +417,10 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
       // again (D82).
       const document =
         heard && m.document !== undefined ? await this.document(m.document) : undefined;
-      // A file without a caption has no text: its text is then ''.
-      const text = m.text ?? m.caption ?? (document === undefined ? undefined : '');
+      const media = heard ? mediaOf(m) : undefined;
+      // A file or other media without a caption has no text: its text is then '' (D161).
+      const text =
+        m.text ?? m.caption ?? (document === undefined && media === undefined ? undefined : '');
       if (heard) {
         this.ledger.advance(key, m.message_id);
         this.keep(m.chat.id, m.message_id, m.photo);
@@ -396,6 +443,7 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
             playback: old,
             ...(missed ? { missed } : {}),
             ...(document === undefined ? {} : { document }),
+            ...(media === undefined ? {} : { media }),
           });
         } catch (e) {
           this.o.log(`a listener failed on message ${m.message_id}: ${String(e)}`);
