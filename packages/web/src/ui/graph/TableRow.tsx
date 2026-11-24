@@ -6,6 +6,10 @@
  *   `GET /plugins/<id>/files/<name>`), or a media (`from: 'media'`: one as JSON carries it, its
  *   bytes shown as they are, or a kept one's reference `{ id: 'sha256:<hex>', mime }`, its file
  *   `sha256-<hex>`), as a thumbnail that opens it whole; an empty value, an empty cell.
+ * - **A carousel** (a column `show: 'carousel'`, D163): a list of such pictures, one thumbnail at a
+ *   time with a previous and a next button (going round) and its place (`3 / 12`). The picture
+ *   shown is kept as the page reads again: by itself while it is still in the list, else by its
+ *   place; and, through `memory`, across a row drawn anew when what it holds changed (#79).
  * - **A row action**: a button that runs an action of the node's interface with the input its
  *   section builds from the row (`'$row.<path>'`) and constants. When the action's input has other
  *   fields, the button opens a small form of them under the row, drawn by the shared form builder
@@ -62,6 +66,62 @@ export function PictureCell(props: { src: string | undefined; alt: string }) {
     <a href={props.src} target="_blank" rel="noreferrer">
       <img className="thumb" src={props.src} alt={props.alt} loading="lazy" />
     </a>
+  );
+}
+
+/** Which picture of a carousel is shown: itself, and its place, for a list that changed. */
+export interface CarouselAt {
+  src: string;
+  index: number;
+}
+
+/** The place of the picture shown in a list of `n`: its own, else its old one, within the list. */
+export function carouselIndex(srcs: readonly string[], shown: CarouselAt | undefined): number {
+  if (shown === undefined || srcs.length === 0) return 0;
+  const own = srcs.indexOf(shown.src);
+  return own >= 0 ? own : Math.min(shown.index, srcs.length - 1);
+}
+
+/**
+ * A cell's list of pictures (D163), one at a time: its thumbnail, which opens it whole, a previous
+ * and a next button that go round, and its place (`3 / 12`); one picture alone, as `PictureCell`;
+ * none, nothing. `memory` keeps the picture shown by `memoryKey`, beyond this cell's life.
+ */
+export function CarouselCell(props: {
+  srcs: readonly string[];
+  /** What it shows, for the thumbnail's and the buttons' labels: `Ads of harbour`. */
+  alt: string;
+  memory?: Map<string, CarouselAt> | undefined;
+  memoryKey?: string | undefined;
+}) {
+  const { srcs, memory, memoryKey } = props;
+  const [shown, setShown] = useState<CarouselAt | undefined>(() =>
+    memoryKey === undefined ? undefined : memory?.get(memoryKey)
+  );
+  if (srcs.length === 0) return null;
+  const i = carouselIndex(srcs, shown);
+  const src = srcs[i] as string;
+  if (srcs.length === 1) return <PictureCell src={src} alt={props.alt} />;
+  const go = (step: number): void => {
+    const index = (i + step + srcs.length) % srcs.length;
+    const next = { src: srcs[index] as string, index };
+    setShown(next);
+    if (memoryKey !== undefined) memory?.set(memoryKey, next);
+  };
+  const place = `${String(i + 1)} / ${String(srcs.length)}`;
+  return (
+    <div className="carousel" role="group" aria-label={props.alt}>
+      <PictureCell src={src} alt={`${props.alt}, ${String(i + 1)} of ${String(srcs.length)}`} />
+      <div className="carousel-controls">
+        <button type="button" aria-label={`Previous of ${props.alt}`} onClick={() => go(-1)}>
+          ‹
+        </button>
+        <span className="small">{place}</span>
+        <button type="button" aria-label={`Next of ${props.alt}`} onClick={() => go(1)}>
+          ›
+        </button>
+      </div>
+    </div>
   );
 }
 

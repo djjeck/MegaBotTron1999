@@ -2123,6 +2123,14 @@ textarea.long {
   border: 1px solid var(--line);
   display: block;
 }
+/* A carousel (D163): one thumbnail of its list at a time, its buttons and its place under it. */
+.widget-section .carousel-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+  white-space: nowrap;
+}
 .widget-section td.row-actions {
   white-space: nowrap;
 }

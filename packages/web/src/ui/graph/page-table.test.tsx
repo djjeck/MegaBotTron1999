@@ -14,7 +14,7 @@ import { NodePage } from '#src/ui/pages/NodePage.tsx';
 import { fakeApi } from '#test/fake-api.ts';
 import { PORT_TYPES } from '#test/graph-view.ts';
 import { optionsOf } from './OptionsField.tsx';
-import { fromRow, ownerFields, pictureSrc } from './TableRow.tsx';
+import { CarouselCell, carouselIndex, fromRow, ownerFields, pictureSrc } from './TableRow.tsx';
 import { rowKeys } from './Widget.tsx';
 
 afterEach(() => {
@@ -39,6 +39,7 @@ const manifest = parseManifest({
             prompt: z.string().describe('Prompt'),
             picture: z.string().optional(),
             face: z.unknown().optional(),
+            ads: z.array(z.string()).optional(),
             host: z.string().optional(),
           })
         ),
@@ -76,6 +77,7 @@ const manifest = parseManifest({
           'prompt',
           { path: 'picture', label: 'Picture', show: 'image' },
           { path: 'face', label: 'Face', show: 'image', from: 'media' },
+          { path: 'ads', label: 'Ads', show: 'carousel' },
         ],
         actions: [
           {
@@ -115,6 +117,7 @@ const CARDS = [
     prompt: 'A quiet harbour at dawn',
     picture: 'card-abc.png',
     face: { id: `sha256:${HASH}`, mime: 'image/png' },
+    ads: ['ad-1.png', 'ad-2.png', 'ad-3.png'],
     host: 'h1',
   },
   { place: 'market', prompt: 'A busy market' },
@@ -156,6 +159,50 @@ describe('a node page’s table (D157)', () => {
     );
     // A row without one: an empty cell.
     expect(within(table).queryByRole('img', { name: 'Picture of market' })).toBeNull();
+  });
+
+  it('shows a row’s list of pictures one at a time, going round, its place kept as it reads again (D163)', async () => {
+    let cards: unknown[] = CARDS;
+    fakeApi({
+      'GET /graph/view': [200, VIEW],
+      'GET /plugins/postcard/state/cards': () => [200, cards],
+      'GET /plugins/postcard/state/hosts': [200, { hosts: [] }],
+      'POST /plugins/postcard/actions/repaint': () => (
+        (cards = [{ ...CARDS[0], ads: ['ad-0.png', 'ad-1.png', 'ad-2.png', 'ad-3.png'] }]),
+        [200, { ok: true }]
+      ),
+    });
+    vi.stubGlobal('confirm', () => true);
+    render(<NodePage loggedOut={() => {}} section="postcard" />);
+    const ads = await screen.findByRole('group', { name: 'Ads of harbour' });
+    const shown = (): string | null =>
+      within(ads).getByRole('img').closest('a')?.getAttribute('href') ?? null;
+    expect(shown()).toBe('api/plugins/postcard/files/ad-1.png');
+    expect(within(ads).getByRole('img').getAttribute('alt')).toBe('Ads of harbour, 1 of 3');
+    expect(within(ads).getByText('1 / 3')).toBeDefined();
+    fireEvent.click(within(ads).getByRole('button', { name: 'Previous of Ads of harbour' }));
+    expect(within(ads).getByText('3 / 3')).toBeDefined();
+    expect(shown()).toBe('api/plugins/postcard/files/ad-3.png');
+    fireEvent.click(within(ads).getByRole('button', { name: 'Next of Ads of harbour' }));
+    fireEvent.click(within(ads).getByRole('button', { name: 'Next of Ads of harbour' }));
+    expect(shown()).toBe('api/plugins/postcard/files/ad-2.png');
+    // A row of none: an empty cell.
+    expect(screen.queryByRole('group', { name: 'Ads of market' })).toBeNull();
+    // The row changes (a picture more, before it): drawn anew, it still shows the same picture.
+    fireEvent.click(screen.getByRole('button', { name: 'Re-roll harbour' }));
+    await waitFor(() => expect(screen.getByText('3 / 4')).toBeDefined());
+    const again = screen.getByRole('group', { name: 'Ads of harbour' });
+    expect(within(again).getByRole('img').getAttribute('src')).toBe(
+      'api/plugins/postcard/files/ad-2.png'
+    );
+  });
+
+  it('shows a list of one picture as it is, and none as nothing', () => {
+    const { container } = render(<CarouselCell srcs={[]} alt="Ads of x" />);
+    expect(container.innerHTML).toBe('');
+    render(<CarouselCell srcs={['one.png']} alt="Ads of y" />);
+    expect(screen.getByRole('img', { name: 'Ads of y' }).getAttribute('src')).toBe('one.png');
+    expect(screen.queryByRole('button')).toBeNull();
   });
 
   it('runs a row’s action with its values, asking first, then reads the table again', async () => {
@@ -256,6 +303,11 @@ describe('a node page’s table (D157)', () => {
     );
     expect(pictureSrc('n', 'media', { id: 'nope', mime: 'image/png' })).toBeUndefined();
     expect(pictureSrc('n', 'media', 'x')).toBeUndefined();
+    // A carousel's picture: itself while in its list, else its place, within the list.
+    expect(carouselIndex(['a', 'b'], undefined)).toBe(0);
+    expect(carouselIndex([], { src: 'a', index: 3 })).toBe(0);
+    expect(carouselIndex(['x', 'a'], { src: 'a', index: 0 })).toBe(1);
+    expect(carouselIndex(['x', 'y'], { src: 'a', index: 5 })).toBe(1);
     expect(ownerFields(undefined, [])).toBeUndefined();
     expect(ownerFields({ type: 'string' }, [])).toBeUndefined();
     expect(ownerFields({ type: 'object', properties: { a: {} } }, ['a'])).toBeUndefined();

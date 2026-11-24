@@ -10,7 +10,7 @@
  * schema refuses, and a path its output's schema has not, or of a kind the section cannot show.
  *
  * A table (D157) may show a column as a picture (`show: 'image'`: a file of the node's own, or a
- * media), and give each row buttons that run one of the node's actions (`actions`), their input
+ * media), or a list of them one at a time (`show: 'carousel'`, D163), and give each row buttons that run one of the node's actions (`actions`), their input
  * built from the row (`'$row.<path>'`) and constants, the rest picked by the owner in a form; the
  * check refuses an action not declared, a key its input has not, a constant its schema refuses and
  * a row path the rows have not. An action's input field may take its options from a read
@@ -56,11 +56,14 @@ const field = z.union([path, z.strictObject({ path, label: label.optional() })])
  * name in its node's own files (`from: 'files'`, the default, D149), or a media (`from: 'media'`:
  * a `Media` as JSON carries it, or a kept one's reference `{ id: 'sha256:<hex>', mime }`, whose
  * file is `sha256-<hex>`, as a collection keeps it, D155). An empty value, an empty cell.
+ *
+ * A column `show: 'carousel'` (D163) takes a list of them, shown one at a time with a previous and
+ * a next button and its place among them (`3 / 12`); an empty list, an empty cell.
  */
 const pictureColumn = z.strictObject({
   path,
   label: label.optional(),
-  show: z.literal('image'),
+  show: z.enum(['image', 'carousel']),
   from: z.enum(['files', 'media']).default('files'),
 });
 const column = z.union([path, z.strictObject({ path, label: label.optional() }), pictureColumn]);
@@ -111,7 +114,7 @@ export const widgetSchema = z.discriminatedUnion('show', [
   z.strictObject({ show: z.literal('list'), ...base, item: path.optional(), max }),
   /**
    * A list's items (a map's values) as rows, a column each of `columns` (a picture, `show:
-   * 'image'`); at most `max` rows; a button per row for each of `actions` (D157).
+   * 'image'`, or a list of them, `show: 'carousel'`); at most `max` rows; a button per row for each of `actions` (D157).
    */
   z.strictObject({
     show: z.literal('table'),
@@ -284,6 +287,13 @@ export function widgetIssues(
       if (w.show === 'list' && w.item !== undefined) fieldsIn(items, [w.item], 'item');
       if (w.show === 'table') {
         fieldsIn(items, w.columns, 'columns');
+        // A carousel's value is a list of pictures (D163).
+        w.columns.forEach((c, i) => {
+          if (typeof c !== 'object' || !('show' in c) || c.show !== 'carousel') return;
+          const s = items === 'open' ? 'open' : schemaAt(items, c.path);
+          if (s !== undefined && s !== 'open' && !types(s).includes('array'))
+            no(`${c.path} is not a list of pictures`, ['columns', i]);
+        });
         (w.actions ?? []).forEach((a, i) => {
           for (const issue of rowActionIssues(a, items, actions))
             no(issue.message, ['actions', i, ...issue.path]);

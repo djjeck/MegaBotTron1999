@@ -225,6 +225,7 @@ const cards = {
             prompt: z.string(),
             picture: z.string().optional(),
             face: z.unknown().optional(),
+            ads: z.array(z.string()).optional(),
             host: z.string().optional(),
           })
         ),
@@ -351,6 +352,30 @@ describe('a table’s pictures and row actions (D157)', () => {
     expect(cardsRefused(table({ columns: [{ path: 'photo', show: 'image' }] }))).toContain(
       'page.sections.0.columns.0: the read cards has no photo'
     );
+  });
+
+  it('takes a carousel column, a list of pictures, and refuses one of no list (D163)', () => {
+    const m = parseManifest({
+      ...cards,
+      ...table({ columns: ['place', { path: 'ads', label: 'Ads', show: 'carousel' }] }),
+    });
+    expect((m.page?.sections[0] as Widget & { show: 'table' }).columns[1]).toEqual({
+      path: 'ads',
+      label: 'Ads',
+      show: 'carousel',
+      from: 'files',
+    });
+    // Of media too; a value its schema leaves open stands.
+    expect(
+      cardsRefused(table({ columns: [{ path: 'face', show: 'carousel', from: 'media' }] }))
+    ).toBe('');
+    expect(cardsRefused(table({ columns: [{ path: 'picture', show: 'carousel' }] }))).toContain(
+      'page.sections.0.columns.0: picture is not a list of pictures'
+    );
+    expect(cardsRefused(table({ columns: [{ path: 'photos', show: 'carousel' }] }))).toContain(
+      'page.sections.0.columns.0: the read cards has no photos'
+    );
+    expect(cardsRefused(table({ columns: [{ path: 'ads', show: 'slideshow' }] }))).not.toBe('');
   });
 
   it('refuses options naming a read it does not declare, or a path its output has not', () => {

@@ -3,12 +3,13 @@
  * (`WidgetLine`), and a section in full (`WidgetSection`): fields as a list of terms, a count, a
  * list, a table, an amount out of its total as a bar, or a time as how long until it. What each
  * shows is the plugin's declaration and its read's output; nothing here knows a plugin. On a page,
- * a table's picture columns show thumbnails, and its row actions a button per row (D157,
- * `TableRow.tsx`).
+ * a table's picture columns show thumbnails (a carousel's, one at a time, D163), and its row
+ * actions a button per row (D157, `TableRow.tsx`).
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { MemberView, Widget } from '#src/ui/api.ts';
-import { PictureCell, pictureSrc, RowActionButton } from './TableRow.tsx';
+import type { CarouselAt } from './TableRow.tsx';
+import { CarouselCell, PictureCell, pictureSrc, RowActionButton } from './TableRow.tsx';
 import {
   at,
   countOf,
@@ -116,6 +117,8 @@ function SectionBody(props: {
   reload: (() => void) | undefined;
 }) {
   const { widget: w, reads, output, now, node } = props;
+  // The picture each carousel shows, by its column and row, kept as the page reads again (D163).
+  const carousels = useRef(new Map<string, CarouselAt>()).current;
   const v = at(output, w.path);
   if (v === undefined) return <p className="muted">—</p>;
   switch (w.show) {
@@ -160,7 +163,9 @@ function SectionBody(props: {
       const keys = rowKeys(shown);
       const columns = fieldsOf(w, reads, v, w.columns, '0').map((c, i) => {
         const spec = w.columns[i];
-        return typeof spec === 'object' && 'show' in spec ? { ...c, from: spec.from } : c;
+        return typeof spec === 'object' && 'show' in spec
+          ? { ...c, from: spec.from, carousel: spec.show === 'carousel' }
+          : c;
       });
       // Row actions need the node to run on: none outside a page.
       const rowActions = node === undefined ? [] : (w.actions ?? []);
@@ -192,7 +197,14 @@ function SectionBody(props: {
                     {columns.map((c) => (
                       <td key={c.path}>
                         {'from' in c && c.from !== undefined ? (
-                          node === undefined ? null : (
+                          node === undefined ? null : c.carousel ? (
+                            <CarouselCell
+                              srcs={pictures(node, c.from, at(row, c.path))}
+                              alt={`${c.label} of ${name}`}
+                              memory={carousels}
+                              memoryKey={`${c.path}\n${name}`}
+                            />
+                          ) : (
                             <PictureCell
                               src={pictureSrc(node, c.from, at(row, c.path))}
                               alt={`${c.label} of ${name}`}
@@ -246,6 +258,12 @@ function SectionBody(props: {
       );
     }
   }
+}
+
+/** The addresses of a carousel's pictures (D163): those of its list that are one. */
+function pictures(node: string, from: 'files' | 'media', value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((p: unknown) => pictureSrc(node, from, p) ?? []);
 }
 
 /** How many more items there are than shown. */

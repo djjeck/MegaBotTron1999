@@ -186,7 +186,9 @@ A section, in full:
   item?: 'name', max?: 20,                            // list: each item's path, at most so many
   columns: ['what', 'n'], max?: 20,                   // table: a column each, within each row
   //   a column may be a picture (D157): { path: 'picture', label?: 'Picture', show: 'image',
-  //   from?: 'files' | 'media' }; and a table may have row actions (D157):
+  //   from?: 'files' | 'media' }, or a list of them, one at a time (D163):
+  //   { path: 'ads', label?: 'Ads', show: 'carousel', from?: 'files' | 'media' };
+  //   and a table may have row actions (D157):
   //   actions?: [{ label: 'Re-roll', action: 'repaint', input?: { place: '$row.place', what: 'ad' },
   //                current?: { host: '$row.host' }, confirm?: 'Re-roll this picture?' }]
   of: 'cap' | 100,                                    // progress: the total, a path or a number
@@ -218,15 +220,22 @@ a thumbnail that opens it whole, an empty value an empty cell: `from: 'files'` (
 name in the node's own files (§4.2, D149), served as `GET /plugins/<id>/files/<name>`;
 `from: 'media'`, a `Media` as JSON carries it (its bytes shown as they are), or a kept one's
 reference `{ id: 'sha256:<hex>', mime }`, whose file is `sha256-<hex>` (a collection's, D155). A
-table's `actions` give each row a button per action, running the node's action of that name
-(`interface.actions`) through the control API, so its schema checks the input as any call's:
-`input`'s keys are constants, or a row's values (a string `'$row.<path>'`, `'$row'` the row itself);
-the action's other input fields are the owner's, in a small form the button opens under the row,
-drawn by the same form builder as every action's and setting's (`SchemaForm`), each key of `current`
-preselected with the row's value at its path. With no field left the button runs at once. `confirm`
-is asked first. While it runs the button is busy; then its answer, or why not, is said under it, and
-the page's reads are asked again. An action's input field may take its **options from a read** of
-the node, since a manifest cannot list what changes while it runs (a cast edited in a collection):
+column `show: 'carousel'` (D163) takes a list of such values (an empty list, or none, an empty cell;
+an item that is no picture, skipped) and shows one at a time, at an `image`'s size: its thumbnail,
+which opens it whole, a previous and a next button that go round, and its place (`3 / 12`); a list
+of one, its thumbnail alone. No autoplay. As the page reads again, each row's carousel keeps the
+picture it shows (found again in its list, else at its place), even when the row is drawn anew for
+holding something else (its key, what it holds: #79); it is the row's name, its first column's text,
+that tells it, so two rows of one name share it. A table's `actions` give each row a button per
+action, running the node's action of that name (`interface.actions`) through the control API, so its
+schema checks the input as any call's: `input`'s keys are constants, or a row's values (a string
+`'$row.<path>'`, `'$row'` the row itself); the action's other input fields are the owner's, in a
+small form the button opens under the row, drawn by the same form builder as every action's and
+setting's (`SchemaForm`), each key of `current` preselected with the row's value at its path. With
+no field left the button runs at once. `confirm` is asked first. While it runs the button is busy;
+then its answer, or why not, is said under it, and the page's reads are asked again. An action's
+input field may take its **options from a read** of the node, since a manifest cannot list what
+changes while it runs (a cast edited in a collection):
 `.meta({ options: { read, path?, value?, label? } })` on a `z.string()`, the items at `path` of the
 read's output (all of it for none, a list or a map), each option's value at `value` (the item itself
 for none) and its label at `label` (its value for none). Every form that knows its node draws it as
@@ -263,8 +272,9 @@ page: {
 },
 ```
 
-The manifest's check refuses a picture column's path its rows have not (as any column's), a row
-action whose action it does not declare
+The manifest's check refuses a picture column's path its rows have not (as any column's), a
+carousel's whose schema is no list (`page.sections.0.columns.2: ads is not a list of pictures`), a
+row action whose action it does not declare
 (`page.sections.0.actions.0.action: fly is not among its actions (interface.actions)`), an `input`
 key its action's object schema does not take, a constant its schema refuses, a row path its rows
 have not (`its rows have no town`), a `current` key that `input` gives already, and options that
