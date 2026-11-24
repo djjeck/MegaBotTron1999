@@ -274,8 +274,12 @@ a path its output has not or that is no list. A script node declares neither: it
 (§5), its code running in a worker thread that a synchronous read could not ask.
 
 **Chat commands (P11).** A command of `interface.commands` has its `help` (the owner's words: the
-owner's menu, the UI, the agents), its `args`, its `aliases` (other names it answers to, in no menu)
-and, for the users' menus, a description in their language (`menu`; a command without one is
+owner's menu, the UI, the agents), its `args`, its `aliases` (other names it answers to, in no menu;
+a name, or a word in any alphabet with a lower-case first letter, such as `perché`: Telegram marks
+as a command only Latin letters, digits and `_`, so `telegram-bot` reads an alias written otherwise
+from a plain text that starts with `/alias` or `/alias@ThisBot` and then a space or nothing, in a
+group only when the bot hears every message there, its privacy mode off or as an admin; bot-os.md
+D162) and, for the users' menus, a description in their language (`menu`; a command without one is
 answered but not listed there). The instance offers a handler for each (`commands`:
 `run(answer, request)`, and `allow(asker)` for a command answered only to some; a command declared
 and not offered fails the plugin at `create`), and two commands or aliases of one name fail the

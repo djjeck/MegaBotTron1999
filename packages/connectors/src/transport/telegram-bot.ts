@@ -315,6 +315,11 @@ export interface BotConnectorOptions {
   };
   /** Where and for whom it works (D128); none: everywhere, for anyone. */
   gate?: Gate;
+  /**
+   * The aliases of the commands it serves that Telegram does not mark as commands, in lower case
+   * (D162): the gate counts them as commands. None until its surface is served.
+   */
+  unmarked?: () => ReadonlySet<string>;
   /** Hears each command it drops, once (the event log). */
   onDenied?: (d: Denied) => void;
 }
@@ -385,7 +390,9 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
       const group = gate?.refusesGroup(m.chat);
       const person = group === undefined ? gate?.refusesPerson(m.from) : undefined;
       const command =
-        group === undefined && person === undefined ? undefined : commandOf(m, this.self());
+        group === undefined && person === undefined
+          ? undefined
+          : commandOf(m, this.self(), this.o.unmarked?.());
       if (group !== undefined || (person !== undefined && command !== undefined)) {
         const key = String(m.chat.id);
         if (this.ledger.covered(key, m.message_id)) return;

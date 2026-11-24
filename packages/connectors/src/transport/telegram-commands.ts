@@ -17,6 +17,13 @@
  * passed on and answered the same way: a command with no
  * `menu` for the players, is in the author's menu only, and answered in a group all the same.
  *
+ * An alias that is not all Latin letters, digits and `_` (`/benvenutə`, D162) Telegram does not mark
+ * as a command: the message comes as plain text, which grammY's command filter passes by. A handler
+ * after the others reads it: a text that starts with `/alias` or `/alias@ThisBot`, then a space or
+ * nothing, is that alias, answered as a marked one is, in the same chats, with the same checks and
+ * throttles, the text after it its arguments. A longer word (`/benvenutəo`) is not. In a group, the
+ * bot hears such a text only with Telegram's privacy mode off, or as an admin.
+ *
  * A command may be answered only to some (`allow`): to the senders its check lets through, by their
  * Telegram id or username, in every chat; anyone else is ignored without a word, and not counted by
  * the throttles. The author is the instance's owner (`Asker.owner`).
@@ -89,6 +96,8 @@ export interface Surface {
   allow: Readonly<Record<string, (asker: Asker) => boolean>>;
   /** Each alias, with the command it stands for. */
   aliases: Readonly<Record<string, string>>;
+  /** The aliases Telegram does not mark as commands, in lower case (D162). */
+  unmarked: ReadonlySet<string>;
   /** The owner's commands: answered in the author's chat only. */
   owner: ReadonlySet<string>;
   /** Every private chat's menu but the author's: those served in every private chat. */
@@ -97,6 +106,39 @@ export interface Surface {
   authorMenu: readonly Command[];
   /** The menus of the other chats an edge names, by the chat as it names it. */
   chatMenus: ReadonlyMap<string, readonly Command[]>;
+}
+
+/** What a typed command is answered from: its message's chat, sender, id, and the bot's API. */
+interface Typed {
+  chat: { id: number; type: string };
+  from?: { id: number; username?: string } | undefined;
+  api: Api;
+  msg: { message_id: number };
+}
+
+/** Whether Telegram marks `/name` as a command: Latin letters, digits and `_` alone (D162). */
+export const isMarked = (name: string): boolean => /^[A-Za-z0-9_]+$/u.test(name);
+
+/**
+ * The alias a message that Telegram did not mark as a command types (D162), one of `names` (those
+ * it does not mark, in lower case), and the text after it: `/name` or `/name@ThisBot` (`me`, any
+ * bot when unknown), then a space or nothing; none for anything else, or a message marked.
+ */
+export function unmarkedOf(
+  m: { text?: string | undefined; entities?: readonly { type: string; offset: number }[] },
+  names: ReadonlySet<string>,
+  me: string | undefined
+): { name: string; args: string } | undefined {
+  if (m.text === undefined || names.size === 0) return undefined;
+  if (m.entities?.some((e) => e.type === 'bot_command' && e.offset === 0) === true)
+    return undefined;
+  const typed = /^\/([^\s@]+)(?:@(\S+))?(?:\s+([\s\S]*))?$/u.exec(m.text);
+  const name = typed?.[1]?.toLowerCase();
+  if (name === undefined || !names.has(name)) return undefined;
+  const to = typed?.[2];
+  if (to !== undefined && me !== undefined && to.toLowerCase() !== me.toLowerCase())
+    return undefined;
+  return { name, args: typed?.[3] ?? '' };
 }
 
 /** A chat's names, as an edge may name it (D96): its id, and its `@username` if it has one. */
@@ -144,6 +186,11 @@ export function surfaceOf(
     served,
     allow,
     aliases,
+    unmarked: new Set(
+      Object.keys(aliases)
+        .filter((a) => !isMarked(a))
+        .map((a) => a.toLowerCase())
+    ),
     owner: new Set(commands.filter((c) => c.owner).map((c) => c.name)),
     privateMenu: menu(commands.filter((c) => players(c) && c.where?.privateChats === true)),
     authorMenu:
@@ -387,31 +434,47 @@ export function installPublicCommands(
 
   // The rest, which the switchboard passes on: every command in the other chats, and in its own
   // chats the aliases and the commands left out of their menu; each where it is served (D109).
-  for (const [name, command] of Object.entries(names)) {
-    bot.command(name, (ctx) => {
-      const chat = ctx.chat.id;
-      const asker = askerOf(ctx.from, o.authorId);
-      const group = isGroup(ctx.chat);
-      if (!servedIn(command, ctx.chat as ChatRef)) return;
-      if (isOwner(command) && chat !== o.authorId) return;
-      if (!allowed(command, asker)) return;
-      if (group) {
-        if (!inGroup(chat, command).allow(asker?.id, o.now())) return;
-      } else if (chat !== o.authorId) {
-        if (inPrivate.get(command)?.allow(asker?.id, o.now()) !== true) return;
-      }
-      run(
-        command,
-        // The owner's, typed out of the menu (a card's button by hand), as the menu's are answered:
-        // through the switchboard, whose buttons come back to it.
-        isOwner(command)
-          ? inTopic(AUTHOR_TOPIC, undefined, command)
-          : inChat(ctx.api, chat, ctx.msg.message_id, expire(command, group)),
-        ctx.match,
-        chat
-      );
+  /** A command typed in a message (`ctx`), with the text after it: answered where it may be. */
+  const typed = (command: string, ctx: Typed, args: string): void => {
+    const chat = ctx.chat.id;
+    const asker = askerOf(ctx.from, o.authorId);
+    const group = isGroup(ctx.chat);
+    if (!servedIn(command, ctx.chat as ChatRef)) return;
+    if (isOwner(command) && chat !== o.authorId) return;
+    if (!allowed(command, asker)) return;
+    if (group) {
+      if (!inGroup(chat, command).allow(asker?.id, o.now())) return;
+    } else if (chat !== o.authorId) {
+      if (inPrivate.get(command)?.allow(asker?.id, o.now()) !== true) return;
+    }
+    run(
+      command,
+      // The owner's, typed out of the menu (a card's button by hand), as the menu's are answered:
+      // through the switchboard, whose buttons come back to it.
+      isOwner(command)
+        ? inTopic(AUTHOR_TOPIC, undefined, command)
+        : inChat(ctx.api, chat, ctx.msg.message_id, expire(command, group)),
+      args,
+      chat
+    );
+  };
+  for (const [name, command] of Object.entries(names))
+    if (isMarked(name)) bot.command(name, (ctx) => typed(command, ctx, ctx.match));
+
+  // The aliases Telegram does not mark as commands (D162), by their name in lower case: plain
+  // texts, read after the others.
+  const unmarked = new Map(
+    Object.entries(names)
+      .filter(([n]) => !isMarked(n))
+      .map(([n, command]) => [n.toLowerCase(), command])
+  );
+  if (unmarked.size > 0)
+    bot.on('message:text', async (ctx, next) => {
+      const u = unmarkedOf(ctx.msg, new Set(unmarked.keys()), ctx.me.username);
+      const command = u === undefined ? undefined : unmarked.get(u.name);
+      if (u === undefined || command === undefined) return next();
+      typed(command, ctx, u.args);
     });
-  }
 
   // A tap on the buttons of an answer sent through the Bot API, which the switchboard passed on.
   bot.on('callback_query:data', async (ctx, next) => {

@@ -34,8 +34,8 @@ const AUTHOR_MENU = [
 /**
  * The public commands on a real switchboard with the author's chat and the group, fed through a
  * stub bot: `/map` answers with a photo, a Markdown caption under it, and reports its file id, `/ping` with a line, `/bold` with a
- * line in Markdown, `/brief` with a line to delete from the group in a minute; `/pong` is an alias of `/ping`, and
- * `/nothing` of no command. `run()` runs what was scheduled.
+ * line in Markdown, `/brief` with a line to delete from the group in a minute; `/pong` is an alias of `/ping`,
+ * and so is `/pongə`, which Telegram does not mark as a command (D162); `/nothing` is of no command. `run()` runs what was scheduled.
  */
 function chats(handlers?: Handlers, allow?: PublicCommandsOptions['allow']) {
   const stub = stubBot();
@@ -75,7 +75,7 @@ function chats(handlers?: Handlers, allow?: PublicCommandsOptions['allow']) {
   installPublicCommands(switchboard, stub.bot, {
     handlers: answering,
     served,
-    aliases: { pong: 'ping', nothing: 'none' },
+    aliases: { pong: 'ping', pongə: 'ping', nothing: 'none', nothingə: 'none' },
     ...(allow && { allow }),
     authorId: AUTHOR,
     now: () => now,
@@ -88,6 +88,11 @@ function chats(handlers?: Handlers, allow?: PublicCommandsOptions['allow']) {
   };
   const feed = async (chat: number, from: number, text: string, username?: string) => {
     await stub.bot.handleUpdate(stub.command(chat, from, text, username));
+    await new Promise((r) => setTimeout(r, 10));
+  };
+  /** A text Telegram marks nothing in (D162). */
+  const say = async (chat: number, from: number, text: string, username?: string) => {
+    await stub.bot.handleUpdate(stub.text(chat, from, text, username));
     await new Promise((r) => setTimeout(r, 10));
   };
   /** Taps the button with callback data `data` on the last message sent to `chat`. */
@@ -124,6 +129,7 @@ function chats(handlers?: Handlers, allow?: PublicCommandsOptions['allow']) {
   return {
     ...stub,
     feed,
+    say,
     press,
     lastId,
     edits,
@@ -296,6 +302,54 @@ describe('installPublicCommands', () => {
     expect(JSON.stringify(c.sent()[0]?.payload['reply_parameters'])).toMatch(/"message_id":\d+/u);
   });
 
+  it('answers an alias Telegram does not mark as a command, typed as one (D162)', async () => {
+    const asked: string[] = [];
+    const c = chats({
+      ping: (a, r) => (asked.push(r.args), a.text('pong')),
+    });
+    let after = 0;
+    c.bot.on('message', () => void after++);
+    await c.say(GROUP, 1, '/pongə alice');
+    await c.say(GROUP, 2, '/Pongə@ExampleBot  bob ');
+    await c.say(PLAYER, PLAYER, '/pongə');
+    await c.say(AUTHOR, AUTHOR, '/pongə carl');
+    expect(c.sent().map((s) => [s.payload['chat_id'], s.payload['text']])).toEqual([
+      [GROUP, 'pong'],
+      [PLAYER, 'pong'],
+      [AUTHOR, 'pong'],
+    ]);
+    // In reply, its arguments what follows it; the group's throttle as a marked one's (1 s).
+    expect(asked).toEqual(['alice', '', 'carl']);
+    expect(JSON.stringify(c.sent()[0]?.payload['reply_parameters'])).toMatch(/"message_id":\d+/u);
+    c.later(PER_CHAT_MS);
+    await c.say(GROUP, 2, '/Pongə@ExampleBot  bob ');
+    expect(asked).toEqual(['alice', '', 'carl', 'bob']);
+    // Answered, they go no further; the rest does.
+    expect(after).toBe(0);
+    c.later(PER_USER_MS);
+    // A longer word, another bot's, not at the start, an alias of no command: no command. Nor is an
+    // unmarked `/pong`: Telegram marks it when it is one.
+    for (const text of [
+      '/pongəo',
+      '/pongə@AnotherBot',
+      'say /pongə',
+      '/pong',
+      'hello',
+      '/nothingə',
+    ])
+      await c.say(GROUP, 3, text);
+    // In a chat it is not served in, ignored, as a marked one is.
+    await c.say(-100999, 3, '/pongə');
+    expect(asked).toHaveLength(4);
+    expect(after).toBe(6);
+  });
+
+  it('answers a marked command once, its unmarked aliases served too (D162)', async () => {
+    const c = chats();
+    await c.feed(GROUP, 1, '/pong');
+    expect(c.sent()).toHaveLength(1);
+  });
+
   it('ignores an alias elsewhere, addressed to another bot, or of no command', async () => {
     const c = chats();
     await c.feed(-100999, 1, '/pong');
@@ -322,7 +376,7 @@ describe('installPublicCommands', () => {
       [
         command('map', { menu: 'la mappa', where: everywhere }),
         command('countdown', { menu: 'conto', aliases: ['timer', 'clock'], where: everywhere }),
-        command('report', { aliases: ['stats'], allow: owner, where: everywhere }),
+        command('report', { aliases: ['stats', 'rapportò'], allow: owner, where: everywhere }),
       ],
       { author: AUTHOR }
     );
@@ -330,7 +384,10 @@ describe('installPublicCommands', () => {
       timer: 'countdown',
       clock: 'countdown',
       stats: 'report',
+      rapportò: 'report',
     });
+    // Those Telegram does not mark as commands (D162).
+    expect([...surface.unmarked]).toEqual(['rapportò']);
     // The group's menu, in the players' words; every private chat's too.
     expect(surface.chatMenus.get(String(GROUP))).toEqual([
       { command: 'map', description: 'la mappa' },

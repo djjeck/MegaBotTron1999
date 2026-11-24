@@ -298,7 +298,11 @@ export function telegramBotPlugin(
         store: ctx.store,
         now: () => ctx.clock.now(),
         ...(gate.active
-          ? { gate, onDenied: (d) => ctx.record(`${TELEGRAM_BOT}.denied`, { ...d }) }
+          ? {
+              gate,
+              onDenied: (d) => ctx.record(`${TELEGRAM_BOT}.denied`, { ...d }),
+              ...(surface === undefined ? {} : { unmarked: () => surface.unmarked }),
+            }
           : {}),
         liveGraceMs: config.liveGraceS * 1000,
         ...(o.sleep === undefined ? {} : { sleep: o.sleep }),

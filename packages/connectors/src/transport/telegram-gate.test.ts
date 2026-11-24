@@ -96,4 +96,14 @@ describe('commandOf', () => {
     expect(commandOf({ text: '/roll' }, 'ExampleBot')).toBeUndefined();
     expect(commandOf({ entities: m('/roll').entities }, 'ExampleBot')).toBeUndefined();
   });
+
+  it('reads an alias Telegram does not mark as a command, typed as one (D162)', () => {
+    const typed = new Set(['tiratə']);
+    expect(commandOf({ text: '/tiratə 3' }, 'ExampleBot', typed)).toBe('/tiratə');
+    expect(commandOf({ text: '/Tiratə@examplebot' }, 'ExampleBot', typed)).toBe('/tiratə');
+    expect(commandOf({ text: '/tiratə@OtherBot' }, 'ExampleBot', typed)).toBeUndefined();
+    expect(commandOf({ text: '/tiratəo 3' }, 'ExampleBot', typed)).toBeUndefined();
+    expect(commandOf({ text: 'say /tiratə' }, 'ExampleBot', typed)).toBeUndefined();
+    expect(commandOf({ text: '/tiratə' }, 'ExampleBot')).toBeUndefined();
+  });
 });

@@ -135,6 +135,7 @@ describe('TelegramBotConnector', () => {
       /** The time, in ms: what came before its connection was missed. */
       now?: number;
       gate?: Gate;
+      unmarked?: ReadonlySet<string>;
     } = {}
   ) {
     const stub = stubBot();
@@ -171,6 +172,7 @@ describe('TelegramBotConnector', () => {
       sleep: () => Promise.resolve(),
       ...(o.download === undefined ? {} : { download: o.download }),
       ...(o.gate === undefined ? {} : { gate: o.gate, onDenied: (d) => denied.push(d) }),
+      ...(o.unmarked === undefined ? {} : { unmarked: () => o.unmarked ?? new Set() }),
     });
     c.onStatus((s) => states.push(`${s.state} ${s.phase}`));
     return { c, stub, logs, states, docs, denied, polls: () => polls };
@@ -724,6 +726,17 @@ describe('TelegramBotConnector', () => {
       expect(logs).toContain('denied /roll of 66 in The Lobby');
       expect(c.denied()).toMatchObject({ count: 3, last: { sender: '66', t: 0 } });
       expect(sent(stub)).toEqual([]);
+    });
+
+    it('drops an alias Telegram does not mark as a command, as a command (D162)', async () => {
+      const { c, stub, denied } = connector({ gate: gate(), unmarked: new Set(['rollə']) });
+      const heard: string[] = [];
+      c.onMessage((m) => heard.push(`${m.chat} ${m.text}`));
+      await stub.bot.handleUpdate(stub.text(LOBBY, 66, '/rollə 3'));
+      // Not one of its aliases: what they say, heard.
+      await stub.bot.handleUpdate(stub.text(LOBBY, 66, '/rolləo 3'));
+      expect(heard).toEqual([`${LOBBY} /rolləo 3`]);
+      expect(denied.map((d) => `${d.sender} ${d.command}`)).toEqual(['66 /rollə']);
     });
 
     it('leaves the owner, other bots’ commands and what they say alone', async () => {

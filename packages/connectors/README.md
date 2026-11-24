@@ -6,19 +6,21 @@ other plugins a handle:
 - `irc`: an IRC channel through a ZNC bouncer, with its flood limits, and a health endpoint;
 - `telegram-bot`: a Telegram bot (grammY), and the owner's chat surface: the owner's commands, cards
   and buttons in the owner's chat, and the plugins' commands its `commands` output's edges serve
-  (docs/bot-os.md D109), each answered and listed in the menus of the chats its edge names alone; it
-  reports nothing on its own (docs/bot-os.md D94), and sends the buttons of an `owner-notice`
-  message to the owner's chat through the surface, so that a tap runs the owner's command; its gate
-  (docs/bot-os.md D128, `telegram-gate.ts`) says where and for whom it works, each list picked among
-  its chats: `groups`, any group it is added to (but those in `blockGroups`) or only those in
-  `onlyGroups`, a group it does not work in hearing nothing, no command answered there and no
-  message read; `people`, anyone (but those in `blockPeople`) or only those in `onlyPeople`, its
-  owner always, in groups and private chats alike, a person's commands and taps dropped (what they
-  say still read); each command dropped before any plugin sees it, recorded (`telegram-bot.denied`)
-  and counted in its node's view, silent unless `denyReply` sets one line for people; each group's
-  menu set in its chat scope, as its commands edges name it, but in a group it does not work in; its
-  `home` (docs/bot-os.md D105), the command of the owner's main card, puts a button back to it
-  (`homeLabel`) at the foot of the core's own cards;
+  (docs/bot-os.md D109), each answered and listed in the menus of the chats its edge names alone,
+  and an alias Telegram does not mark as a command (`/benvenutə`, any letter but Latin ones) read
+  from the plain text all the same (docs/bot-os.md D162; in a group, only with its privacy mode off
+  or as an admin); it reports nothing on its own (docs/bot-os.md D94), and sends the buttons of an
+  `owner-notice` message to the owner's chat through the surface, so that a tap runs the owner's
+  command; its gate (docs/bot-os.md D128, `telegram-gate.ts`) says where and for whom it works, each
+  list picked among its chats: `groups`, any group it is added to (but those in `blockGroups`) or
+  only those in `onlyGroups`, a group it does not work in hearing nothing, no command answered there
+  and no message read; `people`, anyone (but those in `blockPeople`) or only those in `onlyPeople`,
+  its owner always, in groups and private chats alike, a person's commands and taps dropped (what
+  they say still read); each command dropped before any plugin sees it, recorded
+  (`telegram-bot.denied`) and counted in its node's view, silent unless `denyReply` sets one line
+  for people; each group's menu set in its chat scope, as its commands edges name it, but in a group
+  it does not work in; its `home` (docs/bot-os.md D105), the command of the owner's main card, puts
+  a button back to it (`homeLabel`) at the foot of the core's own cards;
 - `telegram-user`: a Telegram user account (GramJS), reading and sending in the chats it monitors
   (every chat, until its `chats` config ticks some);
 

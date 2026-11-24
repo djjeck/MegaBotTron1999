@@ -152,6 +152,26 @@ describe('parseManifest', () => {
     expect(Object.keys(m.events)).toEqual(['dice.message']);
   });
 
+  it('takes a command’s aliases in any alphabet, its first letter lower-case (D162)', () => {
+    const aliased = (aliases: string[]) =>
+      parseManifest({ ...base, interface: { commands: { roll: { help: 'roll', aliases } } } })
+        .interface.commands?.['roll']?.aliases;
+    expect(aliased(['dice', 'rollAll', 'tiratə', 'perché', 'кубик', 'd_20'])).toEqual([
+      'dice',
+      'rollAll',
+      'tiratə',
+      'perché',
+      'кубик',
+      'd_20',
+    ]);
+    for (const bad of ['Roll', 'É', '2d', '/roll', 'roll dice', 'roll@ExampleBot', ''])
+      expect(() => aliased([bad])).toThrow('expected a name such as fooBar');
+    // The command's own name is still Telegram's: it goes in the menus.
+    expect(() =>
+      parseManifest({ ...base, interface: { commands: { tiratə: { help: 'roll' } } } })
+    ).toThrow('interface.commands.tiratə: Invalid key in record');
+  });
+
   it('names the plugin and every field wrong', () => {
     expect(() => parseManifest({ ...base, version: 'one', kinds: ['robot'] })).toThrow(
       /^plugin test-plugin: bad manifest: version: expected a semver version; kinds\.0: /u

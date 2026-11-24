@@ -41,6 +41,16 @@ const fn = z.custom<(...args: never[]) => unknown>(
   'expected a function'
 );
 const name = z.string().regex(/^[a-z][A-Za-z0-9_]*$/u, 'expected a name such as fooBar');
+/**
+ * A command's alias: a name, or a word in any alphabet, its first letter lower-case (`benvenutə`,
+ * `perché`), which Telegram does not mark as a command and its connector reads all the same (D162).
+ */
+const aliasName = z
+  .string()
+  .regex(
+    /^\p{Ll}[\p{L}\p{M}\p{Nd}_]*$/u,
+    'expected a name such as fooBar, or a word such as perché'
+  );
 /** A node's own manifest, from its config and its id (`node`, bot-os.md D74). */
 export type NodeManifest = (config: Readonly<Record<string, unknown>>, id: string) => unknown;
 const nodeFn = z.custom<NodeManifest>((v) => typeof v === 'function', 'expected a function');
@@ -310,8 +320,11 @@ export const manifestSchema = z
           z.strictObject({
             help: z.string(),
             args: z.string().optional(),
-            /** Other names it answers to, in no menu. */
-            aliases: z.array(name).default([]),
+            /**
+             * Other names it answers to, in no menu; any lower-case word, which Telegram reads as
+             * plain text when it is not all Latin letters, digits and `_` (D162).
+             */
+            aliases: z.array(aliasName).default([]),
             /** Its description in the players' menus, in their language; unlisted without. */
             menu: z.string().min(1).optional(),
             /** The owner's alone: answered to the owner only, in the owner's chat. */

@@ -12,7 +12,7 @@
  * known, compared without case.
  */
 import { type Message } from 'grammy/types';
-import { isGroup, Throttle } from './telegram-commands.ts';
+import { isGroup, Throttle, unmarkedOf } from './telegram-commands.ts';
 
 /** How often a person refused is answered, at most: once every 10 minutes. */
 export const DENY_REPLY_MS = 10 * 60_000;
@@ -154,14 +154,20 @@ export class Gate {
 
 /**
  * The command a message starts with, without its arguments (`/roll`), if it is one for this bot:
- * `/roll` or `/roll@ExampleBot`, not one addressed to another bot (`/roll@OtherBot`).
+ * `/roll` or `/roll@ExampleBot`, not one addressed to another bot (`/roll@OtherBot`); or one of the
+ * aliases Telegram does not mark as commands (`unmarked`, in lower case, D162), typed so.
  */
 export function commandOf(
   m: Pick<Message, 'text' | 'entities'>,
-  me: string | undefined
+  me: string | undefined,
+  unmarked: ReadonlySet<string> = new Set()
 ): string | undefined {
   const first = m.entities?.[0];
-  if (m.text === undefined || first?.type !== 'bot_command' || first.offset !== 0) return undefined;
+  if (m.text === undefined) return undefined;
+  if (first?.type !== 'bot_command' || first.offset !== 0) {
+    const u = unmarkedOf(m, unmarked, me);
+    return u === undefined ? undefined : `/${u.name}`;
+  }
   const [name, to] = m.text.slice(0, first.length).split('@');
   if (to !== undefined && me !== undefined && to.toLowerCase() !== me.toLowerCase())
     return undefined;

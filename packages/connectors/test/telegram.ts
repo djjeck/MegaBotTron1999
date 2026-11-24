@@ -67,6 +67,17 @@ export function stubBot() {
       },
     }) as unknown as Update;
   /**
+   * A text Telegram marks nothing in, typed in `chatId` by user `from`, with the username given if
+   * any: as it delivers `/benvenutə`, a command's name it does not take (D162).
+   */
+  const text = (chatId: number, from: number, said: string, username?: string): Update => {
+    const u = command(chatId, from, said, username) as unknown as {
+      message: { entities?: unknown };
+    };
+    delete u.message.entities;
+    return u as unknown as Update;
+  };
+  /**
    * A tap on a button whose callback data is `data`, on message `message` in `chatId`, by user
    * `from`, with the username given if any.
    */
@@ -87,7 +98,7 @@ export function stubBot() {
         message: { message_id: message, date: 0, chat: chatOf(chatId) },
       },
     }) as unknown as Update;
-  return { bot, calls, command, tap };
+  return { bot, calls, command, text, tap };
 }
 
 /** The callback data of every button in the calls' inline keyboards. */

@@ -74,6 +74,8 @@ export class TelegramSurface implements ChatSurface {
   private readonly switchboard: Promise<Switchboard>;
   private menus: CommandMenus | undefined;
   private served = false;
+  /** The aliases served that Telegram does not mark as commands (D162): none until served. */
+  unmarked: ReadonlySet<string> = new Set();
 
   constructor(o: TelegramSurfaceOptions) {
     this.o = o;
@@ -87,6 +89,7 @@ export class TelegramSurface implements ChatSurface {
     this.served = true;
     const { bot, owner, log } = this.o;
     const surface = surfaceOf(commands, { author: owner });
+    this.unmarked = surface.unmarked;
     const switchboard = createSwitchboard({
       api: bot.api,
       authorId: owner,
