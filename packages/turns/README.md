@@ -80,13 +80,14 @@ and the node that tells the owner what needs attention.
   `announce`: an item gained), what each live event did, never what the catch-up or a played-back
   event did (D83), offers `get`, `freshness` and the queries, and its view, which the web UI draws
   from the schema alone. It never sends. **With a `readiness`** (D141: its parser's id and
-  vocabulary, and the game's mechanics, `cooldownMin`, `unlock`, `effects`, `interactive`), it also
-  keeps each of the bot's commands' readiness in a section `readiness`, reduced from the parser's
-  events by the reusable `ReadinessModel` (`src/readiness.ts`); its own reducer may fold more facts
-  in (a ban: `hold`; `succeed`, `unlock`, `lock`), with no wrapper; it offers a player's contract
-  (`state.ready`, `state.commands`, `state.bot`, `actions.sent`, handed to its parser through its
-  `parser` input) and its commands and bot in its manifest (`botCommands`, `botUsername`) for the
-  editor's checklist. `readinessPlugin` is such a state with nothing else, for a game with none.
+  vocabulary, and the game's mechanics, `cooldownMin`, `resetsAt`, `unlock`, `effects`,
+  `interactive`), it also keeps each of the bot's commands' readiness in a section `readiness`,
+  reduced from the parser's events by the reusable `ReadinessModel` (`src/readiness.ts`); its own
+  reducer may fold more facts in (a ban: `hold`; `succeed`, `unlock`, `lock`), with no wrapper; it
+  offers a player's contract (`state.ready`, `state.commands`, `state.bot`, `actions.sent`, handed
+  to its parser through its `parser` input) and its commands and bot in its manifest (`botCommands`,
+  `botUsername`) for the editor's checklist. `readinessPlugin` is such a state with nothing else,
+  for a game with none.
 
 - `ownerNoticePlugin` (`src/owner-notice.ts`): `owner-notice`, the one node that reports to a chat
   (docs/bot-os.md D94: the core tells none itself), which tells the owner what needs attention

@@ -601,6 +601,7 @@ const commandSchema = z.object({
   aliases: z.array(z.string()).optional(),
   turn: z.literal(true).optional(),
   cooldownMin: z.number().optional(),
+  resetsAt: z.object({ times: z.array(z.string()), timeZone: z.string() }).optional(),
   unlock: z.object({ pattern: z.string().optional(), forMin: z.number().optional() }).optional(),
   effects: z
     .array(

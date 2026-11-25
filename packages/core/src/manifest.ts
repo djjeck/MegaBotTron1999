@@ -75,6 +75,13 @@ const botCommandSchema = z.strictObject({
   turn: z.literal(true).optional(),
   /** Held for so many minutes after a success. */
   cooldownMin: z.number().positive().optional(),
+  /** Held after a success until the next of these wall-clock times (`HH:MM`) in `timeZone`. */
+  resetsAt: z
+    .strictObject({
+      times: z.array(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/u, 'expected HH:MM')).min(1),
+      timeZone: z.string().min(1),
+    })
+    .optional(),
   /** Ready only once a message of the bot announces it (`pattern`), for `forMin` minutes. */
   unlock: z
     .strictObject({

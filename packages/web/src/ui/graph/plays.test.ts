@@ -44,6 +44,9 @@ describe('a sentence per command (D137)', () => {
       'activated by “A chest appears!”, for 30 minutes: played while active'
     );
     expect(sentence(DAILY)).toBe('played whenever ready, then cooling down for 24 hours');
+    expect(
+      sentence({ command: '/market', resetsAt: { times: ['00:00', '12:00'], timeZone: 'UTC' } })
+    ).toBe('played whenever ready, then held until 00:00 or 12:00 (UTC)');
     expect(playSentence({ command: SHOP, played: false, policy: undefined }, true)).toBe(
       'needs you to answer: not played by default'
     );

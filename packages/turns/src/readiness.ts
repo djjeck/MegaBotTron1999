@@ -8,6 +8,8 @@
  * - an **announced unlock** (`unlock`): held from the start and after each success, until the bot
  *   announces it (its parser's `unlocks`: a message matching its vocabulary's `announcedBy`, or a
  *   reading naming it), for `forMin` minutes if given;
+ * - a **reset at set times** (`resetsAt`): held after a success until the next of some wall-clock
+ *   times of day in a time zone (a shop whose items change at midnight), whoever's use it was;
  * - **effects** (`effects`): at its success, another command's hold ended (`clear`, a reset) or
  *   shortened (`shortenMin`); the turn's hold is the bot's rest;
  * - **interactive** (`interactive: true`): it needs the person to answer or choose (a minigame, a
@@ -26,6 +28,7 @@
  */
 import { type BotCommand, type BusEvent } from '@megabottron1999/core';
 import { z } from 'zod';
+import { addDays, clockMinutes, localDate, zonedInstant } from '#src/sittings.ts';
 import {
   type BotVocabulary,
   type CommandEffect,
@@ -48,6 +51,11 @@ export interface CommandMechanics {
    * publishes it in `unlocks`; then for `forMin` minutes if given, else until its next success.
    */
   unlock?: { forMin?: number };
+  /**
+   * Usable again at set wall-clock times (D165): after a success, held until the first of `times`
+   * (`HH:MM`) after it, in `timeZone` (an IANA name). With a cooldown, the later hold wins.
+   */
+  resetsAt?: ResetsAt;
   /** What its success does to other commands' holds (by name or alias). */
   effects?: readonly CommandEffect[];
   /**
@@ -55,6 +63,37 @@ export interface CommandMechanics {
    * only when its config names it.
    */
   interactive?: true;
+}
+
+/** The wall-clock times a command is usable again at (D165). */
+export interface ResetsAt {
+  times: readonly string[];
+  timeZone: string;
+}
+
+/** What is wrong with `r`, or undefined if nothing. */
+export function resetsAtProblem(r: ResetsAt): string | undefined {
+  if (r.times.length === 0) return 'resetsAt.times must name at least one time';
+  const bad = r.times.find((t) => clockMinutes(t) === undefined);
+  if (bad !== undefined) return `resetsAt.times: ${bad} is not HH:MM`;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: r.timeZone });
+  } catch {
+    return `resetsAt: unknown timeZone ${r.timeZone}`;
+  }
+  return undefined;
+}
+
+/** The first of `r`'s times strictly after `t`. */
+export function nextReset(r: ResetsAt, t: number): number {
+  const today = localDate(t, r.timeZone);
+  let next = Infinity;
+  for (const days of [-1, 0, 1, 2])
+    for (const time of r.times) {
+      const at = zonedInstant(addDays(today, days), clockMinutes(time) as number, r.timeZone);
+      if (at > t && at < next) next = at;
+    }
+  return next;
 }
 
 /** What a readiness state is built from: its parser's id and vocabulary, and the mechanics. */
@@ -186,6 +225,8 @@ export class ReadinessModel {
         fail(`${command}: cooldownMin must be over 0`);
       if (m.unlock?.forMin !== undefined && !(m.unlock.forMin > 0))
         fail(`${command}: unlock.forMin must be over 0`);
+      const reset = m.resetsAt === undefined ? undefined : resetsAtProblem(m.resetsAt);
+      if (reset !== undefined) fail(`${command}: ${reset}`);
       for (const effect of m.effects ?? []) {
         if (this.name(effect.command) === undefined)
           fail(
@@ -359,7 +400,11 @@ export class ReadinessModel {
   ): void {
     const m = this.mechanics[c] ?? {};
     const cooldown = m.cooldownMin === undefined ? undefined : t + m.cooldownMin * 60_000;
-    if (cooldown !== undefined && (retryAt === undefined || cooldown > retryAt))
+    const reset = m.resetsAt === undefined ? undefined : nextReset(m.resetsAt, t);
+    // The latest of its cooldown, its reset and the bot's wait holds it.
+    if (reset !== undefined && (cooldown ?? -Infinity) < reset && (retryAt ?? -Infinity) < reset)
+      this.held(s, c, reset, 'waits for its reset');
+    else if (cooldown !== undefined && (retryAt === undefined || cooldown > retryAt))
       this.held(s, c, cooldown, 'its cooldown');
     else if (retryAt !== undefined)
       this.held(s, c, retryAt, outcome === undefined ? 'held' : whyOf(outcome));
@@ -414,6 +459,9 @@ export class ReadinessModel {
           command,
           ...aliasesOf(aliases),
           ...(m.cooldownMin === undefined ? {} : { cooldownMin: m.cooldownMin }),
+          ...(m.resetsAt === undefined
+            ? {}
+            : { resetsAt: { times: [...m.resetsAt.times], timeZone: m.resetsAt.timeZone } }),
           ...(m.unlock === undefined
             ? {}
             : {

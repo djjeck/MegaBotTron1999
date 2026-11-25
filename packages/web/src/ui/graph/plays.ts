@@ -219,6 +219,7 @@ export function duration(min: number): string {
  * - `/coffee`, a reset of `/play`: "played if /play is cooling down; ends its cool-down"
  * - `/chest`, unlocked: "activated by “A chest appears!”, for 30 minutes: played while active"
  * - `/daily`: "played whenever ready, then cooling down for 24 hours"
+ * - `/market`, reset at set times: "played whenever ready, then held until 00:00 (Europe/Rome)"
  * - `/shop`, interactive, by default: "needs you to answer: not played by default"
  */
 export function playSentence(
@@ -255,6 +256,8 @@ export function playSentence(
           ? `${when}, if ${row.policy} is cooling down`
           : `played if ${row.policy} is cooling down`;
     if (c.cooldownMin !== undefined) how += `, then cooling down for ${duration(c.cooldownMin)}`;
+    if (c.resetsAt !== undefined)
+      how += `, then held until ${c.resetsAt.times.join(' or ')} (${c.resetsAt.timeZone})`;
     const effects = (c.effects ?? []).flatMap((e) => {
       const whose =
         row.policy !== undefined && same(e.command, row.policy) ? 'its' : `${e.command}'s`;

@@ -9,7 +9,13 @@ import {
   QUESTBOT,
   questGamePlugin,
 } from '#test/quest.ts';
-import { ReadinessModel, type ReadinessSpec, type ReadinessState } from './readiness.ts';
+import {
+  nextReset,
+  ReadinessModel,
+  type ReadinessSpec,
+  type ReadinessState,
+  resetsAtProblem,
+} from './readiness.ts';
 import { statePlugin } from './state-plugin.ts';
 
 const MIN = 60_000;
@@ -88,6 +94,15 @@ describe('ReadinessModel (bot-os.md D141)', () => {
     expect(problem({})).toContain(
       '/chest is announced (announcedBy), but its mechanics have no unlock'
     );
+    expect(problem({ '/daily': { resetsAt: { times: [], timeZone: 'UTC' } } })).toContain(
+      '/daily: resetsAt.times must name at least one time'
+    );
+    expect(problem({ '/daily': { resetsAt: { times: ['24:00'], timeZone: 'UTC' } } })).toContain(
+      'resetsAt.times: 24:00 is not HH:MM'
+    );
+    expect(
+      problem({ '/daily': { resetsAt: { times: ['00:00'], timeZone: 'Mars/Base' } } })
+    ).toContain('resetsAt: unknown timeZone Mars/Base');
     expect(problem({}, { ...PARSER, turnCommands: [] })).toContain('expected its turn commands');
     expect(problem(QUEST_MECHANICS)).toBe('');
   });
@@ -309,5 +324,69 @@ describe('a state plugin with a readiness (bot-os.md D141)', () => {
     expect(() =>
       statePlugin({ ...none, schema: z.object({}), initial: {}, reduce: (s) => s })
     ).toThrow('it consumes no event type');
+  });
+});
+
+describe('a reset at set times (bot-os.md D165)', () => {
+  const ROME = 'Europe/Rome';
+  const at = (iso: string): number => Date.parse(iso);
+
+  it('is the first of its times after a moment, across days and a change of the clock', () => {
+    const midnight = { times: ['00:00'], timeZone: ROME };
+    // 14:00 in Rome (UTC+1 in winter): the next midnight is 23:00 UTC.
+    expect(nextReset(midnight, at('2026-11-25T13:00:00Z'))).toBe(at('2026-11-25T23:00:00Z'));
+    // At the reset itself: the next one, a day on.
+    expect(nextReset(midnight, at('2026-11-25T23:00:00Z'))).toBe(at('2026-11-26T23:00:00Z'));
+    // Across the change to summer time (29 March 2026): Rome's midnight is 22:00 UTC after it.
+    expect(nextReset(midnight, at('2026-03-29T12:00:00Z'))).toBe(at('2026-03-29T22:00:00Z'));
+    // Several times a day, in any order: the nearest.
+    const twice = { times: ['18:00', '06:00'], timeZone: 'UTC' };
+    expect(nextReset(twice, at('2026-11-25T07:00:00Z'))).toBe(at('2026-11-25T18:00:00Z'));
+    expect(nextReset(twice, at('2026-11-25T19:00:00Z'))).toBe(at('2026-11-26T06:00:00Z'));
+    expect(resetsAtProblem(twice)).toBeUndefined();
+  });
+
+  it('holds a command after a success until its reset, a cooldown or a stated wait if later', () => {
+    const m = new ReadinessModel({
+      parser: PARSER,
+      mechanics: {
+        ...QUEST_MECHANICS,
+        '/daily': { resetsAt: { times: ['00:00'], timeZone: ROME } },
+        '/coffee': { cooldownMin: 24 * 60, resetsAt: { times: ['00:00'], timeZone: ROME } },
+      },
+    });
+    expect(m.declared.find((c) => c.command === '/daily')).toEqual({
+      command: '/daily',
+      resetsAt: { times: ['00:00'], timeZone: ROME },
+    });
+    const noon = at('2026-11-25T11:00:00Z');
+    const midnight = at('2026-11-25T23:00:00Z');
+    const gain = { kind: 'gain', bot: QUESTBOT };
+    const s = reduceAll(m, [
+      event('answer', noon, { command: '/daily', outcome: gain }),
+      event('answer', noon, { command: '/coffee', outcome: gain }),
+    ]);
+    expect(m.ready(s, midnight - 1)['/daily']).toEqual({
+      ready: false,
+      until: midnight,
+      why: 'waits for its reset',
+    });
+    expect(m.ready(s, midnight)['/daily']).toEqual({ ready: true, since: midnight });
+    // Its cooldown ends later than the reset: the cooldown holds it.
+    expect(m.ready(s, midnight)['/coffee']).toMatchObject({
+      ready: false,
+      until: noon + 24 * 60 * MIN,
+      why: 'its cooldown',
+    });
+    // The bot's own wait, past the reset, holds it; a game's `succeed` (another's use) resets it.
+    const waited = reduceAll(m, [
+      event('answer', noon, { command: '/daily', outcome: gain, retryAt: midnight + 60 * MIN }),
+    ]);
+    expect(m.ready(waited, midnight)['/daily']).toMatchObject({ until: midnight + 60 * MIN });
+    const used = m.succeed(m.initial(), '/daily', midnight + MIN);
+    expect(m.ready(used, midnight + 2 * MIN)['/daily']).toMatchObject({
+      ready: false,
+      until: at('2026-11-26T23:00:00Z'),
+    });
   });
 });
