@@ -109,7 +109,7 @@ class Group extends FakeConnector {
   /** alice writes `text` by hand: heard as her own, and answered. */
   byHand(chat: string, text: string): void {
     const id = String(this.n++);
-    this.hear({ chat, sender: 'alice', own: true, time: this.clock.now(), id, text });
+    this.hear({ chat, senderUsername: 'alice', own: true, time: this.clock.now(), id, text });
     this.clock.setTimeout(() => this.answer(chat, text, id), 1000);
   }
 
@@ -131,7 +131,14 @@ class Group extends FakeConnector {
         reply = 'Found an apple.';
       }
       this.replies.push({ bot: b.bot, text: reply });
-      this.hear({ chat, sender: b.bot, time: t, id: String(this.n++), replyTo, text: reply });
+      this.hear({
+        chat,
+        senderUsername: b.bot,
+        time: t,
+        id: String(this.n++),
+        replyTo,
+        text: reply,
+      });
     }
   }
 }

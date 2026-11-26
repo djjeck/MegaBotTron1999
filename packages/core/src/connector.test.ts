@@ -24,7 +24,7 @@ class TestConnector extends ConnectorBase implements Connector {
   hear(text: string, chat = 'c', sender = 's', own?: boolean): void {
     this.received({
       chat,
-      sender,
+      senderUsername: sender,
       text,
       time: 1,
       playback: false,
@@ -32,7 +32,7 @@ class TestConnector extends ConnectorBase implements Connector {
     });
   }
   edit(text: string, chat = 'c', edited = 2): void {
-    this.reread({ chat, sender: 's', text, time: 1, playback: false, id: '1', edited });
+    this.reread({ chat, senderUsername: 's', text, time: 1, playback: false, id: '1', edited });
   }
   drop(ids: string[], chat = 'c', aliases?: string[]): void {
     this.deleted({ chat, ids, time: 3, ...(aliases === undefined ? {} : { aliases }) });
@@ -89,11 +89,12 @@ describe('connectors', () => {
   });
 
   it('match a read filter by chat and sender', () => {
-    const m = (chat: string, sender: string, own?: boolean): Inbound => ({
+    const m = (chat: string, sender: string, own?: boolean, senderId?: string): Inbound => ({
       account: 'test:me',
       network: 'test',
       chat,
-      sender,
+      senderUsername: sender,
+      ...(senderId === undefined ? {} : { senderId }),
       text: 't',
       time: 1,
       playback: false,
@@ -103,8 +104,25 @@ describe('connectors', () => {
     expect(hears({ reads: ['#a'] }, m('#b', 'x'))).toBe(false);
     expect(hears({ reads: '*', senders: ['me'] }, m('#b', 'x', true))).toBe(true);
     expect(hears({ reads: '*', senders: ['me'] }, m('#b', 'x'))).toBe(false);
-    expect(hears({ reads: '*', senders: ['me'] }, m('#b', 'x'), 'X')).toBe(true);
+    expect(hears({ reads: '*', senders: ['me'] }, m('#b', 'x'), { name: 'X' })).toBe(true);
     expect(hears({ reads: '*', senders: [] }, m('#b', 'x'))).toBe(false);
+    // By id or by username (D167): an id is digits, a chat's with a leading minus.
+    expect(hears({ reads: '*', senders: ['1001'] }, m('#b', 'x', false, '1001'))).toBe(true);
+    expect(hears({ reads: '*', senders: ['1002'] }, m('#b', 'x', false, '1001'))).toBe(false);
+    expect(hears({ reads: '*', senders: ['@X'] }, m('#b', 'x', false, '1001'))).toBe(true);
+    expect(hears({ reads: '*', senders: ['-1009'] }, m('#b', 'x', false, '-1009'))).toBe(true);
+    // The account's own, by its id.
+    expect(
+      hears({ reads: '*', senders: ['me'] }, m('#b', 'y', false, '1001'), { id: '1001' })
+    ).toBe(true);
+    // A sender without a username is matched by id alone.
+    expect(
+      hears(
+        { reads: '*', senders: ['x', 'me'] },
+        { account: 'test:me', network: 'test', chat: '#b', text: 't', time: 1, playback: false },
+        { name: 'x' }
+      )
+    ).toBe(false);
   });
 
   it('match a chat by any of its names (D90)', () => {
@@ -113,7 +131,7 @@ describe('connectors', () => {
       network: 'telegram',
       chat: '5000001',
       aliases: ['@QuestBot'],
-      sender: 'QuestBot',
+      senderUsername: 'QuestBot',
       text: 't',
       time: 1,
       playback: false,

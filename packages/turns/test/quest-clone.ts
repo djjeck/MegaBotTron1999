@@ -43,7 +43,7 @@ export class QuestClone extends FakeConnector {
   /** The owner plays `text` by hand from another device: heard, and answered. */
   byHand(chat: string, text: string): void {
     const id = String(this.n++);
-    this.hear({ chat, sender: 'alice', own: true, time: this.clock.now(), id, text });
+    this.hear({ chat, senderUsername: 'alice', own: true, time: this.clock.now(), id, text });
     this.clock.setTimeout(() => this.answer(chat, text, id), this.answerMs);
   }
 
@@ -52,7 +52,7 @@ export class QuestClone extends FakeConnector {
     const text = this.garble ? 'Gibberish' : this.reply(command, t);
     this.replies.push({ t, command, text });
     const time = this.wholeSeconds ? Math.floor(t / 1000) * 1000 : t;
-    this.hear({ chat, sender: QUESTBOT, time, id: String(this.n++), replyTo, text });
+    this.hear({ chat, senderUsername: QUESTBOT, time, id: String(this.n++), replyTo, text });
   }
 
   private reply(command: string, t: number): string {

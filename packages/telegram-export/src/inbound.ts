@@ -87,15 +87,18 @@ function isOwn(m: ExportMessage, mapping: ReplayMapping): boolean {
   return m.sender !== null && names.includes(m.sender);
 }
 
-/** A sender's username, by id, else by display name; `''` for one not given. */
-function senderOf(m: ExportMessage, mapping: ReplayMapping): string {
+/** A sender's username, by id, else by display name; none for one not given. */
+function senderOf(m: ExportMessage, mapping: ReplayMapping): string | undefined {
   const s = mapping.senders ?? {};
   return (
     (m.sender_id === undefined ? undefined : s[m.sender_id]) ??
-    (m.sender === null ? undefined : s[m.sender]) ??
-    ''
+    (m.sender === null ? undefined : s[m.sender])
   );
 }
+
+/** A username as `Inbound` carries it: none, rather than `''`, for a sender without one. */
+const usernameOf = (u: string | undefined): { senderUsername?: string } =>
+  u === undefined || u === '' ? {} : { senderUsername: u };
 
 /**
  * The messages of an export (merged and sorted, mergeExports) as `Inbound`s of the account, in time
@@ -118,7 +121,7 @@ export function toInbounds(
       chat: chat.chat,
       ...(chat.aliases === undefined ? {} : { aliases: chat.aliases }),
       ...(chat.private === undefined ? {} : { private: chat.private }),
-      sender: mine ? (mapping.owner.username ?? '') : senderOf(m, mapping),
+      ...usernameOf(mine ? mapping.owner.username : senderOf(m, mapping)),
       text: m.text,
       time: (times[i] as number) * 1000,
       id: String(m.id),

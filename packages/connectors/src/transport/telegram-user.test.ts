@@ -279,7 +279,7 @@ describe('TelegramUserConnector', () => {
         account: 'telegram:alice',
         network: 'telegram',
         chat: GROUP,
-        sender: 'LootBot',
+        senderUsername: 'LootBot',
         senderBot: false,
         text: 'Troppo presto',
         time: 1_793_000_000_000,
@@ -290,7 +290,12 @@ describe('TelegramUserConnector', () => {
         buttons: [],
       },
       // A private chat, as the network says (D90): its name may be an id.
-      expect.objectContaining({ chat: '@Quiz_bot', id: '5', sender: 'quiz_bot', private: true }),
+      expect.objectContaining({
+        chat: '@Quiz_bot',
+        id: '5',
+        senderUsername: 'quiz_bot',
+        private: true,
+      }),
     ]);
   });
 
@@ -298,7 +303,12 @@ describe('TelegramUserConnector', () => {
     const { f, messages } = await connector();
     for (const [i, sender] of [undefined, null, {}, { username: null }].entries())
       await f.deliver(raw({ id: i + 1, sender }));
-    expect(messages.map((m) => m.sender)).toEqual(['', '', '', '']);
+    expect(messages.map((m) => m.senderUsername)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
   });
 
   it('gives the sender’s display name, a channel’s title, and whether it is a bot, where GramJS has them (D159)', async () => {

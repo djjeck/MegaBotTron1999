@@ -528,7 +528,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
             );
           return;
         }
-        if (m.sender.toLowerCase() !== spec.bot.toLowerCase()) return;
+        if (m.senderUsername?.toLowerCase() !== spec.bot.toLowerCase()) return;
         const sent = answered(m);
         const command = sent?.command;
         const answer = sent === undefined ? {} : { answer: { length: m.text.trim().length } };

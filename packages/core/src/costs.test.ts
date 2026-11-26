@@ -84,7 +84,7 @@ describe('a node’s cost', () => {
     await kit.start();
     publish?.(1);
     publish?.(2);
-    connector.hear({ chat: '#lobby', sender: 'bob', text: 'hi', time: 0 });
+    connector.hear({ chat: '#lobby', senderUsername: 'bob', text: 'hi', time: 0 });
     kit.runUntil(20);
     const watch = kit.core.cost('watch');
     expect(watch?.dispatch.calls).toBe(4);

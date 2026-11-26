@@ -438,7 +438,7 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
             chat: String(m.chat.id),
             ...(aliases.length === 0 ? {} : { aliases }),
             private: m.chat.type === 'private',
-            sender: m.from?.username ?? '',
+            ...(m.from?.username === undefined ? {} : { senderUsername: m.from.username }),
             ...senderOf(m),
             text,
             time: m.date * 1000,

@@ -257,18 +257,18 @@ describe('react on a message', () => {
     const { account, on, records } = await run();
     on({
       on: { match: /a (?<item>\w+) lies here/u, chats: ['@questbot'] },
-      when: { sender: 'QuestBot' },
+      when: { senderUsername: 'QuestBot' },
       chat: '{chat}',
       send: '/look {item}',
     });
     const say = (text: string, more: Record<string, unknown> = {}) =>
-      account.hear({ chat: BOT, sender: 'QuestBot', text, time: T0, id: '7', ...more });
+      account.hear({ chat: BOT, senderUsername: 'QuestBot', text, time: T0, id: '7', ...more });
     say('a lantern lies here');
     say('a rope lies here', { playback: true });
     say('a torch lies here', { own: true });
-    say('a coin lies here', { sender: 'bob' });
+    say('a coin lies here', { senderUsername: 'bob' });
     say('nothing lies here');
-    account.hear({ chat: '#lobby', sender: 'QuestBot', text: 'a key lies here', time: T0 });
+    account.hear({ chat: '#lobby', senderUsername: 'QuestBot', text: 'a key lies here', time: T0 });
     await flush();
     expect(account.sent).toEqual([{ chat: BOT, text: '/look lantern' }]);
     expect(records()).toHaveLength(1);
@@ -286,11 +286,16 @@ describe('react on a message', () => {
     account.hear({
       chat: '5000001',
       aliases: [BOT],
-      sender: 'QuestBot',
+      senderUsername: 'QuestBot',
       text: 'a lamp lies here',
       time: T0,
     });
-    account.hear({ chat: '5000002', sender: 'QuestBot', text: 'a rope lies here', time: T0 });
+    account.hear({
+      chat: '5000002',
+      senderUsername: 'QuestBot',
+      text: 'a rope lies here',
+      time: T0,
+    });
     await flush();
     expect(account.sent).toEqual([{ chat: BOT, text: '/look lamp' }]);
   });
@@ -299,7 +304,7 @@ describe('react on a message', () => {
     const { account, on } = await run();
     on({ on: { match: 'Your map' }, chat: BOT, send: '/look {document.name} {document.size}' });
     const document = { name: 'map.txt', mime: 'text/plain', size: 5, text: 'x→y' };
-    account.hear({ chat: BOT, sender: 'QuestBot', text: 'Your map', time: T0, document });
+    account.hear({ chat: BOT, senderUsername: 'QuestBot', text: 'Your map', time: T0, document });
     await flush();
     expect(account.sent).toEqual([{ chat: BOT, text: '/look map.txt 5' }]);
   });
@@ -310,12 +315,12 @@ describe('react on a message', () => {
     on({ on: { match: /(?<chat>\w+) opens/u, port: 'chat' }, chat: '{chat}', send: '/look' });
     account.hear({
       chat: '#lobby',
-      sender: 'QuestBot',
+      senderUsername: 'QuestBot',
       text: 'the draw opens',
       time: T0,
       replyTo: '!',
     });
-    account.hear({ chat: '#lobby', sender: 'QuestBot', text: 'the gate', time: T0 });
+    account.hear({ chat: '#lobby', senderUsername: 'QuestBot', text: 'the gate', time: T0 });
     await flush();
     // The second: to #lobby, which its edge does not send to.
     expect(account.sent).toEqual([{ chat: BOT, text: '/look #lobby!' }]);

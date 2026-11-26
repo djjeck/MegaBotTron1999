@@ -124,11 +124,22 @@ describe('the send-queue watchdog in the core (D93)', () => {
     // Answered: an event read from the chat, by a name of its own case.
     expect(lobby().outcome).toBe('sent');
     expect(lobby().outcome).toBe('sent');
-    account.hear({ chat: '#lobby', sender: 'QuestBot', text: 'you have 3 apples', time: T0 });
+    account.hear({
+      chat: '#lobby',
+      senderUsername: 'QuestBot',
+      text: 'you have 3 apples',
+      time: T0,
+    });
     expect(lobby().outcome).toBe('sent');
     // No answer: its own message, history, or an event not read from a message.
-    account.hear({ chat: '#lobby', sender: 'me', own: true, text: '/inventory', time: T0 });
-    account.hear({ chat: '#lobby', sender: 'QuestBot', text: 'old', time: T0, playback: true });
+    account.hear({ chat: '#lobby', senderUsername: 'me', own: true, text: '/inventory', time: T0 });
+    account.hear({
+      chat: '#lobby',
+      senderUsername: 'QuestBot',
+      text: 'old',
+      time: T0,
+      playback: true,
+    });
     ctx('parser').bus.publish('quest.answer', { text: 'on its own' });
     expect(lobby().outcome).toBe('sent');
     // Not watched: a node that does not act, and a chat no parser reads.

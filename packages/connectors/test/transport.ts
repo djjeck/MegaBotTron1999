@@ -32,7 +32,12 @@ export function transportOver(
         off.push(
           connector.onMessage((m) => {
             if (m.chat.toLowerCase() !== chat.toLowerCase()) return;
-            events.line({ nick: m.sender, text: m.text, time: m.time, playback: m.playback });
+            events.line({
+              nick: m.senderUsername ?? '',
+              text: m.text,
+              time: m.time,
+              playback: m.playback,
+            });
           }),
           connector.onStatus((s) => events.status(s.phase as TransportStatus, s.detail))
         );

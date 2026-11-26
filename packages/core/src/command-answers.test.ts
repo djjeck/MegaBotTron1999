@@ -115,7 +115,7 @@ async function instance() {
   const bot = (text: string, o: { playback?: boolean; own?: boolean } = {}) =>
     account.hear({
       chat: '@QuestBot',
-      sender: o.own === true ? 'me' : 'QuestBot',
+      senderUsername: o.own === true ? 'me' : 'QuestBot',
       text,
       time: clock.now(),
       ...o,

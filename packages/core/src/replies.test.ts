@@ -7,7 +7,7 @@ const m = (o: Partial<Inbound>): Inbound => ({
   account: 'irc:alice',
   network: 'irc',
   chat: '#lobby',
-  sender: 'GameBot',
+  senderUsername: 'GameBot',
   text: '',
   time: 1000,
   playback: false,

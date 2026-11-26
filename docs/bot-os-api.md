@@ -394,12 +394,15 @@ the chats its edges let it send to (the owner's for an edge that names none from
 where such a node sends.
 
 **What a chat-in edge reads** (bot-os.md D62) has two independent parts: `reads`, a list of chats or
-`"*"`, any chat its connector monitors (§4.5); and `senders`, a list of senders by username
-(`@QuestBot`, compared without case and without the `@`; a bot's username never changes, so it is
-not resolved to an id), with `me` for the account's own messages; without `senders`, anyone. An edge
-written before has no `senders`, so it reads from anyone as it did: nothing converts. The edge field
-is `senders`, not `from`, since an edge's `from` is its output end. _Any chat from anyone_ is
-allowed, and the editor flags it as broad. Sending stays explicit: a chat-out edge lists its chats.
+`"*"`, any chat its connector monitors (§4.5); and `senders`, a list of senders, each an id or a
+username (bot-os.md D167): an id is digits (a chat's with a leading `-`), matched against the
+message's `senderId`; anything else is a username (`@QuestBot`, compared without case and without
+the `@`), matched against its `senderUsername`. People are named by id, since a person may change
+their username and another take it; a bot keeps its username, so it may stay named by it. `me` is
+the account's own messages; without `senders`, anyone. An edge written before has no `senders`, so
+it reads from anyone as it did: nothing converts. The edge field is `senders`, not `from`, since an
+edge's `from` is its output end. _Any chat from anyone_ is allowed, and the editor flags it as
+broad. Sending stays explicit: a chat-out edge lists its chats.
 
 **A commands edge** (bot-os.md D109) runs from a connector's `commands` output to a plugin's
 `commands` input, derived from its manifest's `interface.commands` (a port declared under that name
@@ -1243,7 +1246,8 @@ interface Inbound {
   chat: string; // '#lobby', a Telegram chat id or @username
   aliases?: readonly string[]; // the chat's other names (its @username, its id), bot-os.md D90
   private?: boolean; // a private chat (one user or bot), not a group, where the network says
-  sender: string; // a nick, a username; '' for a sender without one
+  senderId?: string; // the sender's stable id: Telegram's, decimal (a chat's -100…); none on IRC (bot-os.md D167)
+  senderUsername?: string; // the sender's username without @, an IRC nick; none without one (bot-os.md D167)
   senderName?: string; // the sender's display name, where the network has one (bot-os.md D159)
   senderBot?: boolean; // whether the sender is a bot, where the network says (bot-os.md D159)
   text: string;
@@ -1311,6 +1315,7 @@ interface ConnectorHandle {
   account: string;
   status(): ConnectorStatus; // 'connecting' | 'connected' | 'closed', with the network's phase
   self(): string | undefined; // the account's own name on the network, once connected
+  selfId(): string | undefined; // the account's own id, as senderId gives it, once connected; none on IRC (D167)
   onMessage(handler: (m: Inbound) => void): () => void;
   onStatus(handler: (s: ConnectorStatus) => void): () => void;
   onEdit?(handler: (m: Inbound) => void): () => void; // edits, opt-in (bot-os.md D144)
@@ -1319,6 +1324,23 @@ interface ConnectorHandle {
   isAdmin?(chat: string): Promise<boolean>; // where the network can say
 }
 ```
+
+**Who sent it** (bot-os.md D167): `senderId`, the network's stable id, is the key to remember a
+person by; `senderUsername` is for display, and for a bot's texts that name people by it. A Telegram
+id is given in the Bot API's decimal form, a user's or a bot's (`123456789`) or a chat's posting as
+itself (`-1001234567890`); IRC has none, and gives the nick as `senderUsername`. A sender without a
+username has none (not `''`). Changed in 0.1.69, which removed `sender`:
+
+- **`Inbound.sender` is gone.** Code that read it no longer compiles. To key, allow or remember a
+  person, read `senderId`; to show them, or to match a name a bot writes, read `senderUsername`.
+- **No username is `undefined`, not `''`.** A test of `m.sender === ''` becomes
+  `m.senderUsername === undefined`.
+- **A connector handle has `selfId()`** beside `self()`; a hand-made connector or handle (a test's)
+  adds it.
+- **A reaction's payload** (§4.15) has `senderId` and `senderUsername` in place of `sender`: a
+  reactor whose `when` or text named `sender` names `senderUsername` (or `senderId`).
+- **Edges' `senders`** keep working: a username entry matches as before. Naming a person by id
+  instead keeps them when they rename.
 
 **Edits** (bot-os.md D144): a message is heard once, as it was sent (`onMessage`). A plugin that
 reads what a message becomes (a bot's menu, which its buttons edit in place) asks for edits as well:
@@ -1577,12 +1599,12 @@ whose account must be its node's (`ctx.account`; a test's fake connector, given 
 own, sits on a node that names it, as the dev kit's default graph does); `ConnectorBase` keeps the
 listeners and the status for the implementations. `ctx.connector(port)` gives a handle only on a
 connector a chat-in input of the plugin is bound to, and the handle hears only the chats that edge
-`reads` (compared without case; any, for `"*"`) and the `senders` it names (anyone without; `me`,
-the account's own, `own` or its own name), as `hears(filter, message, self)` matches them. A
-connector's node has a chat-in output, `chat`, which the readers' edges leave, and a chat-out input,
-`chat`, which the senders' edges reach (§2.1, bot-os.md D60); a service connector (`chat: false`,
-D148) has neither. The wiring reaches the full connector with `core.connector(id)`. The shell's
-connectors are in §5.
+`reads` (compared without case; any, for `"*"`) and the `senders` it names (anyone without; each an
+id or a username, `sentBy`; `me`, the account's own, `own` or its own id or name), as
+`hears(filter, message, { name, id })` matches them. A connector's node has a chat-in output,
+`chat`, which the readers' edges leave, and a chat-out input, `chat`, which the senders' edges reach
+(§2.1, bot-os.md D60); a service connector (`chat: false`, D148) has neither. The wiring reaches the
+full connector with `core.connector(id)`. The shell's connectors are in §5.
 
 **A model connector** (bot-os.md D117): a connector whose manifest says `model: true` spends money
 on each call, so the editor marks its node with a `$`, and it accounts for its calls itself, since
@@ -2516,8 +2538,9 @@ interface Reaction {
   (`chat` by default), in `chats` (compared without case; every chat its edge reads without), whose
   text contains `match` (a string) or matches it (a `RegExp`). Messages played back and the
   account's own are never reacted to. Its payload is
-  `{ chat, sender, text, time, id?, replyTo?, document? }`, with the regular expression's named
-  groups beside them (`(?<item>\w+)` is `{item}`; a group of one of those names is shadowed).
+  `{ chat, senderId?, senderUsername?, text, time, id?, replyTo?, document? }` (bot-os.md D167),
+  with the regular expression's named groups beside them (`(?<item>\w+)` is `{item}`; a group of one
+  of those names is shadowed).
 - **When:** each field of `when`, by dotted path (`outcome.kind`, `outcome.tags.0`), must equal
   (`===`) its value; without it, every payload.
 - **Send:** `chat` and `send` are texts whose `{path}`s are replaced by the payload's values there,

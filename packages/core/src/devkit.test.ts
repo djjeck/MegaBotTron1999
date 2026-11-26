@@ -69,13 +69,13 @@ describe('FakeConnector', () => {
     c.onMessage((m) => heard.push(m));
     c.open('joined');
     expect(c.status()).toEqual({ state: 'connected', phase: 'joined' });
-    c.hear({ chat: '#test', sender: 'Bot', text: 'hi', time: 5 });
+    c.hear({ chat: '#test', senderUsername: 'Bot', text: 'hi', time: 5 });
     expect(heard).toEqual([
       {
         account: 'irc:alice',
         network: 'irc',
         chat: '#test',
-        sender: 'Bot',
+        senderUsername: 'Bot',
         text: 'hi',
         time: 5,
         playback: false,
@@ -127,10 +127,10 @@ describe('DevKit', () => {
     const edits: unknown[] = [];
     c.onMessage((m) => heard.push(m));
     c.onEdit((m) => edits.push(m));
-    c.hearEdit({ chat: '@QuestBot', sender: 'QuestBot', text: 'chosen', time: 5, id: '3' });
+    c.hearEdit({ chat: '@QuestBot', senderUsername: 'QuestBot', text: 'chosen', time: 5, id: '3' });
     c.hearEdit({
       chat: '@QuestBot',
-      sender: 'QuestBot',
+      senderUsername: 'QuestBot',
       text: 'again',
       time: 5,
       id: '3',
@@ -180,7 +180,7 @@ describe('DevKit', () => {
     });
     await kit.start();
     fake.open();
-    fake.hear({ chat: '#test', sender: 'Bot', text: 'ping', time: 1000 });
+    fake.hear({ chat: '#test', senderUsername: 'Bot', text: 'ping', time: 1000 });
     expect(fake.sent).toEqual([{ chat: '#test', text: '!pong PONG' }]);
     kit.runUntil(11_000);
     expect(kit.clock.now()).toBe(11_000);
@@ -252,7 +252,7 @@ describe('DevKit', () => {
     });
     await kit.start();
     fake.open();
-    fake.hear({ chat: '#test', sender: 'Bot', text: 'ping', time: 0 });
+    fake.hear({ chat: '#test', senderUsername: 'Bot', text: 'ping', time: 0 });
     expect(fake.sent).toEqual([]);
     expect(records.filter((r) => r.type === 'core.send').map((r) => r.outcome)).toEqual([
       'dry-run',

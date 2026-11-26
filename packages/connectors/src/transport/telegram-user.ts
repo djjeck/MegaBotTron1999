@@ -1333,7 +1333,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       chat,
       ...(aliases.length === 0 ? {} : { aliases }),
       ...(m.isPrivate === undefined ? {} : { private: m.isPrivate }),
-      sender: sender ?? '',
+      ...(sender === undefined ? {} : { senderUsername: sender }),
       ...senderOf(entity),
       text: m.message,
       time: m.date * 1000,

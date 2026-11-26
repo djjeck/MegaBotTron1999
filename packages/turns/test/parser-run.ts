@@ -62,7 +62,7 @@ export async function runParser(
   let n = 1000;
   const hear = (m: Partial<Heard> & { text: string }): string => {
     const msgId = String(n++);
-    account.hear({ chat: '@x', sender: 'x', time: kit.clock.now(), id: msgId, ...m });
+    account.hear({ chat: '@x', senderUsername: 'x', time: kit.clock.now(), id: msgId, ...m });
     return msgId;
   };
   const ready = (): Record<string, Readiness> => {

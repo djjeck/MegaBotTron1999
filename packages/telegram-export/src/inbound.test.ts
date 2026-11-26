@@ -17,7 +17,7 @@ describe('toInbounds', () => {
         network: 'telegram',
         chat: '@QuestBot',
         private: true,
-        sender: 'alice',
+        senderUsername: 'alice',
         text: '/play',
         time: T0,
         id: '100',
@@ -29,7 +29,7 @@ describe('toInbounds', () => {
         network: 'telegram',
         chat: '@QuestBot',
         private: true,
-        sender: 'QuestBot',
+        senderUsername: 'QuestBot',
         text: 'Found an apple.',
         time: T0 + 2 * S,
         id: '101',
@@ -38,7 +38,9 @@ describe('toInbounds', () => {
         own: false,
       },
     ]);
-    expect(inbounds.map((m) => [m.chat, m.sender, m.text, (m.time - T0) / S])).toStrictEqual([
+    expect(
+      inbounds.map((m) => [m.chat, m.senderUsername, m.text, (m.time - T0) / S])
+    ).toStrictEqual([
       ['@QuestBot', 'alice', '/play', 0],
       ['@QuestBot', 'QuestBot', 'Found an apple.', 2],
       ['@QuestBot', 'alice', '/play', 300],
@@ -76,16 +78,16 @@ describe('toInbounds', () => {
       chat: '@QuestBot',
       aliases: ['1000000001'],
       private: true,
-      sender: '',
       own: true,
     });
-    expect(byIds.at(-1)).toMatchObject({ chat: LOBBY, private: false, sender: 'QuestBot' });
+    expect(byIds[0]).not.toHaveProperty('senderUsername');
+    expect(byIds.at(-1)).toMatchObject({ chat: LOBBY, private: false, senderUsername: 'QuestBot' });
     // Nothing given: by the export's chat id, no username, not the owner's.
     expect(toInbounds(messages, { owner: {} })[0]).toMatchObject({
       chat: '1000000001',
-      sender: '',
       own: false,
     });
+    expect(toInbounds(messages, { owner: {} })[0]).not.toHaveProperty('senderUsername');
     // An HTML export with nothing given: by title, privacy unsaid.
     const html = toInbounds(read(QUEST_HTML), { owner: {}, chats: { QuestBot: '@QuestBot' } });
     expect(html[0]).not.toHaveProperty('private');

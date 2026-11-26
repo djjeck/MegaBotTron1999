@@ -110,6 +110,7 @@ describe('secrets in the core', () => {
             network: 'test',
             status: () => ({ state: 'connected' as const, phase: 'up' }),
             self: () => undefined,
+            selfId: () => undefined,
             onMessage: () => () => {},
             onStatus: () => () => {},
             send: () => true,

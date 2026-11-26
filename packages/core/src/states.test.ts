@@ -387,7 +387,7 @@ describe('a runtime stop’s cascade (#29)', () => {
   it('shuts down at once, dependents first, every node the stop makes inactive', async () => {
     const { core, tg, seen, heard, clock, states } = cascading({ dataDir: dir });
     await core.start();
-    tg.hear({ chat: '#lobby', sender: 'alice', text: 'one', time: 1 });
+    tg.hear({ chat: '#lobby', senderUsername: 'alice', text: 'one', time: 1 });
     expect(heard).toEqual(['near heard one', 'far heard one', 'apart heard one']);
     heard.length = 0;
     (seen[0] as PluginContext).stop('out of 🧊');
@@ -400,7 +400,7 @@ describe('a runtime stop’s cascade (#29)', () => {
       'apart running',
     ]);
     // Its messages, its timers and its interface end at once; its stop runs, its keep is kept.
-    tg.hear({ chat: '#lobby', sender: 'alice', text: 'two', time: 2 });
+    tg.hear({ chat: '#lobby', senderUsername: 'alice', text: 'two', time: 2 });
     clock.advance(60_000);
     await core.stop();
     // Their own stops run as the instance's do, a moment later, dependents first.
@@ -444,7 +444,7 @@ describe('a runtime stop’s cascade (#29)', () => {
       'far inactive: needs tg (stopped)',
       'apart inactive: needs tg (stopped)',
     ]);
-    tg.hear({ chat: '#lobby', sender: 'alice', text: 'late', time: 1 });
+    tg.hear({ chat: '#lobby', senderUsername: 'alice', text: 'late', time: 1 });
     await core.stop();
     expect(heard).toEqual(['apart stop', 'far stop', 'near stop']);
   });

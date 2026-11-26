@@ -5,7 +5,7 @@
  * The matchers combine with `all`; `waitFor` waits on a connector handle for the first match.
  */
 import { type Clock } from './clock.ts';
-import { type ConnectorHandle, type Inbound } from './connector.ts';
+import { type ConnectorHandle, type Inbound, sentBy } from './connector.ts';
 
 export type Matcher = (m: Inbound) => boolean;
 
@@ -28,11 +28,11 @@ export const within =
   (m) =>
     !m.playback && m.time >= sentAt && m.time - sentAt <= ms;
 
-/** A message from `sender`. */
+/** A message from `sender`: an id or a username (`sentBy`, bot-os.md D167). */
 export const from =
   (sender: string): Matcher =>
   (m) =>
-    m.sender === sender;
+    sentBy(m, sender);
 
 /** Every matcher at once. */
 export const all =

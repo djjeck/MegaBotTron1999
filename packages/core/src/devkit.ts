@@ -84,6 +84,8 @@ export interface FakeConnectorOptions {
   account: string;
   /** Its own name on the network; the account's name by default. */
   self?: string;
+  /** Its own id on the network (D167); none by default. */
+  selfId?: string;
   /** The account's limits, which its outbox keeps to; none, no rate limit. */
   limits?: Limits;
   /**
@@ -167,7 +169,7 @@ export class FakeConnector extends ConnectorBase implements Connector {
     const colon = o.account.indexOf(':');
     if (colon <= 0) throw new Error(`not an account: ${o.account} (expected <network>:<name>)`);
     super(o.account, o.account.slice(0, colon));
-    this.named(o.self ?? o.account.slice(colon + 1));
+    this.named(o.self ?? o.account.slice(colon + 1), o.selfId);
     if (o.limits !== undefined) this.limits = o.limits;
     this.onSend = o.onSend;
     this.admins = o.admins ?? [];

@@ -129,7 +129,7 @@ async function run(
   };
   /** alice writes `text` in `chat`, or someone else does. */
   const say = (chat: string, text: string, own = true): void =>
-    account.hear({ chat, sender: own ? 'alice' : 'bob', own, time: kit.clock.now(), text });
+    account.hear({ chat, senderUsername: own ? 'alice' : 'bob', own, time: kit.clock.now(), text });
   return { kit, steps, status, say };
 }
 

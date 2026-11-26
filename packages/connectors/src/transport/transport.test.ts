@@ -22,14 +22,14 @@ describe('transportOver', () => {
     // A closed connector tells nothing at once.
     expect(statuses).toEqual([]);
     c.open('joined');
-    c.hear({ chat: '#chan', sender: 'alice', text: 'hello', time: 5, playback: true });
-    c.hear({ chat: '#other', sender: 'bob', text: 'elsewhere', time: 6 });
+    c.hear({ chat: '#chan', senderUsername: 'alice', text: 'hello', time: 5, playback: true });
+    c.hear({ chat: '#other', senderUsername: 'bob', text: 'elsewhere', time: 6 });
     expect(lines).toEqual([{ nick: 'alice', text: 'hello', time: 5, playback: true }]);
     expect(statuses).toEqual([['joined', undefined]]);
     expect(t.say('hi')).toBe(true);
     expect(c.sent).toEqual([{ chat: '#Chan', text: 'hi' }]);
     t.stop();
-    c.hear({ chat: '#chan', sender: 'alice', text: 'after', time: 7 });
+    c.hear({ chat: '#chan', senderUsername: 'alice', text: 'after', time: 7 });
     expect(lines).toHaveLength(1);
   });
 

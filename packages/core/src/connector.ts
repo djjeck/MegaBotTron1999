@@ -169,8 +169,18 @@ export interface Inbound {
    * be an id either way (D90). Undefined where the connector does not tell.
    */
   private?: boolean;
-  /** Who: a nick, a username; `''` for a sender without one. */
-  sender: string;
+  /**
+   * Who, by the network's stable id (bot-os.md D167): a Telegram user's, bot's or chat's id, in the
+   * Bot API's decimal form (`123456789`, a chat's `-100…`). The key to remember a person by: it
+   * stays when they change their username. Absent where the network has none (IRC).
+   */
+  senderId?: string;
+  /**
+   * Who, by name (D167): a Telegram username without `@`, an IRC nick; absent for a sender without
+   * one. A person may change it at any time, and another take it: for display, and for a bot's
+   * texts that name people by it, never as a key.
+   */
+  senderUsername?: string;
   /**
    * The sender's display name, where the network has one (bot-os.md D159): a Telegram user's first
    * and last names, a chat's title when a chat sent it (a channel, a group's anonymous admin).
@@ -280,7 +290,7 @@ export interface SurfaceQuery {
 
 /**
  * What a chat-in edge reads (bot-os.md D62): its chats (`'*'`: any chat the connector monitors)
- * and its senders (`senders`: usernames, `me` for the account's own; none: anyone).
+ * and its senders (`senders`: ids or usernames, D167, `me` for the account's own; none: anyone).
  */
 export interface ReadFilter {
   reads: readonly string[] | '*';
@@ -289,6 +299,27 @@ export interface ReadFilter {
 
 /** A name compared as networks do: without case, and without a leading `@`. */
 const plainName = (s: string): string => s.replace(/^@/u, '').toLowerCase();
+
+/**
+ * Whether a `senders` entry is an id (D167): digits, a chat's with a leading `-`. A Telegram
+ * username never starts with a digit, so the two cannot be mistaken.
+ */
+export const isSenderId = (entry: string): boolean => /^-?\d+$/u.test(entry);
+
+/**
+ * Whether `entry` names the sender of `m` (D167): an id, its `senderId`; else a username, its
+ * `senderUsername`, without case and without a leading `@`.
+ */
+export function sentBy(m: Pick<Inbound, 'senderId' | 'senderUsername'>, entry: string): boolean {
+  if (isSenderId(entry)) return m.senderId === entry;
+  return m.senderUsername !== undefined && plainName(m.senderUsername) === plainName(entry);
+}
+
+/** The account's own name and id on its network, as a connector knows them. */
+export interface Self {
+  name?: string | undefined;
+  id?: string | undefined;
+}
 
 /** Whether `m` was said in `chat`, by its name or any of its `aliases` (D90), without case. */
 export function inChat(m: Pick<Inbound, 'chat' | 'aliases'>, chat: string): boolean {
@@ -306,17 +337,19 @@ export function readsChat(filter: ReadFilter, m: Pick<Inbound, 'chat' | 'aliases
 
 /**
  * Whether a read filter hears `m`: in one of its chats (any, for `'*'`), by the chat's name or any
- * of its `aliases` (D90), compared without case, and from one of its senders (anyone, without `senders`). `me` is the account's own messages
- * (`own`, or sent as the account's own name, `self`).
+ * of its `aliases` (D90), compared without case, and from one of its senders (anyone, without
+ * `senders`), each an id or a username (`sentBy`, D167). `me` is the account's own messages
+ * (`own`, or sent by the account's own id or name, `self`).
  */
-export function hears(filter: ReadFilter, m: Inbound, self?: string): boolean {
+export function hears(filter: ReadFilter, m: Inbound, self: Self = {}): boolean {
   if (!readsChat(filter, m)) return false;
   if (filter.senders === undefined) return true;
-  const sender = plainName(m.sender);
   return filter.senders.some((f) =>
     f === 'me'
-      ? m.own === true || (self !== undefined && sender === plainName(self))
-      : sender !== '' && plainName(f) === sender
+      ? m.own === true ||
+        (self.id !== undefined && m.senderId === self.id) ||
+        (self.name !== undefined && sentBy(m, self.name))
+      : sentBy(m, f)
   );
 }
 
@@ -327,6 +360,11 @@ export interface ConnectorHandle {
   status(): ConnectorStatus;
   /** The account's own name on the network (a nick, a username), once connected. */
   self(): string | undefined;
+  /**
+   * The account's own id on the network (D167), in `Inbound.senderId`'s form, once connected;
+   * undefined on a network without ids (IRC).
+   */
+  selfId(): string | undefined;
   /** Hears every message; returns the way to stop. */
   onMessage(handler: (m: Inbound) => void): () => void;
   /** Hears every change of status; returns the way to stop. */
@@ -463,6 +501,9 @@ export interface Connector extends ConnectorHandle {
   chatTitle?(chat: string): string | undefined;
 }
 
+/** A connector's own name and id, for `hears`. */
+const selfOf = (c: ConnectorHandle): Self => ({ name: c.self(), id: c.selfId() });
+
 /**
  * The handle of a connector: everything but `send`. With `filter`, what a plugin's chat-in edge
  * reads (P6, D62), it hears only those chats and senders (`hears`); without, everything.
@@ -473,9 +514,10 @@ export function handleOf(c: Connector, filter?: ReadFilter): ConnectorHandle {
     network: c.network,
     status: () => c.status(),
     self: () => c.self(),
+    selfId: () => c.selfId(),
     onMessage: (h) =>
       c.onMessage((m) => {
-        if (filter === undefined || hears(filter, m, c.self())) h(m);
+        if (filter === undefined || hears(filter, m, selfOf(c))) h(m);
       }),
     onStatus: (h) => c.onStatus(h),
     ...(c.onEdit === undefined
@@ -483,7 +525,7 @@ export function handleOf(c: Connector, filter?: ReadFilter): ConnectorHandle {
       : {
           onEdit: (h: (m: Inbound) => void) =>
             (c.onEdit as NonNullable<Connector['onEdit']>)((m) => {
-              if (filter === undefined || hears(filter, m, c.self())) h(m);
+              if (filter === undefined || hears(filter, m, selfOf(c))) h(m);
             }),
         }),
     ...(c.onDelete === undefined
@@ -512,6 +554,7 @@ export class ConnectorBase {
   limits?: Limits;
   private current: ConnectorStatus = { state: 'closed', phase: 'closed' };
   private name: string | undefined;
+  private id: string | undefined;
   private messages: ((m: Inbound) => void)[] = [];
   private edits: ((m: Inbound) => void)[] = [];
   private deletions: ((d: Deletion) => void)[] = [];
@@ -528,6 +571,10 @@ export class ConnectorBase {
 
   self(): string | undefined {
     return this.name;
+  }
+
+  selfId(): string | undefined {
+    return this.id;
   }
 
   onMessage(handler: (m: Inbound) => void): () => void {
@@ -576,9 +623,10 @@ export class ConnectorBase {
     for (const h of [...this.deletions]) h(deletion);
   }
 
-  /** The account's own name on the network, as it learnt it. */
-  protected named(name: string | undefined): void {
+  /** The account's own name on the network, and its id where it has one (D167), as it learnt them. */
+  protected named(name: string | undefined, id?: string): void {
     this.name = name;
+    this.id = id;
   }
 
   /** A change of status: kept, and to every listener. */

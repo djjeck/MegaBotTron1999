@@ -281,15 +281,20 @@ describe('a state plugin with a readiness (bot-os.md D141)', () => {
     expect(read('bot')).toBe(QUESTBOT);
     expect(read('commands')).toHaveLength(4);
     p.kit.core.controls.act('quest-state', 'sent', { chat: `@${QUESTBOT}`, id: '5', t: T0 });
-    p.hear({ sender: QUESTBOT, chat: `@${QUESTBOT}`, replyTo: '5', text: 'Found an apple.' });
+    p.hear({
+      senderUsername: QUESTBOT,
+      chat: `@${QUESTBOT}`,
+      replyTo: '5',
+      text: 'Found an apple.',
+    });
     expect(p.iface.ready()['/play']).toMatchObject({
       ready: false,
       until: T0 + 15 * MIN,
       sent: { t: T0, byHand: false },
     });
     // A defeat holds every command an hour, the game's fact folded in by its own reducer.
-    p.hear({ sender: 'alice', own: true, chat: `@${QUESTBOT}`, text: '/play' });
-    p.hear({ sender: QUESTBOT, chat: `@${QUESTBOT}`, text: 'Defeated.' });
+    p.hear({ senderUsername: 'alice', own: true, chat: `@${QUESTBOT}`, text: '/play' });
+    p.hear({ senderUsername: QUESTBOT, chat: `@${QUESTBOT}`, text: 'Defeated.' });
     expect(p.iface.ready()['/daily']).toMatchObject({
       ready: false,
       until: T0 + 60 * MIN,

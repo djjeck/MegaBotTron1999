@@ -477,7 +477,7 @@ class Attention {
    * one is about to start, nothing more.
    */
   private heard(m: Inbound, self: string | undefined): void {
-    const own = m.own === true || (self !== undefined && m.sender === self);
+    const own = m.own === true || (self !== undefined && m.senderUsername === self);
     if (!own || m.playback || !this.playing()) return;
     if (!(this.c.listen ?? []).some((c) => inChat(m, c))) return;
     if (this.inSitting()) {

@@ -40,8 +40,8 @@ const GROUP = '-1001000000001';
 const MIN = 60_000;
 const PRIVATE = `@${QUESTBOT}`;
 const PRIVATE_ID = '1000000001';
-const bot = { sender: QUESTBOT };
-const own = { sender: 'alice', own: true };
+const bot = { senderUsername: QUESTBOT };
+const own = { senderUsername: 'alice', own: true };
 
 /** A readiness state on @QuestBot's parser (bot-os.md D141), of a vocabulary and its mechanics. */
 const stateOf = (
@@ -96,7 +96,7 @@ describe('a turn parser', () => {
     // Another command, and another sender's message, are none of its business.
     const other = p.hear({ ...own, chat: GROUP, text: '/inventory' });
     p.hear({ ...bot, chat: GROUP, replyTo: other, text: 'Found a plum.' });
-    p.hear({ sender: 'someone', chat: GROUP, replyTo: hand, text: 'Found a fig.' });
+    p.hear({ senderUsername: 'someone', chat: GROUP, replyTo: hand, text: 'Found a fig.' });
     expect(p.events).toEqual([
       {
         type: 'quest.turn',
@@ -145,7 +145,7 @@ describe('a turn parser', () => {
     // Told twice, counted once.
     await p.iface.sent({ chat: GROUP, id: '4', t: T0, command: '/play' });
     expect(sends(p)).toHaveLength(1);
-    p.hear({ sender: QUESTBOT, chat: GROUP, replyTo: '4', text: 'Found an apple.' });
+    p.hear({ senderUsername: QUESTBOT, chat: GROUP, replyTo: '4', text: 'Found an apple.' });
     expect(p.iface.rest()).toMatchObject({ until: T0 + 15 * MIN });
     p.kit.clock.advance(MIN);
     await p.iface.sent({ chat: GROUP, id: '5', t: T0 + MIN, command: `/Play@${QUESTBOT}` });
@@ -247,7 +247,7 @@ describe('a turn parser', () => {
     expect(next.outcomes()).toEqual(['gain']);
     expect(next.events[0]).toMatchObject({ answer: { length: 15 } });
     // Another sender in the private chat is not its edge's to hear.
-    next.hear({ sender: 'someone', chat: PRIVATE, replyTo: '6', text: 'Found a fig.' });
+    next.hear({ senderUsername: 'someone', chat: PRIVATE, replyTo: '6', text: 'Found a fig.' });
     expect(next.outcomes()).toEqual(['gain']);
   });
 
@@ -416,7 +416,7 @@ describe('its turn commands, its game’s (bot-os.md D70)', () => {
       ]);
       // The file keeps the key, untouched; the parser counts its spec's commands alone.
       expect(core.graph()?.nodes[1]).toEqual(graph.nodes[1]);
-      const hear = (m: { sender: string; own?: boolean; text: string }): void =>
+      const hear = (m: { senderUsername: string; own?: boolean; text: string }): void =>
         account.hear({ ...m, chat: PRIVATE, time: T0 });
       hear({ ...own, text: '/play' });
       hear({ ...bot, text: 'Found an apple.' });

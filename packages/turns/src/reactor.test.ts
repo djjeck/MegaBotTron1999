@@ -203,8 +203,13 @@ describe('the reactor', () => {
     };
     const { core, account, reactions } = await run(config, { live: true, events: false });
     expect(core.nodes().find((n) => n.id === 'look')?.ports).not.toHaveProperty('events');
-    account.hear({ chat: BOT, sender: 'QuestBot', text: 'The GOLD draw opens', time: T0 });
-    account.hear({ chat: BOT, sender: 'QuestBot', text: 'the gold draw is shut', time: T0 });
+    account.hear({ chat: BOT, senderUsername: 'QuestBot', text: 'The GOLD draw opens', time: T0 });
+    account.hear({
+      chat: BOT,
+      senderUsername: 'QuestBot',
+      text: 'the gold draw is shut',
+      time: T0,
+    });
     await flush();
     expect(account.sent).toEqual([{ chat: BOT, text: '/look GOLD' }]);
     expect(reactions()).toEqual(['sent']);
@@ -213,8 +218,8 @@ describe('the reactor', () => {
   it('matches with case, in every chat its edge reads, without in', async () => {
     const config = { match: 'the draw opens', chat: BOT, send: '/look' };
     const { account } = await run(config, { live: true, events: false });
-    account.hear({ chat: BOT, sender: 'QuestBot', text: 'The draw opens', time: T0 });
-    account.hear({ chat: BOT, sender: 'QuestBot', text: 'now the draw opens', time: T0 });
+    account.hear({ chat: BOT, senderUsername: 'QuestBot', text: 'The draw opens', time: T0 });
+    account.hear({ chat: BOT, senderUsername: 'QuestBot', text: 'now the draw opens', time: T0 });
     await flush();
     expect(account.sent).toEqual([{ chat: BOT, text: '/look' }]);
   });
@@ -323,8 +328,8 @@ describe('the reactor', () => {
       { ...config, in: [BOT, '@OtherBot'] },
       { live: true, events: false }
     );
-    account.hear({ chat: '@Elsewhere', sender: 'QuestBot', text: 'draw opens', time: T0 });
-    account.hear({ chat: BOT, sender: 'QuestBot', text: 'draw opens', time: T0 });
+    account.hear({ chat: '@Elsewhere', senderUsername: 'QuestBot', text: 'draw opens', time: T0 });
+    account.hear({ chat: BOT, senderUsername: 'QuestBot', text: 'draw opens', time: T0 });
     await flush();
     expect(account.sent).toEqual([{ chat: BOT, text: '/look' }]);
     expect(reactorConfig.safeParse({ ...config, in: [] }).success).toBe(false);

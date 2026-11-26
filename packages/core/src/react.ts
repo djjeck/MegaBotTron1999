@@ -8,8 +8,9 @@
  *   chat-in inputs, of some chats or all its edge reads, whose text contains a text or matches a
  *   regular expression, played back and its own account's never.
  * - **The payload** it reads: the event as published (`{ type, t, instance, ...payload }`); for a
- *   message, `{ chat, sender, text, time, id?, replyTo? }` with the named groups of a regular
- *   expression beside them (a group of one of those names is shadowed).
+ *   message, `{ chat, senderId?, senderUsername?, text, time, id?, replyTo? }` (bot-os.md D167)
+ *   with the named groups of a regular expression beside them (a group of one of those names is
+ *   shadowed).
  * - **When** (`when`): fields of the payload, by dotted path (`outcome.kind`), each equal to its
  *   value; every one must be.
  * - **What it sends** (`send`) and **where** (`chat`): a text whose `{path}`s are the payload's
@@ -126,7 +127,8 @@ function messagePayload(m: Inbound, match: string | RegExp): ReactionPayload | u
   return {
     ...groups,
     chat: m.chat,
-    sender: m.sender,
+    ...(m.senderId === undefined ? {} : { senderId: m.senderId }),
+    ...(m.senderUsername === undefined ? {} : { senderUsername: m.senderUsername }),
     text: m.text,
     time: m.time,
     ...(m.id === undefined ? {} : { id: m.id }),

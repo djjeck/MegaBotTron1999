@@ -72,7 +72,7 @@ export class IrcConnector extends ConnectorBase implements Connector {
         this.lastLine = Math.max(this.lastLine ?? 0, l.time);
         this.received({
           chat: this.channel,
-          sender: l.nick,
+          ...(l.nick === '' ? {} : { senderUsername: l.nick }),
           text: l.text,
           time: l.time,
           playback: l.playback,
@@ -247,7 +247,11 @@ export function ircPlugin(
       const health: IrcHealth = { connected: false };
       connector.onMessage((m) => {
         if (!m.playback) health.lastLine = m.time;
-        ctx.bus.publish(LINE_EVENT, { nick: m.sender, text: m.text, playback: m.playback }, m.time);
+        ctx.bus.publish(
+          LINE_EVENT,
+          { nick: m.senderUsername ?? '', text: m.text, playback: m.playback },
+          m.time
+        );
       });
       connector.onStatus((s) => {
         health.connected = s.state === 'connected';

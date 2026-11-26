@@ -223,7 +223,7 @@ describe('TelegramBotConnector', () => {
       account: 'telegram-bot:ExampleBot',
       network: 'telegram',
       chat: '-100123',
-      sender: 'ada',
+      senderUsername: 'ada',
       senderName: 'Ada',
       senderBot: false,
       text: '/map@ExampleBot',
@@ -232,7 +232,7 @@ describe('TelegramBotConnector', () => {
       playback: false,
       private: false,
     });
-    expect(heard[1]?.sender).toBe('');
+    expect(heard[1]).not.toHaveProperty('senderUsername');
     // User 5's own chat with the bot: private, by its id (D90).
     expect(heard[1]).toMatchObject({ chat: '5', private: true });
   });

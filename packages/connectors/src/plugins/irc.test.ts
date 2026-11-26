@@ -90,7 +90,7 @@ describe('IrcConnector', () => {
         account: 'irc:alice',
         network: 'irc',
         chat: '#lobby',
-        sender: 'GameBot',
+        senderUsername: 'GameBot',
         text: 'hello',
         time: 1000,
         playback: true,
@@ -191,9 +191,12 @@ describe('the irc plugin in the core', () => {
       'onStatus',
       'reads',
       'self',
+      'selfId',
       'status',
     ]);
     expect((got as { self(): string }).self()).toBe('alice');
+    // IRC has no ids (D167).
+    expect((got as { selfId(): string | undefined }).selfId()).toBeUndefined();
     const connector = core.connector('irc');
     expect(connector?.account).toBe('irc:alice');
     expect(connector?.limits).toEqual({
