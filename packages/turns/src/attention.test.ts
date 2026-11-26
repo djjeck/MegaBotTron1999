@@ -44,7 +44,6 @@ function fakePlayer(
   return {
     manifest: {
       id,
-      version: '1.0.0',
       kinds: ['actor'],
       description: 'a made-up player',
       inputs: { attention: { type: 'attention' } },

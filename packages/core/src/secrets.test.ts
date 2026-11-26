@@ -95,7 +95,6 @@ describe('secrets in the core', () => {
     definePlugin({
       manifest: {
         id,
-        version: '0.1.0',
         kinds: ['connector'],
         description: id,
         account: `test:${id}`,
@@ -136,7 +135,7 @@ describe('secrets in the core', () => {
     core.register(
       connector('conn', ['token'], got),
       definePlugin({
-        manifest: { id: 'stats', version: '0.1.0', kinds: ['stats'], description: 'stats' },
+        manifest: { id: 'stats', kinds: ['stats'], description: 'stats' },
         create: (ctx) => {
           got['stats'] = ctx;
           throw new Error('cannot start without tok-123456');

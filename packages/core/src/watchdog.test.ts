@@ -30,7 +30,6 @@ const ctx = (id: string) => contexts.get(id) as PluginContext;
 const parser = definePlugin({
   manifest: {
     id: 'parser',
-    version: '0.1.0',
     kinds: ['parser'],
     description: 'reads #lobby',
     inputs: { chat: { type: 'chat-in' } },
@@ -51,7 +50,6 @@ const sender = (id: string, kind: 'actor' | 'stats') =>
   definePlugin({
     manifest: {
       id,
-      version: '0.1.0',
       kinds: [kind],
       description: 'sends',
       outputs: { chat: { type: 'chat-out' } },
@@ -63,7 +61,6 @@ const sender = (id: string, kind: 'actor' | 'stats') =>
 const follower = definePlugin({
   manifest: {
     id: 'follower',
-    version: '0.1.0',
     kinds: ['stats'],
     description: 'follows the actor',
     inputs: { actor: { type: 'interface', plugin: 'actor', members: [] } },
@@ -75,7 +72,6 @@ const watcher = (heard: Notice[]) =>
   definePlugin({
     manifest: {
       id: 'watcher',
-      version: '0.1.0',
       kinds: ['stats'],
       description: 'hears the notices',
       notices: true,

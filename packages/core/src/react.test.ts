@@ -35,7 +35,6 @@ async function run(state: 'live' | 'dry-run' | 'stopped' = 'live') {
       definePlugin({
         manifest: {
           id: 'quest',
-          version: '0.1.0',
           kinds: ['parser'],
           description: 'reads @QuestBot',
           games: { registers: ['quest'] },
@@ -55,7 +54,6 @@ async function run(state: 'live' | 'dry-run' | 'stopped' = 'live') {
       definePlugin({
         manifest: {
           id: 'watcher',
-          version: '0.1.0',
           kinds: ['actor'],
           description: 'reacts',
           inputs: {

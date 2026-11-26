@@ -11,7 +11,6 @@ import { scriptApi } from './types.ts';
 
 const GAME: PluginView = {
   plugin: 'quest',
-  version: '0.1.0',
   description: 'A made-up game',
   kinds: ['parser'],
   inputs: {},
@@ -142,7 +141,6 @@ describe('a script node exported as a plugin (D79)', () => {
         {
           manifest: {
             id: 'quest',
-            version: '0.1.0',
             kinds: ['parser'],
             description: 'A made-up game',
             games: { registers: ['quest'] },

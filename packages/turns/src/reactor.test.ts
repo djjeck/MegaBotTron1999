@@ -32,7 +32,6 @@ function questParser(seen: { ctx?: PluginContext }) {
   return definePlugin({
     manifest: {
       id: 'quest',
-      version: '0.1.0',
       kinds: ['parser'],
       description: 'reads @QuestBot',
       games: { registers: ['quest'] },

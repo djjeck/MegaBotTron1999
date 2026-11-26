@@ -317,7 +317,6 @@ const changeSchema = z
 
 const BASE = {
   id: COLLECTION,
-  version: '0.1.0',
   kinds: ['stats'],
   description: 'Records of a schema its config gives, media included, edited in its panel',
   config: collectionConfig,

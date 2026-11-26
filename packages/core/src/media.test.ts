@@ -143,7 +143,6 @@ describe('mediaOfFile', () => {
         definePlugin({
           manifest: {
             id: 'quest-state',
-            version: '0.1.0',
             kinds: ['agent'],
             description: 'Keeps the pictures of the rooms',
           },
@@ -210,7 +209,6 @@ describe('bytes as JSON (D155)', () => {
         definePlugin({
           manifest: {
             id: 'album',
-            version: '0.1.0',
             kinds: ['agent'],
             description: 'Echoes a picture',
             interface: {
@@ -254,7 +252,7 @@ describe('bytes as JSON (D155)', () => {
     const kit = new DevKit({
       plugins: [
         definePlugin({
-          manifest: { id: 'album', version: '0.1.0', kinds: ['agent'], description: 'Pictures' },
+          manifest: { id: 'album', kinds: ['agent'], description: 'Pictures' },
           create: (ctx) => ({
             start() {
               listed = mediaOfFile(ctx.store.files, 'one');

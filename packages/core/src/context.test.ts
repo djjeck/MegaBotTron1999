@@ -16,7 +16,6 @@ function parser(seen: PluginContext[]) {
   return definePlugin({
     manifest: {
       id: 'dice',
-      version: '0.1.0',
       kinds: ['parser'],
       description: 'reads the dice',
       games: { registers: ['dice'] },
@@ -34,7 +33,6 @@ function ledger(seen: PluginContext[]) {
   return definePlugin({
     manifest: {
       id: 'ledger',
-      version: '0.1.0',
       kinds: ['stats'],
       description: 'counts the rolls',
       inputs: { rolls: { type: 'events', namespace: 'dice' } },
@@ -175,7 +173,6 @@ describe('the context’s connector services', () => {
     return definePlugin({
       manifest: {
         id: 'api',
-        version: '0.1.0',
         kinds: ['connector'],
         description: 'an API, one token per node',
         account: 'api:default',
@@ -267,7 +264,6 @@ describe('the context’s connector services', () => {
     expect(() =>
       parseManifest({
         id: 'x',
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'x',
         configSecrets: ['token'],
@@ -282,7 +278,6 @@ describe('the context’s ways out of an output of many edges (D97)', () => {
     definePlugin({
       manifest: {
         id: 'teller',
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'tells',
         outputs: { chat: { type: 'chat-out', many: true, owner: true } },
@@ -294,7 +289,7 @@ describe('the context’s ways out of an output of many edges (D97)', () => {
     });
   const connector = (id: string, c: FakeConnector) =>
     definePlugin({
-      manifest: { id, version: '0.1.0', kinds: ['connector'], description: id, account: c.account },
+      manifest: { id, kinds: ['connector'], description: id, account: c.account },
       create: () => ({ connector: c }),
     });
 

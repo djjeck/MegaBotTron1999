@@ -302,7 +302,6 @@ export interface MemberView {
 /** A plugin as the editor shows it (`GET /available`), and each node of it: what it declares. */
 export interface PluginView {
   plugin: string;
-  version: string;
   description: string;
   kinds: string[];
   /**
@@ -484,7 +483,6 @@ export function describePlugin(m: Manifest): PluginView {
   const i = m.interface;
   return {
     plugin: m.id,
-    version: m.version,
     description: m.description,
     kinds: [...m.kinds],
     ...(m.account === undefined ? {} : { account: m.account, network: networkOf(m.account) }),

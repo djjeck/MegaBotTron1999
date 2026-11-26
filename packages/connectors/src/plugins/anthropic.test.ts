@@ -271,7 +271,6 @@ describe('the anthropic plugin', () => {
     const asker = definePlugin({
       manifest: {
         id: 'asker',
-        version: '0.1.0',
         kinds: ['agent'],
         description: 'Asks',
         inputs: { llm: { type: 'interface', plugin: 'anthropic', members: ['actions.ask'] } },
@@ -307,7 +306,6 @@ describe('the anthropic plugin', () => {
     const asker = definePlugin({
       manifest: {
         id: 'asker',
-        version: '0.1.0',
         kinds: ['agent'],
         description: 'Asks',
         inputs: { llm: { type: 'interface', plugin: 'anthropic', members: ['actions.ask'] } },

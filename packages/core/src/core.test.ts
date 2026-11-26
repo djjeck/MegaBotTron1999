@@ -19,7 +19,6 @@ function plugin(
   return definePlugin({
     manifest: {
       id,
-      version: '0.1.0',
       kinds: ['stats'],
       description: `test plugin ${id}`,
       requires: more.requires ?? [],
@@ -184,7 +183,6 @@ describe('Core', () => {
     const migrated = definePlugin({
       manifest: {
         id: 'migrated',
-        version: '0.2.0',
         kinds: ['stats'],
         description: 'migrated',
         state: { migrations: [(s: MigrationStore) => s.write('doc', { v: 1 })] },
@@ -197,7 +195,6 @@ describe('Core', () => {
     const broken = definePlugin({
       manifest: {
         id: 'broken',
-        version: '0.2.0',
         kinds: ['stats'],
         description: 'broken',
         state: {
@@ -394,7 +391,7 @@ describe('Core', () => {
     const c = new Core({ clock: new VirtualClock() });
     c.register(
       definePlugin({
-        manifest: { id: 'quiet', version: '1.0.0', kinds: ['actor'], description: 'quiet' },
+        manifest: { id: 'quiet', kinds: ['actor'], description: 'quiet' },
         create: (ctx) => {
           ctx.log.info('hello');
           ctx.log.warn('careful');
@@ -413,7 +410,6 @@ describe('Core', () => {
     const offered = definePlugin({
       manifest: {
         id: 'game',
-        version: '0.1.0',
         kinds: ['parser'],
         description: 'offers',
         interface: {
@@ -447,7 +443,6 @@ describe('Core', () => {
     const user = definePlugin({
       manifest: {
         id: 'player',
-        version: '0.1.0',
         kinds: ['actor'],
         description: 'uses',
         requires: ['game', 'other'],
@@ -482,7 +477,6 @@ describe('Core', () => {
       definePlugin({
         manifest: {
           id,
-          version: '0.1.0',
           kinds: ['stats'],
           description: 'answers',
           interface: {
@@ -545,7 +539,6 @@ describe('Core', () => {
       definePlugin({
         manifest: {
           id,
-          version: '0.1.0',
           kinds: ['stats'],
           description: 'answers',
           interface: { commands: { [name]: { help: 'h', aliases } } },
@@ -569,7 +562,6 @@ describe('Core', () => {
       definePlugin({
         manifest: {
           id: 'game',
-          version: '0.1.0',
           kinds: ['parser'],
           description: 'offers',
           interface: { state: { score: { help: 'the score', output: z.number() } } },
@@ -580,7 +572,6 @@ describe('Core', () => {
       definePlugin({
         manifest: {
           id: 'player',
-          version: '0.1.0',
           kinds: ['actor'],
           description: 'uses',
           requires,
@@ -615,7 +606,6 @@ describe('Core', () => {
       definePlugin({
         manifest: {
           id: 'game',
-          version: '0.1.0',
           kinds: ['parser'],
           description: 'offers',
           interface: { state: { score: { help: 'the score', output: z.number() } } },
@@ -636,7 +626,6 @@ describe('Core', () => {
     const p = definePlugin({
       manifest: {
         id: 'tuned',
-        version: '0.1.0',
         kinds: ['actor'],
         description: 'tuned',
         settings: z.object({ level: z.coerce.number().int().min(0).describe('the level') }),
@@ -730,7 +719,7 @@ describe('a node failed at runtime (ctx.fail)', () => {
     const { core: c, told } = core();
     let fail: ((why: string) => void) | undefined;
     const failing = definePlugin({
-      manifest: { id: 'a', version: '0.1.0', kinds: ['stats'], description: 'fails' },
+      manifest: { id: 'a', kinds: ['stats'], description: 'fails' },
       create: (ctx) => {
         fail = (why) => ctx.fail(why);
         return { stop: () => void seen.push('stop a') };
@@ -756,7 +745,7 @@ describe('a node failed at runtime (ctx.fail)', () => {
     let fail: ((why: string) => void) | undefined;
     c.register(
       definePlugin({
-        manifest: { id: 'a', version: '0.1.0', kinds: ['stats'], description: 'fails' },
+        manifest: { id: 'a', kinds: ['stats'], description: 'fails' },
         create: (ctx) => {
           fail = (why) => ctx.fail(why);
           return {
@@ -779,7 +768,6 @@ describe('archived plugins (bot-os.md D32)', () => {
     definePlugin({
       manifest: {
         id,
-        version: '0.1.0',
         kinds: ['actor'],
         description: `an archived plugin ${id}`,
         archived: true,
@@ -832,7 +820,6 @@ describe('the owner’s messages (bot-os-api.md §4.8, bot-os.md D94)', () => {
     definePlugin({
       manifest: {
         id,
-        version: '0.1.0',
         kinds: ['connector'],
         description: 'a surface',
         account: connector.account,
@@ -841,7 +828,7 @@ describe('the owner’s messages (bot-os-api.md §4.8, bot-os.md D94)', () => {
     });
   /** A plugin that tells the owner as it is made, with a button. */
   const teller = definePlugin({
-    manifest: { id: 'teller', version: '0.1.0', kinds: ['stats'], description: 'tells' },
+    manifest: { id: 'teller', kinds: ['stats'], description: 'tells' },
     create: (ctx) => {
       ctx.notify('made', [[{ label: 'Go', action: '/go' }]]);
       ctx.notify('plain');

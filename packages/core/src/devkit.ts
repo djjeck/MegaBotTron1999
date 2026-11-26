@@ -290,7 +290,6 @@ export function fakeConnectorPlugin(id: string, connector: FakeConnector): Plugi
   return definePlugin({
     manifest: {
       id,
-      version: '0.1.0',
       kinds: ['connector'],
       description: `A fake connector of ${connector.account}, driven by a test or a simulator`,
       account: connector.account,

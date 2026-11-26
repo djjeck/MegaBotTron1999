@@ -43,7 +43,6 @@ const noisy = (seen: Map<string, PluginContext>, counts: Map<string, Tally>) =>
   definePlugin({
     manifest: {
       id: 'noisy',
-      version: '0.1.0',
       kinds: ['stats'],
       description: 'raises notices',
       summary: true,
@@ -61,7 +60,7 @@ const noisy = (seen: Map<string, PluginContext>, counts: Map<string, Tally>) =>
 
 /** A node that fails as it starts. */
 const crashy = definePlugin({
-  manifest: { id: 'crashy', version: '0.1.0', kinds: ['stats'], description: 'fails' },
+  manifest: { id: 'crashy', kinds: ['stats'], description: 'fails' },
   create: () => ({
     start() {
       throw new Error('boom');
@@ -83,7 +82,6 @@ const monitoring = (account: FakeConnector) =>
   definePlugin({
     manifest: {
       id: 'irc',
-      version: '0.1.0',
       kinds: ['connector'],
       description: 'a fake IRC account',
       account: account.account,
@@ -95,7 +93,6 @@ const monitoring = (account: FakeConnector) =>
 const reader = definePlugin({
   manifest: {
     id: 'reader',
-    version: '0.1.0',
     kinds: ['parser'],
     description: 'reads a chat',
     inputs: { chat: { type: 'chat-in' } },

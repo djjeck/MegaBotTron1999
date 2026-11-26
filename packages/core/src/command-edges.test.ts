@@ -24,7 +24,6 @@ function bot(id = 'bot', served: ChatCommand[][] = []): Plugin {
   return definePlugin({
     manifest: {
       id,
-      version: '0.1.0',
       kinds: ['connector'],
       description: 'a bot',
       account: `chat:${id}`,
@@ -44,7 +43,6 @@ function bot(id = 'bot', served: ChatCommand[][] = []): Plugin {
 const mapper = definePlugin({
   manifest: {
     id: 'mapper',
-    version: '0.1.0',
     kinds: ['stats'],
     description: 'draws the map',
     interface: {
@@ -155,7 +153,6 @@ describe('the commands ports (D109)', () => {
     const chat = definePlugin({
       manifest: {
         id: 'reader',
-        version: '0.1.0',
         kinds: ['parser'],
         description: 'reads',
         inputs: { chat: { type: 'chat-in' } },

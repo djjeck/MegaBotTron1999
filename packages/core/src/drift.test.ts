@@ -177,10 +177,10 @@ describe('drift in the core', () => {
       ['quest-parser', '2.3.0'],
       ['own-parser', '0.1.28'],
     ]);
-    // A module registered with no version, and no release known: its manifest's.
+    // A module registered with no version, and no release known: none (D166).
     const bare = new Core({ clock: new VirtualClock() });
     bare.registerModule('quest', [plugin('quest-parser', ['parser'], [], got, [])]);
     await bare.start();
-    expect(bare.controls.status().plugins[0]?.version).toBe('0.1.0');
+    expect(bare.controls.status().plugins[0]).not.toHaveProperty('version');
   });
 });

@@ -41,7 +41,6 @@ function questParser(
   return definePlugin({
     manifest: {
       id: 'quest',
-      version: '0.1.0',
       kinds: ['parser'],
       description: 'A made-up game',
       games: { registers: ['quest'] },
@@ -177,7 +176,6 @@ function buyer(): Plugin {
   return definePlugin({
     manifest: {
       id: 'buyer',
-      version: '0.1.0',
       kinds: ['actor'],
       description: 'Buys what the state says is missing',
       requires: ['quest-state'],
@@ -367,7 +365,6 @@ describe('statePlugin', () => {
     const echo = definePlugin({
       manifest: {
         id: 'echo',
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'Answers a gain with a bonus',
         games: { registers: ['echo'] },

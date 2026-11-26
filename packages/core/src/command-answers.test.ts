@@ -33,7 +33,6 @@ const ctx = (id: string) => contexts.get(id) as PluginContext;
 const parser = definePlugin({
   manifest: {
     id: 'parser',
-    version: '0.1.0',
     kinds: ['parser'],
     description: 'reads @QuestBot',
     inputs: { chat: { type: 'chat-in' } },
@@ -85,7 +84,6 @@ const parser = definePlugin({
 const actor = definePlugin({
   manifest: {
     id: 'actor',
-    version: '0.1.0',
     kinds: ['actor'],
     description: 'gives',
     outputs: { chat: { type: 'chat-out' } },
@@ -208,7 +206,7 @@ describe('command answers in the core (D98)', () => {
 
 describe('a manifest of answers', () => {
   it('answers only with events of its own', () => {
-    const base = { version: '0.1.0', kinds: ['parser'], description: 'reads' };
+    const base = { kinds: ['parser'], description: 'reads' };
     expect(() =>
       parseManifest({
         ...base,

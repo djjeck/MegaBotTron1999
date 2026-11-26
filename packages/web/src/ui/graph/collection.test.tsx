@@ -304,7 +304,6 @@ describe('a collection node’s panel (#76)', () => {
     const view: NodeView = {
       id: 'cast',
       plugin,
-      version: '0.1.0',
       description: 'Records',
       kinds: ['stats'],
       configSchema: {

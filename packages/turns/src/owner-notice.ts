@@ -504,7 +504,6 @@ export function ownerNoticePlugin(): Plugin {
   return definePlugin({
     manifest: {
       id: OWNER_NOTICE,
-      version: '0.1.0',
       kinds: ['stats'],
       description:
         'The one node that reports to a chat: what needs the owner’s attention (refused events, coalesced sends, drift, cascades, failures, stalled sends, warnings), the plugins’ messages with their buttons, a summary on a cadence, and a notice at each start',

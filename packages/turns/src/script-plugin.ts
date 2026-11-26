@@ -200,7 +200,6 @@ export type ScriptConfig = z.output<typeof scriptConfig>;
 
 const BASE: ManifestInput = {
   id: SCRIPT,
-  version: '0.1.0',
   kinds: ['actor'],
   description: 'Runs TypeScript typed in the editor, on the ports its config declares',
   config: scriptConfig,

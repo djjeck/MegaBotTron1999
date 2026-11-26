@@ -13,21 +13,18 @@ const manifests = (...raw: unknown[]): Map<string, Manifest> =>
 
 const chat = {
   id: 'chat',
-  version: '0.1.0',
   kinds: ['connector'],
   description: 'a chat',
   account: 'chat:me',
 };
 const scorer = {
   id: 'scorer',
-  version: '0.1.0',
   kinds: ['parser'],
   description: 'keeps a score',
   interface: { state: { score: { help: 'the score', output: z.number() } } },
 };
 const actor = {
   id: 'actor',
-  version: '0.1.0',
   kinds: ['actor'],
   description: 'acts on the score',
   inputs: {
@@ -39,7 +36,6 @@ const actor = {
 /** Reads the score if it can: an optional input. */
 const watcher = {
   id: 'watcher',
-  version: '0.1.0',
   kinds: ['stats'],
   description: 'watches the score',
   inputs: {
@@ -49,7 +45,6 @@ const watcher = {
 /** Sends if it can: an optional chat-out output. */
 const herald = {
   id: 'herald',
-  version: '0.1.0',
   kinds: ['actor'],
   description: 'announces',
   outputs: { chat: { type: 'chat-out', network: 'chat', optional: true } },

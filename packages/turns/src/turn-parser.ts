@@ -374,7 +374,6 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
   return definePlugin({
     manifest: {
       id: spec.id,
-      version: '0.1.0',
       kinds: ['parser'],
       description: spec.description,
       // The answers it read since the last summary, by outcome, for the owner (bot-os.md D92).

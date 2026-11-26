@@ -214,7 +214,6 @@ describe('the draft', () => {
     };
     const look: PluginView = {
       plugin: 'script',
-      version: '0.1.0',
       description: 'A script',
       kinds: ['actor'],
       inputs: {},
@@ -256,7 +255,6 @@ describe('the draft', () => {
     });
     const view = (plugin: string, more: Partial<PluginView>): PluginView => ({
       plugin,
-      version: '0.1.0',
       description: plugin,
       kinds: [],
       inputs: {},
@@ -566,7 +564,6 @@ describe('the cards', () => {
 describe('an edge dropped on a node whose inputs its config declares (D80)', () => {
   const grows: PluginView = {
     plugin: 'grows',
-    version: '0.1.0',
     description: 'inputs from its config',
     kinds: ['actor'],
     inputs: {},
@@ -792,7 +789,6 @@ describe('a node added, wired (D135)', () => {
     outputs: Record<string, PortView>
   ): PluginView => ({
     plugin,
-    version: '0.1.0',
     description: plugin,
     kinds: [],
     inputs,
@@ -910,7 +906,6 @@ describe('a commands edge (D109)', () => {
   it('starts a dry run in the connector’s owner’s chat', () => {
     const bot: PluginView = {
       plugin: 'bot',
-      version: '0.1.0',
       description: 'a bot',
       kinds: ['connector'],
       inputs: {},

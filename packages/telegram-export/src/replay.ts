@@ -91,7 +91,6 @@ function fakeTelegramUser(swapped: Map<string, Swapped>, self: string | undefine
   return definePlugin({
     manifest: {
       id: TELEGRAM_USER,
-      version: '0.1.0',
       kinds: ['connector'],
       description: "The owner's own Telegram account, replayed from an export",
       account: OWNER_ACCOUNT,

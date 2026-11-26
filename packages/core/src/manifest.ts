@@ -111,7 +111,11 @@ export const manifestSchema = z
       .string()
       .regex(PLUGIN_ID, 'expected lower-case words and dashes')
       .refine((id) => id !== 'core', '`core` is reserved for the core'),
-    version: z.string().regex(/^\d+\.\d+\.\d+(?:-[\w.]+)?$/u, 'expected a semver version'),
+    /**
+     * @deprecated Ignored (bot-os.md D166): a plugin's version is its module's, or the release's for
+     * one of the image's own. Still accepted, so that a module that declares it loads.
+     */
+    version: z.string().optional(),
     kinds: z.array(z.enum(KINDS)).min(1),
     description: z.string().min(1),
     /**
@@ -675,6 +679,7 @@ function regexProblem(pattern: string): string | undefined {
 function normalise<
   M extends {
     id: string;
+    version?: string | undefined;
     account?: string | undefined;
     chat: boolean;
     requires: string[];
@@ -689,7 +694,16 @@ function normalise<
     };
   },
 >(m: M) {
-  const { requires, uses, games, inputs: declared, outputs: declaredOut, ...rest } = m;
+  // The deprecated `version` is dropped (D166): nothing reads it.
+  const {
+    requires,
+    uses,
+    games,
+    inputs: declared,
+    outputs: declaredOut,
+    version: _ignored,
+    ...rest
+  } = m;
   const inputs: Record<string, DeclaredInput> = {};
   const add = (name: string, port: DeclaredInput): void => {
     let n = name;

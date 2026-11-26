@@ -14,12 +14,11 @@ import { definePlugin, type PluginContext } from './plugin.ts';
 import { describePort, namespaceOf, resolveInputs } from './ports.ts';
 
 const m = (id: string, more: Partial<ManifestInput> = {}): Manifest =>
-  parseManifest({ id, version: '0.1.0', kinds: ['stats'], description: id, ...more });
+  parseManifest({ id, kinds: ['stats'], description: id, ...more });
 
 /** A listener that learns from its config what it hears: `on`, an event type or a namespace. */
 const listener = (optional = false): ManifestInput => ({
   id: 'listener',
-  version: '0.1.0',
   kinds: ['stats'],
   description: 'hears what its config says',
   config: z.object({ on: z.string().optional(), unused: z.number().optional() }),
@@ -215,7 +214,6 @@ describe('a plugin with such an input', () => {
         definePlugin({
           manifest: {
             id: 'dice',
-            version: '0.1.0',
             kinds: ['parser'],
             description: 'rolls',
             games: { registers: ['dice'] },

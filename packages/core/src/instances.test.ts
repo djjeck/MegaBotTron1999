@@ -13,7 +13,6 @@ import { describePort, type InputPort, mismatch } from './ports.ts';
 const game = definePlugin({
   manifest: {
     id: 'game',
-    version: '0.1.0',
     kinds: ['parser'],
     description: 'a game',
     games: { registers: ['game'] },
@@ -42,7 +41,6 @@ function actor(heard: string[], contexts: PluginContext[]) {
   return definePlugin({
     manifest: {
       id: 'actor',
-      version: '0.1.0',
       kinds: ['actor'],
       description: 'an actor',
       inputs: {
@@ -62,7 +60,7 @@ function actor(heard: string[], contexts: PluginContext[]) {
 }
 
 const helper = definePlugin({
-  manifest: { id: 'helper', version: '0.1.0', kinds: ['stats'], description: 'helps' },
+  manifest: { id: 'helper', kinds: ['stats'], description: 'helps' },
   create: () => ({ start: () => {} }),
 });
 
@@ -184,7 +182,6 @@ describe('plugin instances', () => {
     const asker = definePlugin({
       manifest: {
         id: 'asker',
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'asks',
         interface: { commands: { ask: { help: 'asks' } } },
@@ -213,7 +210,6 @@ describe('plugin instances', () => {
       definePlugin({
         manifest: {
           id,
-          version: '0.1.0',
           kinds: ['parser'],
           description: id,
           interface: { state: { rest: { help: 'its rest', output: z.string() } } },
@@ -224,7 +220,6 @@ describe('plugin instances', () => {
     const turns = definePlugin({
       manifest: {
         id: 'turns',
-        version: '0.1.0',
         kinds: ['actor'],
         description: 'turns',
         inputs: { parser: { type: 'interface', members: ['state.rest'] } },
@@ -293,7 +288,6 @@ describe('contracts', () => {
     expect(() =>
       parseManifest({
         id: 'turns',
-        version: '0.1.0',
         kinds: ['actor'],
         description: 'turns',
         inputs: { parser: { type: 'interface' } },

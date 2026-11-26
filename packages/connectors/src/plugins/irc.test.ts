@@ -145,7 +145,6 @@ describe('the irc plugin in the core', () => {
     const reader: Plugin = {
       manifest: {
         id: 'reader',
-        version: '0.1.0',
         kinds: ['parser'],
         description: 'reads irc',
         inputs: { irc: { type: 'chat-in', bind: { node: 'irc', reads: ['#lobby'] } } },

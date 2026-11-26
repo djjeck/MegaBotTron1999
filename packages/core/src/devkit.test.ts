@@ -11,7 +11,6 @@ function pinger() {
   const plugin = definePlugin({
     manifest: {
       id: 'pinger',
-      version: '0.1.0',
       kinds: ['actor'],
       description: 'answers ping',
       inputs: { fake: { type: 'chat-in', bind: { node: 'fake', reads: ['#test'] } } },
@@ -197,7 +196,6 @@ describe('DevKit', () => {
     const migrating = definePlugin({
       manifest: {
         id: 'migrating',
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'migrates',
         settings: z.object({ n: z.number().default(0) }),
@@ -222,7 +220,7 @@ describe('DevKit', () => {
   it('keeps a plugin’s files in memory, with the limits the kit is given (D149)', async () => {
     let ctx: PluginContext | undefined;
     const painter = definePlugin({
-      manifest: { id: 'card-painter', version: '0.1.0', kinds: ['stats'], description: 'paints' },
+      manifest: { id: 'card-painter', kinds: ['stats'], description: 'paints' },
       create: (c) => {
         ctx = c;
         return {};
@@ -269,7 +267,7 @@ describe('DevKit', () => {
     });
     await expect(bad.start()).rejects.toThrow('dev kit: setting pinger.nope');
     const failing = definePlugin({
-      manifest: { id: 'broken', version: '0.1.0', kinds: ['actor'], description: 'fails' },
+      manifest: { id: 'broken', kinds: ['actor'], description: 'fails' },
       create: () => {
         throw new Error('no');
       },
@@ -285,7 +283,6 @@ describe('defineSimulator', () => {
     const sim = defineSimulator({
       manifest: {
         id: 'toy-arena',
-        version: '0.1.0',
         kinds: ['simulator'],
         description: 'a toy game',
         games: { consumes: ['toy'] },
@@ -300,13 +297,13 @@ describe('defineSimulator', () => {
     expect(await sim.run(21, { double: true })).toBe(42);
     expect(() =>
       defineSimulator({
-        manifest: { id: 'not-one', version: '0.1.0', kinds: ['actor'], description: 'x' },
+        manifest: { id: 'not-one', kinds: ['actor'], description: 'x' },
         run: async () => 0,
       })
     ).toThrow(ManifestError);
     expect(() =>
       defineSimulator({
-        manifest: { id: 'Bad', version: '0.1.0', kinds: ['simulator'], description: 'x' },
+        manifest: { id: 'Bad', kinds: ['simulator'], description: 'x' },
         run: async () => 0,
       })
     ).toThrow('bad manifest');
@@ -317,7 +314,6 @@ describe('DevKit and archived plugins', () => {
   const archived = definePlugin({
     manifest: {
       id: 'old',
-      version: '0.1.0',
       kinds: ['stats'],
       description: 'an archive',
       archived: true,

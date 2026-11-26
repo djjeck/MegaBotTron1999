@@ -46,7 +46,6 @@ const pinger = () =>
   definePlugin({
     manifest: {
       id: 'pinger',
-      version: '0.1.0',
       kinds: ['stats'],
       description: 'answers',
       interface: { commands: { ping: { help: 'ping', menu: 'il ping' } } },
@@ -149,7 +148,6 @@ describe('the telegram-bot plugin', () => {
       definePlugin({
         manifest: {
           id: 'pinger',
-          version: '0.1.0',
           kinds: ['stats'],
           description: 'answers',
           interface: { commands: { ping: { help: 'ping', menu: 'il ping' } } },
@@ -470,7 +468,6 @@ describe('the telegram-bot plugin’s photo (D151)', () => {
     definePlugin({
       manifest: {
         id: 'postcard',
-        version: '0.1.0',
         kinds: ['agent'],
         description: 'Keeps the pictures of the rooms',
         inputs: { tg: { type: 'interface', plugin: 'telegram-bot', members: ['actions.photo'] } },

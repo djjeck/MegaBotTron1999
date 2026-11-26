@@ -22,12 +22,10 @@ function shelf(got: Record<string, BusHandle>): Plugin {
   return definePlugin({
     manifest: {
       id: 'shelf',
-      version: '0.1.0',
       kinds: ['stats'],
       description: 'Things on a shelf',
       node: (_config, id) => ({
         id: 'shelf',
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'Things on a shelf',
         games: { registers: [id] },
@@ -43,7 +41,6 @@ function shelf(got: Record<string, BusHandle>): Plugin {
 
 const POSTCARD: ManifestInput = {
   id: 'postcard',
-  version: '0.1.0',
   kinds: ['stats'],
   description: 'Remakes its cards when its cast changes',
   inputs: {
@@ -225,7 +222,6 @@ describe('an events input from its edge (D156)', () => {
     });
     const dice = parseManifest({
       id: 'dice',
-      version: '0.1.0',
       kinds: ['stats'],
       description: 'Rolls',
       games: { registers: ['dice'] },

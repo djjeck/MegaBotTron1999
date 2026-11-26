@@ -13,7 +13,7 @@ function onBus(
   events: Record<string, z.ZodType> = {}
 ): Plugin {
   return definePlugin({
-    manifest: { id, version: '0.1.0', kinds: ['stats'], description: id, games, events },
+    manifest: { id, kinds: ['stats'], description: id, games, events },
     create: (ctx) => {
       got[id] = ctx.bus;
       return {};

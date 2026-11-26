@@ -17,7 +17,6 @@ plugin from what the core gives it.
 export const plugin = definePlugin({
   manifest: {
     id: 'dice-roller',
-    version: '0.1.0',
     kinds: ['actor'],
     // …the rest of the manifest (§2)
   },
@@ -40,7 +39,7 @@ instance does not start.
 | Field             | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `id`              | Lower-case words and dashes (`dice-roller`), unique in the instance; the name of its store, its settings and its log lines. `core` is reserved                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `version`         | Semver of the plugin                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `version`         | Deprecated, ignored (bot-os.md D166): still accepted, no longer required. A plugin's version is its module's, or the release's for one of the image's own (§4.11)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `kinds`           | One or more of `connector`, `parser`, `actor`, `stats` (stats and commands), `agent`, `simulator` (bot-os.md §1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `description`     | One line, for the UI and the agents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `archived`        | An archive (bot-os.md D32): built and tested, but refused in every instance's graph; only a run that says `allowArchived` (a test, the dev kit, a manual-test tool) runs it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -1881,7 +1880,8 @@ stops the actors once until the rate falls back, logs it (`event: "pause"`, with
 stopped) and raises a `drift` notice (§4.16, `detail.paused`); `core.drift()` gives the counts. Each
 record carries the `version` the parser runs (`GET /status`'s, §4.11), so that the web UI's Drift
 page shows a parser's reports of the version it runs now, and folds those an upgrade left behind
-under one line (bot-os.md D113); records written before had none, and are shown as current.
+under one line (bot-os.md D113); records written before had none, and are shown as current, as are
+those of a parser whose version is not known (a test, the dev kit; D166).
 
 ### 4.8 The owner
 
@@ -2047,16 +2047,17 @@ control API, the web UI and later the agents, whose grants will be subsets of it
 (`packages/core/src/controls.ts`, `core.controls`):
 
 - **Each plugin:** the `version` it runs (its module's, as loaded, `GET /modules`; the release's,
-  `GET /instance`, for one of the image's own; bot-os.md D113), its state (bot-os.md D64, §2.1:
-  `running`; `disabled`; `stopped`, with its `stop`, `{ reason, time, source }`; `inactive`, its
-  `reason` the node it needs, `needs tg (disabled)`; `failed` with why; bot-os.md D143: `loading`
-  while the plugins load, and `unloaded` for a node whose plugin did not load, its `reason` and its
-  `failures` naming each package or module and its error, after the nodes the core runs), its
-  settings with the values in force, the names of the reads and actions its `interface` declares,
-  its own account of itself if it declares a read named `status`, the output of the read its widget
-  names (`widget`, bot-os.md D112), for its card, and, if it keeps a state (its instance's `view`,
-  bot-os.md D72), one line of it (`summary`), for its card; a connector whose queue coalesced sends
-  since the start says so there too (`2 sends coalesced: a + b (2)`, D73).
+  `GET /instance`, for one of the image's own; none when neither is known, as in a test; bot-os.md
+  D113, D166), its state (bot-os.md D64, §2.1: `running`; `disabled`; `stopped`, with its `stop`,
+  `{ reason, time, source }`; `inactive`, its `reason` the node it needs, `needs tg (disabled)`;
+  `failed` with why; bot-os.md D143: `loading` while the plugins load, and `unloaded` for a node
+  whose plugin did not load, its `reason` and its `failures` naming each package or module and its
+  error, after the nodes the core runs), its settings with the values in force, the names of the
+  reads and actions its `interface` declares, its own account of itself if it declares a read named
+  `status`, the output of the read its widget names (`widget`, bot-os.md D112), for its card, and,
+  if it keeps a state (its instance's `view`, bot-os.md D72), one line of it (`summary`), for its
+  card; a connector whose queue coalesced sends since the start says so there too
+  (`2 sends coalesced: a + b (2)`, D73).
 - **What holds a node back** (bot-os.md D98), its `backoff` in `GET /status`, while there is any:
   each command the retry-loop guard holds back (§4.6, Command answers),
   `{ account, chat, command, reason, count, until }`.
@@ -2219,56 +2220,55 @@ writes a graph to `<dir>/graph.json` atomically (the versions before it are the 
 **The graph editor** (bot-os.md D47, D55) is the web UI's home page (`packages/web/src/ui/graph/`),
 drawn with React Flow. It edits a draft of the saved graph (`GET /graph/file`), each node drawn from
 its plugin as `GET /available` describes it (a node whose ports its config declares, as the last
-check's `views` describe it, bot-os.md D74) (`describePlugin`: its version, description, kinds and
-account and network, its input and output ports, the reads, actions and commands its `interface`
-declares, and the JSON Schemas of its `config`, its `settings` and its actions' inputs and outputs
-and reads' outputs, zod's `toJSONSchema`), with the node's own id, account (`nodeAccount`, D119) and
-config; the port types' looks come from `GET /graph/view` (`PORT_TYPE_INFO`). It polls
-`GET /status`, `GET /drift` and `GET /accounts` for each node's live state, drift and connection. An
-edge dragged over a port that cannot take it (another type, network or namespace, or an interface
-missing a member) is drawn refused and its drop refused, the status saying why (bot-os.md D101).
-Each change of the draft is checked (`POST /graph/check`) and every problem shown where it is
-located (§2.3); every warning too (bot-os.md D89), in amber, dashed, on its edge, its port and its
-node, listed in their panels and in the review, and counted in the map's bar beside the problems
-(`N warnings`), without keeping Apply from the draft. A node's config starts filled with its
-schema's defaults (nested objects within), written to the draft as if typed; a node opened shows the
-defaults of the fields its config leaves unset filled in, unmarked, and writes them with its first
-change, so that merely opening a node changes nothing. A field's description is its help. A
-connector's fields that every connector shares (`commandIntervalS`, `unansweredAt`,
-`unansweredAtBy`, `liveGraceS`) are drawn last, folded under **Tuning** (bot-os.md D122); a
-connector that logs in says, above its config while it is not logged in, to log in first, its chats
-being picked from those it sees once connected. A node selected shows its forms, editable, a key of
-`configSecrets` as a choice of `GET /secrets`, a list of strings or numbers as rows of plain fields
-(add, remove; an empty row written nowhere), a record of plain values as rows of a key and a value
-(its type picked where the schema allows several), **a player's commands as a checklist** (bot-os.md
-D137, D141, `configPlays`, `PlaysField.tsx`): a row per command of the readiness state its `state`
-edge binds (its `botCommands`, in its order), with a box (played or not; by default every command
-but an interactive one, and the config left unset while they stay so), a sentence saying what the
-player will do with it, composed from its mechanics and its policy (`plays.ts`: "a turn: played
-whenever the bot's rest is over", "played if /play is cooling down; ends its cool-down", "activated
-by “A chest appears!”, for 30 minutes: played while active", "played whenever ready, then cooling
-down for 24 hours", "needs you to answer: not played by default"), and, when played, its policy to
-pick: whenever ready, or if another command is cooling down; and its forms (bot-os.md D139, D140),
-one row per command whatever its aliases: each of its names (its own, then its `aliases`) bare
-(`/play`, which every bot in the group that declares it takes), then, where its edge sends to a
-group, each of them addressed to its bot in the same order (`/play@QuestBot`, its state's
-`botUsername`), each with its tick, all ticked by default (the entry's `forms` unset), the last one
-ticked kept, an unticked one never sent; a single form is not listed, and in its bot's private chat
-no addressed form is (but one its entry allows already). The sentence says how the form is chosen
-("sent as the form that plays the most ready turns at once"; "sent as /play@QuestBot, which only
-@QuestBot takes"; "sent as /play, which every bot in the group that declares it takes"), with a note
-of what bare means in a group. Without a state edge, or a state that declares none, the list is
-typed as JSON, as it can be under **Edit as JSON**; and its chat-out edge follows it: each change of
-the draft sets that edge's `commands` to the forms it may send, in order, which its panel shows
-rather than a list of its own. JSON only for what these do not draw, and what each of its outputs
-carries, not its type, which the graph draws (bot-os.md D71): an events output, the event types its
-plugin registers in that namespace (`types` of its port in `GET /available`), each with its schema's
-description (§4.4) and its payload's JSON Schema (`schema`); a chat-out output that declares its
-commands, each with its spacing (bot-os.md D74); an interface output, its members' names, folded,
-opening on each one's signature (from its schemas:
-`actions.sent({ chat: string, id?: string, t: number })`, `state.bot() → string`) and help; another
-output, its port in words. An events edge, and the events input of the node it enters, show what it
-carries (#3): each event type with its payload's fields by dotted path and type
+check's `views` describe it, bot-os.md D74) (`describePlugin`: its description, kinds and account
+and network, its input and output ports, the reads, actions and commands its `interface` declares,
+and the JSON Schemas of its `config`, its `settings` and its actions' inputs and outputs and reads'
+outputs, zod's `toJSONSchema`), with the node's own id, account (`nodeAccount`, D119) and config;
+the port types' looks come from `GET /graph/view` (`PORT_TYPE_INFO`). It polls `GET /status`,
+`GET /drift` and `GET /accounts` for each node's live state, drift and connection. An edge dragged
+over a port that cannot take it (another type, network or namespace, or an interface missing a
+member) is drawn refused and its drop refused, the status saying why (bot-os.md D101). Each change
+of the draft is checked (`POST /graph/check`) and every problem shown where it is located (§2.3);
+every warning too (bot-os.md D89), in amber, dashed, on its edge, its port and its node, listed in
+their panels and in the review, and counted in the map's bar beside the problems (`N warnings`),
+without keeping Apply from the draft. A node's config starts filled with its schema's defaults
+(nested objects within), written to the draft as if typed; a node opened shows the defaults of the
+fields its config leaves unset filled in, unmarked, and writes them with its first change, so that
+merely opening a node changes nothing. A field's description is its help. A connector's fields that
+every connector shares (`commandIntervalS`, `unansweredAt`, `unansweredAtBy`, `liveGraceS`) are
+drawn last, folded under **Tuning** (bot-os.md D122); a connector that logs in says, above its
+config while it is not logged in, to log in first, its chats being picked from those it sees once
+connected. A node selected shows its forms, editable, a key of `configSecrets` as a choice of
+`GET /secrets`, a list of strings or numbers as rows of plain fields (add, remove; an empty row
+written nowhere), a record of plain values as rows of a key and a value (its type picked where the
+schema allows several), **a player's commands as a checklist** (bot-os.md D137, D141, `configPlays`,
+`PlaysField.tsx`): a row per command of the readiness state its `state` edge binds (its
+`botCommands`, in its order), with a box (played or not; by default every command but an interactive
+one, and the config left unset while they stay so), a sentence saying what the player will do with
+it, composed from its mechanics and its policy (`plays.ts`: "a turn: played whenever the bot's rest
+is over", "played if /play is cooling down; ends its cool-down", "activated by “A chest appears!”,
+for 30 minutes: played while active", "played whenever ready, then cooling down for 24 hours",
+"needs you to answer: not played by default"), and, when played, its policy to pick: whenever ready,
+or if another command is cooling down; and its forms (bot-os.md D139, D140), one row per command
+whatever its aliases: each of its names (its own, then its `aliases`) bare (`/play`, which every bot
+in the group that declares it takes), then, where its edge sends to a group, each of them addressed
+to its bot in the same order (`/play@QuestBot`, its state's `botUsername`), each with its tick, all
+ticked by default (the entry's `forms` unset), the last one ticked kept, an unticked one never sent;
+a single form is not listed, and in its bot's private chat no addressed form is (but one its entry
+allows already). The sentence says how the form is chosen ("sent as the form that plays the most
+ready turns at once"; "sent as /play@QuestBot, which only @QuestBot takes"; "sent as /play, which
+every bot in the group that declares it takes"), with a note of what bare means in a group. Without
+a state edge, or a state that declares none, the list is typed as JSON, as it can be under **Edit as
+JSON**; and its chat-out edge follows it: each change of the draft sets that edge's `commands` to
+the forms it may send, in order, which its panel shows rather than a list of its own. JSON only for
+what these do not draw, and what each of its outputs carries, not its type, which the graph draws
+(bot-os.md D71): an events output, the event types its plugin registers in that namespace (`types`
+of its port in `GET /available`), each with its schema's description (§4.4) and its payload's JSON
+Schema (`schema`); a chat-out output that declares its commands, each with its spacing (bot-os.md
+D74); an interface output, its members' names, folded, opening on each one's signature (from its
+schemas: `actions.sent({ chat: string, id?: string, t: number })`, `state.bot() → string`) and help;
+another output, its port in words. An events edge, and the events input of the node it enters, show
+what it carries (#3): each event type with its payload's fields by dotted path and type
 (`outcome.item?: string`), from its schema (`types[].schema`), so that a reaction's `when` and
 `send` paths are written against it, narrowed in the node's panel to the type its config names (the
 reactor's `on`); the edge's rhombus says it in its title, a line per type. An edge selected, what it
@@ -3541,7 +3541,6 @@ export const plugins: Plugin[] = [
   definePlugin({
     manifest: {
       id: 'dice-roller',
-      version: '0.1.0',
       kinds: ['actor'],
       description: 'Rolls the dice',
       config: z.object({ faces: z.number().default(faces) }),

@@ -111,7 +111,7 @@ describe('the scheduler in the core', () => {
   /** A plugin that sets its timers at its first start and writes what fires to `seen`. */
   function timed(seen: string[], options: { onTimer?: boolean } = {}): Plugin {
     return definePlugin({
-      manifest: { id: 'timed', version: '0.1.0', kinds: ['actor'], description: 'timed' },
+      manifest: { id: 'timed', kinds: ['actor'], description: 'timed' },
       create: (ctx) => {
         if (ctx.store.read('set') === undefined) {
           ctx.scheduler.after('send', 60_000, { payload: { what: 'hello' } });
@@ -188,7 +188,7 @@ describe('the scheduler in the core', () => {
     const clock = new VirtualClock(0);
     const seen: string[] = [];
     const failing = definePlugin({
-      manifest: { id: 'failing', version: '0.1.0', kinds: ['actor'], description: 'failing' },
+      manifest: { id: 'failing', kinds: ['actor'], description: 'failing' },
       create: (ctx) => {
         ctx.scheduler.after('never', 10);
         return {

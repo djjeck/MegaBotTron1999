@@ -6,7 +6,6 @@ import { portsOf, scriptApi, scriptDts, tsType } from './types.ts';
 /** A made-up game's state node, as `GET /available` describes it. */
 const STATE: PluginView = {
   plugin: 'quest-state',
-  version: '0.1.0',
   description: 'The inventory at @QuestBot',
   kinds: ['stats'],
   inputs: {},

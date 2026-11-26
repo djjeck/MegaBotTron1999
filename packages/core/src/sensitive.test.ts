@@ -22,7 +22,6 @@ function keeper(seen: unknown[]) {
   return definePlugin({
     manifest: {
       id: 'keeper',
-      version: '0.1.0',
       kinds: ['stats'],
       description: 'keeps a token',
       config: z.object({ token: z.string().optional(), label: z.string().optional() }),

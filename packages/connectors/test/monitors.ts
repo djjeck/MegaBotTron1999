@@ -8,7 +8,6 @@ import { parseManifest, type Plugin, resolveGraph } from '@megabottron1999/core'
 
 const READER = parseManifest({
   id: 'reader',
-  version: '0.1.0',
   kinds: ['parser'],
   description: 'reads a chat',
   inputs: { chat: { type: 'chat-in' } },

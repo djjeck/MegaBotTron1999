@@ -21,14 +21,12 @@ import { definePlugin, type Plugin } from './plugin.ts';
 const scripted: Plugin = definePlugin({
   manifest: {
     id: 'scripted',
-    version: '0.1.0',
     kinds: ['stats'],
     description: 'Runs code',
     config: z.object({ code: z.string().default('') }),
     audit: ['code'],
     node: () => ({
       id: 'scripted',
-      version: '0.1.0',
       kinds: ['stats'],
       description: 'Runs code',
       config: z.object({ code: z.string().default('') }),
@@ -38,7 +36,7 @@ const scripted: Plugin = definePlugin({
   create: () => ({}),
 });
 const plain: Plugin = definePlugin({
-  manifest: { id: 'plain', version: '0.1.0', kinds: ['stats'], description: 'Plain' },
+  manifest: { id: 'plain', kinds: ['stats'], description: 'Plain' },
   create: () => ({}),
 });
 

@@ -314,7 +314,6 @@ export function playerPlugin(): Plugin {
   return definePlugin({
     manifest: {
       id: PLAYER,
-      version: '0.1.0',
       kinds: ['actor'],
       description:
         "A game bot's commands, from the owner's account, in its private chat or a group, in a simulated person's sittings",

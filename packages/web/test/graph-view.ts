@@ -43,7 +43,6 @@ export const VIEW: GraphViewData = {
     {
       id: 'chat',
       plugin: 'chat',
-      version: '1.0.0',
       description: 'a chat network',
       kinds: ['connector'],
       account: 'chat:chat',
@@ -81,7 +80,6 @@ export const VIEW: GraphViewData = {
     {
       id: 'parser',
       plugin: 'parser',
-      version: '0.1.0',
       description: 'reads the game',
       kinds: ['parser'],
       inputs: {},
@@ -142,7 +140,6 @@ export const VIEW: GraphViewData = {
     {
       id: 'actor-a',
       plugin: 'actor',
-      version: '0.2.0',
       description: 'plays the game',
       kinds: ['actor'],
       settingsSchema: {

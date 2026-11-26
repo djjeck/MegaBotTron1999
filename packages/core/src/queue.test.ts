@@ -13,7 +13,6 @@ const T0 = Date.UTC(2026, 10, 12, 9);
 const game = definePlugin({
   manifest: {
     id: 'game',
-    version: '0.1.0',
     kinds: ['parser'],
     description: 'a made-up game',
     games: { registers: ['game'] },
@@ -34,7 +33,6 @@ const contexts = new Map<string, PluginContext>();
 const actor = definePlugin({
   manifest: {
     id: 'actor',
-    version: '0.1.0',
     kinds: ['actor'],
     description: 'queues sends',
     inputs: { events: { type: 'events', namespace: 'game', optional: true } },

@@ -133,7 +133,6 @@ export function reactorPlugin(): Plugin {
   return definePlugin({
     manifest: {
       id: REACTOR,
-      version: '0.1.0',
       kinds: ['actor'],
       description:
         'Sends a command when an event is heard or a message matches, as its config says',

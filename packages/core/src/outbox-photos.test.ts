@@ -311,7 +311,6 @@ describe('a photo through the core (D150)', () => {
       {
         manifest: {
           id: 'conn',
-          version: '0.1.0',
           kinds: ['connector'],
           description: 'conn',
           account: 'test:me',
@@ -321,7 +320,6 @@ describe('a photo through the core (D150)', () => {
       {
         manifest: {
           id: 'card-painter',
-          version: '0.1.0',
           kinds: ['actor'],
           description: 'paints cards',
           outputs: {

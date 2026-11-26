@@ -90,7 +90,6 @@ describe('a fake connector’s photos (D151)', () => {
     definePlugin({
       manifest: {
         id: 'postcard',
-        version: '0.1.0',
         kinds: ['agent'],
         description: 'Keeps the pictures of the rooms',
         inputs: { tg: { type: 'interface', plugin: 'telegram-user', members: ['actions.photo'] } },

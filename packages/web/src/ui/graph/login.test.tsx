@@ -149,7 +149,6 @@ describe('a Telegram-like connector’s panel, as a first setup sees it (D122)',
   const view: NodeView = {
     id: 'quest-bot',
     plugin: 'telegram-bot',
-    version: '0.1.0',
     description: 'A bot',
     kinds: ['connector'],
     account: 'telegram-bot:quest-bot',
@@ -294,7 +293,6 @@ describe('a sensitive config field (D124)', () => {
         view={{
           id: 'k',
           plugin: 'keeper',
-          version: '0.1.0',
           description: 'keeps a token',
           kinds: ['stats'],
           configSchema: { type: 'object', properties: { token: { type: 'string' } } },

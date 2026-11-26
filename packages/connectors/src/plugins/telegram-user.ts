@@ -81,7 +81,6 @@ export function telegramUserPlugin(
   return definePlugin({
     manifest: {
       id: TELEGRAM_USER,
-      version: '0.1.0',
       kinds: ['connector'],
       description: "The owner's own Telegram account: the chats it monitors",
       account,

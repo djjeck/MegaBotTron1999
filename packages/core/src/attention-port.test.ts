@@ -15,7 +15,6 @@ const person = (id = 'person'): Plugin =>
   definePlugin({
     manifest: {
       id,
-      version: '1.0.0',
       kinds: ['actor'],
       description: 'a person',
       outputs: { attention: { type: 'attention', help: 'its sittings' } },
@@ -28,7 +27,6 @@ const player = (id = 'player', optional = false): Plugin =>
   definePlugin({
     manifest: {
       id,
-      version: '1.0.0',
       kinds: ['actor'],
       description: 'a player',
       inputs: {

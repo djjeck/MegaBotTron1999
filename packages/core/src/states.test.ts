@@ -25,7 +25,6 @@ afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 const parser = definePlugin({
   manifest: {
     id: 'parser',
-    version: '0.1.0',
     kinds: ['parser'],
     description: 'reads #lobby',
     config: z.object({ chat: z.string().default('#lobby') }),
@@ -40,7 +39,6 @@ function actor(seen: PluginContext[]) {
   return definePlugin({
     manifest: {
       id: 'actor',
-      version: '0.1.0',
       kinds: ['actor'],
       description: 'acts',
       inputs: {
@@ -63,7 +61,6 @@ function actor(seen: PluginContext[]) {
 const watcher = definePlugin({
   manifest: {
     id: 'watcher',
-    version: '0.1.0',
     kinds: ['stats'],
     description: 'watches',
     inputs: { actor: { type: 'interface', plugin: 'actor', members: [] } },
@@ -309,7 +306,7 @@ describe('a stop (D64)', () => {
 
   it('a plugin that stops itself as it starts stays stopped', async () => {
     const early = definePlugin({
-      manifest: { id: 'early', version: '0.1.0', kinds: ['actor'], description: 'stops' },
+      manifest: { id: 'early', kinds: ['actor'], description: 'stops' },
       create: (ctx) => ({ start: () => ctx.stop('nothing to do') }),
     });
     const core = new Core({ clock: new VirtualClock() });
@@ -325,7 +322,6 @@ describe('a runtime stop’s cascade (#29)', () => {
     return definePlugin({
       manifest: {
         id,
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'reads and watches',
         inputs: {
@@ -455,13 +451,12 @@ describe('a runtime stop’s cascade (#29)', () => {
 
   it('made as a node starts, keeps those after it from starting', async () => {
     const early = definePlugin({
-      manifest: { id: 'early', version: '0.1.0', kinds: ['actor'], description: 'stops' },
+      manifest: { id: 'early', kinds: ['actor'], description: 'stops' },
       create: (ctx) => ({ start: () => ctx.stop('nothing to do'), interface: {} }),
     });
     const later = definePlugin({
       manifest: {
         id: 'later',
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'needs early',
         requires: ['early'],
@@ -485,7 +480,6 @@ describe('a runtime stop’s cascade (#29)', () => {
     const fragile = definePlugin({
       manifest: {
         id: 'fragile',
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'fails to stop',
         requires: ['base'],
@@ -497,7 +491,7 @@ describe('a runtime stop’s cascade (#29)', () => {
       }),
     });
     const base = definePlugin({
-      manifest: { id: 'base', version: '0.1.0', kinds: ['actor'], description: 'base' },
+      manifest: { id: 'base', kinds: ['actor'], description: 'base' },
       create: () => ({}),
     });
     const core = new Core({ clock: new VirtualClock(), print: (l) => lines.push(l) });

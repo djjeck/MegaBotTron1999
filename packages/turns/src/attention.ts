@@ -281,7 +281,6 @@ export function attentionPlugin(): Plugin {
   return definePlugin({
     manifest: {
       id: ATTENTION,
-      version: '0.1.0',
       kinds: ['actor'],
       description:
         'A simulated person: when they sit down to play, how fast they act, for the players bound to it',

@@ -197,7 +197,6 @@ export function telegramBotPlugin(
   return definePlugin({
     manifest: {
       id: TELEGRAM_BOT,
-      version: '0.1.0',
       kinds: ['connector'],
       description:
         'A Telegram bot: the owner’s commands, the public commands, and the chats it monitors',

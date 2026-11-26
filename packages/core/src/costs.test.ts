@@ -38,7 +38,6 @@ describe('a node’s cost', () => {
         definePlugin({
           manifest: {
             id: 'game',
-            version: '0.1.0',
             kinds: ['parser'],
             description: 'A game',
             games: { registers: ['game'] },
@@ -52,7 +51,6 @@ describe('a node’s cost', () => {
         definePlugin({
           manifest: {
             id: 'watch',
-            version: '0.1.0',
             kinds: ['stats'],
             description: 'Watches',
             inputs: {
@@ -74,7 +72,7 @@ describe('a node’s cost', () => {
           },
         }),
         definePlugin({
-          manifest: { id: 'broken', version: '0.1.0', kinds: ['stats'], description: 'Broken' },
+          manifest: { id: 'broken', kinds: ['stats'], description: 'Broken' },
           create: () => ({
             cost: () => {
               throw new Error('no idea');

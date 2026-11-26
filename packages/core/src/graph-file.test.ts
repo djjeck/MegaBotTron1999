@@ -17,7 +17,6 @@ import { shutdown } from './shutdown.ts';
 const scorer = definePlugin({
   manifest: {
     id: 'scorer',
-    version: '0.1.0',
     kinds: ['parser'],
     description: 'keeps a score',
     interface: { state: { score: { help: 'the score', output: z.number() } } },
@@ -29,7 +28,6 @@ const scorer = definePlugin({
 const actor = definePlugin({
   manifest: {
     id: 'actor',
-    version: '0.1.0',
     kinds: ['actor'],
     description: 'acts on the score',
     config: z.object({ every: z.number().int().min(1) }),
@@ -60,7 +58,6 @@ const good: GraphInput = {
 const watcher = definePlugin({
   manifest: {
     id: 'watcher',
-    version: '0.1.0',
     kinds: ['connector'],
     description: 'monitors its chats',
     account: 'chat:watcher',

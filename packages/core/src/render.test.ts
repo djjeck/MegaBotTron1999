@@ -55,7 +55,7 @@ describe('svgToPng', () => {
   it('is what a plugin’s context offers, unless the wiring gives another', async () => {
     const seen: PluginContext[] = [];
     const plugin = definePlugin({
-      manifest: { id: 'painter', version: '0.1.0', kinds: ['stats'], description: 'Draws' },
+      manifest: { id: 'painter', kinds: ['stats'], description: 'Draws' },
       create: (ctx) => {
         seen.push(ctx);
         return {};

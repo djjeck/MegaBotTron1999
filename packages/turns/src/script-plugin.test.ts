@@ -32,7 +32,6 @@ function questParser(): Plugin & { publish?: (type: string, payload: object) => 
   const p: Plugin & { publish?: (type: string, payload: object) => void } = definePlugin({
     manifest: {
       id: 'quest',
-      version: '0.1.0',
       kinds: ['parser'],
       description: 'A made-up game',
       games: { registers: ['quest'] },

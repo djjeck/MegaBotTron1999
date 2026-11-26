@@ -44,7 +44,7 @@ export function entrySource(...ids: string[]): string {
   return `export const plugins = [${ids
     .map(
       (id) =>
-        `{ manifest: { id: '${id}', version: '0.1.0', kinds: ['stats'], description: 'A test plugin' }, create: () => ({}) }`
+        `{ manifest: { id: '${id}', kinds: ['stats'], description: 'A test plugin' }, create: () => ({}) }`
     )
     .join(', ')}];\n`;
 }

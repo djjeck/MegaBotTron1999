@@ -790,7 +790,7 @@ export function NodeDetails(props: {
       <p>
         {view.description}{' '}
         <span className="muted">
-          ({view.plugin} {view.version}; {view.kinds.join(', ')})
+          ({view.plugin}; {view.kinds.join(', ')})
         </span>
       </p>
       {props.problems.length === 0 ? null : (

@@ -507,7 +507,6 @@ export function viewOf(
 ): NodeView {
   const base: PluginView = plugin ?? {
     plugin: node.plugin,
-    version: '?',
     description: `the plugin ${node.plugin} is not offered by this instance`,
     kinds: [],
     inputs: {},

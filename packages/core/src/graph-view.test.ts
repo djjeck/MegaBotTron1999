@@ -162,7 +162,6 @@ describe('the graph printed', () => {
 describe('the nodes as the graph view shows them', () => {
   const irc = parseManifest({
     id: 'irc',
-    version: '1.0.0',
     kinds: ['connector'],
     description: 'a network',
     account: 'irc:me',
@@ -176,7 +175,6 @@ describe('the nodes as the graph view shows them', () => {
   });
   const actor = parseManifest({
     id: 'actor',
-    version: '0.2.0',
     kinds: ['actor'],
     description: 'acts',
     requires: ['game'],
@@ -203,7 +201,6 @@ describe('the nodes as the graph view shows them', () => {
   });
   const game = parseManifest({
     id: 'game',
-    version: '0.1.0',
     kinds: ['parser'],
     description: 'reads the game',
     games: { registers: ['game'] },
@@ -223,7 +220,6 @@ describe('the nodes as the graph view shows them', () => {
     expect(views[0]).toMatchObject({
       id: 'irc',
       plugin: 'irc',
-      version: '1.0.0',
       // Its node names no account: `<network>:<its id>` (D119).
       account: 'irc:irc',
       network: 'irc',

@@ -23,7 +23,7 @@ const count = z.coerce.number().int().min(0).max(9).describe('a count');
 
 function plugin(id: string, settings: z.ZodObject, seen: string[] = []): Plugin {
   return definePlugin({
-    manifest: { id, version: '0.1.0', kinds: ['stats'], description: id, settings },
+    manifest: { id, kinds: ['stats'], description: id, settings },
     create: () => ({ settingsChanged: () => seen.push(`${id} changed`) }),
   });
 }
@@ -86,7 +86,6 @@ describe('settings in the core', () => {
       definePlugin({
         manifest: {
           id: 'a',
-          version: '0.1.0',
           kinds: ['stats'],
           description: 'a',
           settings: z.object({ n: count }),
@@ -112,7 +111,6 @@ describe('settings in the core', () => {
         definePlugin({
           manifest: {
             id,
-            version: '0.1.0',
             kinds: ['stats'],
             description: id,
             config: z.object({ port: z.coerce.number().default(1) }),

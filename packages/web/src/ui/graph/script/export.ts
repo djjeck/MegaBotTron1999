@@ -80,7 +80,6 @@ export const plugins: Plugin[] = [
   definePlugin({
     manifest: {
       id: ${JSON.stringify(id)},
-      version: '0.1.0',
       kinds: [${sends ? "'actor'" : "'stats'"}],
       description: ${JSON.stringify(`Exported from the script node ${id}`)},
       inputs: ${literal(ports.inputs, '      ')},

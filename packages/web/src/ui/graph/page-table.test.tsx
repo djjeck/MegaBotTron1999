@@ -26,7 +26,6 @@ const HASH = 'd'.repeat(64);
 
 const manifest = parseManifest({
   id: 'postcard',
-  version: '0.1.0',
   kinds: ['actor'],
   description: 'Paints a card per place',
   interface: {

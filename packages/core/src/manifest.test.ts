@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { ManifestError, parseManifest } from './manifest.ts';
 
-const base = { id: 'test-plugin', version: '0.1.0', kinds: ['stats'], description: 'a test' };
+const base = { id: 'test-plugin', kinds: ['stats'], description: 'a test' };
 
 describe('parseManifest', () => {
   it('fills in the defaults', () => {
@@ -27,6 +27,11 @@ describe('parseManifest', () => {
       state: { migrations: [] },
       interface: {},
     });
+  });
+
+  it('accepts a version, deprecated, and drops it (D166)', () => {
+    expect(parseManifest({ ...base, version: '1.2.3' })).toEqual(parseManifest(base));
+    expect(parseManifest({ ...base, version: 'one' })).not.toHaveProperty('version');
   });
 
   it('reads the shorthand as input ports, in the order of requires, and derives the outputs', () => {
@@ -173,10 +178,10 @@ describe('parseManifest', () => {
   });
 
   it('names the plugin and every field wrong', () => {
-    expect(() => parseManifest({ ...base, version: 'one', kinds: ['robot'] })).toThrow(
-      /^plugin test-plugin: bad manifest: version: expected a semver version; kinds\.0: /u
+    expect(() => parseManifest({ ...base, kinds: ['robot'] })).toThrow(
+      /^plugin test-plugin: bad manifest: kinds\.0: /u
     );
-    expect(() => parseManifest({ version: '1.0.0' })).toThrow(/^plugin \(no id\): bad manifest/u);
+    expect(() => parseManifest({ description: 'x' })).toThrow(/^plugin \(no id\): bad manifest/u);
     expect(() => parseManifest(null)).toThrow(ManifestError);
     expect(() => parseManifest({ ...base, extra: 1 })).toThrow(/extra/u);
   });
@@ -184,7 +189,6 @@ describe('parseManifest', () => {
   it('lets a connector say which chats it monitors, from a key of its config (D89)', () => {
     const tg = {
       id: 'tg',
-      version: '0.1.0',
       kinds: ['connector'],
       description: 'tg',
       account: 'telegram:alice',
@@ -208,7 +212,6 @@ describe('parseManifest', () => {
     const config = z.object({ owner: z.number().optional(), chat: z.string().optional() });
     const tg = {
       id: 'tg',
-      version: '0.1.0',
       kinds: ['connector'],
       description: 'tg',
       account: 'telegram:alice',

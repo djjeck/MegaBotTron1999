@@ -205,7 +205,6 @@ export function ircPlugin(
   return definePlugin({
     manifest: {
       id: IRC,
-      version: '0.1.0',
       kinds: ['connector'],
       description: 'An IRC account through ZNC',
       account: `irc:${o.nick ?? 'irc'}`,

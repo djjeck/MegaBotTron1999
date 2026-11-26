@@ -30,7 +30,6 @@ const reads = {
 
 const base = {
   id: 'ledger',
-  version: '0.1.0',
   kinds: ['stats' as const],
   description: 'keeps a ledger',
   interface: { state: reads },
@@ -212,7 +211,6 @@ describe('a widget’s value in the controls’ status', () => {
 /** A made-up postcard's cards, each a place, a prompt, a picture and a host; its hosts to pick. */
 const cards = {
   id: 'postcard',
-  version: '0.1.0',
   kinds: ['actor' as const],
   description: 'Paints a card per place',
   interface: {

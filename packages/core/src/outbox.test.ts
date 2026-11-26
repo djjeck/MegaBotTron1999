@@ -379,7 +379,6 @@ describe('the outboxes of the core', () => {
     const conn = {
       manifest: {
         id: 'conn',
-        version: '0.1.0',
         kinds: ['connector' as const],
         description: 'conn',
         account: 'test:me',
@@ -389,7 +388,6 @@ describe('the outboxes of the core', () => {
     const actor = (id: string, reach: boolean) => ({
       manifest: {
         id,
-        version: '0.1.0',
         kinds: ['actor' as const],
         description: id,
         ...(reach
@@ -465,7 +463,6 @@ describe('the outboxes of the core', () => {
       {
         manifest: {
           id: 'early',
-          version: '0.1.0',
           kinds: ['actor' as const],
           description: 'early',
           inputs: {

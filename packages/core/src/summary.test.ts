@@ -60,7 +60,6 @@ const contexts = new Map<string, PluginContext>();
 const sender = definePlugin({
   manifest: {
     id: 'sender',
-    version: '0.1.0',
     kinds: ['actor'],
     description: 'sends',
     summary: true,
@@ -73,7 +72,6 @@ const sender = definePlugin({
 const teller = definePlugin({
   manifest: {
     id: 'teller',
-    version: '0.1.0',
     kinds: ['stats'],
     description: 'tells the owner',
     notices: true,
@@ -84,7 +82,7 @@ const teller = definePlugin({
 });
 
 const plain = definePlugin({
-  manifest: { id: 'plain', version: '0.1.0', kinds: ['stats'], description: 'no summary' },
+  manifest: { id: 'plain', kinds: ['stats'], description: 'no summary' },
   create: (ctx) => (contexts.set(ctx.id, ctx), {}),
 });
 
@@ -121,7 +119,6 @@ describe("the core's summary (D92)", () => {
       definePlugin({
         manifest: {
           id: 'tg',
-          version: '0.1.0',
           kinds: ['connector'],
           description: 'a fake account',
           account: 'tg:me',

@@ -40,7 +40,6 @@ function reader(heard: (m: Inbound) => void) {
   return definePlugin({
     manifest: {
       id: 'reader',
-      version: '0.1.0',
       kinds: ['parser'],
       description: 'reader',
       inputs: { chat: { type: 'chat-in', network: 'telegram' } },
@@ -174,7 +173,6 @@ describe('the telegram-user plugin', () => {
       definePlugin({
         manifest: {
           id: 'reader',
-          version: '0.1.0',
           kinds: ['parser'],
           description: 'reader',
           inputs: { chat: { type: 'chat-in', network: 'telegram' } },
@@ -357,7 +355,6 @@ function asker(plugin: string, asked: unknown[], request: { chat: string; messag
   return definePlugin({
     manifest: {
       id: 'postcard',
-      version: '0.1.0',
       kinds: ['agent'],
       description: 'Keeps the pictures of the rooms',
       inputs: { tg: { type: 'interface', plugin, members: ['actions.photo'] } },

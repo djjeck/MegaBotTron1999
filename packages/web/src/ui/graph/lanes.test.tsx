@@ -265,7 +265,6 @@ const grouped = (): Graph => ({
  */
 const PERSON: PluginView = {
   plugin: 'person',
-  version: '0.1.0',
   description: 'a simulated person',
   kinds: ['actor'],
   inputs: { listen: { type: 'chat-in', label: 'chat-in', optional: false, when: 'follows' } },

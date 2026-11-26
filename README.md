@@ -171,7 +171,6 @@ import { z } from 'zod';
 export const greeter = definePlugin({
   manifest: {
     id: 'greeter',
-    version: '0.1.0',
     kinds: ['actor'],
     description: 'Says hello in a channel',
     // It reads the channel (chat-in) and sends to it (chat-out): two ports, one name.

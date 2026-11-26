@@ -323,7 +323,6 @@ export function anthropicPlugin(o: AnthropicPluginOptions = {}): Plugin {
   return definePlugin({
     manifest: {
       id: ANTHROPIC,
-      version: '0.1.0',
       kinds: ['connector'],
       description: 'The Claude API: asks a model, with structured output',
       account,

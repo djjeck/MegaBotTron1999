@@ -98,7 +98,6 @@ describe('a connector’s sealed store (D123)', () => {
         definePlugin({
           manifest: {
             id: 'tg',
-            version: '0.1.0',
             kinds: ['connector'],
             description: 'logs in',
             account: 'tg:me',

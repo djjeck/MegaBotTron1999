@@ -19,7 +19,6 @@ function loginConnector(grab: (ctx: PluginContext) => void = () => {}) {
   return definePlugin({
     manifest: {
       id: 'tg',
-      version: '0.1.0',
       kinds: ['connector'],
       description: 'logs in',
       account: 'tg:me',
@@ -58,7 +57,7 @@ function loginConnector(grab: (ctx: PluginContext) => void = () => {}) {
 }
 
 const plain = definePlugin({
-  manifest: { id: 'plain', version: '0.1.0', kinds: ['stats'], description: 'nothing' },
+  manifest: { id: 'plain', kinds: ['stats'], description: 'nothing' },
   create: () => ({}),
 });
 
@@ -159,7 +158,6 @@ describe('a connector that logs in from its node (D116)', () => {
       definePlugin({
         manifest: {
           id: 'tg',
-          version: '0.1.0',
           kinds: ['connector'],
           description: 'logs in, with a key',
           account: 'tg:me',
@@ -178,7 +176,6 @@ describe('a connector that logs in from its node (D116)', () => {
       definePlugin({
         manifest: {
           id: 'tg',
-          version: '0.1.0',
           kinds: ['connector'],
           description: 'broken',
           account: 'tg:me',
@@ -206,7 +203,6 @@ describe('a connector that logs in from its node (D116)', () => {
     expect(() =>
       parseManifest({
         id: 'x',
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'x',
         login: true,

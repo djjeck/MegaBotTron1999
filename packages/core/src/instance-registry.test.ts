@@ -16,7 +16,6 @@ const DAY = 86_400_000;
 const counter = definePlugin({
   manifest: {
     id: 'counter',
-    version: '0.1.0',
     kinds: ['stats'],
     description: 'counts its starts',
     settings: z.object({ step: z.coerce.number().int().default(1) }),
@@ -34,7 +33,7 @@ const counter = definePlugin({
   },
 });
 const other = definePlugin({
-  manifest: { id: 'other', version: '0.1.0', kinds: ['stats'], description: 'another plugin' },
+  manifest: { id: 'other', kinds: ['stats'], description: 'another plugin' },
   create: () => ({}),
 });
 

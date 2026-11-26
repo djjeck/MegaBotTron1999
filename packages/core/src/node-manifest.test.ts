@@ -16,7 +16,6 @@ import { definePlugin, type Instance, type Plugin, type PluginContext } from './
 const declaring = (create: (ctx: PluginContext) => Instance = () => ({})): Plugin => {
   const base: ManifestInput = {
     id: 'declared',
-    version: '0.1.0',
     kinds: ['stats'],
     description: 'Ports from its config',
     config: z.object({
@@ -65,7 +64,6 @@ const declaring = (create: (ctx: PluginContext) => Instance = () => ({})): Plugi
 const game = definePlugin({
   manifest: {
     id: 'game',
-    version: '0.1.0',
     kinds: ['parser'],
     description: 'A game',
     games: { registers: ['game'] },
@@ -139,7 +137,6 @@ describe('a node’s own manifest', () => {
 describe('where a node declares its own inputs (D80)', () => {
   const base: ManifestInput = {
     id: 'grows',
-    version: '0.1.0',
     kinds: ['stats'],
     description: 'Inputs from its config',
     config: z.object({ ins: z.record(z.string(), z.unknown()).default({}) }),
@@ -296,7 +293,6 @@ describe('the editor’s views of such nodes', () => {
     const listener = definePlugin({
       manifest: {
         id: 'listener',
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'Hears what its config says, game by default',
         config: z.object({ on: z.string().default('game.turn') }),

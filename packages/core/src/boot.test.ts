@@ -22,7 +22,6 @@ const scorer = (id = 'scorer'): Plugin =>
   definePlugin({
     manifest: {
       id,
-      version: '0.1.0',
       kinds: ['parser'],
       description: 'keeps a score',
       interface: { state: { score: { help: 'the score', output: z.number() } } },
@@ -34,7 +33,6 @@ const scorer = (id = 'scorer'): Plugin =>
 const actor = definePlugin({
   manifest: {
     id: 'actor',
-    version: '0.1.0',
     kinds: ['actor'],
     description: 'acts on the score',
     inputs: {
@@ -360,21 +358,21 @@ describe('a node that does not start in time (D143)', () => {
     let stopped = 0;
     let finish: () => void = () => {};
     const slow = definePlugin({
-      manifest: { id: 'slow', version: '0.1.0', kinds: ['stats'], description: 'slow' },
+      manifest: { id: 'slow', kinds: ['stats'], description: 'slow' },
       create: () =>
         new Promise((r) => {
           finish = () => r({ stop: () => void (stopped += 1) });
         }),
     });
     const hangs = definePlugin({
-      manifest: { id: 'hangs', version: '0.1.0', kinds: ['stats'], description: 'hangs' },
+      manifest: { id: 'hangs', kinds: ['stats'], description: 'hangs' },
       create: () => ({
         start: () => new Promise<void>(() => {}),
         stop: () => void (stopped += 10),
       }),
     });
     const late = definePlugin({
-      manifest: { id: 'late', version: '0.1.0', kinds: ['stats'], description: 'late' },
+      manifest: { id: 'late', kinds: ['stats'], description: 'late' },
       create: () => ({
         ready: () => new Promise<void>(() => {}),
         stop: () => void (stopped += 100),
@@ -415,7 +413,7 @@ describe('a node that does not start in time (D143)', () => {
   it('starts no more nodes once the instance stops', async () => {
     let release: () => void = () => {};
     const first = definePlugin({
-      manifest: { id: 'first', version: '0.1.0', kinds: ['stats'], description: 'first' },
+      manifest: { id: 'first', kinds: ['stats'], description: 'first' },
       create: () => new Promise((r) => (release = () => r({}))),
     });
     const { core } = instance({

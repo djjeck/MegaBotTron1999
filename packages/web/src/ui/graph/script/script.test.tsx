@@ -70,7 +70,6 @@ const CONFIG = {
 const SCRIPT: AvailablePlugin = {
   id: 'script',
   plugin: 'script',
-  version: '0.1.0',
   description: 'Runs TypeScript typed in the editor',
   kinds: ['actor'],
   configSchema: { type: 'object', properties: { code: { type: 'string', default: '' } } },

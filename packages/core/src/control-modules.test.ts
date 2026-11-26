@@ -18,7 +18,7 @@ import { Stores } from './store.ts';
 
 const plugin = (id: string, description = 'A test plugin'): Plugin =>
   definePlugin({
-    manifest: { id, version: '0.2.0', kinds: ['stats'], description },
+    manifest: { id, kinds: ['stats'], description },
     create: () => ({}),
   });
 
@@ -36,7 +36,6 @@ describe('the plugins available', () => {
       {
         id: 'image-plugin',
         plugin: 'image-plugin',
-        version: '0.2.0',
         description: 'A test plugin',
         kinds: ['stats'],
         // What the editor draws and forms a node of it with.
@@ -48,7 +47,6 @@ describe('the plugins available', () => {
       },
       {
         id: 'dice-stats',
-        version: '0.2.0',
         description: 'Counts rolls',
         kinds: ['stats'],
         module: 'dice',
@@ -96,7 +94,6 @@ describe('the control API’s modules', () => {
       [
         expect.objectContaining({
           id: 'image-plugin',
-          version: '0.2.0',
           description: 'A test plugin',
           kinds: ['stats'],
         }),

@@ -16,7 +16,7 @@ import { type Manifest, type ManifestInput, parseManifest } from './manifest.ts'
 import { describePort, type InputPort, mismatch, PORT_TYPE_INFO, PORT_TYPES } from './ports.ts';
 
 const m = (id: string, more: Partial<ManifestInput> = {}): Manifest =>
-  parseManifest({ id, version: '0.1.0', kinds: ['stats'], description: id, ...more });
+  parseManifest({ id, kinds: ['stats'], description: id, ...more });
 
 /** A connector, a parser on it, an actor on both, and a reader of the parser's events. */
 const image = (): Map<string, Manifest> =>

@@ -19,7 +19,6 @@ function actor(seen: string[], grab: (ctx: PluginContext) => void = () => {}) {
   return definePlugin({
     manifest: {
       id: 'actor',
-      version: '0.1.0',
       kinds: ['actor'],
       description: 'acts',
       inputs: { chat: { type: 'chat-in', bind: { node: 'chat', reads: [] } } },
@@ -85,7 +84,7 @@ function actor(seen: string[], grab: (ctx: PluginContext) => void = () => {}) {
 
 /** A plugin whose hooks throw, and one with no controls at all. */
 const broken = definePlugin({
-  manifest: { id: 'broken', version: '0.1.0', kinds: ['stats'], description: 'breaks' },
+  manifest: { id: 'broken', kinds: ['stats'], description: 'breaks' },
   create: () => ({
     off: () => {
       throw new Error('cannot stop');
@@ -175,7 +174,6 @@ describe('Controls', () => {
           plugin: 'actor',
           description: 'acts',
           kinds: ['actor'],
-          version: '0.1.0',
           state: 'running',
           settings: { loud: false, level: 1 },
           reads: ['status', 'broken', 'absent'],
@@ -248,7 +246,6 @@ describe('Controls', () => {
     const key = definePlugin({
       manifest: {
         id: 'key',
-        version: '0.1.0',
         kinds: ['connector'],
         description: 'fails to make its connector',
         account: 'api:me',
@@ -341,11 +338,11 @@ describe('a node’s kill (D44) and stop (D64)', () => {
 
   it('stops a node a drift stopped, and one with no stop of its own, its error logged', async () => {
     const quiet = definePlugin({
-      manifest: { id: 'quiet', version: '0.1.0', kinds: ['stats'], description: 'no stop' },
+      manifest: { id: 'quiet', kinds: ['stats'], description: 'no stop' },
       create: () => ({}),
     });
     const throws = definePlugin({
-      manifest: { id: 'throws', version: '0.1.0', kinds: ['stats'], description: 'bad stop' },
+      manifest: { id: 'throws', kinds: ['stats'], description: 'bad stop' },
       create: () => ({
         kill: () => {
           throw new Error('cannot stop');
@@ -419,7 +416,6 @@ describe('the core’s commands', () => {
       definePlugin({
         manifest: {
           id,
-          version: '0.1.0',
           kinds: ['connector'],
           description: 'a chat surface',
           account: `${id}:me`,
@@ -830,7 +826,6 @@ describe('reads with an input, and a node’s state for the viewer (bot-os.md D7
     const keeper = definePlugin({
       manifest: {
         id: 'keeper',
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'keeps a state',
         interface: {
@@ -910,7 +905,6 @@ describe('a node’s files, listed and downloaded by the owner (bot-os.md D149)'
     const painter = definePlugin({
       manifest: {
         id: 'card-painter',
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'keeps pictures',
       },

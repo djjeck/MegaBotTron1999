@@ -61,7 +61,6 @@ function postcard(): { plugin: ReturnType<typeof definePlugin>; ctx: () => Plugi
     plugin: definePlugin({
       manifest: {
         id: 'postcard',
-        version: '0.1.0',
         kinds: ['actor'],
         description: 'Draws a host for each card',
         inputs: {
@@ -246,7 +245,6 @@ describe('a collection’s events, heard from the edge alone (D156)', () => {
     const watcher = definePlugin({
       manifest: {
         id: 'postcard',
-        version: '0.1.0',
         kinds: ['stats'],
         description: 'Remakes its cards when its cast changes',
         inputs: {

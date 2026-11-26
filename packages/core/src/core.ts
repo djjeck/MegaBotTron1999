@@ -692,9 +692,13 @@ export class Core {
    * The version a node runs: its module's, as loaded (`GET /modules`); the release's for one of
    * the image's own (`GET /instance`); its manifest's when neither is known (a test).
    */
-  private versionOf(e: Entry): string {
+  /**
+   * The version a node runs (D113, D166): its module's, or the release's for one of the image's
+   * own; none when neither is known (a test, the dev kit).
+   */
+  private versionOf(e: Entry): string | undefined {
     const origin = this.origins.get(e.plugin);
-    return (origin === undefined ? this.o.build?.version : origin.version) ?? e.manifest.version;
+    return origin === undefined ? this.o.build?.version : origin.version;
   }
 
   /**
@@ -1157,13 +1161,21 @@ export class Core {
    * The plugin instances, in load order: each one's id, its plugin's manifest, and its input ports
    * as its node's config resolves them (§2.1).
    */
-  nodes(): { id: string; manifest: Manifest; ports: Record<string, InputPort>; version: string }[] {
-    return [...this.entries.values()].map((e) => ({
-      id: e.id,
-      manifest: e.manifest,
-      ports: e.node.ports,
-      version: this.versionOf(e),
-    }));
+  nodes(): {
+    id: string;
+    manifest: Manifest;
+    ports: Record<string, InputPort>;
+    version?: string;
+  }[] {
+    return [...this.entries.values()].map((e) => {
+      const version = this.versionOf(e);
+      return {
+        id: e.id,
+        manifest: e.manifest,
+        ports: e.node.ports,
+        ...(version === undefined ? {} : { version }),
+      };
+    });
   }
 
   /**

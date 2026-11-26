@@ -47,7 +47,6 @@ class TestConnector extends ConnectorBase implements Connector {
 
 const manifest = (id: string, account?: string) => ({
   id,
-  version: '0.1.0',
   kinds: ['connector' as const],
   description: id,
   ...(account === undefined ? {} : { account }),
@@ -178,7 +177,6 @@ describe('connectors', () => {
       definePlugin({
         manifest: {
           id: 'reader',
-          version: '0.1.0',
           kinds: ['stats'],
           description: 'reader',
           inputs: { down: { type: 'chat-in', optional: true, bind: { node: 'down', reads: [] } } },
@@ -206,7 +204,6 @@ describe('connectors', () => {
       definePlugin({
         manifest: {
           id,
-          version: '0.1.0',
           kinds: ['parser'],
           description: id,
           inputs: { chat: { type: 'chat-in' } },
@@ -269,7 +266,6 @@ describe('connectors', () => {
       definePlugin({
         manifest: {
           id,
-          version: '0.1.0',
           kinds: ['parser'],
           description: id,
           inputs: { chat: { type: 'chat-in' } },
@@ -324,7 +320,6 @@ describe('connectors', () => {
       definePlugin({
         manifest: {
           id,
-          version: '0.1.0',
           kinds: ['parser'],
           description: id,
           inputs: { chat: { type: 'chat-in' } },
@@ -409,7 +404,6 @@ describe('connectors', () => {
       definePlugin({
         manifest: {
           id,
-          version: '0.1.0',
           kinds: ['parser'],
           description: id,
           inputs: { chat: { type: 'chat-in' } },

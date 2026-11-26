@@ -53,7 +53,6 @@ const tg = (connector: FakeConnector) =>
   definePlugin({
     manifest: {
       id: 'tg',
-      version: '0.1.0',
       kinds: ['connector'],
       description: 'a fake account that monitors its chats',
       account: connector.account,
@@ -66,7 +65,6 @@ const tg = (connector: FakeConnector) =>
 const parser = definePlugin({
   manifest: {
     id: 'parser',
-    version: '0.1.0',
     kinds: ['parser'],
     description: 'reads #lobby',
     drift: { unreadAt: 1, windowMin: 10 },
@@ -80,7 +78,6 @@ const parser = definePlugin({
 const actor = definePlugin({
   manifest: {
     id: 'actor',
-    version: '0.1.0',
     kinds: ['actor'],
     description: 'acts',
     inputs: { parser: { type: 'interface', plugin: 'parser', members: ['state.count'] } },
@@ -93,7 +90,6 @@ const actor = definePlugin({
 const follower = definePlugin({
   manifest: {
     id: 'follower',
-    version: '0.1.0',
     kinds: ['stats'],
     description: 'follows the actor',
     inputs: { actor: { type: 'interface', plugin: 'actor', members: [] } },
@@ -105,7 +101,6 @@ const follower = definePlugin({
 const other = definePlugin({
   manifest: {
     id: 'other',
-    version: '0.1.0',
     kinds: ['actor'],
     description: 'sends too',
     outputs: { chat: { type: 'chat-out' } },
@@ -118,7 +113,6 @@ const watcher = (heard: Notice[]) =>
   definePlugin({
     manifest: {
       id: 'watcher',
-      version: '0.1.0',
       kinds: ['stats'],
       description: 'hears the notices',
       notices: true,
