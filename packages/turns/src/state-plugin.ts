@@ -84,6 +84,10 @@ export interface StateSpec<S extends Record<string, unknown>> {
   /** The plugin's id, and its namespace (`<id>.changed`). */
   id: string;
   description: string;
+  /**
+   * @deprecated Ignored (bot-os.md D166): a plugin's version is its module's. Still accepted, so
+   * that a spec that passes it compiles.
+   */
   version?: string;
   /** The state's schema: an object, whose keys are its sections, each `.describe()`d for the viewer. */
   schema: z.ZodObject;
@@ -270,7 +274,6 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
   return definePlugin({
     manifest: {
       id: spec.id,
-      version: spec.version ?? '0.1.0',
       kinds: ['stats'],
       description: spec.description,
       // The events it applied and refused since the last summary, for the owner (bot-os.md D92).
