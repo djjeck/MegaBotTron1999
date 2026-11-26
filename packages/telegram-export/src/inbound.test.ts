@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { type ExportMessage } from '#src/messages.ts';
 import { LOBBY, QUEST_HTML, QUEST_JSON, QUEST_MAPPING, T0 } from '#test/quest.ts';
 import { readExportPaths } from './files.ts';
-import { toInbounds } from './inbound.ts';
+import { senderIdOf, toInbounds } from './inbound.ts';
 
 const S = 1000;
 
@@ -17,6 +17,7 @@ describe('toInbounds', () => {
         network: 'telegram',
         chat: '@QuestBot',
         private: true,
+        senderId: '1000000003',
         senderUsername: 'alice',
         text: '/play',
         time: T0,
@@ -29,6 +30,7 @@ describe('toInbounds', () => {
         network: 'telegram',
         chat: '@QuestBot',
         private: true,
+        senderId: '1000000001',
         senderUsername: 'QuestBot',
         text: 'Found an apple.',
         time: T0 + 2 * S,
@@ -37,6 +39,12 @@ describe('toInbounds', () => {
         playback: false,
         own: false,
       },
+    ]);
+    // Each sender by id too (D167): an HTML export has none, given by display name (`ids`).
+    expect([...new Set(inbounds.map((m) => `${m.senderUsername} ${m.senderId}`))]).toEqual([
+      'alice 1000000003',
+      'QuestBot 1000000001',
+      'bob 1000000004',
     ]);
     expect(
       inbounds.map((m) => [m.chat, m.senderUsername, m.text, (m.time - T0) / S])
@@ -81,6 +89,8 @@ describe('toInbounds', () => {
       own: true,
     });
     expect(byIds[0]).not.toHaveProperty('senderUsername');
+    // The export's id (D167), in the Bot API's form.
+    expect(byIds[0]?.senderId).toBe('1000000003');
     expect(byIds.at(-1)).toMatchObject({ chat: LOBBY, private: false, senderUsername: 'QuestBot' });
     // Nothing given: by the export's chat id, no username, not the owner's.
     expect(toInbounds(messages, { owner: {} })[0]).toMatchObject({
@@ -91,6 +101,7 @@ describe('toInbounds', () => {
     // An HTML export with nothing given: by title, privacy unsaid.
     const html = toInbounds(read(QUEST_HTML), { owner: {}, chats: { QuestBot: '@QuestBot' } });
     expect(html[0]).not.toHaveProperty('private');
+    expect(html[0]).not.toHaveProperty('senderId');
     expect(html.map((m) => m.chat)).toContain('Quest Lobby');
   });
 
@@ -135,5 +146,11 @@ describe('toInbounds', () => {
     expect(
       toInbounds([later, m(5, '06.11.2026 13:00:00 UTC+01:00')], { owner: {} }).map((x) => x.id)
     ).toStrictEqual(['5', '4']);
+  });
+
+  it('gives_an_exported_sender_id_in_the_bot_api_s_form', () => {
+    expect(
+      ['user42', 'channel42', 'chat42', '42', '-10042', 'bot42', 'user'].map(senderIdOf)
+    ).toEqual(['42', '-10042', '-42', '42', '-10042', undefined, undefined]);
   });
 });

@@ -8,7 +8,8 @@
  *
  * As `telegram-user` delivers a message: `chat` as the connector names it (a group's id, a private
  * chat's `@username` or id, D90), its other names in `aliases`, `private` for a chat with one user
- * or bot, `sender` the username without `@` (`''` without one), `own` for the account's own (a
+ * or bot, `senderId` the sender's id in the Bot API's form and `senderUsername` the username
+ * without `@` (bot-os.md D167; each absent where unknown), `own` for the account's own (a
  * forward is its forwarder's), `id` and `replyTo` as strings, `time` in milliseconds, the text as
  * written (`/cmd@Bot` included), and a text file's content in `document`.
  */
@@ -44,9 +45,29 @@ export interface ReplayMapping {
   chats?: Readonly<Record<string, string | ChatMapping>>;
   /**
    * The senders' usernames, without `@`, by id (`user<id>`) or by display name, the id first. A
-   * sender not given has none (`''`), as `telegram-user` delivers one without a username.
+   * sender not given has none, as `telegram-user` delivers one without a username.
    */
   senders?: Readonly<Record<string, string>>;
+  /**
+   * The senders' ids, by display name (bot-os.md D167), for an export that gives none (an HTML
+   * export made on Windows): each as the export writes one (`user<id>`) or as `Inbound.senderId`
+   * gives it. One the export gives wins.
+   */
+  ids?: Readonly<Record<string, string>>;
+}
+
+/**
+ * An export's sender id (`user<id>`, `channel<id>`, `chat<id>`) in the Bot API's decimal form, as
+ * `Inbound.senderId` gives it (bot-os.md D167): a user's as it is, a channel's `-100<id>`, a basic
+ * group's `-<id>`; one already in that form as it is; none for anything else.
+ */
+export function senderIdOf(exported: string): string | undefined {
+  const m = /^(user|channel|chat)?(-?\d+)$/u.exec(exported);
+  if (m === null) return undefined;
+  const [, kind, n] = m as unknown as [string, string | undefined, string];
+  if (kind === 'channel') return `-100${n}`;
+  if (kind === 'chat') return `-${n}`;
+  return n;
 }
 
 export interface InboundOptions {
@@ -96,6 +117,19 @@ function senderOf(m: ExportMessage, mapping: ReplayMapping): string | undefined 
   );
 }
 
+/**
+ * A sender's id (D167): the export's, else the mapping's by display name; the owner's own, of a
+ * message the export gives none, their first id.
+ */
+function idOf(m: ExportMessage, mapping: ReplayMapping, mine: boolean): { senderId?: string } {
+  const given =
+    m.sender_id ??
+    (m.sender === null ? undefined : mapping.ids?.[m.sender]) ??
+    (mine ? mapping.owner.ids?.[0] : undefined);
+  const id = given === undefined ? undefined : senderIdOf(given);
+  return id === undefined ? {} : { senderId: id };
+}
+
 /** A username as `Inbound` carries it: none, rather than `''`, for a sender without one. */
 const usernameOf = (u: string | undefined): { senderUsername?: string } =>
   u === undefined || u === '' ? {} : { senderUsername: u };
@@ -121,6 +155,7 @@ export function toInbounds(
       chat: chat.chat,
       ...(chat.aliases === undefined ? {} : { aliases: chat.aliases }),
       ...(chat.private === undefined ? {} : { private: chat.private }),
+      ...idOf(m, mapping, mine),
       ...usernameOf(mine ? mapping.owner.username : senderOf(m, mapping)),
       text: m.text,
       time: (times[i] as number) * 1000,

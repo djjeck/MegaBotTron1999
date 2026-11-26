@@ -34,7 +34,9 @@ nothing of the shell, so that the wiki could import them in place of its copy.
 - `src/inbound.ts`: `toInbounds(messages, mapping, { playback? })`, with a `ReplayMapping`: the
   `account`, the `owner` (`username`, and their display `names` or `ids`: their messages are the
   account's own), the `chats` (by title or chat id: the name the connector's config lists, whether
-  private, aliases) and the `senders` (by id or display name: the username).
+  private, aliases), the `senders` (by id or display name: the username) and their `ids` (by display
+  name, for an export that gives none); each sender's id as `senderId`, in the Bot API's form
+  (`senderIdOf`, docs/bot-os.md D167).
 - `src/replay.ts` (Node, docs/bot-os.md D131):
   `replay({ plugins, inbounds, graph?, playback?, self?, start?, until?, config?, settings?, documents?, history? })`
   runs a module's plugins, or a graph file in the live format (its path), on a `DevKit` whose

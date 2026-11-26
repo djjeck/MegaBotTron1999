@@ -5,5 +5,6 @@
     "QuestBot": { "chat": "@QuestBot", "private": true },
     "Quest Lobby": { "chat": "-1001000000002", "private": false }
   },
-  "senders": { "QuestBot": "QuestBot", "Bob Stone": "bob" }
+  "senders": { "QuestBot": "QuestBot", "Bob Stone": "bob" },
+  "ids": { "QuestBot": "user1000000001", "Bob Stone": "user1000000004" }
 }
