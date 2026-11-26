@@ -59,18 +59,21 @@ edits (`onEdit`) alone: none hears it as a message. The catch-up gives each mess
 and no edit made while the instance was down. A deletion (`telegram-user`, D158: a supergroup's or a
 channel's) comes as its chat and the deleted ids, live only, to the plugins that ask for deletions
 (`onDelete`) alone; a basic group's or a private chat's, which name no chat, are not passed on. Both
-Telegram connectors give a message's sender's display name (`senderName`: a user's first and last
-names, a chat's title when a chat sent it) and whether the sender is a bot (`senderBot`, D159);
-`irc` gives neither. Both say what a message carries besides its text (`media`, D161): a photo, a
-sticker and its emoji, a GIF, a video, a video note, a voice note, an audio's performer and title, a
-file, a poll's question and answers, a location, a venue's title, a contact's name (never a number
-or coordinates), a die and its emoji, a game, a story; described, never downloaded, its caption the
-text (`''` without one), so `telegram-bot` passes on a sticker or a photo without a caption too. A
-bot's message with inline buttons gives their labels, row by row (`buttons`, `telegram-user`, D145;
-`[]` when it has none), and an edit gives them as they now are. Both Telegram connectors send photos
-through the outbox (`deliverPhoto`, D150), with a caption, plain, Markdown or Telegram HTML (D164),
-in reply to a message: `telegram-bot` with the Bot API's `sendPhoto`, answering the photo's
-`file_id`; `telegram-user` with GramJS's `sendFile`, answering
+Telegram connectors give a message's sender by their stable id (`senderId`, D167: the Bot API's
+decimal form, a user's or a bot's id, `-100…` for a chat that sent it, live, edited and caught up
+alike) and their username (`senderUsername`, none without one), the account's own id (`selfId()`),
+the sender's display name (`senderName`: a user's first and last names, a chat's title when a chat
+sent it) and whether the sender is a bot (`senderBot`, D159). `irc` gives the nick as
+`senderUsername`, and no id, display name or bot. Both say what a message carries besides its text
+(`media`, D161): a photo, a sticker and its emoji, a GIF, a video, a video note, a voice note, an
+audio's performer and title, a file, a poll's question and answers, a location, a venue's title, a
+contact's name (never a number or coordinates), a die and its emoji, a game, a story; described,
+never downloaded, its caption the text (`''` without one), so `telegram-bot` passes on a sticker or
+a photo without a caption too. A bot's message with inline buttons gives their labels, row by row
+(`buttons`, `telegram-user`, D145; `[]` when it has none), and an edit gives them as they now are.
+Both Telegram connectors send photos through the outbox (`deliverPhoto`, D150), with a caption,
+plain, Markdown or Telegram HTML (D164), in reply to a message: `telegram-bot` with the Bot API's
+`sendPhoto`, answering the photo's `file_id`; `telegram-user` with GramJS's `sendFile`, answering
 `<id>:<access hash>:<file reference>`; each sends one again by the id it gave. `irc` sends none, and
 the outbox refuses them with why. Both fetch a message's photo on demand (D151), for a plugin an
 edge binds to their node's interface (`actions.photo`, answering a `MediaResult`, D153: its `media`,

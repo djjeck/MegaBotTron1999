@@ -91,7 +91,10 @@ function fake(
       Promise.resolve(o.dialogs ?? [])
     ),
     getInputEntity: (id) => (calls.push(`entity ${id}`), Promise.resolve({ peer: id })),
-    getMe: () => (calls.push('me'), Promise.resolve({ username: 'alice' })),
+    getMe: () => (
+      calls.push('me'),
+      Promise.resolve({ className: 'User', id: 4200000001, username: 'alice' })
+    ),
     sendMessage: (entity, params) => {
       sent.push({ entity, ...params });
       return o.send?.() ?? Promise.resolve({ id: 99 });
@@ -309,6 +312,35 @@ describe('TelegramUserConnector', () => {
       undefined,
       undefined,
     ]);
+  });
+
+  it('gives the sender’s id in the Bot API’s form, where GramJS says its kind (D167)', async () => {
+    const { c, f, messages } = await connector();
+    expect(c.selfId()).toBe('4200000001');
+    const senders = [
+      { className: 'User', id: 4200000002, username: 'bob' },
+      { className: 'User', id: { toString: () => '4200000003' } },
+      { className: 'Channel', id: 1000000009, title: 'The Lobby' },
+      { className: 'Chat', id: 300 },
+      { className: 'User', id: 'not a number' },
+      { className: 'Other', id: 5 },
+      { className: 'User' },
+      { id: 6 },
+      undefined,
+    ];
+    for (const [i, sender] of senders.entries()) await f.deliver(raw({ id: i + 1, sender }));
+    expect(messages.map((m) => m.senderId)).toEqual([
+      '4200000002',
+      '4200000003',
+      '-1001000000009',
+      '-300',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(messages[0]?.senderUsername).toBe('bob');
   });
 
   it('gives the sender’s display name, a channel’s title, and whether it is a bot, where GramJS has them (D159)', async () => {

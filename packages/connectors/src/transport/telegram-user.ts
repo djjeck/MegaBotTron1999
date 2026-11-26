@@ -212,6 +212,23 @@ function username(entity: unknown): string | undefined {
 }
 
 /**
+ * An entity's id in the Bot API's decimal form (D167), as `Inbound.senderId` gives it: a user's or
+ * a bot's as it is, a channel's (or a supergroup's, posting as itself) `-100<id>`, a basic group's
+ * `-<id>`; none for an entity GramJS did not give, or whose kind it does not say.
+ */
+export function idOf(entity: unknown): string | undefined {
+  if (typeof entity !== 'object' || entity === null) return undefined;
+  const { className, id } = entity as { className?: unknown; id?: unknown };
+  if (id === undefined || id === null) return undefined;
+  const n = String(id);
+  if (!/^\d+$/u.test(n)) return undefined;
+  if (className === 'User') return n;
+  if (className === 'Channel') return `-100${n}`;
+  if (className === 'Chat') return `-${n}`;
+  return undefined;
+}
+
+/**
  * A sender's display name and whether it is a bot (D159): a user's first and last names, a
  * channel's (or a group's, posting as itself) title; nothing for a sender GramJS did not give.
  */
@@ -897,7 +914,8 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       const dialogs = [...(await client.getDialogs({}))];
       for (const d of dialogs) if (!migrated(d)) this.learn(d.id?.toString(), username(d.entity));
       for (const chat of this.chats?.values() ?? []) await this.peer(chat);
-      this.named(username(await client.getMe()));
+      const me = await client.getMe();
+      this.named(username(me), idOf(me));
       if (!this.started) return;
       this.connected = true;
       this.changed({ state: 'connected', phase: 'ready' });
@@ -1325,6 +1343,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
   ): Promise<Omit<Inbound, 'account' | 'network'>> {
     const entity = await m.getSender();
     const sender = username(entity);
+    const senderId = idOf(entity);
     const replyTo = m.replyTo?.replyToMsgId;
     const document = await this.document(m);
     const media = mediaOf(m);
@@ -1333,6 +1352,7 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
       chat,
       ...(aliases.length === 0 ? {} : { aliases }),
       ...(m.isPrivate === undefined ? {} : { private: m.isPrivate }),
+      ...(senderId === undefined ? {} : { senderId }),
       ...(sender === undefined ? {} : { senderUsername: sender }),
       ...senderOf(entity),
       text: m.message,

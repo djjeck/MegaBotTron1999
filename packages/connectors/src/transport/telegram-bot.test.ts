@@ -193,6 +193,8 @@ describe('TelegramBotConnector', () => {
     expect(polls()).toBe(1);
     expect(stub.calls.map((x) => x.method)).toEqual(['getMe']);
     expect(c.self()).toBe('ExampleBot');
+    // Its own id too (D167), as a message from it would carry.
+    expect(c.selfId()).toBe('1');
     expect(states).toEqual(['connecting connecting', 'connected polling']);
     expect(logs).toEqual(['connected as @ExampleBot']);
     await c.stop();
@@ -223,6 +225,7 @@ describe('TelegramBotConnector', () => {
       account: 'telegram-bot:ExampleBot',
       network: 'telegram',
       chat: '-100123',
+      senderId: '5',
       senderUsername: 'ada',
       senderName: 'Ada',
       senderBot: false,
@@ -233,6 +236,7 @@ describe('TelegramBotConnector', () => {
       private: false,
     });
     expect(heard[1]).not.toHaveProperty('senderUsername');
+    expect(heard[1]?.senderId).toBe('5');
     // User 5's own chat with the bot: private, by its id (D90).
     expect(heard[1]).toMatchObject({ chat: '5', private: true });
   });
@@ -284,6 +288,8 @@ describe('TelegramBotConnector', () => {
       [undefined, false],
       [undefined, false],
     ]);
+    // Who (D167): a chat that sent it by the chat's id, not Telegram's stand-in bot's.
+    expect(heard.map((m) => m.senderId)).toEqual(['5', '6', '-100123', '-100124', '9']);
   });
 
   describe('a file (D82)', () => {

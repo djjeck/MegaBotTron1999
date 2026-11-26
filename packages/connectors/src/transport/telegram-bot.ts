@@ -229,6 +229,23 @@ export const OWNER_UNREACHABLE =
 
 /** A sender as recorded: by `@username`, else by id; `?` for none. */
 /**
+ * Who sent a message (D167): its id, the Bot API's own, and its username. A chat that sent it (a
+ * channel, a group's anonymous admin) is named by the chat's id and username, though Telegram puts
+ * a stand-in bot of its own in `from`.
+ */
+function whoOf(m: {
+  from?: { id: number; username?: string | undefined } | undefined;
+  sender_chat?: { id: number; username?: string | undefined } | undefined;
+}): { senderId?: string; senderUsername?: string } {
+  const who = m.sender_chat ?? m.from;
+  if (who === undefined) return {};
+  return {
+    senderId: String(who.id),
+    ...(who.username === undefined ? {} : { senderUsername: who.username }),
+  };
+}
+
+/**
  * A message's sender's display name and whether it is a bot (D159): a chat that sent it (a channel,
  * a group's anonymous admin) by its title, and no bot, though Telegram puts its own bot in `from`;
  * else the user's first and last names.
@@ -438,7 +455,7 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
             chat: String(m.chat.id),
             ...(aliases.length === 0 ? {} : { aliases }),
             private: m.chat.type === 'private',
-            ...(m.from?.username === undefined ? {} : { senderUsername: m.from.username }),
+            ...whoOf(m),
             ...senderOf(m),
             text,
             time: m.date * 1000,
@@ -549,7 +566,7 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
         running: () => this.started,
         onStart: () => {
           this.since = Math.floor((this.o.now ?? Date.now)() / 1000);
-          this.named(this.bot.botInfo.username);
+          this.named(this.bot.botInfo.username, String(this.bot.botInfo.id));
           this.changed({ state: 'connected', phase: 'polling' });
         },
         onStop: (e) =>
