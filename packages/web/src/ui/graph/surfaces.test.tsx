@@ -187,6 +187,53 @@ describe('chats picked from lists', () => {
     await waitFor(() => expect(core.checked.at(-1)?.edges[1]).toMatchObject({ sends: [] }));
   });
 
+  it('keeps a person among an edge’s senders by id, shown by name; a bot by @username (D167)', async () => {
+    const core = fakeCore({
+      routes: {
+        'GET /accounts/chat/surfaces': [...listed([LOBBY, QUEST])],
+        'GET /accounts/chat/surfaces?peers=1': [...listed([LOBBY, QUEST])],
+        'GET /accounts/chat/people?limit=500': [
+          200,
+          {
+            running: true,
+            people: [
+              { id: '1001', username: 'alice', name: 'Alice Liddell', seen: 3 },
+              { id: '1002', name: 'Bob Stone', seen: 2 },
+              { id: '900', username: 'QuestBot', bot: true, seen: 1 },
+            ],
+          },
+        ],
+      },
+    });
+    render(<GraphPage loggedOut={vi.fn()} checkAfterMs={0} />);
+    await screen.findByLabelText('node chat · in', {}, slow);
+    fireEvent.click(screen.getByRole('button', { name: 'edge chat.chat → actor-a.chat' }));
+    const panel = await screen.findByLabelText('details of edge chat.chat → actor-a.chat');
+    fireEvent.click(within(panel).getByLabelText('only these'));
+    const senders = within(panel).getByRole('group', { name: 'senders list' });
+    await waitFor(() => expect(core.api.calls).toContain('GET /accounts/chat/people?limit=500'));
+    const add = (value: string): void => {
+      fireEvent.change(within(senders).getByLabelText('new senders list'), { target: { value } });
+      fireEvent.click(within(senders).getByRole('button', { name: 'Add' }));
+    };
+    // A person's username, typed, is kept as their id; a bot's stays; an id never seen stays too.
+    add('@Alice');
+    add('@QuestBot');
+    add('1009');
+    await waitFor(() =>
+      expect(core.checked.at(-1)?.edges[0]).toMatchObject({
+        senders: ['me', '1001', '@QuestBot', '1009'],
+      })
+    );
+    expect(within(senders).getByText('@alice · Alice Liddell')).toBeDefined();
+    expect(within(senders).getByText('not seen yet')).toBeDefined();
+    // The people suggested by id, with their names; the bots by @username.
+    const options = [...senders.querySelectorAll('option')].map((o) =>
+      `${o.getAttribute('value')} ${o.getAttribute('label') ?? ''}`.trim()
+    );
+    expect(options).toEqual(['@QuestBot', '1001 @alice · Alice Liddell', '1002 Bob Stone']);
+  });
+
   it('reminds the owner of the edges to update once the draft changes the chats', async () => {
     const core = fakeCore({
       routes: {

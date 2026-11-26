@@ -2044,16 +2044,18 @@ public API (`packages/core/src/devkit.ts`):
   connector of any network (the account's prefix), whose messages the test or the simulator says
   (`hear`, live unless `playback`) and whose status it sets (`open`, `connecting`, `close`), and
   whose sends go to its `onSend` (and are kept, `sent`), with the account's `limits` and the chats
-  it administers (`admins`). It sends photos (`deliverPhoto`, bot-os.md D150; none with `noPhotos`,
-  as `irc`), kept in `sent` too (`FakeSent`): `text` the caption (`''` without one), `photo` as
-  sent, `format`, `replyTo`, and `id`, the photo's id it answers (`photo-<n>` for bytes, the id it
-  was sent by otherwise); the message's id is `m<n>`. Given the photos of its messages (`photos`:
-  `{ chat, message, photo }`, `photo` a `Media` or a string, the why of a refusal; more with
-  `givePhoto(chat, message, photo)`), it fetches them (`photo`, bot-os.md D151), a message not given
-  one answering `null`, and `fakeConnectorPlugin` then offers the action `photo` on its interface,
-  as a Telegram connector's does (§4.5): a plugin bound to
-  `fakeConnectorPlugin('telegram-user', fake)` with members `actions.photo` asks it as it would
-  live. The plugins read it through their handles and send through their outboxes, as they do live.
+  it administers (`admins`), its own name and id (`self`, `selfId`, bot-os.md D167), and, with
+  `people`, a people directory in memory, as a Telegram connector keeps one (D167). It sends photos
+  (`deliverPhoto`, bot-os.md D150; none with `noPhotos`, as `irc`), kept in `sent` too (`FakeSent`):
+  `text` the caption (`''` without one), `photo` as sent, `format`, `replyTo`, and `id`, the photo's
+  id it answers (`photo-<n>` for bytes, the id it was sent by otherwise); the message's id is
+  `m<n>`. Given the photos of its messages (`photos`: `{ chat, message, photo }`, `photo` a `Media`
+  or a string, the why of a refusal; more with `givePhoto(chat, message, photo)`), it fetches them
+  (`photo`, bot-os.md D151), a message not given one answering `null`, and `fakeConnectorPlugin`
+  then offers the action `photo` on its interface, as a Telegram connector's does (§4.5): a plugin
+  bound to `fakeConnectorPlugin('telegram-user', fake)` with members `actions.photo` asks it as it
+  would live. The plugins read it through their handles and send through their outboxes, as they do
+  live.
 - **`fakeMedia(mime?, { size?, width?, height? })`** and **`assertMedia(value, limits?)`** (§4.18,
   bot-os.md D153): a `Media` made up for a test (a PNG by default), its first bytes those of its
   type where `sniffMime` reads it, padded to `size` (64 bytes by default): bytes that pass
@@ -2172,12 +2174,15 @@ connector's surfaces, §4.5: `{ running, listed, surfaces, peers? }`, `running` 
 `listed` false for a connector that cannot list its chats, 409 with why when it cannot tell now,
 such as not connected, 404 for a node that is not a connector; with `peers=1`, `peers`: for each
 other running connector of its network, the chats it lists for the same query that this one does not
-by any name, nor its own account's chat (a chat with itself), bot-os.md D96); `GET /drift`;
-`GET /events?limit=100&type=<prefix>&hours=24` (the event log's latest records, newest first);
-`POST /off`, `/on`, `/kill`; `GET` and `POST /settings`; `GET /graph` and `GET /graph/view` (§4.12);
-`POST /plugins/<id>/kill` and `POST /plugins/<id>/clear-stop` (409 with why when refused, such as
-`actor is not stopped`); `GET /plugins/<id>/state/<name>?<field>=<value>` (a read, its input the
-query's fields, §2); `GET /plugins/<id>/queue` (what waits in a connector's queue, D73:
+by any name, nor its own account's chat (a chat with itself), bot-os.md D96);
+`GET /accounts/<id>/people?search=&limit=200` (the people its directory knows, §4.5, bot-os.md D167:
+`{ running, people }`, most recently seen first, a search matching an id, or a part of a username or
+a name; none from a connector that keeps no directory; 404 for a node that is not a connector);
+`GET /drift`; `GET /events?limit=100&type=<prefix>&hours=24` (the event log's latest records, newest
+first); `POST /off`, `/on`, `/kill`; `GET` and `POST /settings`; `GET /graph` and `GET /graph/view`
+(§4.12); `POST /plugins/<id>/kill` and `POST /plugins/<id>/clear-stop` (409 with why when refused,
+such as `actor is not stopped`); `GET /plugins/<id>/state/<name>?<field>=<value>` (a read, its input
+the query's fields, §2); `GET /plugins/<id>/queue` (what waits in a connector's queue, D73:
 `{ account, entries: [{ chat, text, command, queuedAt, waitingUntil, intervalS, nodes }], coalesced }`,
 each node with its `origin` and its `cancel`, `{ on?, when?, test?, deadline? }`, and `coalesced`
 the sends merged since the start, `{ count, pairs: [{ nodes: [a, b], count }] }`; 404 for a node

@@ -101,6 +101,7 @@ export {
   KILLED,
   type LoadFailureView,
   type NodeFiles,
+  type PeopleView,
   type PluginControl,
   POWER_DOC,
   type PowerDoc,

@@ -5,8 +5,9 @@
  * `senders`. A connector not running yet lists nothing: the owner applies first. Lists of words
  * (commands, senders) are rows to add and remove, not JSON.
  */
-import { useState } from 'react';
-import type { GraphEdge } from '#src/ui/api.ts';
+import { useEffect, useState } from 'react';
+import type { GraphEdge, PeopleView, Person } from '#src/ui/api.ts';
+import { api, seg } from '#src/ui/api.ts';
 import { ChatPicker, useSurfaces } from './ChatPicker.tsx';
 import { edgeKey, endOf } from './draft.ts';
 
@@ -14,6 +15,12 @@ export { unlistedNote, useSurfaces } from './ChatPicker.tsx';
 
 /** The config key of a connector that lists the chats it monitors. */
 export const CHATS_KEY = 'chats';
+
+/** A suggestion for a new row: its value, and what it shows beside it. */
+export interface RowSuggestion {
+  value: string;
+  label?: string;
+}
 
 /** A list of words as rows, each removable, and one more added (no JSON). */
 export function RowsField(props: {
@@ -23,11 +30,16 @@ export function RowsField(props: {
   set: (v: string[]) => void;
   placeholder?: string;
   /** Suggestions for a new row. */
-  suggest?: readonly string[];
+  suggest?: readonly (string | RowSuggestion)[];
+  /** What a row shows beside its value (a person's name beside their id); nothing when undefined. */
+  label?: (v: string) => string | undefined;
+  /** The value a typed row is kept as (a person's id for their username). */
+  normalize?: (v: string) => string;
 }) {
   const [next, setNext] = useState('');
   const add = (): void => {
-    const v = next.trim();
+    const typed = next.trim();
+    const v = typed === '' ? '' : (props.normalize?.(typed) ?? typed);
     if (v === '' || props.value.includes(v)) return;
     props.set([...props.value, v]);
     setNext('');
@@ -39,7 +51,7 @@ export function RowsField(props: {
       <ul className="rows">
         {props.value.map((v, i) => (
           <li key={v}>
-            <code>{v}</code>{' '}
+            <code>{v}</code> {rowLabel(props.label?.(v))}
             <button
               type="button"
               className="link"
@@ -71,15 +83,23 @@ export function RowsField(props: {
       </span>
       {props.suggest === undefined ? null : (
         <datalist id={listId}>
-          {props.suggest.map((s) => (
-            <option key={s} value={s} />
-          ))}
+          {props.suggest.map((s) =>
+            typeof s === 'string' ? (
+              <option key={s} value={s} />
+            ) : (
+              <option key={s.value} value={s.value} label={s.label} />
+            )
+          )}
         </datalist>
       )}
       <small className="muted">{props.help}</small>
     </div>
   );
 }
+
+/** A row's label, muted, or nothing. */
+const rowLabel = (label: string | undefined) =>
+  label === undefined ? null : <span className="muted small">{label} </span>;
 
 const has = (list: readonly string[], id: string): boolean =>
   list.some((x) => x.toLowerCase() === id.toLowerCase());
@@ -267,10 +287,46 @@ const ME_BOX = {
   legend: 'whom it hears',
 };
 
+/** Whether a senders entry is an id (bot-os.md D167): digits, a chat's with a leading `-`. */
+export const isSenderId = (entry: string): boolean => /^-?\d+$/u.test(entry);
+
+/** A person as the editor names them: `@username · name`, either alone, else their id. */
+export const personLabel = (p: Person): string =>
+  [p.username === undefined ? undefined : `@${p.username}`, p.name]
+    .filter((x) => x !== undefined)
+    .join(' · ') || p.id;
+
+/**
+ * The people a connector has seen (bot-os.md D167, `GET /accounts/<id>/people`), most recently
+ * first; none until it runs, or when it cannot tell.
+ */
+export function usePeople(id: string | undefined): readonly Person[] {
+  const [people, setPeople] = useState<readonly Person[]>([]);
+  useEffect(() => {
+    if (id === undefined) return;
+    let live = true;
+    api<PeopleView>(`/accounts/${seg(id)}/people?limit=500`).then(
+      (v) => {
+        if (live) setPeople(v.people);
+      },
+      () => {
+        if (live) setPeople([]);
+      }
+    );
+    return () => {
+      live = false;
+    };
+  }, [id]);
+  return people;
+}
+
 /**
  * An edge's senders: anyone (unset), or a list: a box of its own (a chat-in's `me`, the account's
- * own messages; a commands edge's `owner`, the connector's owner, D109) and senders by @username,
- * the bots among its surfaces suggested.
+ * own messages; a commands edge's `owner`, the connector's owner, D109) and senders, each an id or
+ * a username (D167). A person is kept by id, shown with the name they had when the connector last
+ * saw them, since a username may change hands; a bot by its @username, which never changes. The
+ * people the connector has seen and the bots among its surfaces are suggested; a username typed
+ * that the connector has seen on a person is written as their id.
  */
 export function Senders(props: {
   connector: string | undefined;
@@ -285,8 +341,25 @@ export function Senders(props: {
   const list = props.value ?? [];
   const me = list.includes(self.token);
   const named = list.filter((x) => x !== self.token);
+  const people = usePeople(props.connector);
   const bots =
     s.state === 'listed' ? s.surfaces.filter((x) => x.kind === 'bot').map((x) => x.id) : [];
+  const byId = new Map(people.map((p) => [p.id, p]));
+  const plain = (v: string): string => v.replace(/^@/u, '').toLowerCase();
+  const suggest = [
+    ...bots,
+    ...people.filter((p) => p.bot !== true).map((p) => ({ value: p.id, label: personLabel(p) })),
+  ];
+  const normalize = (v: string): string => {
+    if (isSenderId(v)) return v;
+    const p = people.find((x) => x.username !== undefined && plain(x.username) === plain(v));
+    return p === undefined || p.bot === true ? v : p.id;
+  };
+  const label = (v: string): string | undefined => {
+    if (!isSenderId(v)) return undefined;
+    const p = byId.get(v);
+    return p === undefined ? 'not seen yet' : personLabel(p);
+  };
   return (
     <fieldset className="field surfaces" aria-label="senders">
       <legend>
@@ -325,10 +398,12 @@ export function Senders(props: {
           </label>
           <RowsField
             name="senders list"
-            help="Senders by @username (a bot’s never changes)"
+            help="People by id, shown by the name they had when last seen; bots by @username, which never changes. A username typed is kept as its person’s id once seen"
             placeholder="@QuestBot"
             value={named}
-            suggest={bots}
+            suggest={suggest}
+            label={label}
+            normalize={normalize}
             set={(v) => props.set(me ? [self.token, ...v] : v)}
           />
         </>

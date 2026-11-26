@@ -46,13 +46,15 @@ the server that guards them.
   naming them, to drop it on the port of one (D84); a rhombus at its midpoint, in its port type's
   colour (`PortEdge.tsx`), is a button that selects it and opens its panel (`EdgeDetails.tsx`),
   where a chat-in edge's `reads` (or all the chats its connector monitors) and its `senders`
-  (anyone, or a list with _me_), or a chat-out edge's `sends` and `commands`, are set, the chats
-  read picked among its connector's monitored chats, those sent to among all its chats (sending
-  needs no monitoring, D97), and the words as rows (`Surfaces.tsx`, D62, D63); a **commands edge**
-  (D109), from a connector's `commands` output to a plugin's `commands` input, the plugin's chat
-  commands it answers (checkboxes, every one by default; not a chat-out's `commands`, the words a
-  plugin sends), the `chats` it answers them in (in the chat picker) and every private chat, who may
-  ask (anyone, or a list with _the owner_), all within whom and where its connector works for (a
+  (anyone, or a list with _me_: a person kept by id and shown by the name they had when the
+  connector last saw them, `GET /accounts/<id>/people`, a username typed written as its person's id
+  once seen; a bot by `@username`, D167), or a chat-out edge's `sends` and `commands`, are set, the
+  chats read picked among its connector's monitored chats, those sent to among all its chats
+  (sending needs no monitoring, D97), and the words as rows (`Surfaces.tsx`, D62, D63); a **commands
+  edge** (D109), from a connector's `commands` output to a plugin's `commands` input, the plugin's
+  chat commands it answers (checkboxes, every one by default; not a chat-out's `commands`, the words
+  a plugin sends), the `chats` it answers them in (in the chat picker) and every private chat, who
+  may ask (anyone, or a list with _the owner_), all within whom and where its connector works for (a
   `telegram-bot`'s groups and people, docs/bot-os.md D128, as the panel says), and its dry run,
   which a new one starts (its chats the connector's owner's); a plugin's panel says, for each of its
   commands, which connector serves it, in which chats by name and to whom, or that no edge does, a

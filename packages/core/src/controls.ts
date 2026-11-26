@@ -29,6 +29,7 @@ import { type DriftCounts } from './drift.ts';
 import { type LoginState } from './login.ts';
 import { type Manifest } from './manifest.ts';
 import { type CoalescedView, type QueueEntryView } from './outbox.ts';
+import { type PeopleQuery, type Person } from './people.ts';
 import { type ActionCall, type Instance } from './plugin.ts';
 import { type InputPort } from './ports.ts';
 import { type SealedState } from './sealed-store.ts';
@@ -163,6 +164,8 @@ export interface Connection {
   self(): string | undefined;
   status(): ConnectorStatus;
   surfaces?(query?: SurfaceQuery): Promise<Surface[]>;
+  /** The people its directory knows (bot-os.md D167). */
+  people?(query?: PeopleQuery): Person[];
 }
 
 /**
@@ -177,6 +180,15 @@ export interface SurfacesView {
   listed: boolean;
   surfaces: Surface[];
   peers?: { connector: string; surfaces: Surface[] }[];
+}
+
+/**
+ * The people a connector's directory knows (bot-os.md D167), for the editor's senders: `running`
+ * false until it runs; none from a connector that keeps no directory.
+ */
+export interface PeopleView {
+  running: boolean;
+  people: Person[];
 }
 
 /** One account, as the owner sees it: its connector instance and the connection's status. */
@@ -397,6 +409,15 @@ export class Controls {
    * query; undefined for a node that is not a connector. Rejects when the connector cannot tell
    * now (not connected).
    */
+  /** The people a connector has seen (D167), most recently first; undefined for no connector. */
+  people(id: string, query: PeopleQuery = {}): PeopleView | undefined {
+    const node = this.host.nodes().find((n) => n.id === id);
+    if (node === undefined || !node.manifest.kinds.includes('connector')) return undefined;
+    const c = this.host.account(id).connection;
+    if (c === undefined) return { running: false, people: [] };
+    return { running: true, people: c.people?.(query) ?? [] };
+  }
+
   async surfaces(
     id: string,
     query: SurfaceQuery = {},

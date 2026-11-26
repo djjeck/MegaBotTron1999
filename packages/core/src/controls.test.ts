@@ -767,6 +767,46 @@ describe('controlServer', () => {
     await core.stop();
   });
 
+  it('serves the people a connector has seen, once it runs (D167)', async () => {
+    const seeing = new FakeConnector({ account: 'tg:me', people: true });
+    const core = new Core({ clock: new VirtualClock(1000) });
+    core.register(
+      fakeConnectorPlugin('tg', seeing),
+      fakeConnectorPlugin('chat', new FakeConnector({ account: 'chat:me' })),
+      broken
+    );
+    core.load();
+    expect(core.controls.people('tg')).toEqual({ running: false, people: [] });
+    await core.start();
+    seeing.hear({ chat: '-1001', senderId: '1001', senderUsername: 'alice', text: 'hi', time: 5 });
+    seeing.hear({ chat: '-1001', senderId: '1002', senderName: 'Bob Stone', text: 'hi', time: 6 });
+    server = controlServer({ controls: core.controls, settings: core.settings });
+    await new Promise<void>((r) => server?.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as { port: number };
+    const get = async (p: string) => {
+      const res = await fetch(`http://127.0.0.1:${port}${p}`);
+      return [res.status, await res.json()] as const;
+    };
+    expect(await get('/accounts/tg/people')).toEqual([
+      200,
+      {
+        running: true,
+        people: [
+          { id: '1002', name: 'Bob Stone', seen: 6 },
+          { id: '1001', username: 'alice', seen: 5 },
+        ],
+      },
+    ]);
+    expect((await get('/accounts/tg/people?search=ALI&limit=1'))[1]).toMatchObject({
+      people: [{ id: '1001' }],
+    });
+    // A connector that keeps no directory has seen no one.
+    expect(await get('/accounts/chat/people')).toEqual([200, { running: true, people: [] }]);
+    expect(await get('/accounts/broken/people')).toEqual([404, { error: 'no such connector' }]);
+    expect(await get('/accounts/nobody/people')).toEqual([404, { error: 'no such connector' }]);
+    await core.stop();
+  });
+
   it('lists the chats its network’s other connectors see and it does not (peers, D96)', async () => {
     const lobby = { id: '-1001', title: 'The Lobby', kind: 'group' as const, aliases: ['@lobby'] };
     const ada = { id: '@ada_x', title: 'Ada', kind: 'private' as const, aliases: ['5'] };

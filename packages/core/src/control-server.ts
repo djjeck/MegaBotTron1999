@@ -18,6 +18,8 @@
  *   first (bot-os.md D63): `running` false until it runs, `listed` false if it cannot list them; 409
  *   with why when it cannot tell now (not connected); with `peers=1`, those the other connectors of
  *   its network list and it does not (`peers`, D96).
+ * - `GET /accounts/<id>/people?search=&limit=200`: the people a connector has seen (bot-os.md
+ *   D167), most recently first, for the editor's senders: `running` false until it runs.
  * - `GET /drift`: each parser's counts of what it read and could not read (§4.7).
  * - `GET /events?limit=100&type=core.&hours=24`: the event log's latest records, newest first,
  *   those whose type starts with `type` (when the wiring gives the log).
@@ -417,6 +419,15 @@ export function controlHandler(
         } catch (e) {
           return reply(409, { error: e instanceof Error ? e.message : String(e) });
         }
+        return view === undefined ? reply(404, { error: 'no such connector' }) : reply(200, view);
+      }
+      const people = /^\/accounts\/([^/]+)\/people$/u.exec(route);
+      if (!post && people !== null) {
+        const search = url.searchParams.get('search');
+        const view = controls.people(decodeURIComponent(people[1] ?? ''), {
+          ...(search === null ? {} : { search }),
+          limit: bounded(url.searchParams.get('limit'), 200, 1000),
+        });
         return view === undefined ? reply(404, { error: 'no such connector' }) : reply(200, view);
       }
       if (!post && route === '/drift') return reply(200, controls.drift());

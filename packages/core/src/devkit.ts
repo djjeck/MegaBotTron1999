@@ -86,6 +86,11 @@ export interface FakeConnectorOptions {
   self?: string;
   /** Its own id on the network (D167); none by default. */
   selfId?: string;
+  /**
+   * It keeps a people directory (D167), in memory, as a Telegram connector does: everyone a message
+   * it hears comes from, for `person` and `onRename`. None by default.
+   */
+  people?: boolean;
   /** The account's limits, which its outbox keeps to; none, no rate limit. */
   limits?: Limits;
   /**
@@ -170,6 +175,7 @@ export class FakeConnector extends ConnectorBase implements Connector {
     if (colon <= 0) throw new Error(`not an account: ${o.account} (expected <network>:<name>)`);
     super(o.account, o.account.slice(0, colon));
     this.named(o.self ?? o.account.slice(colon + 1), o.selfId);
+    if (o.people === true) this.keepPeople();
     if (o.limits !== undefined) this.limits = o.limits;
     this.onSend = o.onSend;
     this.admins = o.admins ?? [];
