@@ -85,7 +85,7 @@ async function run(
   } = {}
 ) {
   const steps: string[] = [];
-  const account = new FakeConnector({ account: 'telegram:alice' });
+  const account = new FakeConnector({ account: 'telegram:alice', selfId: '1001' });
   const kit = new DevKit({
     start: T0,
     plugins: [
@@ -130,7 +130,10 @@ async function run(
   /** alice writes `text` in `chat`, or someone else does. */
   const say = (chat: string, text: string, own = true): void =>
     account.hear({ chat, senderUsername: own ? 'alice' : 'bob', own, time: kit.clock.now(), text });
-  return { kit, steps, status, say };
+  /** Someone writes `text` in `chat`, known by their id alone, not marked as the account's own. */
+  const sayAs = (chat: string, text: string, senderId: string): void =>
+    account.hear({ chat, senderId, time: kit.clock.now(), text });
+  return { kit, steps, status, say, sayAs };
 }
 
 describe('attentionConfig', () => {
@@ -454,6 +457,22 @@ describe('its two behaviours: scheduled, and following your play (D138)', () => 
       r.kit.core.summary({ since: 0, until: T0 + 11 * MIN }).find((s) => s.node === ATTENTION)
         ?.lines
     ).toEqual(['1 sitting (1 following you)']);
+    await r.kit.stop();
+  });
+
+  it('knows your message by the account’s id, unmarked (D167)', async () => {
+    const log: string[] = [];
+    const r = await run([fakePlayer('a', log)], {
+      config: { scheduled: false, ...follows },
+      reads: '*',
+    });
+    r.kit.runUntil(T0 + MIN);
+    r.sayAs(QUEST_CHAT, 'hello', '1002');
+    r.kit.runUntil(T0 + 2 * MIN);
+    expect(log).toEqual([]);
+    r.sayAs(QUEST_CHAT, 'hello', '1001');
+    r.kit.runUntil(T0 + 2 * MIN + 3000);
+    expect(log).toEqual([`a #1 at ${2 * MIN + 3000} following`]);
     await r.kit.stop();
   });
 

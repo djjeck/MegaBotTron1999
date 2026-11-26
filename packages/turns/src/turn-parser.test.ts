@@ -189,6 +189,11 @@ describe('a turn parser', () => {
       ['Your bag', document],
       ['Hello', undefined],
     ]);
+    // The owner by name and by id (D167), as the account knows them.
+    expect(seen.map((m) => [m.self, m.selfId])).toEqual([
+      ['alice', '1001'],
+      ['alice', '1001'],
+    ]);
   });
 
   it('marks what it reads of a message played back as history (D83)', async () => {

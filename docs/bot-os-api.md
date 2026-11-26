@@ -2915,12 +2915,13 @@ its bytes is for later.
   only, with no way to send; its default edge reads from its bot and the owner
   (`senders: ["@<bot>", "me"]`). Its game gives it a spec (`TurnParserSpec`): its `id`, its
   `description`, its grammar (`read`, given each of its bot's messages as a `BotMessage`: `text`,
-  `private`, `answers`, `command`, `replies`, `self`, and `document`, the file it carries with its
-  text when it has one, such as the bot's export of the player's state, beside the caption in
-  `text`, D82), and its bot's **vocabulary** (`BotVocabulary`, which its readiness state is given
-  too): its `bot`; its `turnCommands`, the bot's turn by first word, its name first and its aliases
-  after (`["/play"]`, or `["/play", "/quest"]`: one turn, bot-os.md D140), a fact of the game, so it
-  has no config (bot-os.md D70); and its other commands (`commands`, bot-os.md D132), each with its
+  `private`, `answers`, `command`, `replies`, `self` and `selfId` (the owner's username and id, the
+  id the key to the owner by, bot-os.md D167), and `document`, the file it carries with its text
+  when it has one, such as the bot's export of the player's state, beside the caption in `text`,
+  D82), and its bot's **vocabulary** (`BotVocabulary`, which its readiness state is given too): its
+  `bot`; its `turnCommands`, the bot's turn by first word, its name first and its aliases after
+  (`["/play"]`, or `["/play", "/quest"]`: one turn, bot-os.md D140), a fact of the game, so it has
+  no config (bot-os.md D70); and its other commands (`commands`, bot-os.md D132), each with its
   `aliases` (D140) and, for one the bot announces, `announcedBy`, a regular expression on the text
   of a message of the bot's (in private, or answering the owner) that announces it unlocked:
   `{ "/daily": {}, "/chest": { announcedBy: "A chest appears!" }, "/boost": { aliases: ["/b"] } }`.
@@ -2998,10 +2999,10 @@ its bytes is for later.
   `telegram-bot`'s edge, whose account never hears a message of the owner's own), is there only
   while `followsMyPlay` is on (`when`, §2.1, a key set to `false` setting nothing), and then
   required; the config refuses `followsMyPlay` without `listen`, and `listen` without it. **Any
-  message of the owner's own** (`own`, or sent as the account's name), live, in a chat it listens
-  to, command or not, starts a sitting `followDelayS` seconds later (the timer `follow`), so that
-  the owner's own typing wins a race; one more message while it is pending starts no other. A
-  message during a sitting (a player still in it, `AttentionPlayer.inSitting`) starts none either:
+  message of the owner's own** (`own`, or sent by the account's id or name, D167), live, in a chat
+  it listens to, command or not, starts a sitting `followDelayS` seconds later (the timer `follow`),
+  so that the owner's own typing wins a race; one more message while it is pending starts no other.
+  A message during a sitting (a player still in it, `AttentionPlayer.inSitting`) starts none either:
   its players in it look again (`again`). A sitting that follows the owner is marked `follow` and
   counts as the owner's own sitting (`byHand` in its status), so while `scheduled` the next planned
   one comes a full gap after it. A player asks it, through `ctx.attention`, for the person's next

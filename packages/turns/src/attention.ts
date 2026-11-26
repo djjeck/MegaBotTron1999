@@ -46,6 +46,8 @@ import {
   inChat,
   type Plugin,
   type PluginContext,
+  type Self,
+  sentBy,
   type SummaryWindow,
   Tally,
 } from '@megabottron1999/core';
@@ -387,7 +389,7 @@ class Attention {
         this.ctx.summary?.contribute((w) => this.summaryLines(w));
         if (this.c.followsMyPlay && this.c.listen !== undefined) {
           const listen = this.ctx.connector('listen');
-          listen.onMessage((m) => this.heard(m, listen.self()));
+          listen.onMessage((m) => this.heard(m, { name: listen.self(), id: listen.selfId() }));
         }
         this.settle();
       },
@@ -476,8 +478,12 @@ class Attention {
    * starts a sitting `followDelayS` later; during a sitting, its players look again instead; while
    * one is about to start, nothing more.
    */
-  private heard(m: Inbound, self: string | undefined): void {
-    const own = m.own === true || (self !== undefined && m.senderUsername === self);
+  private heard(m: Inbound, self: Self): void {
+    // The owner's own: as the connector marks it, else by the account's id or name (D167).
+    const own =
+      m.own === true ||
+      (self.id !== undefined && m.senderId === self.id) ||
+      (self.name !== undefined && sentBy(m, self.name));
     if (!own || m.playback || !this.playing()) return;
     if (!(this.c.listen ?? []).some((c) => inChat(m, c))) return;
     if (this.inSitting()) {

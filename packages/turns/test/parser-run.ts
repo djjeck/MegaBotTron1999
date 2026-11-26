@@ -29,7 +29,7 @@ export async function runParser(
   documents?: Record<string, Record<string, unknown>>,
   state?: Plugin
 ) {
-  const account = new FakeConnector({ account: 'telegram:alice' });
+  const account = new FakeConnector({ account: 'telegram:alice', selfId: '1001' });
   /** Its turns' and other commands' answers, and every event of its namespace. */
   const events: BusEvent[] = [];
   const all: BusEvent[] = [];

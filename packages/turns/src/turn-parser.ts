@@ -69,6 +69,8 @@ export interface BotMessage {
   replies: boolean;
   /** the owner's username, without `@`, once the account knows it. */
   self: string | undefined;
+  /** the owner's id (bot-os.md D167), once the account knows it: the key to the owner by. */
+  selfId: string | undefined;
 }
 
 /**
@@ -544,6 +546,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
           ...(command === undefined ? {} : { command }),
           replies: m.replyTo !== undefined,
           self: handle.self(),
+          selfId: handle.selfId(),
           ...(m.document === undefined ? {} : { document: m.document }),
         });
         const unlocksOf = (more: readonly string[]) => {
