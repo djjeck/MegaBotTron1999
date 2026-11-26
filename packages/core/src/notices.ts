@@ -19,25 +19,6 @@
  */
 import { type Buttons } from './commands.ts';
 
-/** The kinds the core and the shell's plugins raise; a plugin may raise its own. */
-export const NOTICE_KINDS = [
-  'refused',
-  'coalesced',
-  'drift',
-  'cascade',
-  'failed',
-  'warning',
-  'stalled',
-  'unreachable',
-  'told',
-  'graph-refused',
-  'backoff',
-  'unanswered',
-  'load-failed',
-  'uncaught',
-] as const;
-export type CoreNoticeKind = (typeof NOTICE_KINDS)[number];
-
 /** A notice's kind: lower-case words and dashes (`refused`, a plugin's `watchdog`). */
 export const NOTICE_KIND = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 

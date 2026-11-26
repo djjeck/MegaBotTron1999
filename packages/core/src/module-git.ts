@@ -131,14 +131,6 @@ export type GitHosts = (host: string) => GitHost;
 export const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 export const SHA = /^[0-9a-f]{40}$/u;
 
-/** The hosts GitHub alone is: where no Git server is added (and in tests). */
-export const onlyGitHub =
-  (github: GitHost): GitHosts =>
-  (host) => {
-    if (host.toLowerCase() !== GITHUB_HOST) throw new HostNotAllowed(host);
-    return github;
-  };
-
 /** The host a source was installed from. */
 export const hostOf = (s: RepoSource): string => (s.kind === 'github' ? GITHUB_HOST : s.host);
 

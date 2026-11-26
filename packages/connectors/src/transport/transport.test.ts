@@ -1,6 +1,7 @@
 import { FakeConnector } from '@megabottron1999/core';
 import { describe, expect, it } from 'vitest';
-import { type ChannelLine, transportOver, type TransportStatus } from './transport.ts';
+import { transportOver } from '#test/transport.ts';
+import { type ChannelLine, type TransportStatus } from './transport.ts';
 
 /** A transport over `over` on `#chan`: what it hears. */
 function attach(over: Parameters<typeof transportOver>[0]) {

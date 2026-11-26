@@ -1,7 +1,8 @@
 /**
  * The clock the core and every plugin read (docs/bot-os-api.md §4.1): the time and timers,
- * injected, so that tests and the arena run on a virtual clock. Nothing in the core or a plugin
- * reads `Date.now()` or calls the global timers directly.
+ * injected, so that tests, the dev kit (packages/core/src/devkit.ts) and the simulation of the
+ * sittings run on a virtual clock. Nothing in the core or a plugin reads `Date.now()` or calls the
+ * global timers directly.
  */
 
 /** A timer set on a clock, to clear it by. */

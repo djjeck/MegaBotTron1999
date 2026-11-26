@@ -4,6 +4,7 @@
  */
 import { createHash } from 'node:crypto';
 import zlib from 'node:zlib';
+import { type GitHost, type GitHosts, GITHUB_HOST, HostNotAllowed } from '#src/module-git.ts';
 import { tarOf } from './modules.ts';
 
 export interface FakeRepo {
@@ -123,3 +124,14 @@ export function fakeGitHub(repos: Record<string, FakeRepo>): FakeGitHub {
   };
   return gh;
 }
+
+/**
+ * The hosts of a test with GitHub alone: `github` for github.com, `HostNotAllowed` for any other.
+ * The instance's own are a `GitHostList`'s `get` (packages/core/src/module-hosts.ts).
+ */
+export const onlyGitHub =
+  (github: GitHost): GitHosts =>
+  (host) => {
+    if (host.toLowerCase() !== GITHUB_HOST) throw new HostNotAllowed(host);
+    return github;
+  };

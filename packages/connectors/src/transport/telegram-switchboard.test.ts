@@ -3,7 +3,6 @@ import { BOT_INFO, stubBot } from '#test/telegram.ts';
 import {
   AUTHOR_TOPIC,
   CommandMenus,
-  maxActionBytes,
   telegramTopics,
   watchMembership,
 } from './telegram-switchboard.ts';
@@ -11,14 +10,6 @@ import {
 describe('telegramTopics', () => {
   it("is the author's private chat, whose chat id is the author's user id", () => {
     expect(telegramTopics(4242)).toEqual({ [AUTHOR_TOPIC]: { chatId: 4242 } });
-  });
-});
-
-describe('maxActionBytes', () => {
-  it("leaves the room the wire format's prefix doesn't take", () => {
-    // `~6:author-` is 10 bytes of 64.
-    expect(maxActionBytes('author')).toBe(54);
-    expect(maxActionBytes('x'.repeat(10))).toBe(64 - '~10:'.length - 10 - 1);
   });
 });
 

@@ -1,16 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fakeGitHub, sha } from '#test/github.ts';
+import { fakeGitHub, onlyGitHub, sha } from '#test/github.ts';
 import { manifestOf, tempDir, writeModule } from '#test/modules.ts';
-import {
-  CHECK_EVERY,
-  GitError,
-  GitModules,
-  moduleControls,
-  newerTag,
-  onlyGitHub,
-} from './module-git.ts';
+import { CHECK_EVERY, GitError, GitModules, moduleControls, newerTag } from './module-git.ts';
 import { GitHub, parseGitHubUrl } from './module-github.ts';
 import { ModuleStore } from './module-store.ts';
 

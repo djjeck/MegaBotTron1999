@@ -9,7 +9,7 @@
  * later than its `graceMs`; `late: 'drop'`, or a grace passed, drops it, logged. A dropped timer is
  * gone before `create`, so the plugin never sees it.
  *
- * Timers run on the core's clock, so tests and the arena run them on a virtual one.
+ * Timers run on the core's clock, so tests and the dev kit run them on a virtual one.
  */
 import { type Clock, type TimerHandle } from './clock.ts';
 

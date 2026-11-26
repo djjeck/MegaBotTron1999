@@ -306,16 +306,6 @@ export type PlayerStep = z.infer<typeof stepSchema>;
 
 const clock = (t: number) => new Date(t).toISOString().slice(11, 16);
 
-/** A player's line in the owner's summary: its bot, its state, its last and next play. */
-export function playerSummary(id: string, state: string, s: PlayerStatus | undefined): string {
-  const parts = [
-    ...(s?.last === undefined ? [] : [`last ${clock(s.last)}`]),
-    ...(typeof s?.next === 'number' ? [`next ${clock(s.next)}`] : []),
-  ];
-  const times = parts.length > 0 ? `, ${parts.join(', ')} UTC` : '';
-  return `${s?.chat ?? id}: ${state}${times}${typeof s?.next === 'string' ? `, ${s.next}` : ''}`;
-}
-
 /** The player plugin, of which the wiring makes one node per bot. */
 export function playerPlugin(): Plugin {
   // Its nodes' groups, by account and chat (D140): where they meet to pick a form and hand off a

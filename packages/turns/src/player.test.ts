@@ -20,7 +20,6 @@ import {
   PLAYER,
   playerConfig,
   playerPlugin,
-  playerSummary,
   playForms,
   playsOf,
 } from './player.ts';
@@ -237,20 +236,6 @@ describe('playsOf: what it plays, and when (D137)', () => {
     expect(derivedWhileHeld(undefined)).toBeUndefined();
     expect(derivedWhileHeld({ command: '/go', turn: true })).toBeUndefined();
     expect(derivedWhileHeld(declared[3])).toBe('/play');
-  });
-});
-
-describe('playerSummary', () => {
-  it("gives a node's chat, state, last and next play", () => {
-    expect(
-      playerSummary('quest-player', 'live', {
-        chat: CHAT,
-        commands: '/play',
-        last: T0,
-        next: T0 + 18 * MIN,
-      })
-    ).toBe('@QuestBot: live, last 12:00, next 12:18 UTC');
-    expect(playerSummary('quest-player', 'stopped', undefined)).toBe('quest-player: stopped');
   });
 });
 

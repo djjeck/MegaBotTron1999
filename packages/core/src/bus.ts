@@ -105,11 +105,6 @@ export class Bus {
     return problems;
   }
 
-  /** The types registered, sorted. */
-  registered(): string[] {
-    return [...this.types.keys()].sort();
-  }
-
   /**
    * An instance's way onto the bus: it publishes its plugin's types, and hears a namespace's events
    * from the instances its edges bind (`sources`, by namespace: its events inputs', and itself for

@@ -314,7 +314,7 @@ export const outputSchema = z.discriminatedUnion('type', [
 export type DeclaredOutput = z.output<typeof outputSchema>;
 export type OutputPortInput = z.input<typeof outputSchema>;
 
-/** An input port as a manifest writes it, the old `chat` included. */
+/** An input port as a manifest declares it, parsed: chat-in, events, interface or attention. */
 export type DeclaredInput = z.output<typeof inputSchema>;
 export type InputPortInput = z.input<typeof inputSchema>;
 /** A connector's chat-out input, derived from its account: what the plugins send through it. */

@@ -22,15 +22,6 @@ export function telegramTopics(authorId: number): Record<string, Topic> {
   return { [AUTHOR_TOPIC]: { chatId: authorId } };
 }
 
-/**
- * The most bytes an action can have for a button of `topic` sent without a ref to fit inline, from
- * the switchboard's wire format v1 (`~<topic bytes>:<topic>-<action>`, at most 64 bytes).
- */
-export function maxActionBytes(topic: string): number {
-  const bytes = Buffer.byteLength(topic);
-  return 64 - `~${bytes}:`.length - bytes - '-'.length;
-}
-
 export interface SwitchboardOptions {
   api: Api;
   authorId: number;

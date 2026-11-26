@@ -1174,12 +1174,6 @@ export class Core {
     return this.loadedGraph === undefined ? undefined : structuredClone(this.loadedGraph);
   }
 
-  /** Whether an instance sends anywhere: a chat-out edge binds a chat it sends to. */
-  sends(id: string): boolean {
-    const node = this.entries.get(id)?.node;
-    return node !== undefined && sendsOf(node).some(([, b]) => (b.chat?.sends.length ?? 0) > 0);
-  }
-
   /**
    * Checks the plugins and starts them in order. Throws a StartError, before any plugin runs, for
    * an error of the deployment; a plugin that fails at runtime fails only itself and its

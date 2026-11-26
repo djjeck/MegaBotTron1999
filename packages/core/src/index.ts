@@ -98,7 +98,6 @@ export {
   KILLED,
   type LoadFailureView,
   type NodeFiles,
-  OFF_REFUSAL,
   type PluginControl,
   POWER_DOC,
   type PowerDoc,
@@ -356,10 +355,8 @@ export {
 } from './modules.ts';
 export {
   buttonsOf,
-  type CoreNoticeKind,
   type Notice,
   NOTICE_KIND,
-  NOTICE_KINDS,
   Notices,
   NOTICES_KEPT,
   type NoticesHandle,

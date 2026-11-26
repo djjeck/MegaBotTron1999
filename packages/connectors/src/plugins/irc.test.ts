@@ -10,9 +10,10 @@ import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
 import type http from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type IrcClientOptions } from '#src/transport/irc-client.ts';
-import { type ChannelLine, type TransportEvents, transportOver } from '#src/transport/transport.ts';
+import { type ChannelLine, type TransportEvents } from '#src/transport/transport.ts';
 import { IRC_CONFIG, IRC_OPTIONS, IRC_SECRETS } from '#test/irc.ts';
 import { readWarnings } from '#test/monitors.ts';
+import { transportOver } from '#test/transport.ts';
 import { healthServer, IrcConnector, ircPlugin } from './irc.ts';
 
 /** An IRC connector on a fake client: what it was told, and its events to play. */

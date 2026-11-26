@@ -1,6 +1,7 @@
 /**
- * A seeded random generator (mulberry32): the same seed gives the same draws, so that an arena run
- * repeats exactly, and a strategy can draw without reading `Math.random`.
+ * A seeded random generator (mulberry32): the same seed gives the same draws, so that a test or a
+ * simulation of the sittings (packages/turns/src/sittings.ts) repeats exactly, and a plugin can
+ * draw without reading `Math.random`.
  */
 export class Rng {
   private s: number;
@@ -21,11 +22,6 @@ export class Rng {
   /** True with probability `p`. */
   chance(p: number): boolean {
     return this.next() < p;
-  }
-
-  /** An integer in [lo, hi]. */
-  int(lo: number, hi: number): number {
-    return lo + Math.floor(this.next() * (hi - lo + 1));
   }
 
   /** One element of a non-empty list. */
