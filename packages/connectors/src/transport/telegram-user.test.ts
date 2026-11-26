@@ -343,6 +343,31 @@ describe('TelegramUserConnector', () => {
     expect(messages[0]?.senderUsername).toBe('bob');
   });
 
+  it('keeps everyone it reads in its people directory, in its store (D167)', async () => {
+    const docs: Record<string, unknown> = {};
+    const f = fake();
+    const c = new TelegramUserConnector({
+      account: 'telegram:alice',
+      client: f.client,
+      chats: [GROUP],
+      clock: new VirtualClock(0),
+      log: () => {},
+      notify: () => {},
+      store: {
+        read: <T>(name: string) => docs[name] as T | undefined,
+        write: (name: string, value: unknown) => (docs[name] = value),
+      },
+    });
+    c.start();
+    await flush();
+    await f.deliver(raw({ id: 1, sender: { className: 'User', id: 4200000002, username: 'bob' } }));
+    expect(c.person('@Bob')?.id).toBe('4200000002');
+    expect(c.people().map((p) => p.username)).toEqual(['bob']);
+    expect(docs['people']).toEqual([
+      expect.objectContaining({ id: '4200000002', username: 'bob' }),
+    ]);
+  });
+
   it('gives the sender’s display name, a channel’s title, and whether it is a bot, where GramJS has them (D159)', async () => {
     const { f, messages } = await connector();
     const senders = [

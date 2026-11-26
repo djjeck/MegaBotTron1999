@@ -1322,6 +1322,23 @@ interface ConnectorHandle {
   onDelete?(handler: (d: Deletion) => void): () => void; // deletions, opt-in (bot-os.md D158)
   reads?(): readonly string[] | '*'; // the chats its edge reads (bot-os.md D139)
   isAdmin?(chat: string): Promise<boolean>; // where the network can say
+  person?(idOrUsername: string): Person | undefined; // someone it has seen, by id or username (D167)
+  onRename?(handler: (r: Rename) => void): () => void; // a known person seen under a new username (D167)
+}
+
+interface Person {
+  id: string; // as Inbound.senderId gives it
+  username?: string; // when last seen; none if they had none, or another took it since
+  name?: string; // their display name when last seen
+  bot?: boolean;
+  seen: number; // when last seen, ms
+}
+
+interface Rename {
+  id: string;
+  from?: string; // the username they had; none if they had none
+  to?: string; // the username they have now; none if they dropped it
+  time: number;
 }
 ```
 
@@ -1341,6 +1358,20 @@ username has none (not `''`). Changed in 0.1.69, which removed `sender`:
   reactor whose `when` or text named `sender` names `senderUsername` (or `senderId`).
 - **Edges' `senders`** keep working: a username entry matches as before. Naming a person by id
   instead keeps them when they rename.
+
+**The people directory** (bot-os.md D167, `packages/core/src/people.ts`): each Telegram connector
+keeps everyone it reads a message of, live, edited or caught up, by id, with the username, display
+name and kind they had when last seen, the latest 5000. A plugin finds one by id or by a username
+they held when seen (`handle.person`), and hears a known person's new username (`handle.onRename`),
+told before the message they were seen in: what a module needs to read a bot's text that names
+people by username (`@alice, …`, `… from alice`), and to move what it keeps of a person from their
+name to their id. A username is one person's at a time: seen on another id, it moves there, and the
+one who had it keeps none until seen again. Nothing is looked up: a username never seen is unknown.
+`telegram-user` keeps its directory in its store (`people`), written when someone is new or changed
+or an hour on; `telegram-bot` keeps its in memory only, as it keeps its groups' members (D100).
+`irc`'s is always empty: a nick has no id. A connector built on `ConnectorBase` keeps one by calling
+`keepPeople(store?)`; `Connector.people(query)` lists it, most recently seen first, for the editor's
+picker.
 
 **Edits** (bot-os.md D144): a message is heard once, as it was sent (`onMessage`). A plugin that
 reads what a message becomes (a bot's menu, which its buttons edit in place) asks for edits as well:

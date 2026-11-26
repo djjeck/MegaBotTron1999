@@ -18,6 +18,7 @@ import {
 } from './commands.ts';
 import { type Media } from './media.ts';
 import { type Limits, type TextFormat } from './outbox.ts';
+import { People, type PeopleQuery, type PeopleStore, type Person, type Rename } from './people.ts';
 
 /**
  * A file attached to a message (docs/bot-os.md D82): what it is, and its text when the connector
@@ -383,6 +384,17 @@ export interface ConnectorHandle {
    */
   onDelete?(handler: (d: Deletion) => void): () => void;
   /**
+   * A person its account has seen send a message, by id or by a username they held when seen
+   * (bot-os.md D167, its people directory); undefined for one never seen, and on a network without
+   * ids (IRC). Absent on a handle of a connector that keeps none.
+   */
+  person?(idOrUsername: string): Person | undefined;
+  /**
+   * Hears each known person seen under a new username (D167), before the message they were seen
+   * in; returns the way to stop. Absent on a handle of a connector that keeps no directory.
+   */
+  onRename?(handler: (r: Rename) => void): () => void;
+  /**
    * The chats its edge reads (bot-os.md D139): `'*'`, every chat, also for a handle that reads
    * unfiltered. A send it is told of elsewhere counts only in one of these.
    */
@@ -499,6 +511,11 @@ export interface Connector extends ConnectorHandle {
   owner?(): string | undefined;
   /** A chat's title, as the network shows it, where it knows the chat: for the owner's words. */
   chatTitle?(chat: string): string | undefined;
+  /**
+   * The people its directory knows (D167), most recently seen first, those matching
+   * `query.search`: what the editor picks an edge's senders from.
+   */
+  people?(query?: PeopleQuery): Person[];
 }
 
 /** A connector's own name and id, for `hears`. */
@@ -537,6 +554,15 @@ export function handleOf(c: Connector, filter?: ReadFilter): ConnectorHandle {
             }),
         }),
     reads: () => filter?.reads ?? '*',
+    ...(c.person === undefined
+      ? {}
+      : { person: (x: string) => (c.person as NonNullable<Connector['person']>)(x) }),
+    ...(c.onRename === undefined
+      ? {}
+      : {
+          onRename: (h: (r: Rename) => void) =>
+            (c.onRename as NonNullable<Connector['onRename']>)(h),
+        }),
     ...(c.isAdmin === undefined
       ? {}
       : { isAdmin: (chat: string) => c.isAdmin?.(chat) ?? Promise.resolve(false) }),
@@ -559,6 +585,8 @@ export class ConnectorBase {
   private edits: ((m: Inbound) => void)[] = [];
   private deletions: ((d: Deletion) => void)[] = [];
   private statuses: ((s: ConnectorStatus) => void)[] = [];
+  /** Its people directory (D167), once it keeps one (`keepPeople`). */
+  private directory: People | undefined;
 
   constructor(account: string, network: string) {
     this.account = account;
@@ -605,15 +633,40 @@ export class ConnectorBase {
     };
   }
 
-  /** A message read: to every listener, in order. */
+  /** A person its directory knows (D167); none without one. */
+  person(idOrUsername: string): Person | undefined {
+    return this.directory?.person(idOrUsername);
+  }
+
+  /** Hears its directory's renames (D167); none without one. */
+  onRename(handler: (r: Rename) => void): () => void {
+    return this.directory?.onRename(handler) ?? (() => {});
+  }
+
+  /** The people its directory knows (D167); none without one. */
+  people(query?: PeopleQuery): Person[] {
+    return this.directory?.list(query) ?? [];
+  }
+
+  /**
+   * Keeps a people directory (D167), in `store` if given: every sender of a message it reads or
+   * rereads is seen, before its listeners hear the message.
+   */
+  protected keepPeople(store?: PeopleStore): void {
+    this.directory = new People({ store });
+  }
+
+  /** A message read: its sender seen (D167), then to every listener, in order. */
   protected received(m: Omit<Inbound, 'account' | 'network'>): void {
     const inbound: Inbound = { account: this.account, network: this.network, ...m };
+    this.directory?.see(inbound);
     for (const h of [...this.messages]) h(inbound);
   }
 
-  /** An edit of a message read (D144): to every listener of edits, in order; `edited`, when. */
+  /** An edit of a message read (D144): its sender seen, then to every listener of edits. */
   protected reread(m: Omit<Inbound, 'account' | 'network'> & { edited: number }): void {
     const inbound: Inbound = { account: this.account, network: this.network, ...m };
+    this.directory?.see(inbound);
     for (const h of [...this.edits]) h(inbound);
   }
 

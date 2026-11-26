@@ -290,6 +290,9 @@ describe('TelegramBotConnector', () => {
     ]);
     // Who (D167): a chat that sent it by the chat's id, not Telegram's stand-in bot's.
     expect(heard.map((m) => m.senderId)).toEqual(['5', '6', '-100123', '-100124', '9']);
+    // Its people directory knows them, in memory only, as its groups' members (D100).
+    expect(c.person('6')?.name).toBe('Quest');
+    expect(c.people()).toHaveLength(5);
   });
 
   describe('a file (D82)', () => {

@@ -32,6 +32,9 @@ hidden from every view of it (`src/sensitive.ts`, `hideSensitive`, D124).
   bytes as JSON carries them, `{ "$bytes": "<base64>" }`, read by `bytesSchema` and written by
   `bytesJson` (the control API's answers), and a media within limits as a schema whose JSON Schema
   says them, for the editor's file picker (`mediaField`, D155).
+- `src/people.ts`: a connector's people directory (docs/bot-os.md D167): everyone it has read a
+  message of, by stable id, with the username and name they had when last seen; found by id or by
+  username (`person`), a rename told (`onRename`), kept in its store or in memory.
 - `src/message-photo.ts`: a message's photo fetched on demand (docs/bot-os.md D151): the action
   `photo({ chat, message })` a connector plugin offers on its interface over its connector's
   `photo`, answering a `MediaResult` (D153), and its size limit (`PHOTO_MAX_BYTES`).

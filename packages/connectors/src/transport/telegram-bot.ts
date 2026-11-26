@@ -383,6 +383,8 @@ export class TelegramBotConnector extends ConnectorBase implements Connector {
 
   constructor(options: BotConnectorOptions) {
     super(options.account, 'telegram');
+    // Everyone it reads a message of, by id (D167): in memory only, as its groups' members (D100).
+    this.keepPeople();
     this.o = options;
     this.bot = options.bot;
     this.chats =

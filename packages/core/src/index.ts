@@ -398,6 +398,15 @@ export {
 } from './outbox.ts';
 export { CORE_COMMANDS, coreCommands, lamp, showValue } from './owner-commands.ts';
 export {
+  People,
+  PEOPLE_DOC,
+  PEOPLE_KEPT,
+  type PeopleQuery,
+  type PeopleStore,
+  type Person,
+  type Rename,
+} from './people.ts';
+export {
   type ActionCall,
   definePlugin,
   type EventQuery,

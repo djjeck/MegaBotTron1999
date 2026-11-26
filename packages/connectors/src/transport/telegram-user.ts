@@ -577,6 +577,8 @@ export class TelegramUserConnector extends ConnectorBase implements Connector {
 
   constructor(options: UserConnectorOptions) {
     super(options.account, 'telegram');
+    // Everyone it reads a message of, by id (D167).
+    this.keepPeople(options.store);
     this.o = options;
     this.raw = new RawLog(options.clock, options.store);
     this.ledger = new SeenLedger(options.store, (key, after, before) =>

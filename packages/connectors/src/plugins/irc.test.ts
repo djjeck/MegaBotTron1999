@@ -188,15 +188,18 @@ describe('the irc plugin in the core', () => {
       'onDelete',
       'onEdit',
       'onMessage',
+      'onRename',
       'onStatus',
+      'person',
       'reads',
       'self',
       'selfId',
       'status',
     ]);
     expect((got as { self(): string }).self()).toBe('alice');
-    // IRC has no ids (D167).
+    // IRC has no ids (D167), so no one in its directory either.
     expect((got as { selfId(): string | undefined }).selfId()).toBeUndefined();
+    expect((got as { person(x: string): unknown }).person('alice')).toBeUndefined();
     const connector = core.connector('irc');
     expect(connector?.account).toBe('irc:alice');
     expect(connector?.limits).toEqual({

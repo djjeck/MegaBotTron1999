@@ -43,6 +43,32 @@ class TestConnector extends ConnectorBase implements Connector {
   up(): void {
     this.changed({ state: 'connected', phase: 'up' });
   }
+  /** Keeps a people directory (D167), as a Telegram connector does. */
+  keep(): void {
+    this.keepPeople();
+  }
+  from(id: string, username: string, text = 't', time = 1): void {
+    this.received({
+      chat: 'c',
+      senderId: id,
+      senderUsername: username,
+      text,
+      time,
+      playback: false,
+    });
+  }
+  editFrom(id: string, username: string): void {
+    this.reread({
+      chat: 'c',
+      senderId: id,
+      senderUsername: username,
+      text: 'e',
+      time: 1,
+      playback: false,
+      id: '1',
+      edited: 2,
+    });
+  }
 }
 
 const manifest = (id: string, account?: string) => ({
@@ -53,6 +79,41 @@ const manifest = (id: string, account?: string) => ({
 });
 
 describe('connectors', () => {
+  it('keep a people directory where they say so, seen before their listeners hear (D167)', () => {
+    const plain = new TestConnector('test:me', 'test');
+    plain.from('1001', 'alice');
+    expect(plain.person('1001')).toBeUndefined();
+    expect(plain.people()).toEqual([]);
+    plain.onRename(() => {})();
+    const c = new TestConnector('test:me', 'test');
+    c.keep();
+    const handle = handleOf(c, { reads: '*' });
+    const seen: (string | undefined)[] = [];
+    const renames: string[] = [];
+    handle.onMessage((m) => seen.push(handle.person?.(m.senderId ?? '')?.username));
+    const stop = handle.onRename?.((r) => renames.push(`${r.id} ${r.from} ${r.to}`));
+    c.from('1001', 'alice');
+    c.from('1001', 'alice_b');
+    c.editFrom('1001', 'ally');
+    expect(seen).toEqual(['alice', 'alice_b']);
+    expect(renames).toEqual(['1001 alice alice_b', '1001 alice_b ally']);
+    expect(c.people().map((p) => p.username)).toEqual(['ally']);
+    stop?.();
+    // A hand-made connector without a directory gives a handle without one.
+    const bare: Connector = {
+      account: 'test:bare',
+      network: 'test',
+      status: () => ({ state: 'closed', phase: 'closed' }),
+      self: () => undefined,
+      selfId: () => undefined,
+      onMessage: () => () => {},
+      onStatus: () => () => {},
+      send: () => true,
+    };
+    expect(handleOf(bare)).not.toHaveProperty('person');
+    expect(handleOf(bare)).not.toHaveProperty('onRename');
+  });
+
   it('hear only the chats a handle reads, without case, and tell their own name', () => {
     const c = new TestConnector('test:me', 'test');
     const heard: string[] = [];
