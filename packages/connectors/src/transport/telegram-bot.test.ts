@@ -290,7 +290,7 @@ describe('TelegramBotConnector', () => {
     ]);
     // Who (D167): a chat that sent it by the chat's id, not Telegram's stand-in bot's.
     expect(heard.map((m) => m.senderId)).toEqual(['5', '6', '-100123', '-100124', '9']);
-    // Its people directory knows them, in memory only, as its groups' members (D100).
+    // Its people directory knows them, kept in its store (D168).
     expect(c.person('6')?.name).toBe('Quest');
     expect(c.people()).toHaveLength(5);
   });
@@ -891,7 +891,13 @@ describe('TelegramBotConnector', () => {
           unreachable: MEMBER_UNREACHABLE,
         },
       ]);
-      expect(JSON.stringify(docs)).not.toContain('mallory_x');
+      // The list stays in memory (D100); only the people directory is kept in the store (D168).
+      const { people: directory, ...rest } = docs;
+      expect(JSON.stringify(rest)).not.toContain('mallory_x');
+      expect(directory).toEqual([
+        expect.objectContaining({ id: '66', username: 'mallory_x' }),
+        expect.anything(),
+      ]);
       expect((await c.surfaces({ search: 'MALLORY' })).map((x) => x.id)).toEqual(['66']);
     });
 

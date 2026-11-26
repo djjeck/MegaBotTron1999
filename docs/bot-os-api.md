@@ -1367,11 +1367,10 @@ told before the message they were seen in: what a module needs to read a bot's t
 people by username (`@alice, …`, `… from alice`), and to move what it keeps of a person from their
 name to their id. A username is one person's at a time: seen on another id, it moves there, and the
 one who had it keeps none until seen again. Nothing is looked up: a username never seen is unknown.
-`telegram-user` keeps its directory in its store (`people`), written when someone is new or changed
-or an hour on; `telegram-bot` keeps its in memory only, as it keeps its groups' members (D100).
-`irc`'s is always empty: a nick has no id. A connector built on `ConnectorBase` keeps one by calling
-`keepPeople(store?)`; `Connector.people(query)` lists it, most recently seen first, for the editor's
-picker.
+Each keeps its directory in its store (`people`), written when someone is new or changed or an hour
+on (`telegram-bot`'s since D168, in memory only before). `irc`'s is always empty: a nick has no id.
+A connector built on `ConnectorBase` keeps one by calling `keepPeople(store?)`;
+`Connector.people(query)` lists it, most recently seen first, for the editor's picker.
 
 **Edits** (bot-os.md D144): a message is heard once, as it was sent (`onMessage`). A plugin that
 reads what a message becomes (a bot's menu, which its buttons edit in place) asks for edits as well:

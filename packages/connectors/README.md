@@ -61,9 +61,10 @@ channel's) comes as its chat and the deleted ids, live only, to the plugins that
 (`onDelete`) alone; a basic group's or a private chat's, which name no chat, are not passed on. Both
 Telegram connectors give a message's sender by their stable id (`senderId`, D167: the Bot API's
 decimal form, a user's or a bot's id, `-100…` for a chat that sent it, live, edited and caught up
-alike) and their username (`senderUsername`, none without one), the account's own id (`selfId()`),
-the sender's display name (`senderName`: a user's first and last names, a chat's title when a chat
-sent it) and whether the sender is a bot (`senderBot`, D159). `irc` gives the nick as
+alike) and their username (`senderUsername`, none without one), the account's own id (`selfId()`), a
+people directory of everyone they read a message of, kept in their store (`person`, `onRename`,
+D167, D168), the sender's display name (`senderName`: a user's first and last names, a chat's title
+when a chat sent it) and whether the sender is a bot (`senderBot`, D159). `irc` gives the nick as
 `senderUsername`, and no id, display name or bot. Both say what a message carries besides its text
 (`media`, D161): a photo, a sticker and its emoji, a GIF, a video, a video note, a voice note, an
 audio's performer and title, a file, a poll's question and answers, a location, a venue's title, a
