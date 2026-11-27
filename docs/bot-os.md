@@ -127,6 +127,14 @@ The instance's wiring is that graph, kept as data: the web UI draws it and edits
 are the permissions (P6). One plugin may be used more than once, and a plugin may wrap or extend a
 base one. This makes clear which module talks to which, to people who do not write code too.
 
+**P18. Chat first; the UI for what chat cannot hold.** A chat-based system is run day to day through
+chat. What is time-sensitive and gains from a push goes to the owner's chat: a bot down, a picture
+just made that waits for moderation. So does monitoring that fits a message, in Telegram's Markdown
+or as one plotted picture. The web UI gives the whole view in one place, and what chat cannot show
+(a carousel of pictures) or makes cumbersome (editing many fields of a config). So the owner's
+notices and summary (D91, D92) are chat's, a node's quick actions on the graph (#88) are the owner's
+shortcuts at the desk, and a view (#87) holds no feature that only a push would serve.
+
 ## 3. Architecture in outline
 
 - **Accounts** are first-class. Every connector is bound to one account, every event says which
