@@ -2,9 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { VirtualClock } from './clock.ts';
 import { Core } from './core.ts';
-import { FakeConnector } from './devkit.ts';
+import { DevKit, FakeConnector } from './devkit.ts';
 import { type GraphInput } from './graph.ts';
-import { buttonsOf, type Notice, Notices, NOTICES_KEPT } from './notices.ts';
+import {
+  atLeast,
+  buttonsOf,
+  DEFAULT_LEVELS,
+  levelOf,
+  LEVELS,
+  type Notice,
+  Notices,
+  NOTICES_KEPT,
+} from './notices.ts';
 import { definePlugin, type PluginContext } from './plugin.ts';
 
 const T0 = Date.UTC(2026, 10, 14, 9);
@@ -244,5 +253,45 @@ describe('buttonsOf (D94)', () => {
     expect(buttonsOf(told({ buttons: [[{ label: 'Go' }]] }))).toBeUndefined();
     expect(buttonsOf(told({ buttons: ['Go'] }))).toBeUndefined();
     expect(buttonsOf(told({ buttons: [[null]] }))).toBeUndefined();
+  });
+});
+
+describe('a notice’s level (D171)', () => {
+  it('is its own, else its kind’s, else a warning; and orders the levels', () => {
+    expect(levelOf({ kind: 'failed' })).toBe('error');
+    expect(levelOf({ kind: 'coalesced' })).toBe('debug');
+    expect(levelOf({ kind: 'told' })).toBe('warning');
+    expect(levelOf({ kind: 'watchdog' })).toBe('warning');
+    expect(levelOf({ kind: 'failed', level: 'info' })).toBe('info');
+    expect(atLeast('error', 'warning')).toBe(true);
+    expect(atLeast('info', 'warning')).toBe(false);
+    expect(atLeast('debug', 'debug')).toBe(true);
+    expect(Object.values(DEFAULT_LEVELS).every((l) => LEVELS.includes(l))).toBe(true);
+  });
+
+  it('is set on what is raised, as a plugin says it or by its kind', async () => {
+    const kit = new DevKit({
+      plugins: [
+        definePlugin({
+          manifest: { id: 'loud', kinds: ['stats'], description: 'raises' },
+          create: (ctx) => ({
+            start() {
+              ctx.notice('quota', 'used up', undefined, { level: 'info' });
+              ctx.notice('refused', 'refused one');
+              ctx.notify('look', undefined, { level: 'error' });
+              ctx.notify('plain');
+            },
+          }),
+        }),
+      ],
+    });
+    await kit.start();
+    expect(kit.core.notices().map((n) => [n.kind, n.level])).toEqual([
+      ['quota', 'info'],
+      ['refused', 'warning'],
+      ['told', 'error'],
+      ['told', 'warning'],
+    ]);
+    await kit.stop();
   });
 });

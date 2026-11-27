@@ -39,6 +39,7 @@
  * the acting nodes' business, through their outbox's queue (§4.6).
  */
 import {
+  activity,
   behind,
   type BusEvent,
   counted,
@@ -376,7 +377,9 @@ export function statePlugin<S extends Record<string, unknown>>(spec: StateSpec<S
         const applied = tally.count('applied', w);
         const refused = tally.count('refused', w);
         if (applied + refused === 0) return [];
-        return [`${counted(applied, 'event')} applied${refused > 0 ? `, ${refused} refused` : ''}`];
+        return activity([
+          `${counted(applied, 'event')} applied${refused > 0 ? `, ${refused} refused` : ''}`,
+        ]);
       });
 
       /** Keeps the state, then announces what changed, then notes it announced. */

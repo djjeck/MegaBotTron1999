@@ -16,6 +16,9 @@ import {
 const T0 = Date.UTC(2026, 10, 14, 9);
 const MIN = 60_000;
 
+const debug = (text: string) => ({ text, level: 'debug' });
+const info = (text: string) => ({ text, level: 'info' });
+
 describe('Tally', () => {
   it('counts by key over a window, from its start to before its end', () => {
     const clock = new VirtualClock(T0);
@@ -162,17 +165,18 @@ describe("the core's summary (D92)", () => {
     ctx('b').notice('refused', 'b refused y');
     ctx('b').notice('watchdog', 'b paused');
     // Contributors, in load order whatever order they came in; one with nothing, one that throws.
-    ctx('a').summary?.contribute(() => ['a did 2 things']);
+    ctx('a').summary?.contribute(() => ['a did 2 things', { text: 'a ran', level: 'error' }]);
     const stop = ctx('b').summary?.contribute(() => ['b did 1 thing', ' ']);
     ctx('b').summary?.contribute(() => undefined);
     ctx('teller').summary?.contribute(() => {
       throw new Error('boom');
     });
     expect(summary.collect(w())).toEqual([
-      { title: 'Sends', lines: ['b 1 dry-run', 'a 1 sent, 1 refused, 1 cancelled'] },
-      { title: 'Notices', lines: ['2 refused, 1 watchdog'] },
-      { title: 'b', node: 'b', lines: ['b did 1 thing'] },
-      { title: 'a', node: 'a', lines: ['a did 2 things'] },
+      // The core's counts are activity (D171); a plugin's line is info unless it says.
+      { title: 'Sends', lines: [debug('b 1 dry-run'), debug('a 1 sent, 1 refused, 1 cancelled')] },
+      { title: 'Notices', lines: [debug('2 refused, 1 watchdog')] },
+      { title: 'b', node: 'b', lines: [info('b did 1 thing')] },
+      { title: 'a', node: 'a', lines: [info('a did 2 things'), { text: 'a ran', level: 'error' }] },
     ]);
     expect(errors.some((l) => l.includes('its summary lines: boom'))).toBe(true);
     stop?.();
@@ -180,7 +184,7 @@ describe("the core's summary (D92)", () => {
     // A later window: what happened before it is not in it.
     clock.advance(MIN);
     expect(summary.collect({ since: T0 + MIN, until: T0 + 2 * MIN })).toEqual([
-      { title: 'a', node: 'a', lines: ['a did 2 things'] },
+      { title: 'a', node: 'a', lines: [info('a did 2 things'), { text: 'a ran', level: 'error' }] },
     ]);
     await core.stop();
   });
@@ -196,7 +200,7 @@ describe("the core's summary (D92)", () => {
     summaries.sent('gone', 'failed');
     summaries.sent('a', 'expired');
     expect(summaries.collect({ since: T0, until: T0 + 1 })).toEqual([
-      { title: 'Sends', lines: ['a 1 expired', 'gone 1 failed'] },
+      { title: 'Sends', lines: [debug('a 1 expired'), debug('gone 1 failed')] },
     ]);
   });
 });

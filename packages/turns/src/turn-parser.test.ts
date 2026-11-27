@@ -217,7 +217,10 @@ describe('a turn parser', () => {
     // The owner's summary counts the news alone (D92).
     const now = p.kit.clock.now();
     expect(
-      p.kit.core.summary({ since: now, until: now + 1 }).find((x) => x.node === QUEST)?.lines
+      p.kit.core
+        .summary({ since: now, until: now + 1 })
+        .find((x) => x.node === QUEST)
+        ?.lines.map((l) => l.text)
     ).toEqual(['1 answer to turns read: 1 gain']);
   });
 
@@ -292,7 +295,10 @@ describe('a turn parser', () => {
     expect(p.iface.ready()['/play']).toMatchObject({ ready: true, answer: { t: T0, length: 8 } });
     const now = p.kit.clock.now();
     expect(
-      p.kit.core.summary({ since: now, until: now + 1 }).find((x) => x.node === QUEST)?.lines
+      p.kit.core
+        .summary({ since: now, until: now + 1 })
+        .find((x) => x.node === QUEST)
+        ?.lines.map((l) => l.text)
     ).toEqual(['1 answer to turns read: 1 unknown']);
     expect(p.kit.core.summary({ since: now + 1, until: now + 2 })).toEqual([]);
   });

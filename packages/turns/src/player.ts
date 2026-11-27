@@ -75,6 +75,7 @@
  * `player.step`, with its node's id, and printed; its plays go in the owner's summary (D92).
  */
 import {
+  activity,
   type BotCommand,
   counted,
   definePlugin,
@@ -415,7 +416,7 @@ class Player {
   instance() {
     return {
       start: () => {
-        this.ctx.summary?.contribute((w) => this.summaryLines(w));
+        this.ctx.summary?.contribute((w) => activity(this.summaryLines(w)));
         // Its state's commands, its defaults and policies (D137), read once it runs.
         this.played();
         this.attention = this.ctx.attention<AttentionHandle>();

@@ -19,6 +19,7 @@
  * `TALLY_KEPT_MS` ago.
  */
 import { type Clock } from './clock.ts';
+import { type Level } from './notices.ts';
 
 /** How far back a tally keeps what it counted: the longest window a summary may cover. */
 export const TALLY_KEPT_MS = 7 * 24 * 60 * 60 * 1000;
@@ -35,15 +36,26 @@ export interface SummaryWindow {
   until: number;
 }
 
-/** A contributor's lines for a window: none when nothing happened in it. */
-export type SummaryLines = (window: SummaryWindow) => readonly string[] | undefined;
+/**
+ * A summary's line (D171): its text, and how much it matters, `info` for a bare text. An activity
+ * counter (sends, sittings, events applied) is `debug`: worth a look while diagnosing, not a digest.
+ */
+export interface SummaryLine {
+  text: string;
+  level: Level;
+}
+
+/** A contributor's lines for a window, each a text (`info`) or a line with its level; none when nothing happened. */
+export type SummaryLines = (
+  window: SummaryWindow
+) => readonly (string | { text: string; level?: Level | undefined })[] | undefined;
 
 /** A contributor's part of a summary: its title (its node's id, or the core's own), its lines. */
 export interface SummarySection {
   title: string;
   /** The node it is about; none for the core's own sections. */
   node?: string;
-  lines: string[];
+  lines: SummaryLine[];
 }
 
 /** A node as a start notice names it. */
@@ -121,6 +133,10 @@ export class Tally {
     });
   }
 }
+
+/** Lines of activity (D171): a node's counts of what it did, at `debug`, for no digest of their own. */
+export const activity = (lines: readonly string[] | undefined): SummaryLine[] | undefined =>
+  lines?.map((text) => ({ text, level: 'debug' }));
 
 /** `n thing(s)`. */
 export const counted = (n: number, one: string, many = `${one}s`): string =>
@@ -227,20 +243,28 @@ export class Summaries {
             .map(([outcome, n]) => `${n} ${outcome}`)
             .join(', ')}`
       );
-    if (sendLines.length > 0) out.push({ title: 'Sends', lines: sendLines });
+    // The core's counts are activity (D171): a look while diagnosing, not a digest's.
+    const debug = (text: string): SummaryLine => ({ text, level: 'debug' });
+    if (sendLines.length > 0) out.push({ title: 'Sends', lines: sendLines.map(debug) });
     const kinds = this.noticeKinds.counts(w);
     if (kinds.length > 0)
-      out.push({ title: 'Notices', lines: [kinds.map(([k, n]) => `${n} ${k}`).join(', ')] });
+      out.push({ title: 'Notices', lines: [debug(kinds.map(([k, n]) => `${n} ${k}`).join(', '))] });
     const contributors = [...this.contributors].sort((a, b) => rank(a.node) - rank(b.node));
     for (const c of contributors) {
-      let lines: readonly string[] | undefined;
+      let lines: ReturnType<SummaryLines>;
       try {
         lines = c.lines(w);
       } catch (e) {
         this.o.error?.(c.node, `its summary lines: ${e instanceof Error ? e.message : String(e)}`);
         continue;
       }
-      const kept = (lines ?? []).filter((l) => l.trim() !== '');
+      const kept = (lines ?? [])
+        .map((l): SummaryLine =>
+          typeof l === 'string'
+            ? { text: l, level: 'info' }
+            : { text: l.text, level: l.level ?? 'info' }
+        )
+        .filter((l) => l.text.trim() !== '');
       if (kept.length > 0) out.push({ title: c.node, node: c.node, lines: [...kept] });
     }
     return out;

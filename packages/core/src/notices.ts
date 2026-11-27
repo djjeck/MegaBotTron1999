@@ -19,6 +19,48 @@
  */
 import { type Buttons } from './commands.ts';
 
+/**
+ * How much a notice matters (bot-os.md D171), lowest first: `debug` (what a curious owner may look
+ * at), `info` (worth a line in the daily digest), `warning` (worth a message soon), `error` (worth a
+ * message now). Levels decide what a node that tells the owner sends; every notice is recorded.
+ */
+export const LEVELS = ['debug', 'info', 'warning', 'error'] as const;
+export type Level = (typeof LEVELS)[number];
+
+/** Whether `level` is `threshold` or above. */
+export const atLeast = (level: Level, threshold: Level): boolean =>
+  LEVELS.indexOf(level) >= LEVELS.indexOf(threshold);
+
+/**
+ * The shell's kinds' levels by default (D171); a kind not here (a plugin's own, a `told` message)
+ * is a `warning`: it was raised for the owner.
+ */
+export const DEFAULT_LEVELS: Readonly<Record<string, Level>> = {
+  failed: 'error',
+  stalled: 'error',
+  cascade: 'error',
+  uncaught: 'error',
+  'load-failed': 'error',
+  'graph-refused': 'error',
+  drift: 'warning',
+  unreachable: 'warning',
+  backoff: 'warning',
+  unanswered: 'warning',
+  refused: 'warning',
+  warning: 'warning',
+  told: 'warning',
+  coalesced: 'debug',
+};
+
+/** A notice's level: its own, else its kind's by default, else a warning. */
+export const levelOf = (n: { kind: string; level?: Level | undefined }): Level =>
+  n.level ?? DEFAULT_LEVELS[n.kind] ?? 'warning';
+
+/** What a plugin may say of a notice it raises beside its text: its level (D171). */
+export interface NoticeOptions {
+  level?: Level;
+}
+
 /** A notice's kind: lower-case words and dashes (`refused`, a plugin's `watchdog`). */
 export const NOTICE_KIND = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
@@ -41,6 +83,11 @@ export interface Notice {
   kind: string;
   /** When, in ms. */
   t: number;
+  /**
+   * How much it matters (D171): the raiser's, else its kind's by default (`levelOf`); always set on
+   * a notice raised through the core.
+   */
+  level?: Level;
   /** The node it is about, by id; none for the instance's (a warning of no node). */
   node?: string;
   /** One line, for the owner, naming nodes by id. */
@@ -109,7 +156,11 @@ export class Notices {
   /** Raises a notice: kept, and heard by every subscriber. */
   raise(notice: Notice): void {
     if (!NOTICE_KIND.test(notice.kind)) throw new Error(`not a notice kind: ${notice.kind}`);
-    const n: Notice = { ...notice, text: this.o.redact?.(notice.text) ?? notice.text };
+    const n: Notice = {
+      ...notice,
+      level: levelOf(notice),
+      text: this.o.redact?.(notice.text) ?? notice.text,
+    };
     this.kept.push(n);
     if (this.kept.length > NOTICES_KEPT) this.kept.shift();
     for (const s of [...this.subscribers]) this.deliver(s, n);

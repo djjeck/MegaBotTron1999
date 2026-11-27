@@ -35,6 +35,7 @@
  */
 import { TELEGRAM_USER } from '@megabottron1999/connectors/plugins/telegram-user.ts';
 import {
+  activity,
   type AnswerDeclarationInput,
   counted,
   definePlugin,
@@ -464,7 +465,7 @@ export function turnParserPlugin(spec: TurnParserSpec): Plugin {
         const total = kinds.reduce((sum, [, n]) => sum + n, 0);
         if (total === 0) return [];
         const each = kinds.map(([kind, n]) => `${n} ${kind}`).join(', ');
-        return [`${counted(total, 'answer')} to turns read: ${each}`];
+        return activity([`${counted(total, 'answer')} to turns read: ${each}`]);
       });
       const kept = ctx.store.read<Parsed>(PARSED_DOC);
       /** The owner's sends, newest last, and whether something answered each. */

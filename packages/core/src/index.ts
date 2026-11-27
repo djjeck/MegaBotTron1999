@@ -359,9 +359,15 @@ export {
   PLUGIN_API,
 } from './modules.ts';
 export {
+  atLeast,
   buttonsOf,
+  DEFAULT_LEVELS,
+  type Level,
+  levelOf,
+  LEVELS,
   type Notice,
   NOTICE_KIND,
+  type NoticeOptions,
   Notices,
   NOTICES_KEPT,
   type NoticesHandle,
@@ -514,12 +520,14 @@ export {
   type StoresOptions,
 } from './store.ts';
 export {
+  activity,
   counted,
   type InstanceSummary,
   type NodeSummary,
   Summaries,
   type SummariesOptions,
   type SummaryHandle,
+  type SummaryLine,
   type SummaryLines,
   type SummarySection,
   type SummaryWindow,

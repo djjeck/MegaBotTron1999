@@ -17,7 +17,7 @@ import { type DriftReporter } from './drift.ts';
 import { type LogCursor, type LogEntry, type LogTail } from './event-log.ts';
 import { type Login } from './login.ts';
 import { type ManifestInput } from './manifest.ts';
-import { type NoticesHandle } from './notices.ts';
+import { type NoticeOptions, type NoticesHandle } from './notices.ts';
 import { type OutboxHandle } from './outbox.ts';
 import { type Render } from './render.ts';
 import { type Scheduler } from './scheduler.ts';
@@ -115,16 +115,23 @@ export interface PluginContext {
    * A message for the owner (§4.8), with buttons that each run a command (§2): raised as a `told`
    * notice about its node (§4.16, bot-os.md D94), which a node that tells the owner (`owner-notice`)
    * sends at once, with its buttons where its chat can run them; with no such node, the editor's
-   * events panel alone shows it. The core sends it to no chat itself.
+   * events panel alone shows it. The core sends it to no chat itself. Its level (D171) is a
+   * `warning` unless `options` says otherwise: it asks the owner to act.
    */
-  notify(text: string, buttons?: Buttons): void;
+  notify(text: string, buttons?: Buttons, options?: NoticeOptions): void;
   /**
    * Raises a notice for the owner's attention (§4.16, bot-os.md D91), about its node: `kind`, lower-case
    * words and dashes (a state node's `refused`, or the plugin's own), `text`, one line naming nodes
    * by id, and `detail`, fields a listener may group by. Heard by the nodes that tell the owner
-   * (`owner-notice`), which group and pace them; nothing is sent by raising one.
+   * (`owner-notice`), which group and pace them, and send them by their level (D171: `options`, else
+   * the kind's default, else a `warning`); nothing is sent by raising one.
    */
-  notice(kind: string, text: string, detail?: Readonly<Record<string, unknown>>): void;
+  notice(
+    kind: string,
+    text: string,
+    detail?: Readonly<Record<string, unknown>>,
+    options?: NoticeOptions
+  ): void;
   /**
    * The owner's notices (§4.16, D91), raised by the core and the plugins: given only to a plugin whose
    * manifest declares `notices: true`, which hears those raised since the start, then each as it

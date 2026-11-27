@@ -40,6 +40,7 @@
  * `attention.step`, with its node's id. It knows no game and sends nothing.
  */
 import {
+  activity,
   counted,
   definePlugin,
   type Inbound,
@@ -386,7 +387,7 @@ class Attention {
   instance() {
     return {
       start: () => {
-        this.ctx.summary?.contribute((w) => this.summaryLines(w));
+        this.ctx.summary?.contribute((w) => activity(this.summaryLines(w)));
         if (this.c.followsMyPlay && this.c.listen !== undefined) {
           const listen = this.ctx.connector('listen');
           listen.onMessage((m) => this.heard(m, { name: listen.self(), id: listen.selfId() }));

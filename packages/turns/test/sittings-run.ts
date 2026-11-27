@@ -148,7 +148,10 @@ export async function runSittings(o: RunOptions = {}) {
     }));
   };
   const summary = (node: string): string[] | undefined =>
-    kit.core.summary({ since: 0, until: kit.clock.now() + 1 }).find((s) => s.node === node)?.lines;
+    kit.core
+      .summary({ since: 0, until: kit.clock.now() + 1 })
+      .find((s) => s.node === node)
+      ?.lines.map((l) => l.text);
   return {
     kit,
     account,

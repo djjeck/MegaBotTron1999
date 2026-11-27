@@ -172,7 +172,7 @@ describe('the send-queue watchdog in the core (D93)', () => {
     // Counted in the owner's summary, by kind (D92).
     expect(core.summary({ since: T0, until: clock.now() + 1 })).toContainEqual({
       title: 'Notices',
-      lines: ['1 cascade, 1 stalled'],
+      lines: [{ text: '1 cascade, 1 stalled', level: 'debug' }],
     });
     await core.stop();
 

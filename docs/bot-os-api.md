@@ -2694,47 +2694,66 @@ event type nobody registers, and a message trigger on a chat-in input no edge bi
 
 What needs the owner's attention is **raised as a notice** (bot-os.md D91,
 `packages/core/src/notices.ts`), where it happens, so that a node can tell the owner without reading
-the log: `{ kind, t, node?, text, detail? }`, its `text` one owner-facing line naming nodes by id,
-its `detail` the fields a listener groups by. **The core raises** `failed` (a node failed: at its
-start, at `ready`, at runtime through `ctx.fail`, such as a script killed as hung, D81, D85, D87, or
-because a node it requires failed; `detail.reason`), `cascade` (each node a runtime stop makes
-inactive, D65; `detail.reason`, `needs actor (stopped)`), `drift` (a parser past its threshold,
-§4.7, about the parser; `detail.paused`, the actors stopped; or a message it could not read, at most
-once an hour, `detail.unread`, `detail.more`), `coalesced` (a queued send that joined another node's
-same text for the same chat, D73, about the node that joined; `detail`: `account`, `chat`, `text`,
-`with`, the other nodes), `stalled` (a node the send-queue watchdog stopped, §4.6, D93, about that
-node; `detail`: `account`, `chat`, `command`, `count`, `reason`), `unreachable` (a send the network
-refused, §4.6, D95, about each node it went for but one that tells the owner itself; its text names
-the chat by its title and says what to do; `detail`: `account`, `chat`, `reason`), `warning` (each
-warning of the graph's check at the load, D89, D90, about its node if it names one), `backoff` (a
-node the retry-loop guard holds back, its command refused for the same reason three times in a row,
-§4.6, D98, about that node; `detail`: `account`, `chat`, `command`, `reason`, `count`; told by
-`owner-notice` among its `other` kinds), `unanswered` (a command no answer came for in its window,
-once until that node's command is answered in that chat, §4.6, D107, about that node; `detail`:
-`account`, `chat`, `command`, `withinS`; told among the `other` kinds), `graph-refused` (the saved
-graph refused at the load, so that no node runs, D94; `detail.problems`; no node hears it, the
-events panel shows it), `load-failed` (a package or module that failed to load, before the load,
-D143; `detail`: `source`, `module`, `error`; told among the `other` kinds), `uncaught` (an error
-nothing caught, the process going on, D143; `detail`: `error`, `from`, the module or package its
-stack names; told among the `other` kinds). **A plugin raises** its own through
-`ctx.notice(kind, text, detail?)`, about its node: a state node raises `refused` for each event it
-refuses (D72; `detail`: `event`, `at`, `reason`); and `told` through `ctx.notify(text, buttons?)`
-(§4.8, D94; `detail.buttons`, which `buttonsOf(notice)` reads). A kind is lower-case words and
-dashes; raising one sends nothing. **A plugin whose manifest declares `notices: true`** gets
-`ctx.notices`: `subscribe(handler)` hears the notices raised since the instance started first (the
-newest `NOTICES_KEPT`, 200), so that the load's warnings and a node failed at its start reach a node
-started after them, then each as it is raised, while its node is up; the time its handler takes is
-its node's (D77). The notices live in memory (`core.notices()` lists them), and **each is recorded**
-as it is raised (`core.notice`: `kind`, `node?`, `text`, `detail?`), so that the editor's events
-panel shows every notice whether a node tells it or not (D94), beside the records it was raised with
-(`core.plugin`, `core.drift`, `core.queue`, `<id>.refused`).
+the log: `{ kind, t, level, node?, text, detail? }`, its `text` one owner-facing line naming nodes
+by id, its `detail` the fields a listener groups by. **The core raises** `failed` (a node failed: at
+its start, at `ready`, at runtime through `ctx.fail`, such as a script killed as hung, D81, D85,
+D87, or because a node it requires failed; `detail.reason`), `cascade` (each node a runtime stop
+makes inactive, D65; `detail.reason`, `needs actor (stopped)`), `drift` (a parser past its
+threshold, §4.7, about the parser; `detail.paused`, the actors stopped; or a message it could not
+read, at most once an hour, `detail.unread`, `detail.more`), `coalesced` (a queued send that joined
+another node's same text for the same chat, D73, about the node that joined; `detail`: `account`,
+`chat`, `text`, `with`, the other nodes), `stalled` (a node the send-queue watchdog stopped, §4.6,
+D93, about that node; `detail`: `account`, `chat`, `command`, `count`, `reason`), `unreachable` (a
+send the network refused, §4.6, D95, about each node it went for but one that tells the owner
+itself; its text names the chat by its title and says what to do; `detail`: `account`, `chat`,
+`reason`), `warning` (each warning of the graph's check at the load, D89, D90, about its node if it
+names one), `backoff` (a node the retry-loop guard holds back, its command refused for the same
+reason three times in a row, §4.6, D98, about that node; `detail`: `account`, `chat`, `command`,
+`reason`, `count`; told by `owner-notice` among its `other` kinds), `unanswered` (a command no
+answer came for in its window, once until that node's command is answered in that chat, §4.6, D107,
+about that node; `detail`: `account`, `chat`, `command`, `withinS`; told among the `other` kinds),
+`graph-refused` (the saved graph refused at the load, so that no node runs, D94; `detail.problems`;
+no node hears it, the events panel shows it), `load-failed` (a package or module that failed to
+load, before the load, D143; `detail`: `source`, `module`, `error`; told among the `other` kinds),
+`uncaught` (an error nothing caught, the process going on, D143; `detail`: `error`, `from`, the
+module or package its stack names; told among the `other` kinds). **A plugin raises** its own
+through `ctx.notice(kind, text, detail?)`, about its node: a state node raises `refused` for each
+event it refuses (D72; `detail`: `event`, `at`, `reason`); and `told` through
+`ctx.notify(text, buttons?)` (§4.8, D94; `detail.buttons`, which `buttonsOf(notice)` reads). A kind
+is lower-case words and dashes; raising one sends nothing.
 
-`owner-notice` (§5) tells a kind it does not name as `other`. Its view (`GET /plugins/<id>/view`,
-D72) shows the notices waiting by kind with when each is due, when each kind was last told, whether
-the start notice is waiting, sent or off, the summary's cadence and times (next due, last sent, last
-looked), the graph's warnings at this start, and its last message the network refused to each chat
-(`notSent`: when, the account, the chat, why; D95, per chat since D97), pinned first; its card's
-line says the last (`not sent to …: …`, or how many chats) and counts the notices waiting.
+**Every notice has a level** (bot-os.md D171), lowest first: `debug` (for a look while diagnosing),
+`info` (a line in the owner's daily digest), `warning` (a message soon), `error` (a message now).
+The shell's kinds have theirs (`DEFAULT_LEVELS`): `error` for `failed`, `stalled`, `cascade`,
+`uncaught`, `load-failed` and `graph-refused`; `warning` for `drift`, `unreachable`, `backoff`,
+`unanswered`, `refused` and `warning`; `debug` for `coalesced`. A plugin gives its own with
+`ctx.notice(kind, text, detail?, { level })` and `ctx.notify(text, buttons?, { level })`; a notice
+it raises without one is its kind's, and a plugin's own kind or a `told` message is a `warning`.
+`levelOf(notice)` reads it, `atLeast(level, threshold)` compares two. Levels decide only what a node
+that tells the owner sends: every notice is recorded and listed whatever its level.
+
+```ts
+ctx.notice('quota', 'quest-bot used 80% of its quota', { used: 0.8 }, { level: 'info' });
+ctx.notify('A new picture waits for your review', buttons); // a warning: it asks the owner to act
+```
+
+**A plugin whose manifest declares `notices: true`** gets `ctx.notices`: `subscribe(handler)` hears
+the notices raised since the instance started first (the newest `NOTICES_KEPT`, 200), so that the
+load's warnings and a node failed at its start reach a node started after them, then each as it is
+raised, while its node is up; the time its handler takes is its node's (D77). The notices live in
+memory (`core.notices()` lists them), and **each is recorded** as it is raised (`core.notice`:
+`kind`, `level`, `node?`, `text`, `detail?`), so that the editor's events panel shows every notice
+whether a node tells it or not (D94), beside the records it was raised with (`core.plugin`,
+`core.drift`, `core.queue`, `<id>.refused`).
+
+`owner-notice` (§5) tells a kind it does not name as `other`, at once or in its digest by level. Its
+view (`GET /plugins/<id>/view`, D72) shows its levels (at once, in the digest, the next digest), the
+overrides per node, the recent notices of every level (the latest 100, newest first, each with what
+became of it: `sent`, `digest` or `dropped`), the notices waiting by kind with when each is due,
+when each kind was last told, whether the start notice is waiting, sent or off, the digest's waiting
+count and times, the graph's warnings at this start, and its last message the network refused to
+each chat (`notSent`: when, the account, the chat, why; D95, per chat since D97), pinned first; its
+card's line says the last (`not sent to …: …`, or how many chats) and counts the notices waiting.
 
 ### 4.17 The owner's summary
 
@@ -2746,12 +2765,16 @@ What happened over a window of time, in a few lines, for a node that tells the o
 ```ts
 interface SummaryHandle {
   // Its lines for a window: what it did from `since` (included) to `until` (excluded), in ms;
-  // none ([] or undefined) when it did nothing. Returns the way to stop.
+  // none ([] or undefined) when it did nothing. A line is a text (info) or { text, level }
+  // (bot-os.md D171). Returns the way to stop.
   contribute(
-    lines: (window: { since: number; until: number }) => readonly string[] | undefined
+    lines: (window: {
+      since: number;
+      until: number;
+    }) => readonly (string | { text: string; level?: Level })[] | undefined
   ): () => void;
   // Every contributor's lines for a window, the core's first, then the nodes' in load order;
-  // only those with something to say: { title, node?, lines }. For a node that tells them.
+  // only those with something to say: { title, node?, lines: { text, level }[] }.
   collect(window: SummaryWindow): SummarySection[];
   // The release and commit (CoreOptions.build, as GET /instance says), when the core started,
   // and each node with its plugin, state and why ({ id, plugin, state, reason? }), in load order.
@@ -2765,8 +2788,11 @@ as things happen with a **`Tally`** (`new Tally(ctx.clock)`; `add(key, n?)`; `co
 `counts(window)`, each key with its count, in the order first added), which keeps 7 days back
 (`TALLY_KEPT_MS`) and at most `TALLY_MAX` (100 000) times per key; `counted(n, 'event')` words
 `1 event`, `2 events`. Its function is called when a summary is made; one that throws is logged and
-left out. The counts live in memory: a window reaches back to the start at most. A game's module
-adds its own lines the same way (its turns, what it bought):
+left out. **Each line has a level** (D171): a bare text is `info`, a line for the owner's daily
+digest (`12 items bought`); a count of plain activity is `debug` (`{ text, level: 'debug' }`, or
+`activity(lines)` for a list), shown only for a node the owner asked to see in detail (`/verbose`,
+§5); a line that matters more says so. The counts live in memory: a window reaches back to the start
+at most. A game's module adds its own lines the same way (its turns, what it bought):
 
 ```ts
 manifest: { /* … */ summary: true },
@@ -2784,12 +2810,12 @@ create: (ctx) => {
 `dry-run`, `refused`, `failed`, and a queued send `cancelled` or `expired`, D73; a coalesced send
 counts for each node it went for), but those of the nodes that tell the owner (`notices: true`),
 whose sends are the summaries and notices themselves; and `Notices`, the notices raised (§4.16),
-counted by kind (`1 cascade, 1 stalled`). **The shell's plugins contribute:** a state node its
-events heard live, `applied` and `refused` (D72); a turn parser the answers to turns it read live,
-by their outcome's kind (`unknown` for one it could not read); an `attention` node its sittings
-(those that followed the owner's play counted apart), and those the owner played by hand; a `player`
-its commands, `sent` and `in a dry run` by command, and `failed`. `core.summary(window)` gives what
-`collect` gives, for tests.
+counted by kind (`1 cascade, 1 stalled`), both `debug`. **The shell's plugins contribute**, at
+`debug`, as activity: a state node its events heard live, `applied` and `refused` (D72); a turn
+parser the answers to turns it read live, by their outcome's kind (`unknown` for one it could not
+read); an `attention` node its sittings (those that followed the owner's play counted apart), and
+those the owner played by hand; a `player` its commands, `sent` and `in a dry run` by command, and
+`failed`. `core.summary(window)` gives what `collect` gives, for tests.
 
 ### 4.18 Media
 
@@ -2877,7 +2903,7 @@ its bytes is for later.
 | `script`        | actor, stats | `@megabottron1999/turns`      | TypeScript typed in the editor, on the ports its config declares, in a worker thread of its own                                                                            |
 | `collection`    | stats        | `@megabottron1999/turns`      | Records of a schema its config gives, media included, edited in its panel and read through its interface (D155)                                                            |
 | `view`          | view         | `@megabottron1999/turns`      | A page of the owner's own at `/v/<path>/`, its sections from its config, each read from a node wired to its inputs (D170)                                                  |
-| `owner-notice`  | stats        | `@megabottron1999/turns`      | Tells the owner what needs attention (§4.16), a summary on a cadence (§4.17) and a notice at each start, through a chat-out edge                                           |
+| `owner-notice`  | stats        | `@megabottron1999/turns`      | Tells the owner what needs attention (§4.16) at once or in a daily digest by level (§4.17), and a notice at each start, through a chat-out edge                            |
 | (states)        | stats        | `@megabottron1999/turns`      | `statePlugin`: a game's player state, kept from its parsers' events, from a spec a game gives, with its commands' readiness; `readinessPlugin`: the readiness alone (D141) |
 
 - **`irc`** (`packages/connectors/src/plugins/irc.ts`, on the IRC client of
@@ -3194,57 +3220,88 @@ its bytes is for later.
   the state, which alone holds it (D142: the outbox keeps no cooldown); a grammar reads a reset's
   answer with its `effects` only where the state needs them, for an effect the mechanics do not
   declare.
-- **`owner-notice`** (`packages/turns/src/owner-notice.ts`, bot-os.md D91, D94): the one node that
-  reports to a chat; without one, nothing is (the editor's events panel shows the notices, §4.16).
-  It tells the owner what needs attention, from the notices (§4.16), through its `chat` output
-  (chat-out, on any network). **Its edges are its only chat setting** (bot-os.md D97): it sends each
-  message to every chat every edge of that output names (`many`: one edge per connector, so an edge
-  to a `telegram-bot` and one to `irc` tell both, `ctx.outboxes`); an edge that names no chat sends
-  to its connector's owner's private chat (`owner`: `Connector.owner()`, a `telegram-bot`'s
-  `owner`), which the editor writes on the edge as it is drawn; to a connector with no owner, it
-  sends nowhere and its panel says why. Its sends are queued as any node's (`enqueue`, D73), so a
-  dry-run edge (as a new one is drawn, D64) logs each as `core.send` with outcome `dry-run` and
-  sends nothing. Its configuration (`ownerNoticeConfig`): `report`, each kind on or off (`refused`,
-  `coalesced`, `drift`, `cascade`, `failed`, `stalled`, `unreachable`, `warning`, `other` for every
-  kind it does not name, and `told`, the plugins' messages), all on by default; `pace`, per kind but
-  `told`, `gatherS`, how long the kind's first notice waits for others of its kind, and `everyMin`,
-  the least minutes between two of its messages, what comes meanwhile going in the next
-  (`DEFAULT_PACE`: `failed`, `drift`, `cascade` and `stalled` 10 s and 5 min; `unreachable` 30 s and
-  10 min; `refused` 60 s and 10 min; `coalesced` 60 s and 30 min; `warning` 30 s and 60 min; `other`
-  60 s and 10 min; a field left out keeps its default); `maxLines`, the most items a message lists
-  (5), the rest counted; `summaryEveryMin` and `startNotice`, below. A kind's message is plain text:
-  one notice is its own line (`script-1 failed: its script hung: …`); several, a title with their
-  count and, past a minute, how long they took, then an item each, alike ones counted once
+- **`owner-notice`** (`packages/turns/src/owner-notice.ts`, bot-os.md D91, D94, D171): the one node
+  that reports to a chat; without one, nothing is (the editor's events panel shows the notices,
+  §4.16). It tells the owner what needs attention, from the notices (§4.16), through its `chat`
+  output (chat-out, on any network). **Its edges are its only chat setting** (bot-os.md D97): it
+  sends each message to every chat every edge of that output names (`many`: one edge per connector,
+  so an edge to a `telegram-bot` and one to `irc` tell both, `ctx.outboxes`); an edge that names no
+  chat sends to its connector's owner's private chat (`owner`: `Connector.owner()`, a
+  `telegram-bot`'s `owner`), which the editor writes on the edge as it is drawn; to a connector with
+  no owner, it sends nowhere and its panel says why. Its sends are queued as any node's (`enqueue`,
+  D73), so a dry-run edge (as a new one is drawn, D64) logs each as `core.send` with outcome
+  `dry-run` and sends nothing. Its configuration (`ownerNoticeConfig`): `report`, each kind on or
+  off (`refused`, `coalesced`, `drift`, `cascade`, `failed`, `stalled`, `unreachable`, `warning`,
+  `other` for every kind it does not name, and `told`, the plugins' messages), all on by default;
+  `pace`, per kind but `told`, `gatherS`, how long the kind's first notice waits for others of its
+  kind, and `everyMin`, the least minutes between two of its messages, what comes meanwhile going in
+  the next (`DEFAULT_PACE`: `failed`, `drift`, `cascade` and `stalled` 10 s and 5 min; `unreachable`
+  30 s and 10 min; `refused` 60 s and 10 min; `coalesced` 60 s and 30 min; `warning` 30 s and 60
+  min; `other` 60 s and 10 min; a field left out keeps its default); `maxLines`, the most items a
+  message lists (5), the rest counted; `level`, `digest`, `sources`, `verboseEveryMin` and
+  `startNotice`, below. **What it sends at once, by level** (D171, §4.16): a notice at or above
+  `level` (`warning` by default) is told at once, at its kind's pace; one below it and at or above
+  `digest.level` (`info`) waits for the digest; one below both is dropped (recorded all the same,
+  `core.notice`, and listed in its view). So by default a failure, a stop or a cascade (`error`) and
+  a drift or a refusal (`warning`) are told at once, a start notice (`info`) waits for the digest,
+  and a coalesced send (`debug`) is told nowhere. `sources` sets one node's two thresholds at once,
+  both its level (`{ "quest-state": { "level": "error" } }`; with `until`, an ISO time, for that
+  long); the `/verbose` command, below, sets one too, and wins. A kind's message is plain text: one
+  notice is its own line (`script-1 failed: its script hung: …`); several, a title with their count
+  and, past a minute, how long they took, then an item each, alike ones counted once
   (`inventory refused 5 events in the last 10 min:` and `- quest.gain: … (×3)`), grouped by node for
   `refused` and `coalesced`. It tells nothing of itself (a notice about its node, or a send it
   shared), so its own sends cannot feed it. The load's warnings it has told are kept in its store
   (`warned`), and the next start tells only new ones. Each message is recorded as
-  `owner-notice.told` once per chat it goes to (`kind`, `count`, `chat`, `text`; `kind` `summary`
-  and `start` for the two below). One the network refuses (D95) is never told (its own failure, sent
-  the same way, would loop): its view keeps the last failure per chat (`notSent`, a list of
-  `{ t, account, chat, reason }`, the chat's next message that goes clearing it), and its card the
-  last. What waits in a kind is dropped when its node stops. **The plugins' messages** (`told`,
-  `ctx.notify`, §4.8, D94) are neither grouped nor paced, since a plugin's prompt waits for nothing:
-  each is sent at once as its own message, with its buttons (`buttonsOf`) handed to the outbox
-  (`SendOptions.buttons`), which a `telegram-bot` sends to the owner's chat through its surface, so
-  that a tap runs the owner's command, and any other connector drops; none while the instance is
-  off. Those heard as the instance starts wait for the start notice's wait (`START_WAIT_MS`, its
-  connector connected by then) and follow it. **A summary** (bot-os.md D92) every `summaryEveryMin`
-  minutes (60 by default, at most a week; 0: none): what happened since the last summary sent, or
-  since the start when that came later, from `collect` (§4.17), each section titled (`Sends`,
-  `Notices`, a node's id), one line on its title's, several listed, at most `maxLines`; **none when
-  no section has anything to say**, and the next then covers the time since the last one sent. Its
-  own sends are not in it. Kept in its store (`summary`): when it last sent one (`sentAt`) and last
-  looked (`checkedAt`), so that after a restart the next is still due a cadence after the last look
-  (a cadence after the start when that is past), neither sent again nor put off; what happened
-  between the last summary and the stop is in none. **A start notice** at each start (`startNotice`,
-  on by default), 10 s after every node has started (`START_WAIT_MS`), so that a node that fails as
-  it starts is in it: the release and commit, the nodes running (at most `maxLines` named, the rest
-  counted), those not running with their state and why, and the graph's warnings (those new listed,
-  those told at an earlier start counted, with `warning` on). The failures and warnings heard before
-  it are its news, not messages of their own, each node not running named with why; the core tells
-  no start of its own (it tells no chat anything, D94). A node the send-queue watchdog stopped
-  (`stalled`, §4.6, D93) is told as its notice says
+  `owner-notice.told` once per chat it goes to (`kind`, `count`, `chat`, `text`; `kind` `digest`,
+  `verbose` and `start` for those below). One the network refuses (D95) is never told (its own
+  failure, sent the same way, would loop): its view keeps the last failure per chat (`notSent`, a
+  list of `{ t, account, chat, reason }`, the chat's next message that goes clearing it), and its
+  card the last. What waits in a kind is dropped when its node stops. **The plugins' messages**
+  (`told`, `ctx.notify`, §4.8, D94) are neither grouped nor paced, since a plugin's prompt waits for
+  nothing: each is sent at once as its own message, with its buttons (`buttonsOf`) handed to the
+  outbox (`SendOptions.buttons`), which a `telegram-bot` sends to the owner's chat through its
+  surface, so that a tap runs the owner's command, and any other connector drops; none while the
+  instance is off. Those heard as the instance starts wait for the start notice's wait
+  (`START_WAIT_MS`, its connector connected by then) and follow it; a plugin's message is a
+  `warning` unless it gives a level (`ctx.notify(text, buttons, { level })`), and goes to the digest
+  or nowhere below `level`. **A digest** (bot-os.md D92, D171; `digest`): once a day at `at`
+  (`09:00` by default, HH:MM) in `timeZone` (an IANA zone, `UTC` by default; the times its messages
+  name are in it too), or every `everyMin` minutes instead; `enabled: false`, none. It holds the
+  notices that waited for it, grouped by kind (a kind's several as its paced message words them, the
+  start notices folded into `Started 3 times, last: …`), the lines for the nodes whose `/verbose`
+  ended (`quest-state back to warning`), `And 12 older notices not kept` past the 500 it keeps
+  (`DIGEST_KEPT`), then the summary lines (`collect`, §4.17) at or above `digest.level` for the time
+  since the last digest sent (or since the start, when that came later), each section titled by its
+  node, one line on its title's, several listed, at most `maxLines`. So the core's counts of sends
+  and notices and the shell's activity counts (`debug`) are in none by default. **None when nothing
+  qualifies**, and the next then covers the time since the last one sent. Kept in its store
+  (`digest`): what waits (`waiting`, `dropped`) and when it last sent one (`sentAt`) and last looked
+  (`checkedAt`), so that a restart neither loses what waits nor sends a digest again, the next due
+  at the next time after the last look (in a minute, when that is past). A graph saved before D171
+  has `summaryEveryMin` (deprecated; `digestOf` reads it): `60`, which 0.1.72 wrote as its default,
+  counts as unset (the daily digest); another number of minutes is the digest's `everyMin`; `0`
+  turns the digest off. **The owner's commands** (`owner: true`, §2; they need a commands edge from
+  a connector's `commands` output to its `commands` input that names the owner's chat, D109, as a
+  new edge starts as a dry run): `/notices` shows its levels, each node's own with its expiry and
+  who set it (`/verbose` or the graph's `sources`), and when the next digest goes;
+  `/verbose <node> [level] [for <duration>]` tells that node's notices at once from `level` (`debug`
+  by default) and above, until `/quiet` or for the duration (`30m`, `2h`, `1d`, `1h30m`), replying
+  with the exact time it ends in `timeZone`; `/quiet <node>` ends it. The overrides live in its
+  store (`overrides`, a setting being a number, a flag or text, §2), so they survive a restart and
+  not a fresh store; one past its end is removed, and the digest says so. **While a node is told
+  below `digest.level`** (`/verbose quest-state debug`), every `verboseEveryMin` minutes (60 by
+  default) it sends that node's summary lines alone, its activity counts included
+  (`Detail of quest-state, the last 60 min:`), none when they are empty, until the override ends.
+  **A start notice** at each start (`startNotice`, on by default; `info`, so in the digest, or
+  `error`, so at once, when an enabled node failed to start or load), 10 s after every node has
+  started (`START_WAIT_MS`), so that a node that fails as it starts is in it: the release and
+  commit, the nodes running (at most `maxLines` named, the rest counted), those not running with
+  their state and why, and the graph's warnings (those new listed, those told at an earlier start
+  counted, with `warning` on). The failures and warnings heard before it are its news, not messages
+  of their own, each node not running named with why; the core tells no start of its own (it tells
+  no chat anything, D94). A node the send-queue watchdog stopped (`stalled`, §4.6, D93) is told as
+  its notice says
   (`quest-actor sent /inventory to @QuestBot 10 times with no answer read from it; stopped until you clear the stop in the editor`),
   several as `2 nodes stopped: their commands went unanswered:` and an item each
   (`- quest-actor: /inventory to @QuestBot, 10 times`).

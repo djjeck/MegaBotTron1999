@@ -295,8 +295,10 @@ describe('attention', () => {
       'sitting: #2, 2 players',
     ]);
     expect(
-      r.kit.core.summary({ since: 0, until: T0 + 31 * MIN }).find((s) => s.node === ATTENTION)
-        ?.lines
+      r.kit.core
+        .summary({ since: 0, until: T0 + 31 * MIN })
+        .find((s) => s.node === ATTENTION)
+        ?.lines.map((l) => l.text)
     ).toEqual(['2 sittings']);
     await r.kit.stop();
   });
@@ -358,7 +360,7 @@ describe('attention', () => {
     expect(log.length).toBeGreaterThan(0);
     expect(
       r.kit.core.summary({ since: 0, until: T0 + 61 * MIN }).find((s) => s.node === ATTENTION)
-        ?.lines?.[0]
+        ?.lines?.[0]?.text
     ).toMatch(/^\d+ sittings?, 2 by hand$/u);
     await r.kit.stop();
   });
@@ -454,8 +456,10 @@ describe('its two behaviours: scheduled, and following your play (D138)', () => 
     r.kit.runUntil(T0 + 10 * MIN);
     expect(log).toHaveLength(1);
     expect(
-      r.kit.core.summary({ since: 0, until: T0 + 11 * MIN }).find((s) => s.node === ATTENTION)
-        ?.lines
+      r.kit.core
+        .summary({ since: 0, until: T0 + 11 * MIN })
+        .find((s) => s.node === ATTENTION)
+        ?.lines.map((l) => l.text)
     ).toEqual(['1 sitting (1 following you)']);
     await r.kit.stop();
   });

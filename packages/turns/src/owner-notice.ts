@@ -25,29 +25,38 @@
  * the next, one message (`refused 5 events in the last 10 min: …`), listing at most `maxLines`
  * items. A warning already told at the previous start is not told again.
  *
- * **A summary every `summaryEveryMin`** (D92, #46): what happened since the last one, from the
- * core's lines (sends per node, notices by kind) and those the plugins contribute (`ctx.summary`,
- * §4.17); none when nobody has anything to say. The time of the last is kept in its store, so that
- * a restart neither sends one again nor puts the next off.
+ * **By level** (D171, #90): a notice at or above `level` goes at once, at its kind's pace; one at
+ * or above `digest.level` waits for **a digest**, daily at an hour in a time zone (or every
+ * `everyMin`), with the summary lines of that level (D92, `ctx.summary`, §4.17), none when nothing
+ * qualifies; the rest is dropped, recorded all the same and shown in its view. What waits and when
+ * the last went are kept in its store, so that a restart neither loses nor repeats it. Per node,
+ * `sources`, or the owner's `/verbose` and `/quiet` (kept in its store, `overrides`), set both
+ * thresholds; a node told below the digest's level gets its summary lines every `verboseEveryMin`.
  *
  * **A start notice at each start** (`startNotice`, D92): the release and commit, the nodes running,
  * those that are not and why, and the graph's warnings; the failures and warnings heard before it
- * go in it, not in messages of their own.
+ * go in it, not in messages of their own. It is `info`, or `error` when a node failed to start.
  */
 import {
+  type Answer,
+  atLeast,
   type Buttons,
   buttonsOf,
   type Clock,
   definePlugin,
   type InstanceSummary,
+  type Level,
+  levelOf,
+  LEVELS,
   type Notice,
   type Plugin,
   type PluginContext,
+  type Request,
   type StateView,
-  type SummarySection,
   type TimerHandle,
 } from '@megabottron1999/core';
 import { z } from 'zod';
+import { addDays, localDate, zonedInstant } from './sittings.ts';
 
 export const OWNER_NOTICE = 'owner-notice';
 
@@ -122,6 +131,19 @@ const reportHelp: Record<Reported, string> = {
   told: 'The plugins’ messages for the owner (`ctx.notify`), each at once, with its buttons where the chat can run them',
 };
 
+/** A notice's level (D171), as its config names one. */
+const level = z.enum(LEVELS, { error: `expected a level: ${LEVELS.join(', ')}` });
+
+/** Whether a time zone is one this process knows. */
+const knownZone = (zone: string): boolean => {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const paceSchema = z.object({
   gatherS: z.number().min(0).optional(),
   everyMin: z.number().min(0).optional(),
@@ -153,14 +175,68 @@ export const ownerNoticeConfig = z.object({
     .min(1)
     .default(5)
     .describe('The most items one message lists; the rest are counted'),
+  level: level
+    .default('warning')
+    .describe(
+      'What it sends at once: notices of this level and above (debug, info, warning, error); the rest wait for the digest'
+    ),
+  digest: z
+    .object({
+      enabled: z.boolean().default(true).describe('A digest of what was not sent at once'),
+      level: level
+        .default('info')
+        .describe('What the digest gathers: notices and summary lines of this level and above'),
+      at: z
+        .string()
+        .regex(/^([01]\d|2[0-3]):[0-5]\d$/u, 'expected HH:MM, as 09:00')
+        .default('09:00')
+        .describe('When it goes each day, HH:MM in its timeZone'),
+      timeZone: z
+        .string()
+        .default('UTC')
+        .refine(knownZone, 'expected a time zone such as Europe/Rome or America/New_York')
+        .describe('The time zone of its hour, and of the times its messages name'),
+      everyMin: z
+        .number()
+        .int()
+        .min(1)
+        .max(7 * 24 * 60)
+        .optional()
+        .describe('Instead of once a day at its hour: every so many minutes'),
+    })
+    .default({ enabled: true, level: 'info', at: '09:00', timeZone: 'UTC' })
+    .describe(
+      'What waits: the notices below its level, and the plugins’ summary lines, in one message, none when nothing is there'
+    ),
+  sources: z
+    .record(
+      z.string().min(1),
+      z.object({
+        level: level.describe('Both its thresholds, at once and in the digest'),
+        until: z.iso.datetime().optional().describe('Until when; none: for good'),
+      })
+    )
+    .default({})
+    .describe(
+      'Per node: its notices’ thresholds, lower (more from it) or higher (less), as /verbose sets them for a while'
+    ),
+  verboseEveryMin: z
+    .number()
+    .int()
+    .min(1)
+    .max(24 * 60)
+    .default(60)
+    .describe(
+      'While a node is told below the digest’s level (/verbose), every so many minutes its summary lines alone'
+    ),
   summaryEveryMin: z
     .number()
     .int()
     .min(0)
     .max(7 * 24 * 60)
-    .default(60)
+    .optional()
     .describe(
-      'Minutes between two summaries of what happened (sends, notices, what the plugins say); none when nothing did. 0: no summary'
+      'Deprecated (D171): read as the digest’s cadence (everyMin); 0 turns the digest off, 60 (the old default) is as if unset'
     ),
   startNotice: z
     .boolean()
@@ -381,19 +457,127 @@ function wordSection(title: string, lines: readonly string[], maxLines: number):
   return [`${title}:`, ...shown];
 }
 
+/** The digest as it runs (D171): its config, with a saved `summaryEveryMin` read into it. */
+export interface DigestPlan {
+  enabled: boolean;
+  level: Level;
+  /** Minutes after midnight, in its time zone, when it goes each day. */
+  atMin: number;
+  timeZone: string;
+  /** Instead of once a day: every so many minutes. */
+  everyMin?: number;
+}
+
 /**
- * A summary: its window (since the last summary, or since the start when that came after), then
- * each section with something to say.
+ * The digest a config asks for (D171): its `digest`, a saved `summaryEveryMin` (the summary it
+ * replaces) read into it: `0`, none; `60`, the old default an editor wrote out, as if unset (the
+ * daily digest); any other, its cadence, unless the digest names one.
  */
-export function wordSummary(
-  sections: readonly SummarySection[],
+export function digestOf(c: Pick<OwnerNoticeConfig, 'digest' | 'summaryEveryMin'>): DigestPlan {
+  const d = c.digest;
+  const [h = 0, m = 0] = d.at.split(':').map(Number);
+  const old = c.summaryEveryMin;
+  const everyMin = d.everyMin ?? (old === undefined || old === 0 || old === 60 ? undefined : old);
+  return {
+    enabled: d.enabled && old !== 0,
+    level: d.level,
+    atMin: h * 60 + m,
+    timeZone: d.timeZone,
+    ...(everyMin === undefined ? {} : { everyMin }),
+  };
+}
+
+/** When the digest next goes after `from`: its cadence on, or the next day's hour. */
+export function nextDigest(from: number, d: DigestPlan): number {
+  if (d.everyMin !== undefined) return from + d.everyMin * 60_000;
+  const day = localDate(from, d.timeZone);
+  const today = zonedInstant(day, d.atMin, d.timeZone);
+  return today > from ? today : zonedInstant(addDays(day, 1), d.atMin, d.timeZone);
+}
+
+/** A time in the owner's words, in its zone: `27 Nov 2026, 14:30 (America/New_York)`. */
+export function when(t: number, timeZone: string): string {
+  const text = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(t);
+  return `${text} (${timeZone})`;
+}
+
+/** A duration as `/verbose` takes it, `30m`, `2h`, `1d`, `1h30m`, in ms; undefined for none. */
+export function durationOf(text: string): number | undefined {
+  const m = /^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?$/u.exec(text.trim().toLowerCase());
+  if (m === null || m.slice(1).every((x) => x === undefined)) return undefined;
+  const [d = 0, h = 0, min = 0] = m.slice(1).map((x) => Number(x ?? 0));
+  const ms = ((d * 24 + h) * 60 + min) * 60_000;
+  return ms > 0 ? ms : undefined;
+}
+
+/** The store's document of the overrides `/verbose` set (D171), by node. */
+export const OVERRIDES_DOC = 'overrides';
+/** A node's override: both its thresholds, until when (none: until `/quiet`). */
+export interface Override {
+  level: Level;
+  until?: number;
+}
+
+/**
+ * The store's document of the digest's waiting notices (D171), the latest `DIGEST_KEPT`, and how
+ * many older ones were not kept.
+ */
+export const DIGEST_DOC = 'digest';
+export const DIGEST_KEPT = 500;
+/** A notice waiting for the digest, as kept. */
+export interface Waiting {
+  kind: string;
+  level: Level;
+  t: number;
+  node?: string;
+  text: string;
+  detail?: Readonly<Record<string, unknown>>;
+}
+export interface DigestKept {
+  waiting: Waiting[];
+  dropped: number;
+}
+
+/**
+ * A digest (D171): its window, the notices that waited by kind (a kind's several as one message
+ * would word them), how many older ones were not kept, then the summary's lines at its level.
+ */
+export function wordDigest(
+  waiting: readonly Waiting[],
+  dropped: number,
+  sections: readonly { title: string; lines: readonly string[] }[],
   window: { since: number; until: number; sinceStart: boolean },
   maxLines: number
 ): string {
   const head = window.sinceStart
-    ? `Summary since the start, ${span(window.until - window.since)} ago:`
-    : `Summary of the last ${span(window.until - window.since)}:`;
-  return [head, ...sections.flatMap((s) => wordSection(s.title, s.lines, maxLines))].join('\n');
+    ? `Digest since the start, ${span(window.until - window.since)} ago:`
+    : `Digest of the last ${span(window.until - window.since)}:`;
+  const byKind = new Map<string, Waiting[]>();
+  for (const w of waiting) byKind.set(w.kind, [...(byKind.get(w.kind) ?? []), w]);
+  const notices = [...byKind].map(([kind, list]) => {
+    if (kind === 'start') {
+      const last = list.at(-1) as Waiting;
+      const line = last.text.split('\n')[0] ?? '';
+      return list.length === 1 ? line : `Started ${list.length} times, last: ${line}`;
+    }
+    if (kind === 'override') return list.map((w) => w.text).join('\n');
+    const asNotices = list.map((w) => ({ ...w })) as Notice[];
+    return wordNotices(reportedOf(kind), asNotices, window.until, maxLines);
+  });
+  return [
+    head,
+    ...notices,
+    ...(dropped > 0 ? [`And ${plural(dropped, 'older notice')} not kept`] : []),
+    ...sections.flatMap((s) => wordSection(s.title, s.lines, maxLines)),
+  ].join('\n');
 }
 
 /** What a start notice says of the graph's warnings: those new, and those told before. */
@@ -452,11 +636,43 @@ function ownNotice(n: Notice, id: string): boolean {
   return n.node === id || (Array.isArray(others) && others.includes(id));
 }
 
-const kindTimes = (what: string) =>
-  z.object(Object.fromEntries(REPORTED.map((k) => [k, z.number().optional()]))).describe(what);
+/** How many recent notices its view shows, of every level. */
+export const RECENT_KEPT = 100;
+
+/** What became of a notice it heard (D171): sent at once, kept for the digest, or neither. */
+export type Fate = 'sent' | 'digest' | 'dropped';
 
 /** What its view shows (bot-os.md D72): the state its schema describes, for the viewer's labels. */
 const viewState = z.object({
+  levels: z
+    .object({
+      now: z.string().describe('Sent at once'),
+      digest: z.string().describe('In the digest'),
+      digestNext: z.number().optional().describe('Next digest'),
+    })
+    .describe('Levels (D171)'),
+  overrides: z
+    .array(
+      z.object({
+        node: z.string().describe('Node'),
+        level: z.string().describe('Level'),
+        until: z.number().optional().describe('Until'),
+        from: z.string().describe('Set by'),
+      })
+    )
+    .describe('Per node'),
+  recent: z
+    .array(
+      z.object({
+        t: z.number().describe('When'),
+        level: z.string().describe('Level'),
+        kind: z.string().describe('Kind'),
+        node: z.string().optional().describe('Node'),
+        text: z.string().describe('Notice'),
+        fate: z.string().describe('Then'),
+      })
+    )
+    .describe('Recent notices, every level, newest first'),
   waiting: z
     .object(
       Object.fromEntries(
@@ -472,16 +688,17 @@ const viewState = z.object({
       )
     )
     .describe('Waiting to be told'),
-  lastTold: kindTimes('Last told, by kind'),
+  lastTold: z
+    .object(Object.fromEntries(REPORTED.map((k) => [k, z.number().optional()])))
+    .describe('Last told, by kind'),
   startNotice: z.enum(['waiting', 'sent', 'off']).describe('Start notice'),
-  summary: z
+  digest: z
     .object({
-      everyMin: z.number().describe('Every (min)'),
-      dueAt: z.number().optional().describe('Next due'),
+      waiting: z.number().describe('Notices waiting'),
       sentAt: z.number().optional().describe('Last sent'),
       checkedAt: z.number().optional().describe('Last looked'),
     })
-    .describe('Summary'),
+    .describe('Digest'),
   warnings: z.array(z.string()).describe("The graph's warnings at this start"),
   notSent: z
     .array(
@@ -506,7 +723,7 @@ export function ownerNoticePlugin(): Plugin {
       id: OWNER_NOTICE,
       kinds: ['stats'],
       description:
-        'The one node that reports to a chat: what needs the owner’s attention (refused events, coalesced sends, drift, cascades, failures, stalled sends, warnings), the plugins’ messages with their buttons, a summary on a cadence, and a notice at each start',
+        'The one node that reports to a chat: what needs the owner’s attention at once (warnings and errors by default), the rest in a daily digest, the plugins’ messages with their buttons, and a notice at each start',
       config: ownerNoticeConfig,
       notices: true,
       summary: true,
@@ -519,17 +736,39 @@ export function ownerNoticePlugin(): Plugin {
           help: "The accounts it tells the owner through, each in the chats its edge names: a telegram-bot (no chat named: the owner's private chat), irc",
         },
       },
+      interface: {
+        commands: {
+          notices: {
+            help: 'What it sends at once and what waits for the digest, each node set apart, and the next digest',
+            owner: true,
+          },
+          verbose: {
+            help: 'Sends a node’s notices from a lower level (debug by default), for a while if given: /verbose lore-state info for 2h',
+            args: '<node> [debug|info|warning|error] [for <30m|2h|1d>]',
+            owner: true,
+          },
+          quiet: {
+            help: 'Ends what /verbose set for a node',
+            args: '<node>',
+            owner: true,
+          },
+        },
+      },
     },
     create: (ctx: PluginContext) => {
       const c = ctx.config as OwnerNoticeConfig;
+      const plan = digestOf(c);
       const told = new Set(ctx.store.read<string[]>(WARNED_DOC) ?? []);
       const warned: string[] = [];
       let unsubscribe: (() => void) | undefined;
       /** The failures and warnings heard before the start notice, which it tells; none once sent. */
       let atStart: Notice[] | undefined = c.startNotice ? [] : undefined;
       let startTimer: TimerHandle | undefined;
-      let summaryTimer: TimerHandle | undefined;
-      let summaryDueAt: number | undefined;
+      let digestTimer: TimerHandle | undefined;
+      let digestDueAt: number | undefined;
+      let verboseTimer: TimerHandle | undefined;
+      let verboseSince: number | undefined;
+      let expiryTimer: TimerHandle | undefined;
       /** When it last told the owner anything. */
       let toldAt: number | undefined;
       /** When it last told a plugin's message. */
@@ -537,9 +776,39 @@ export function ownerNoticePlugin(): Plugin {
       /** The plugins' messages heard as the instance starts, told after the start's wait. */
       let held: Notice[] | undefined = [];
       let kept: SummaryKept = ctx.store.read<SummaryKept>(SUMMARY_DOC) ?? {};
+      const digestKept = ctx.store.read<DigestKept>(DIGEST_DOC) ?? { waiting: [], dropped: 0 };
+      const overrides = new Map(
+        Object.entries(ctx.store.read<Record<string, Override>>(OVERRIDES_DOC) ?? {})
+      );
+      /** The overrides whose end the digest has said, so that it says each once. */
+      const ended = new Set<string>();
+      const recent: (Waiting & { fate: Fate })[] = [];
       const summary = (): NonNullable<PluginContext['summary']> => {
         if (ctx.summary === undefined) throw new Error('no summary: its manifest declares it');
         return ctx.summary;
+      };
+      const now = (): number => ctx.clock.now();
+      /** The graph's override of a node, while it runs: its `sources` entry, until its end. */
+      const sourceOf = (node: string): Override | undefined => {
+        const s = Object.hasOwn(c.sources, node) ? c.sources[node] : undefined;
+        if (s === undefined) return undefined;
+        const until = s.until === undefined ? undefined : Date.parse(s.until);
+        return until !== undefined && until <= now()
+          ? undefined
+          : { level: s.level, ...(until === undefined ? {} : { until }) };
+      };
+      /** A node's override in force: a command's, else the graph's. */
+      const overrideOf = (node: string | undefined): Override | undefined => {
+        if (node === undefined) return undefined;
+        const o = overrides.get(node);
+        return o !== undefined && (o.until === undefined || o.until > now()) ? o : sourceOf(node);
+      };
+      /** A notice's thresholds, at once and in the digest: its node's override's, else the config's. */
+      const thresholds = (node: string | undefined): { now: Level; digest: Level } => {
+        const o = overrideOf(node);
+        return o === undefined
+          ? { now: c.level, digest: plan.level }
+          : { now: o.level, digest: o.level };
       };
       /**
        * Its last message that did not go, per account and chat, for its panel and card (D95): never
@@ -559,12 +828,12 @@ export function ownerNoticePlugin(): Plugin {
             outs.length === 0
               ? 'no edge: draw one from its chat output to a connector'
               : 'no chat: name one on its edge (its connector has no owner)';
-          notSent.set('', { t: ctx.clock.now(), account: '', chat: '', reason });
+          notSent.set('', { t: now(), account: '', chat: '', reason });
           ctx.log.warn(`not told (${reason}): ${text}`);
           return;
         }
         notSent.delete('');
-        toldAt = ctx.clock.now();
+        toldAt = now();
         for (const { out, chat } of targets) {
           ctx.record(`${OWNER_NOTICE}.told`, { kind, count, chat, text });
           const key = `${out.account} ${chat}`;
@@ -576,7 +845,7 @@ export function ownerNoticePlugin(): Plugin {
             }
             const reason = r.reason === undefined ? r.outcome : `${r.outcome}: ${r.reason}`;
             if (r.outcome !== 'cancelled')
-              notSent.set(key, { t: ctx.clock.now(), account: out.account, chat, reason });
+              notSent.set(key, { t: now(), account: out.account, chat, reason });
             ctx.log.warn(`not told in ${chat} (${reason}): ${text}`);
           });
         }
@@ -593,16 +862,54 @@ export function ownerNoticePlugin(): Plugin {
         },
         tell: (kind, text, notices) => send(kind, text, notices.length),
       });
+      /** A notice kept for the digest (D171), the latest `DIGEST_KEPT`, the older counted. */
+      const keep = (w: Waiting): void => {
+        digestKept.waiting.push(w);
+        while (digestKept.waiting.length > DIGEST_KEPT) {
+          digestKept.waiting.shift();
+          digestKept.dropped += 1;
+        }
+        ctx.store.write(DIGEST_DOC, digestKept);
+      };
+      const waitingOf = (n: Notice): Waiting => ({
+        kind: n.kind,
+        level: levelOf(n),
+        t: n.t,
+        ...(n.node === undefined ? {} : { node: n.node }),
+        text: n.text,
+        ...(n.detail === undefined ? {} : { detail: n.detail }),
+      });
+      /** What it heard, for its view, newest first. */
+      const saw = (w: Waiting, fate: Fate): void => {
+        recent.unshift({ ...w, fate });
+        recent.length = Math.min(recent.length, RECENT_KEPT);
+      };
       /** A plugin's message, at once, with its buttons; none while the instance is off (P8). */
       const tellNow = (n: Notice): void => {
         if (ctx.off()) return;
-        lastToldNow = ctx.clock.now();
+        lastToldNow = now();
         send('told', n.text, 1, buttonsOf(n));
+      };
+      /**
+       * Where a notice goes by its level (D171): at once at or above its node's threshold, into the
+       * digest at or above the digest's, nowhere below.
+       */
+      const route = (n: Notice): Fate => {
+        const level = levelOf(n);
+        const t = thresholds(n.node);
+        if (atLeast(level, t.now)) return 'sent';
+        return plan.enabled && atLeast(level, t.digest) ? 'digest' : 'dropped';
       };
       const hear = (n: Notice): void => {
         if (ownNotice(n, ctx.id)) return;
+        sweep();
+        const w = waitingOf(n);
         if (n.kind === 'told') {
-          if (!c.report.told) return;
+          if (!c.report.told) return saw(w, 'dropped');
+          const fate = route(n);
+          saw(w, fate);
+          if (fate === 'digest') keep(w);
+          if (fate !== 'sent') return;
           if (held !== undefined) held.push(n);
           else tellNow(n);
           return;
@@ -612,11 +919,14 @@ export function ownerNoticePlugin(): Plugin {
         // Before the start notice, a failure or a warning is its news, not a message of its own.
         if (atStart !== undefined && (n.kind === 'failed' || n.kind === 'warning')) {
           atStart.push(n);
-          return;
+          return saw(w, 'sent');
         }
-        if (n.kind === 'warning' && told.has(n.text)) return;
-        if (!c.report[kind]) return;
-        desk.add(kind, n);
+        if (n.kind === 'warning' && told.has(n.text)) return saw(w, 'dropped');
+        if (!c.report[kind]) return saw(w, 'dropped');
+        const fate = route(n);
+        saw(w, fate);
+        if (fate === 'sent') desk.add(kind, n);
+        else if (fate === 'digest') keep(w);
       };
       /** The start's wait is over: the start notice, then the plugins' messages held meanwhile. */
       const afterStart = (): void => {
@@ -626,6 +936,10 @@ export function ownerNoticePlugin(): Plugin {
         held = undefined;
         for (const n of waiting) tellNow(n);
       };
+      /**
+       * The start notice (D171): an error, sent at once, when an enabled node failed or did not
+       * load; else info, which the digest holds.
+       */
       const tellStart = (): void => {
         const heard = atStart ?? [];
         atStart = undefined;
@@ -636,50 +950,276 @@ export function ownerNoticePlugin(): Plugin {
               told: texts.filter((w) => told.has(w)).length,
             }
           : undefined;
-        const text = wordStart(summary().instance(), warnings, c.maxLines);
-        send('start', text, 1);
+        const instance = summary().instance();
+        const text = wordStart(instance, warnings, c.maxLines);
+        const failed = instance.nodes.some((n) => n.state === 'failed' || n.state === 'unloaded');
+        const n: Notice = { kind: 'start', t: now(), level: failed ? 'error' : 'info', text };
+        const fate = route(n);
+        saw(waitingOf(n), fate);
+        if (fate === 'sent') send('start', text, 1);
+        else if (fate === 'digest') keep(waitingOf(n));
       };
-      const every = c.summaryEveryMin * 60_000;
-      const tellSummary = (): void => {
-        const now = ctx.clock.now();
-        const startedAt = summary().instance().startedAt ?? now;
+      /** The summary's lines in a window, each section at its node's digest level (D171). */
+      const linesIn = (
+        window: { since: number; until: number },
+        at: (node: string | undefined) => Level | undefined
+      ): { title: string; lines: string[] }[] =>
+        summary()
+          .collect(window)
+          .flatMap((sec) => {
+            const min = at(sec.node);
+            if (min === undefined) return [];
+            const lines = sec.lines.filter((l) => atLeast(l.level, min)).map((l) => l.text);
+            return lines.length === 0 ? [] : [{ title: sec.title, lines }];
+          });
+      /** The digest (D171): what waited, and the summary's lines at its level; none when empty. */
+      const tellDigest = (): void => {
+        sweep();
+        const at = now();
+        const startedAt = summary().instance().startedAt ?? at;
         const since = Math.max(kept.sentAt ?? startedAt, startedAt);
-        const sections = summary().collect({ since, until: now });
-        if (sections.length > 0) {
+        const window = { since, until: at };
+        const sections = linesIn(window, (node) => thresholds(node).digest);
+        const waiting = digestKept.waiting.splice(0);
+        const dropped = digestKept.dropped;
+        digestKept.dropped = 0;
+        if (waiting.length > 0 || dropped > 0 || sections.length > 0) {
           send(
-            'summary',
-            wordSummary(
+            'digest',
+            wordDigest(
+              waiting,
+              dropped,
               sections,
-              { since, until: now, sinceStart: (kept.sentAt ?? -Infinity) < startedAt },
+              { ...window, sinceStart: (kept.sentAt ?? -Infinity) < startedAt },
               c.maxLines
             ),
+            waiting.length + sections.length
+          );
+          kept = { sentAt: at, checkedAt: at };
+        } else kept = { ...kept, checkedAt: at };
+        ctx.store.write(DIGEST_DOC, digestKept);
+        ctx.store.write(SUMMARY_DOC, kept);
+        armDigest(at);
+      };
+      const armDigest = (from: number): void => {
+        ctx.clock.clearTimeout(digestTimer);
+        digestTimer = undefined;
+        digestDueAt = undefined;
+        if (!plan.enabled) return;
+        const due = nextDigest(from, plan);
+        digestDueAt = due;
+        digestTimer = ctx.clock.setTimeout(tellDigest, Math.max(0, due - now()));
+      };
+      /** The nodes told below the digest's level (`/verbose`): their summary lines on a short cadence. */
+      const verboseNodes = (): [string, Level][] => {
+        const nodes = new Set([...overrides.keys(), ...Object.keys(c.sources)]);
+        return [...nodes].flatMap((node): [string, Level][] => {
+          const o = overrideOf(node);
+          return o !== undefined && !atLeast(o.level, plan.level) ? [[node, o.level]] : [];
+        });
+      };
+      /** A short report of the verbose nodes' summary lines (D171), every `verboseEveryMin`. */
+      const tellVerbose = (): void => {
+        verboseTimer = undefined;
+        sweep();
+        const nodes = new Map(verboseNodes());
+        if (nodes.size === 0) {
+          verboseSince = undefined;
+          return;
+        }
+        const at = now();
+        const since = verboseSince ?? at - c.verboseEveryMin * 60_000;
+        const sections = linesIn({ since, until: at }, (node) =>
+          node === undefined ? undefined : nodes.get(node)
+        );
+        verboseSince = at;
+        if (sections.length > 0)
+          send(
+            'verbose',
+            [
+              `Detail of ${[...nodes.keys()].join(', ')}, the last ${span(at - since)}:`,
+              ...sections.flatMap((sec) => wordSection(sec.title, sec.lines, c.maxLines)),
+            ].join('\n'),
             sections.length
           );
-          kept = { sentAt: now, checkedAt: now };
-        } else kept = { ...kept, checkedAt: now };
-        ctx.store.write(SUMMARY_DOC, kept);
-        summaryDueAt = now + every;
-        summaryTimer = ctx.clock.setTimeout(tellSummary, every);
+        armVerbose();
+      };
+      const armVerbose = (): void => {
+        if (verboseTimer !== undefined || verboseNodes().length === 0) return;
+        verboseSince ??= now();
+        verboseTimer = ctx.clock.setTimeout(tellVerbose, c.verboseEveryMin * 60_000);
+      };
+      /**
+       * The overrides that ended (D171): each said once in the digest (`lore-state back to
+       * warning`), a command's taken out of the store; then a timer at the next end.
+       */
+      const sweep = (): void => {
+        const at = now();
+        let changed = false;
+        const ends = (node: string, until: number | undefined): void => {
+          if (until === undefined || until > at || ended.has(`${node} ${until}`)) return;
+          ended.add(`${node} ${until}`);
+          const o = overrideOf(node);
+          keep({
+            kind: 'override',
+            level: 'info',
+            t: until,
+            node,
+            text: `${node} back to ${o === undefined ? c.level : o.level}`,
+          });
+        };
+        for (const [node, o] of [...overrides]) {
+          if (o.until === undefined || o.until > at) continue;
+          overrides.delete(node);
+          changed = true;
+          ends(node, o.until);
+        }
+        for (const [node, s] of Object.entries(c.sources))
+          if (s.until !== undefined) ends(node, Date.parse(s.until));
+        if (changed) ctx.store.write(OVERRIDES_DOC, Object.fromEntries(overrides));
+        ctx.clock.clearTimeout(expiryTimer);
+        expiryTimer = undefined;
+        const next = [
+          ...[...overrides.values()].map((o) => o.until),
+          ...Object.values(c.sources).map((s) =>
+            s.until === undefined ? undefined : Date.parse(s.until)
+          ),
+        ]
+          .filter((u): u is number => u !== undefined && u > at)
+          .sort((a, b) => a - b)[0];
+        if (next !== undefined) expiryTimer = ctx.clock.setTimeout(sweep, next - at);
+      };
+      const zone = plan.timeZone;
+      /** The levels, the overrides and the next digest, as `/notices` says them. */
+      const levelsText = (): string => {
+        sweep();
+        const lines = [
+          `At once: ${c.level} and above.`,
+          plan.enabled
+            ? `Digest: ${plan.level} and above, ${
+                plan.everyMin === undefined
+                  ? `daily at ${c.digest.at} (${zone})`
+                  : `every ${span(plan.everyMin * 60_000)}`
+              }; next ${digestDueAt === undefined ? 'not planned' : when(digestDueAt, zone)}.`
+            : 'Digest: off.',
+        ];
+        const nodes = [...new Set([...overrides.keys(), ...Object.keys(c.sources)])].sort();
+        const set = nodes.flatMap((node) => {
+          const o = overrideOf(node);
+          if (o === undefined) return [];
+          const by = overrides.has(node) ? '/verbose' : 'the graph';
+          return [
+            `- ${node}: ${o.level}${o.until === undefined ? '' : ` until ${when(o.until, zone)}`} (${by})`,
+          ];
+        });
+        if (set.length > 0) lines.push('Per node:', ...set);
+        const verbose = verboseNodes();
+        if (verbose.length > 0)
+          lines.push(
+            `Detail of ${verbose.map(([n]) => n).join(', ')} every ${span(c.verboseEveryMin * 60_000)}.`
+          );
+        return lines.join('\n');
+      };
+      const nodeIds = (): string[] =>
+        summary()
+          .instance()
+          .nodes.map((n) => n.id);
+      const commands = {
+        notices: { run: async (answer: Answer) => answer.text(levelsText()) },
+        verbose: {
+          run: async (answer: Answer, request: Request) => {
+            const words = request.args.split(/\s+/u).filter((w) => w !== '');
+            const [node, ...rest] = words;
+            if (node === undefined)
+              return answer.text('Which node? /verbose <node> [level] [for <duration>]');
+            if (!nodeIds().includes(node)) return answer.text(`No node ${node}.`);
+            let lvl: Level = 'debug';
+            let ms: number | undefined;
+            for (let i = 0; i < rest.length; i++) {
+              const w = (rest[i] as string).toLowerCase();
+              if ((LEVELS as readonly string[]).includes(w)) lvl = w as Level;
+              else if (w === 'for') {
+                ms = durationOf(rest[i + 1] ?? '');
+                if (ms === undefined)
+                  return answer.text(
+                    `Not a duration: ${rest[i + 1] ?? '(none)'}. Say 30m, 2h, 1d or 1h30m.`
+                  );
+                i++;
+              } else
+                return answer.text(
+                  `Not a level or a duration: ${w}. Levels: ${LEVELS.join(', ')}; a duration: for 2h.`
+                );
+            }
+            const until = ms === undefined ? undefined : now() + ms;
+            overrides.set(node, { level: lvl, ...(until === undefined ? {} : { until }) });
+            ctx.store.write(OVERRIDES_DOC, Object.fromEntries(overrides));
+            sweep();
+            armVerbose();
+            const detail = atLeast(lvl, plan.level)
+              ? ''
+              : ` Its summary lines every ${span(c.verboseEveryMin * 60_000)}.`;
+            return answer.text(
+              `${node}: ${lvl} and above at once, ${
+                until === undefined ? 'until /quiet' : `until ${when(until, zone)}`
+              }.${detail}`
+            );
+          },
+        },
+        quiet: {
+          run: async (answer: Answer, request: Request) => {
+            const node = request.args.trim();
+            if (node === '') return answer.text('Which node? /quiet <node>');
+            const had = overrides.delete(node);
+            ctx.store.write(OVERRIDES_DOC, Object.fromEntries(overrides));
+            sweep();
+            const graph = sourceOf(node);
+            const back = graph === undefined ? c.level : graph.level;
+            return answer.text(
+              had
+                ? `${node} back to ${back}${graph === undefined ? '' : ' (the graph’s sources)'}.`
+                : graph === undefined
+                  ? `${node} has no /verbose set.`
+                  : `${node} has no /verbose set; the graph’s sources keep it at ${graph.level}.`
+            );
+          },
+        },
       };
       /** What it holds now, for the node panel's viewer and its card (D72). */
       const view = (): StateView => ({
         schema: VIEW_SCHEMA,
         state: {
+          levels: {
+            now: c.level,
+            digest: plan.enabled ? plan.level : 'off',
+            ...(digestDueAt === undefined ? {} : { digestNext: digestDueAt }),
+          },
+          overrides: [...new Set([...overrides.keys(), ...Object.keys(c.sources)])].flatMap(
+            (node) => {
+              const o = overrideOf(node);
+              return o === undefined
+                ? []
+                : [
+                    {
+                      node,
+                      level: o.level,
+                      ...(o.until === undefined ? {} : { until: o.until }),
+                      from: overrides.has(node) ? '/verbose' : 'graph',
+                    },
+                  ];
+            }
+          ),
+          recent: recent.map(({ detail: _, ...r }) => r),
           ...desk.view(),
           ...(lastToldNow === undefined
             ? {}
             : { lastTold: { ...desk.view().lastTold, told: lastToldNow } }),
           startNotice: atStart !== undefined ? 'waiting' : c.startNotice ? 'sent' : 'off',
-          summary: {
-            everyMin: c.summaryEveryMin,
-            ...(summaryDueAt === undefined ? {} : { dueAt: summaryDueAt }),
-            ...kept,
-          },
+          digest: { waiting: digestKept.waiting.length, ...kept },
           warnings: warned,
           ...(notSent.size === 0 ? {} : { notSent: [...notSent.values()] }),
         },
         ...(toldAt === undefined ? {} : { updatedAt: toldAt }),
-        pin: ['notSent', 'waiting'],
+        pin: ['notSent', 'waiting', 'recent'],
       });
       /** Its card's line: the notices waiting to be told, if any. */
       const waitingLine = (): string | undefined => {
@@ -701,13 +1241,15 @@ export function ownerNoticePlugin(): Plugin {
           unsubscribe = notices.subscribe(hear);
           // The load's warnings, heard first: kept, so that the next start tells only new ones.
           ctx.store.write(WARNED_DOC, warned);
-          if (every > 0) {
-            // A cadence after the last look, kept across a restart; one overdue, a cadence on.
-            const now = ctx.clock.now();
-            const due = (kept.checkedAt ?? now) + every;
-            summaryDueAt = due > now ? due : now + every;
-            summaryTimer = ctx.clock.setTimeout(tellSummary, summaryDueAt - now);
+          // The next digest after the last look, kept across a restart; one missed, in a minute.
+          const at = now();
+          if (plan.enabled) {
+            const due = nextDigest(kept.checkedAt ?? at, plan);
+            digestDueAt = due > at ? due : at + 60_000;
+            digestTimer = ctx.clock.setTimeout(tellDigest, digestDueAt - at);
           }
+          sweep();
+          armVerbose();
         },
         ready() {
           // Every node has started: what the start notice says, once a failure at the start is in,
@@ -718,10 +1260,11 @@ export function ownerNoticePlugin(): Plugin {
           unsubscribe?.();
           unsubscribe = undefined;
           desk.stop();
-          ctx.clock.clearTimeout(startTimer);
-          ctx.clock.clearTimeout(summaryTimer);
-          startTimer = summaryTimer = summaryDueAt = undefined;
+          for (const t of [startTimer, digestTimer, verboseTimer, expiryTimer])
+            ctx.clock.clearTimeout(t);
+          startTimer = digestTimer = verboseTimer = expiryTimer = digestDueAt = undefined;
         },
+        commands,
         view: { read: view, summary: waitingLine },
       };
     },

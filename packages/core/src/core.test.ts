@@ -857,8 +857,9 @@ describe('the owner’s messages (bot-os-api.md §4.8, bot-os.md D94)', () => {
         text: 'made',
         detail: { buttons: [[{ label: 'Go', action: '/go' }]] },
         t: 1000,
+        level: 'warning',
       },
-      { kind: 'told', node: 'teller', text: 'plain', t: 1000 },
+      { kind: 'told', node: 'teller', text: 'plain', t: 1000, level: 'warning' },
     ]);
     expect(records.filter((r) => r.type === 'core.notice')).toEqual([
       {
@@ -868,8 +869,16 @@ describe('the owner’s messages (bot-os-api.md §4.8, bot-os.md D94)', () => {
         node: 'teller',
         text: 'made',
         detail: { buttons: [[{ label: 'Go', action: '/go' }]] },
+        level: 'warning',
       },
-      { type: 'core.notice', t: 1000, kind: 'told', node: 'teller', text: 'plain' },
+      {
+        type: 'core.notice',
+        t: 1000,
+        kind: 'told',
+        node: 'teller',
+        text: 'plain',
+        level: 'warning',
+      },
     ]);
     expect(connector.sent).toEqual([]);
     await c.stop();

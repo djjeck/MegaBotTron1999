@@ -86,7 +86,7 @@ import { holdUnloaded, type Unloaded } from './held.ts';
 import { type InstanceInfo, InstanceRegistry } from './instance-registry.ts';
 import { type Manifest, parseManifest, SECRET_NAME } from './manifest.ts';
 import { type Media } from './media.ts';
-import { type Notice, Notices } from './notices.ts';
+import { levelOf, type Notice, Notices } from './notices.ts';
 import {
   Outbox,
   type OutboxHandle,
@@ -1106,8 +1106,10 @@ export class Core {
    * and recorded (`core.notice`), for the editor's events panel, whether a node tells it or not
    * (D94: the core tells no chat itself).
    */
-  private notice(n: Omit<Notice, 't'>): void {
+  private notice(raised: Omit<Notice, 't'>): void {
     const t = this.o.clock.now();
+    // Its level, its own or its kind's (D171), on what is heard and on what is recorded.
+    const n = { ...raised, level: levelOf(raised) };
     this.noticeFeed.raise({ ...n, t });
     this.summaries.noticed(n.kind);
     this.o.record?.({ type: 'core.notice', t, ...n });
@@ -2158,17 +2160,24 @@ export class Core {
         set: (key, raw) => this.settings.set(`${id}.${key}`, raw),
       },
       // A message for the owner, raised as a notice (D94): a node that tells the owner sends it.
-      notify: (text, buttons) =>
+      notify: (text, buttons, options) =>
         this.notice({
           kind: 'told',
           node: id,
           text,
+          ...(options?.level === undefined ? {} : { level: options.level }),
           ...(buttons === undefined || buttons.length === 0
             ? {}
             : { detail: { buttons: buttons.map((row) => row.map((b) => ({ ...b }))) } }),
         }),
-      notice: (kind, text, detail) =>
-        this.notice({ kind, node: id, text, ...(detail === undefined ? {} : { detail }) }),
+      notice: (kind, text, detail, options) =>
+        this.notice({
+          kind,
+          node: id,
+          text,
+          ...(detail === undefined ? {} : { detail }),
+          ...(options?.level === undefined ? {} : { level: options.level }),
+        }),
       ...(entry.manifest.notices
         ? {
             notices: {

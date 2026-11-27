@@ -4,6 +4,7 @@ import {
   FakeConnector,
   fakeConnectorPlugin,
   type GraphInput,
+  type Instance,
   type Notice,
   type PluginContext,
   type Store,
@@ -13,6 +14,13 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
   DEFAULT_PACE,
+  DIGEST_DOC,
+  DIGEST_KEPT,
+  type DigestKept,
+  digestOf,
+  durationOf,
+  nextDigest,
+  OVERRIDES_DOC,
   OWNER_NOTICE,
   ownerNoticeConfig,
   ownerNoticePlugin,
@@ -22,9 +30,9 @@ import {
   SUMMARY_DOC,
   type SummaryKept,
   WARNED_DOC,
+  when,
   wordNotices,
   wordStart,
-  wordSummary,
 } from './owner-notice.ts';
 
 const S = 1000;
@@ -68,12 +76,17 @@ const crashy = definePlugin({
   }),
 });
 
-/** owner-notice, its store at hand: what a restart reads back. */
-const withStore = (stores: Map<string, Store>) => {
+/** owner-notice, its store and its instance at hand: what a restart reads back, its commands. */
+const withStore = (stores: Map<string, Store>, instances: Map<string, Instance>) => {
   const inner = ownerNoticePlugin();
   return definePlugin({
     manifest: inner.manifest,
-    create: (ctx) => (stores.set(ctx.id, ctx.store), inner.create(ctx)),
+    create: async (ctx) => {
+      stores.set(ctx.id, ctx.store);
+      const instance = await inner.create(ctx);
+      instances.set(ctx.id, instance);
+      return instance;
+    },
   });
 };
 
@@ -137,12 +150,13 @@ interface RunOptions {
 }
 
 /** Its D91 tells alone: no start notice, no summary, unless a test asks. */
-const D91_ONLY = { startNotice: false, summaryEveryMin: 0 };
+const D91_ONLY = { startNotice: false, digest: { enabled: false } };
 
 async function run(o: RunOptions = {}) {
   const seen = new Map<string, PluginContext>();
   const counts = new Map<string, Tally>();
   const stores = new Map<string, Store>();
+  const instances = new Map<string, Instance>();
   const start = o.start ?? T0;
   const bot =
     o.refuses === undefined
@@ -193,7 +207,7 @@ async function run(o: RunOptions = {}) {
       noisy(seen, counts),
       reader,
       crashy,
-      withStore(stores),
+      withStore(stores, instances),
     ],
     ...(o.documents === undefined ? {} : { documents: { notice: o.documents } }),
     ...(o.build === undefined ? {} : { build: o.build }),
@@ -211,7 +225,17 @@ async function run(o: RunOptions = {}) {
   const said = () => irc.sent.map((m) => `${m.chat}: ${m.text}`);
   const records = (type: string) =>
     kit.log.recordsSince(0, Number.MAX_SAFE_INTEGER).filter((r) => r.type === type);
-  return { kit, graph, bot, ctx, count, store, at, sent, said, records };
+  /** Runs one of its chat commands, as the owner: what it answers. */
+  const command = async (name: string, args = ''): Promise<string> => {
+    const said: string[] = [];
+    const answer = {
+      text: (t: string) => (said.push(t), Promise.resolve()),
+      photo: () => Promise.resolve(undefined),
+    };
+    await instances.get('notice')?.commands?.[name]?.run(answer, { args });
+    return said.join('\n');
+  };
+  return { kit, graph, bot, ctx, count, store, at, sent, said, records, command };
 }
 
 const refused = (ctx: PluginContext, event: string, reason: string) =>
@@ -386,7 +410,7 @@ describe('owner-notice: sends that cannot reach their chat (D95)', () => {
             },
           ],
         },
-        pin: ['notSent', 'waiting'],
+        pin: ['notSent', 'waiting', 'recent'],
       },
     });
     expect(line()).toBe(`not sent to ${OWNER}: failed: 400: Bad Request: chat not found`);
@@ -449,7 +473,8 @@ describe('owner-notice: the plugins’ messages (D94)', () => {
     ]);
 
   it('holds those heard as it starts, tells them after the start notice, then each at once', async () => {
-    const r = await run({ config: { summaryEveryMin: 0 } });
+    // The start notice is info (D171): sent at once only from that level.
+    const r = await run({ config: { level: 'info', digest: { enabled: false } } });
     r.ctx('a').notify('Pick one', GO);
     r.at(START_WAIT_MS - 1);
     expect(r.sent()).toEqual([]);
@@ -493,7 +518,8 @@ describe('owner-notice: the plugins’ messages (D94)', () => {
 });
 
 describe('owner-notice: the start notice (D92)', () => {
-  const quiet = { summaryEveryMin: 0 };
+  // The start notice is info (D171): told at once from that level, else in the digest.
+  const quiet = { level: 'info', digest: { enabled: false } };
 
   it('tells the release, the nodes, a failure and the warnings at each start, once', async () => {
     const r = await run({
@@ -588,138 +614,220 @@ describe('owner-notice: the start notice (D92)', () => {
   });
 });
 
-describe('owner-notice: the summary (D92)', () => {
-  const summary = (minutes = 60) => ({ startNotice: false, summaryEveryMin: minutes });
+describe('owner-notice: levels and the digest (D171)', () => {
+  const D = 24 * H;
+  const info = (ctx: PluginContext, text: string) =>
+    ctx.notice('quota', text, undefined, { level: 'info' });
 
-  it('goes on its cadence, the core’s lines first, then each contributor’s', async () => {
-    const r = await run({ config: { ...summary(), report: { refused: false } } });
-    r.at(10 * MIN);
-    r.count('a').add('quest.tick', 3);
-    r.count('b').add('quest.gain');
-    r.count('b').add('quest.loss', 2);
+  it('sends warnings at once, gathers info for the daily digest, and drops debug', async () => {
+    const r = await run({ config: { startNotice: false } });
     refused(r.ctx('a'), 'quest.gain', 'no room');
-    r.at(H - 1);
-    expect(r.sent()).toEqual([]);
-    r.at(H);
-    expect(r.sent()).toEqual([
-      [
-        `${OWNER}: Summary since the start, 60 min ago:`,
-        'Notices: 1 refused',
-        'a: quest.tick 3 times',
-        'b:',
-        '- quest.gain 1 time',
-        '- quest.loss 2 times',
-      ].join('\n'),
+    info(r.ctx('a'), 'a used 80% of its quota');
+    r.ctx('b').notice('coalesced', 'b shared a send', { chat: '#lobby', text: '/go', with: ['a'] });
+    r.ctx('b').notify('Look at this', undefined, { level: 'info' });
+    r.count('a').add('quest.tick', 3);
+    r.at(60 * S);
+    expect(r.sent()).toEqual([`${OWNER}: a refused quest.gain: no room`]);
+    // Every level is recorded, and shown with what became of it.
+    expect(r.records('core.notice').map((n) => [n['kind'], n['level']])).toEqual([
+      ['refused', 'warning'],
+      ['quota', 'info'],
+      ['coalesced', 'debug'],
+      ['told', 'info'],
     ]);
-    expect(r.records(`${OWNER_NOTICE}.told`)).toMatchObject([{ kind: 'summary', count: 3 }]);
-    // The next covers what happened since: its own send is left out of the sends.
-    r.at(H + 5 * MIN);
-    r.count('a').add('quest.tick');
-    r.at(2 * H);
-    expect(r.sent()[1]).toBe(`${OWNER}: Summary of the last 60 min:\na: quest.tick 1 time`);
-  });
-
-  it('is skipped while nothing happened, and covers since the last one sent', async () => {
-    const r = await run({ config: summary(30) });
-    r.at(2 * H);
-    expect(r.sent()).toEqual([]);
-    expect(r.store().read<SummaryKept>(SUMMARY_DOC)).toEqual({ checkedAt: T0 + 2 * H });
-    r.ctx('a').fail('crashed');
-    r.at(2 * H + 30 * MIN);
-    // The failure is told by its kind (D91), and counted in the summary.
-    expect(r.sent()).toEqual([
-      `${OWNER}: a failed: crashed`,
-      `${OWNER}: Summary since the start, 2 h 30 min ago:\nNotices: 1 failed`,
+    const recent = () =>
+      (
+        r.kit.core.controls.view('notice') as {
+          value: { state: { recent: { kind: string; fate: string }[] } };
+        }
+      ).value.state.recent;
+    expect(recent().map((x) => `${x.kind} ${x.fate}`)).toEqual([
+      'told digest',
+      'coalesced dropped',
+      'quota digest',
+      'refused sent',
     ]);
-    r.at(5 * H);
-    expect(r.sent()).toHaveLength(2);
-  });
-
-  it('keeps its time across a restart: neither sent again nor put off', async () => {
-    const r = await run({ config: summary() });
-    r.count('a').add('quest.tick');
-    r.at(H);
+    // At 09:00 in its zone (UTC by default), the next day: what waited, and the lines at info.
+    r.at(D - 1);
     expect(r.sent()).toHaveLength(1);
-    const kept = r.store().read<SummaryKept>(SUMMARY_DOC);
-    expect(kept).toEqual({ sentAt: T0 + H, checkedAt: T0 + H });
-    await r.kit.stop();
-    // Back 20 minutes later: the next is still due an hour after the last, covering the start on.
-    const next = await run({
-      config: summary(),
-      start: T0 + H + 20 * MIN,
-      documents: { [SUMMARY_DOC]: kept },
-    });
-    next.count('b').add('quest.gain');
-    next.at(40 * MIN - 1);
-    expect(next.sent()).toEqual([]);
-    next.at(40 * MIN);
-    expect(next.sent()).toEqual([
-      `${OWNER}: Summary since the start, 40 min ago:\nb: quest.gain 1 time`,
-    ]);
-    // Back after a long time: overdue, the next is a cadence after the start, not at once.
-    const late = await run({
-      config: summary(),
-      start: T0 + 10 * H,
-      documents: { [SUMMARY_DOC]: kept },
-    });
-    late.count('a').add('quest.tick');
-    late.at(H - 1);
-    expect(late.sent()).toEqual([]);
-    late.at(H);
-    expect(late.sent()).toHaveLength(1);
-  });
-
-  it('sends nothing on a cadence of 0, and nothing after its node stops', async () => {
-    const off = await run({ config: summary(0) });
-    off.count('a').add('quest.tick');
-    off.at(24 * H);
-    expect(off.sent()).toEqual([]);
-    const r = await run({ config: summary() });
-    r.count('a').add('quest.tick');
-    await r.kit.stop();
-    r.at(2 * H);
-    expect(r.sent()).toEqual([]);
-  });
-
-  it('words a section of one line on its title, and lists at most maxLines', () => {
-    const w = { since: T0, until: T0 + 90 * MIN, sinceStart: false };
-    expect(
-      wordSummary(
-        [
-          { title: 'Sends', lines: ['questbot-actor 3 sent'] },
-          { title: 'inventory', node: 'inventory', lines: ['l1', 'l2', 'l3'] },
-        ],
-        w,
-        2
-      )
-    ).toBe(
+    r.at(D);
+    expect(r.sent()[1]).toBe(
       [
-        'Summary of the last 90 min:',
-        'Sends: questbot-actor 3 sent',
-        'inventory:',
-        '- l1',
-        '- l2',
-        '- and 1 more',
+        `${OWNER}: Digest since the start, 24 h ago:`,
+        'a used 80% of its quota',
+        'Look at this',
+        'a: quest.tick 3 times',
       ].join('\n')
     );
+    expect(r.store().read<DigestKept>(DIGEST_DOC)).toEqual({ waiting: [], dropped: 0 });
+    // Nothing since: no digest.
+    r.at(2 * D);
+    expect(r.sent()).toHaveLength(2);
+    expect(r.store().read<SummaryKept>(SUMMARY_DOC)).toEqual({
+      sentAt: T0 + D,
+      checkedAt: T0 + 2 * D,
+    });
+  });
+
+  it('keeps what waits across a restart, sends a missed digest soon, and says what it could not keep', async () => {
+    const r = await run({ config: { startNotice: false } });
+    for (let i = 0; i < DIGEST_KEPT + 2; i++) info(r.ctx('a'), `note ${i}`);
+    const kept = r.store().read<DigestKept>(DIGEST_DOC) as DigestKept;
+    expect(kept.waiting).toHaveLength(DIGEST_KEPT);
+    expect(kept.dropped).toBe(2);
+    await r.kit.stop();
+    // Back after the hour it was due: within a minute.
+    const next = await run({
+      config: { startNotice: false, maxLines: 2 },
+      start: T0 + D + 2 * H,
+      documents: { [DIGEST_DOC]: kept, [SUMMARY_DOC]: { checkedAt: T0 } },
+    });
+    next.at(MIN);
+    expect(next.sent()[0]?.split('\n')).toEqual([
+      `${OWNER}: Digest since the start, 1 min ago:`,
+      `${DIGEST_KEPT} notices in the last 26 h 1 min:`,
+      '- quota: note 2',
+      '- quota: note 3',
+      `- and ${DIGEST_KEPT - 2} more`,
+      'And 2 older notices not kept',
+    ]);
+  });
+
+  it('puts the start notice in the digest, folded, and an error start at once', async () => {
+    const r = await run({ build: { version: '0.1.15' } });
+    r.at(START_WAIT_MS);
+    expect(r.sent()).toEqual([]);
+    const again = await run({
+      build: { version: '0.1.16' },
+      start: T0 + H,
+      documents: { [DIGEST_DOC]: r.store().read<DigestKept>(DIGEST_DOC) },
+    });
+    again.at(23 * H);
+    expect(again.sent()).toEqual([
+      `${OWNER}: Digest since the start, 23 h ago:\nStarted 2 times, last: Started 0.1.16`,
+    ]);
+    const crash = await run({ crash: true });
+    crash.at(START_WAIT_MS);
+    expect(crash.sent()[0]).toMatch(/^1000000002: Started\n.*\nNot running: crashy: failed/u);
+  });
+
+  it('reads a saved summaryEveryMin: 60 as unset, another as its cadence, 0 as no digest', async () => {
+    const plan = (summaryEveryMin?: number) =>
+      digestOf(ownerNoticeConfig.parse(summaryEveryMin === undefined ? {} : { summaryEveryMin }));
+    expect(plan()).toEqual({ enabled: true, level: 'info', atMin: 540, timeZone: 'UTC' });
+    expect(plan(60)).toEqual(plan());
+    expect(plan(30)).toMatchObject({ enabled: true, everyMin: 30 });
+    expect(plan(0)).toMatchObject({ enabled: false });
+    const r = await run({ config: { startNotice: false, summaryEveryMin: 30 } });
+    info(r.ctx('a'), 'half an hour');
+    r.at(30 * MIN);
+    expect(r.sent()).toEqual([`${OWNER}: Digest since the start, 30 min ago:\nhalf an hour`]);
+  });
+
+  it('goes at its hour in its time zone, daylight saving time included', () => {
+    const plan = digestOf(
+      ownerNoticeConfig.parse({ digest: { at: '09:00', timeZone: 'America/New_York' } })
+    );
+    // 14 November 2026, 09:00 UTC is 04:00 in New York: today at 09:00 there, 14:00 UTC.
+    expect(new Date(nextDigest(T0, plan)).toISOString()).toBe('2026-11-14T14:00:00.000Z');
+    expect(new Date(nextDigest(Date.UTC(2026, 6, 1, 14), plan)).toISOString()).toBe(
+      '2026-07-02T13:00:00.000Z'
+    );
+    expect(when(Date.UTC(2026, 10, 14, 14), 'America/New_York')).toBe(
+      '14 Nov 2026, 09:00 (America/New_York)'
+    );
+    expect(() => ownerNoticeConfig.parse({ digest: { timeZone: 'Mars/Base' } })).toThrow(
+      'expected a time zone'
+    );
+    expect(() => ownerNoticeConfig.parse({ digest: { at: '9am' } })).toThrow('expected HH:MM');
+    expect(() => ownerNoticeConfig.parse({ level: 'loud' })).toThrow('expected a level');
+  });
+
+  it('takes /verbose, /quiet and /notices, a node’s detail on a short cadence until its end', async () => {
+    const r = await run({ config: { startNotice: false, verboseEveryMin: 30 } });
+    expect(await r.command('verbose', '')).toBe(
+      'Which node? /verbose <node> [level] [for <duration>]'
+    );
+    expect(await r.command('verbose', 'nobody')).toBe('No node nobody.');
+    expect(await r.command('verbose', 'a loud')).toMatch(/^Not a level or a duration: loud/u);
+    expect(await r.command('verbose', 'a for soon')).toMatch(/^Not a duration: soon/u);
+    expect(await r.command('verbose', 'a for 1h')).toBe(
+      'a: debug and above at once, until 14 Nov 2026, 10:00 (UTC). Its summary lines every 30 min.'
+    );
+    expect(r.store().read(OVERRIDES_DOC)).toEqual({ a: { level: 'debug', until: T0 + H } });
+    // Its debug notices at once, b's not.
+    r.ctx('a').notice('coalesced', 'a shared a send', { chat: '#lobby', text: '/go', with: ['b'] });
+    r.ctx('b').notice('coalesced', 'b shared a send', { chat: '#lobby', text: '/go', with: ['a'] });
+    r.count('a').add('quest.tick');
+    r.count('b').add('quest.tick');
+    r.at(30 * MIN);
+    expect(r.sent()).toEqual([
+      `${OWNER}: a shared a send`,
+      `${OWNER}: Detail of a, the last 30 min:\na: quest.tick 1 time`,
+    ]);
+    expect(await r.command('notices')).toBe(
+      [
+        'At once: warning and above.',
+        'Digest: info and above, daily at 09:00 (UTC); next 15 Nov 2026, 09:00 (UTC).',
+        'Per node:',
+        '- a: debug until 14 Nov 2026, 10:00 (UTC) (/verbose)',
+        'Detail of a every 30 min.',
+      ].join('\n')
+    );
+    // Its end: no more detail, and the digest says so.
+    r.at(2 * H);
+    expect(r.sent()).toHaveLength(2);
+    r.at(24 * H);
+    expect(r.sent()[2]).toBe(
+      `${OWNER}: Digest since the start, 24 h ago:\na back to warning\na: quest.tick 1 time\nb: quest.tick 1 time`
+    );
+    expect(await r.command('verbose', 'b info')).toBe('b: info and above at once, until /quiet.');
+    expect(await r.command('quiet', 'b')).toBe('b back to warning.');
+    expect(await r.command('quiet', 'b')).toBe('b has no /verbose set.');
+    expect(await r.command('quiet', '')).toBe('Which node? /quiet <node>');
+  });
+
+  it('takes a node’s level from the graph’s sources, a command’s first', async () => {
+    const r = await run({
+      config: {
+        startNotice: false,
+        sources: { a: { level: 'error' }, b: { level: 'debug', until: '2026-11-14T10:00:00Z' } },
+      },
+    });
+    refused(r.ctx('a'), 'quest.gain', 'no room');
+    r.ctx('b').notice('coalesced', 'b shared a send', { chat: '#lobby', text: '/go', with: ['a'] });
+    r.at(60 * S);
+    expect(r.sent()).toEqual([`${OWNER}: b shared a send`]);
+    expect(await r.command('quiet', 'a')).toBe(
+      'a has no /verbose set; the graph’s sources keep it at error.'
+    );
+    await r.command('verbose', 'a warning');
+    expect(await r.command('notices')).toContain('- a: warning (/verbose)');
+    expect(await r.command('quiet', 'a')).toBe('a back to error (the graph’s sources).');
+    expect(durationOf('1h30m')).toBe(90 * MIN);
+    expect(durationOf('2d')).toBe(2 * D);
+    expect(durationOf('0m')).toBeUndefined();
+    expect(durationOf('')).toBeUndefined();
   });
 });
 
-describe('owner-notice: its view (D72, D91)', () => {
-  it('shows the node panel what waits, what it told last, and when the summary is due', async () => {
-    const r = await run({ config: { summaryEveryMin: 60 }, warn: true });
+describe('owner-notice: its view (D72, D91, D171)', () => {
+  it('shows the levels, what waits, what it told last, the recent notices and the digest', async () => {
+    const r = await run({ warn: true });
     const view = () => r.kit.core.controls.view('notice');
     const line = () => r.kit.core.controls.status().plugins.find((p) => p.id === 'notice')?.summary;
     expect(view()).toMatchObject({
       value: {
         state: {
+          levels: { now: 'warning', digest: 'info', digestNext: T0 + 24 * H },
+          overrides: [],
           waiting: {},
           lastTold: {},
           startNotice: 'waiting',
-          summary: { everyMin: 60, dueAt: T0 + H },
+          digest: { waiting: 0 },
           warnings: [WARNING],
         },
-        pin: ['notSent', 'waiting'],
+        pin: ['notSent', 'waiting', 'recent'],
       },
     });
     expect(line()).toBeUndefined();
@@ -737,19 +845,23 @@ describe('owner-notice: its view (D72, D91)', () => {
         updatedAt: T0 + 60 * S,
       },
     });
-    expect(line()).toBeUndefined();
     const schema = (
       view() as unknown as { value: { schema: { properties: Record<string, unknown> } } }
     ).value.schema;
-    expect(schema.properties['waiting']).toMatchObject({ description: 'Waiting to be told' });
-    r.count('a').add('quest.tick');
-    r.at(H);
-    expect(view()).toMatchObject({
-      value: { state: { summary: { sentAt: T0 + H, checkedAt: T0 + H, dueAt: T0 + 2 * H } } },
+    expect(schema.properties['recent']).toMatchObject({
+      description: 'Recent notices, every level, newest first',
     });
-    const off = await run({ config: { startNotice: false, summaryEveryMin: 0 } });
+    await r.command('verbose', 'a for 2h');
+    expect(view()).toMatchObject({
+      value: {
+        state: {
+          overrides: [{ node: 'a', level: 'debug', until: T0 + 60 * S + 2 * H, from: '/verbose' }],
+        },
+      },
+    });
+    const off = await run({ config: { startNotice: false, digest: { enabled: false } } });
     expect(off.kit.core.controls.view('notice')).toMatchObject({
-      value: { state: { startNotice: 'off', summary: { everyMin: 0 } } },
+      value: { state: { startNotice: 'off', levels: { digest: 'off' } } },
     });
   });
 });
@@ -833,7 +945,10 @@ describe('its wording', () => {
     expect(c.pace).toEqual(DEFAULT_PACE);
     expect(Object.values(c.report).every((on) => on)).toBe(true);
     expect(c.maxLines).toBe(5);
-    expect(c.summaryEveryMin).toBe(60);
+    expect(c.summaryEveryMin).toBeUndefined();
+    expect(c.level).toBe('warning');
+    expect(c.digest).toEqual({ enabled: true, level: 'info', at: '09:00', timeZone: 'UTC' });
+    expect(c.verboseEveryMin).toBe(60);
     expect(c.startNotice).toBe(true);
   });
 });

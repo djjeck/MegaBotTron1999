@@ -99,13 +99,21 @@ the node that tells the owner what needs attention, and a view, a page of the ow
   connector, a `telegram-bot` and `irc` at once; an edge naming none, its connector's owner's
   private chat), queued as any send, so a dry-run edge sends nothing. The plugins' messages
   (`ctx.notify`, a `told` notice) go at once, one each, with their buttons where the chat can run
-  them (a `telegram-bot`'s owner's chat), text alone elsewhere. It also sends a summary every
-  `summaryEveryMin` (60) minutes, none when nothing happened, from the lines the core and the
-  plugins contribute (docs/bot-os.md D92, #46), and a notice at each start (`startNotice`). The
-  state plugins, the turn parsers, `attention` and the `player` contribute their lines (events
-  applied and refused, answers read, turns). Its view, in its node's panel, shows what waits to be
-  told and when, its last tells, the start notice's and the summary's times, and the last message
-  each chat refused (`notSent`, D95).
+  them (a `telegram-bot`'s owner's chat), text alone elsewhere. **By level** (docs/bot-os.md D171,
+  #90): what is at or above `level` (`warning`) goes at once, what is at or above `digest.level`
+  (`info`) waits for a digest, daily at `digest.at` in `digest.timeZone` (09:00 UTC) or every
+  `digest.everyMin`, none when nothing qualifies, which also holds the summary lines the core and
+  the plugins contribute at that level (docs/bot-os.md D92, #46); the rest is dropped. A saved
+  `summaryEveryMin` is read into the digest (`digestOf`: 60 as unset, 0 as off, another as its
+  cadence). A notice at each start (`startNotice`), `info`, or `error` when a node failed to start.
+  Per node, `sources` in the config, or the owner's commands `/notices`,
+  `/verbose <node> [level] [for <duration>]` and `/quiet <node>`, kept in its store (`overrides`); a
+  node told below the digest's level gets its summary lines every `verboseEveryMin`. The state
+  plugins, the turn parsers, `attention` and the `player` contribute their lines as activity
+  (`debug`: events applied and refused, answers read, turns). Its view, in its node's panel, shows
+  its levels and overrides, the recent notices of every level and what became of each, what waits to
+  be told and when, its last tells, the digest's times, and the last message each chat refused
+  (`notSent`, D95).
 - `viewPlugin` (`src/view.ts`): the generic `view` (docs/bot-os.md D170), a page of the owner's own
   at `/v/<path>/`: its config's `inputs` (interface inputs, by `plugin` or by contract `members`,
   each optional, added by an edge dropped on its card), `title`, `selector` and `sections` (a

@@ -263,9 +263,12 @@ export const greeter = definePlugin({
   without it. Wire it from the editor: add the node and draw its `chat` edge to the `telegram-bot`
   node; the edge starts with the bot's owner's private chat (D97: the edge is its only chat setting;
   pick others there, or draw a second edge to `irc` to be told there too), and make it live once the
-  dry run's log (`core.send`, `dry-run`) reads right. The same node sends a summary of what happened
-  every hour (`summaryEveryMin`; none when nothing did, from lines the core and the plugins add,
-  D92) and a notice at each start: the release, the nodes running and not, the graph's warnings.
+  dry run's log (`core.send`, `dry-run`) reads right. It tells a warning or an error at once and
+  keeps the rest for a daily digest (09:00 in its `timeZone`, UTC by default; none when nothing
+  qualifies, D171), and sends a notice at each start: the release, the nodes running and not, the
+  graph's warnings (in the digest, or at once when a node failed to start). Draw a commands edge
+  from the `telegram-bot` to it, in the owner's chat, for `/notices`, `/verbose <node>` and
+  `/quiet <node>`: one node told in detail while you look into it.
 - **A send the network refuses** (D95), such as a chat the bot cannot reach, is recorded
   (`core.send-failed`, on the Events page) and raised as an `unreachable` notice that names the
   node, the chat and what to do; `owner-notice`'s own failures are only recorded and shown on its

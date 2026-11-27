@@ -295,7 +295,10 @@ describe('statePlugin', () => {
     expect(run.kept()).toMatchObject({ updatedAt: T0, batch: 5 });
     // For the owner's summary (D92): what it applied.
     expect(
-      run.core.summary({ since: T0, until: T0 + 1 }).find((x) => x.node === 'quest-state')?.lines
+      run.core
+        .summary({ since: T0, until: T0 + 1 })
+        .find((x) => x.node === 'quest-state')
+        ?.lines.map((l) => l.text)
     ).toEqual(['5 events applied']);
     await run.core.stop();
   });
@@ -447,9 +450,12 @@ describe('statePlugin', () => {
     ]);
     // Counted for the owner's summary (D92): the events heard live, applied and refused.
     const window = { since: T0, until: T0 + 1 };
-    expect(run.core.summary(window).find((s) => s.node === 'quest-state')?.lines).toEqual([
-      '1 event applied, 2 refused',
-    ]);
+    expect(
+      run.core
+        .summary(window)
+        .find((s) => s.node === 'quest-state')
+        ?.lines.map((l) => l.text)
+    ).toEqual(['1 event applied, 2 refused']);
     expect(run.core.summary({ since: T0 + 1, until: T0 + 2 })).toEqual([]);
     await run.core.stop();
     const again = await boot({ plugins: [questParser(), questState({ reduce: reducer })] });
