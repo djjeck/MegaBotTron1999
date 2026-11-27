@@ -133,13 +133,14 @@ function is called with it (`state.get({ path: 'inventory.items' })`), the owner
 against the schema, and the control API takes it from the query
 (`GET /plugins/<id>/state/get?path=inventory.items`); a read without one is called with none.
 
-**Widgets and pages** (bot-os.md P16, D11, D112; `packages/core/src/widgets.ts`). A plugin may
-declare what the web UI draws of each of its nodes, made from its own reads (`interface.state`),
-with no code of its own in the UI: a **widget**, one section drawn in a line on its node's card in
-the graph editor (so keep it to what the owner wants at a glance: the map is for the architecture),
-and a **page**, a title and its sections, for what does not fit there, opened from its node's panel
-(`#/node/<id>`). They are its nodes', not its plugin's: each node shows what its own instance's
-reads answer. A made-up game's ledger, for one:
+**Widgets and pages** (bot-os.md P16, D11, D112; `packages/core/src/widgets.ts`; a node's page is
+deprecated since D169, for view nodes, #87). A plugin may declare what the web UI draws of each of
+its nodes, made from its own reads (`interface.state`), with no code of its own in the UI: a
+**widget**, one section drawn in a line on its node's card in the graph editor (so keep it to what
+the owner wants at a glance: the map is for the architecture), and a **page**, a title and its
+sections, for what does not fit there, opened from its node's panel (`#/node/<id>`). They are its
+nodes', not its plugin's: each node shows what its own instance's reads answer. A made-up game's
+ledger, for one:
 
 ```ts
 manifest: {
