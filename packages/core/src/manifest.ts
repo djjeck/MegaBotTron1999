@@ -16,9 +16,12 @@ import {
   PORT_NAME,
 } from './ports.ts';
 import {
+  layoutIssues,
   optionsIssues,
   pageSchema,
   type View,
+  viewCounts,
+  viewLeaves,
   viewSchema,
   widgetIssues,
   widgetSchema,
@@ -421,7 +424,10 @@ export const manifestSchema = z
           });
       };
       if (m.view.selector !== undefined) from(m.view.selector.from, ['view', 'selector']);
-      m.view.sections.forEach((sec, n) => from(sec.from, ['view', 'sections', n]));
+      for (const { leaf, path } of viewLeaves(m.view)) from(leaf.from, ['view', ...path]);
+      for (const { count, path } of viewCounts(m.view)) from(count.from, ['view', ...path]);
+      for (const i of layoutIssues(m.view))
+        ctx.addIssue({ code: 'custom', path: ['view', ...i.path], message: i.message });
     } else if (m.kinds.includes('view'))
       ctx.addIssue({ code: 'custom', path: ['view'], message: 'a view declares its view' });
     // An action's field whose options a read gives (D157) names a read it declares.
@@ -717,11 +723,18 @@ function withViewMembers<
     used.set(port, set);
   };
   if (m.view.selector !== undefined) use(m.view.selector.from, `state.${m.view.selector.read}`);
-  for (const sec of m.view.sections) {
-    use(sec.from, `state.${sec.read}`);
-    if (sec.show === 'table')
-      for (const a of sec.actions ?? []) use(sec.from, `actions.${a.action}`);
+  for (const { leaf } of viewLeaves(m.view)) {
+    if (leaf.show === 'form') {
+      if (leaf.action !== undefined) use(leaf.from, `actions.${leaf.action}`);
+      if (leaf.current !== undefined) use(leaf.from, `state.${leaf.current.read}`);
+      continue;
+    }
+    use(leaf.from, `state.${leaf.read}`);
+    if (leaf.show === 'table' || leaf.show === 'gallery')
+      for (const a of [...(leaf.actions ?? []), ...(leaf.detail?.actions ?? [])])
+        use(leaf.from, `actions.${a.action}`);
   }
+  for (const { count } of viewCounts(m.view)) use(count.from, `state.${count.read}`);
   const inputs = Object.fromEntries(
     Object.entries(m.inputs).map(([port, input]) => {
       const more = used.get(port);

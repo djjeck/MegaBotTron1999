@@ -53,7 +53,16 @@ import {
   readsSchema,
   resolveInputs,
 } from './ports.ts';
-import { selectorIssues, type WidgetIssue, widgetIssues } from './widgets.ts';
+import {
+  countIssues,
+  formIssues,
+  rowsOf,
+  selectorIssues,
+  viewCounts,
+  viewLeaves,
+  type WidgetIssue,
+  widgetIssues,
+} from './widgets.ts';
 
 /**
  * The format of the graph file; a change that old files cannot be read with bumps it. Version 2
@@ -922,17 +931,37 @@ function viewProblems(
           selectorIssues(view.selector, of.manifest.interface.state ?? {})
         );
     }
-    view.sections.forEach((sec, i) => {
-      const of = boundTo(sec.from);
-      if (of === undefined) return;
-      const issues = widgetIssues(
-        sec,
-        of.manifest.interface.state ?? {},
-        of.manifest.interface.actions ?? {},
-        { selector: view.selector !== undefined }
-      );
-      said(`sections.${i}`, sec.from, of, issues);
-    });
+    const selector = view.selector !== undefined;
+    for (const { leaf, path, drawerOf } of viewLeaves(view)) {
+      const of = boundTo(leaf.from);
+      if (of === undefined) continue;
+      const reads = of.manifest.interface.state ?? {};
+      const actions = of.manifest.interface.actions ?? {};
+      // A drawer's sections read their row's values: the rows of the leaf that opens it.
+      const parent = drawerOf === undefined ? undefined : boundTo(drawerOf.from);
+      const rows =
+        drawerOf === undefined
+          ? undefined
+          : parent === undefined
+            ? 'open'
+            : rowsOf(drawerOf, parent.manifest.interface.state ?? {});
+      const options = { selector, ...(rows === undefined ? {} : { rows }) };
+      const issues =
+        leaf.show === 'form'
+          ? formIssues(leaf, { reads, actions, settings: of.manifest.settings }, options)
+          : widgetIssues(leaf, reads, actions, options);
+      said(path.join('.'), leaf.from, of, issues);
+    }
+    for (const { count, path } of viewCounts(view)) {
+      const of = boundTo(count.from);
+      if (of !== undefined)
+        said(
+          path.join('.'),
+          count.from,
+          of,
+          countIssues(count, of.manifest.interface.state ?? {}, { selector })
+        );
+    }
   }
   return out;
 }

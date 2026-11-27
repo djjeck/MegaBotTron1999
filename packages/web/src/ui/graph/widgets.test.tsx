@@ -190,7 +190,7 @@ describe('a section of a node’s page', () => {
     expect(within(list).getByText('and 2 more')).toBeDefined();
     cleanup();
     section({ show: 'list', read: 'status', path: 'bag' }, { bag: [] });
-    expect(screen.getByText('none')).toBeDefined();
+    expect(screen.getByText('Nothing yet')).toBeDefined();
     cleanup();
     section({
       show: 'table',
@@ -207,7 +207,7 @@ describe('a section of a node’s page', () => {
     expect(within(table).getAllByRole('row')).toHaveLength(5);
     cleanup();
     section({ show: 'table', read: 'status', path: 'bag', columns: ['item'] }, { bag: {} });
-    expect(screen.getByText('none')).toBeDefined();
+    expect(screen.getByText('Nothing yet')).toBeDefined();
     cleanup();
     section({ show: 'progress', read: 'status', path: 'gold', of: 50 });
     expect(screen.getByRole('progressbar', { name: 'Gold' })).toBeDefined();
@@ -225,7 +225,7 @@ describe('a section of a node’s page', () => {
 
   it('says a value missing with a dash, and why its read did not answer', () => {
     section({ show: 'counter', read: 'status', path: 'gold' }, {});
-    expect(screen.getByRole('region', { name: 'Gold' }).textContent).toBe('Gold—');
+    expect(screen.getByRole('region', { name: 'Gold' }).textContent).toBe('GoldNothing yet');
     cleanup();
     section({ show: 'counter', read: 'status', path: 'gold' }, undefined, 'ledger is not running');
     expect(screen.getByText('ledger is not running').className).toBe('error');

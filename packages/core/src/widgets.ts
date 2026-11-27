@@ -48,25 +48,91 @@ const pick = (s: JsonSchema): JsonSchema =>
 export const WIDGET_PATH = /^[A-Za-z0-9_$-]+(?:\.[A-Za-z0-9_$-]+)*$/u;
 const path = z.string().regex(WIDGET_PATH, 'expected a dotted path such as inventory.items');
 const label = z.string().min(1);
-/** A key/value section's field, or a table's column: its path, and a label if not its schema's. */
-const field = z.union([path, z.strictObject({ path, label: label.optional() })]);
 
 /**
- * A table's column shown as a picture (D157), a thumbnail that opens it whole: its value a file
- * name in its node's own files (`from: 'files'`, the default, D149), or a media (`from: 'media'`:
- * a `Media` as JSON carries it, or a kept one's reference `{ id: 'sha256:<hex>', mime }`, whose
- * file is `sha256-<hex>`, as a collection keeps it, D155). An empty value, an empty cell.
- *
- * A column `show: 'carousel'` (D163) takes a list of them, shown one at a time with a previous and
- * a next button and its place among them (`3 / 12`); an empty list, an empty cell.
+ * How a value is formatted (D170, phase 2), on a column, a stat or a gallery's badge: as text (the
+ * default); a number (`unit` after it); a percent (a number out of 100); a time, as a date and an
+ * hour (`datetime`) or as how long ago or until (`relative`); a badge coloured by its value
+ * (`tones`); a list of texts as tags; a picture (`image`, D157) or a list of them one at a time
+ * (`carousel`, D163), from the node's files or a media (`source`).
  */
-const pictureColumn = z.strictObject({
-  path,
-  label: label.optional(),
-  show: z.enum(['image', 'carousel']),
-  from: z.enum(['files', 'media']).default('files'),
+export const FORMATS = [
+  'text',
+  'number',
+  'percent',
+  'datetime',
+  'relative',
+  'badge',
+  'tags',
+  'image',
+  'carousel',
+] as const;
+export type Format = (typeof FORMATS)[number];
+
+/** A badge's or a stat's colour: what it says at a glance. */
+export const TONES = ['neutral', 'info', 'success', 'warning', 'danger'] as const;
+export type Tone = (typeof TONES)[number];
+const tone = z.enum(TONES, { error: `expected a tone: ${TONES.join(', ')}` });
+const format = z.enum(FORMATS, { error: `expected a format: ${FORMATS.join(', ')}` });
+/** Each value's tone, by the value as text (`refunded`, `true`); `'*'`, any other's. */
+const tones = z.record(z.string(), tone);
+/** Where a picture is: a file of the node's own (`files`, D149), or a media (`media`, D155). */
+const source = z.enum(['files', 'media'], { error: 'expected a source: files or media' });
+
+/**
+ * A column of a table, a field of a drawer or a gallery's badge: its path, a label if not its
+ * schema's, and how its value is formatted (`format`). Phase 1's columns said a picture's with
+ * `show` and `from` (D157, D163), still read as `format` and `source`.
+ */
+const formatted = z
+  .strictObject({
+    path,
+    label: label.optional(),
+    format: format.optional(),
+    /** Phase 1's `format`, for a picture column: read as it. */
+    show: z.enum(['image', 'carousel']).optional(),
+    unit: z.string().min(1).optional(),
+    tones: tones.optional(),
+    source: source.optional(),
+    /** Phase 1's `source`: read as it. */
+    from: source.optional(),
+  })
+  .superRefine((c, ctx) => {
+    if (c.show !== undefined && c.format !== undefined)
+      ctx.addIssue({ code: 'custom', path: ['show'], message: 'say format alone' });
+    const f = c.format ?? c.show ?? 'text';
+    const picture = f === 'image' || f === 'carousel';
+    if ((c.source ?? c.from) !== undefined && !picture)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['source'],
+        message: 'only a picture (format image or carousel) has a source',
+      });
+    if (c.tones !== undefined && f !== 'badge')
+      ctx.addIssue({ code: 'custom', path: ['tones'], message: 'only a badge has tones' });
+    if (c.unit !== undefined && f !== 'number')
+      ctx.addIssue({ code: 'custom', path: ['unit'], message: 'only a number has a unit' });
+  })
+  .transform(({ show, from, ...c }) => {
+    const f = c.format ?? show;
+    const picture = f === 'image' || f === 'carousel';
+    return {
+      ...c,
+      ...(f === undefined ? {} : { format: f }),
+      ...(picture ? { source: c.source ?? from ?? 'files' } : {}),
+    };
+  });
+/**
+ * A column: a path, or a path with its label and its format. Told apart by its type, so that an
+ * error says what is wrong with the one written, not that it is neither.
+ */
+const column = z.unknown().transform((v, ctx): string | z.output<typeof formatted> => {
+  const r = typeof v === 'string' ? path.safeParse(v) : formatted.safeParse(v);
+  if (r.success) return r.data;
+  for (const i of r.error.issues)
+    ctx.addIssue({ code: 'custom', message: i.message, path: i.path as (string | number)[] });
+  return z.NEVER;
 });
-const column = z.union([path, z.strictObject({ path, label: label.optional() }), pictureColumn]);
 
 /** A value of a row's: `$row` (the row itself) or `$row.<path>`. */
 export const ROW_REF = /^\$row(?:\.[A-Za-z0-9_$-]+)*$/u;
@@ -86,41 +152,66 @@ const rowAction = z.strictObject({
   confirm: z.string().min(1).optional(),
 });
 
+const readName = z.string().regex(/^[a-z][A-Za-z0-9_]*$/u, 'expected a read’s name such as status');
+
 /** What every section says: the read, its input, where its value is in the output, its label. */
 const base = {
   /** The read of its plugin's `interface.state` it shows. */
-  read: z.string().regex(/^[a-z][A-Za-z0-9_]*$/u, 'expected a read’s name such as status'),
+  read: readName,
   /** The read's input, for one that takes one, as its schema parses it. */
   input: z.record(z.string(), z.unknown()).optional(),
   /** Where the value is in the read's output; none, the whole output. */
   path: path.optional(),
   /** Its label; none, its schema's description at the path, else the path's last key. */
   label: label.optional(),
+  /** What it says when its value is empty (no row, no item, none); none: `Nothing yet`. */
+  empty: z.string().min(1).optional(),
 };
 
 const max = z.number().int().positive().optional();
 
+/** A table's or a gallery's search: every text it shows (`true`), or the paths named. */
+const search = z.union([z.literal(true), z.array(path).min(1)]).optional();
+/** How many rows or items a page of it holds; past it, it pages. */
+const pageSize = z.number().int().min(1).max(500).optional();
+
+/** An input port's name, as a view's section names the one its node is bound to. */
+const inputPort = z
+  .string()
+  .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u, 'expected an input port’s name');
+
+/** A row's drawer's title, fields and actions (D170): what a node page's drawer may hold. */
+const detailBase = {
+  /** Its title: a path of the row. */
+  title: path.optional(),
+  /** The row's fields shown, each formatted as a column is. */
+  fields: z.array(column).min(1).optional(),
+  /** The row's actions, as buttons. */
+  actions: z.array(rowAction).min(1).optional(),
+};
+
 /**
- * The kinds of section, each with `extra` beside what every section says: a view's (D170) name the
- * input their node is bound to, a page's none.
+ * The leaves every page has (the sections that show a value), each with `extra` (a view's input,
+ * `from`) and `opening` (a table's drawer, and the key its rows are told apart by), as its page
+ * allows them.
  */
-function sectionKinds<E extends z.ZodRawShape>(extra: E) {
-  return z.discriminatedUnion('show', [
+function leafKinds<E extends z.ZodRawShape, O extends z.ZodRawShape>(extra: E, opening: O) {
+  return [
     /** Its value's fields (those named, or every one), each `label: value`. */
     z.strictObject({
       show: z.literal('keyValue'),
       ...base,
       ...extra,
-      fields: z.array(field).min(1).optional(),
+      fields: z.array(column).min(1).optional(),
     }),
     /** A number, or how many items a list or a map holds. */
     z.strictObject({ show: z.literal('counter'), ...base, ...extra }),
     /** A list's items (a map's values), each its `item` path's value, or itself; at most `max`. */
     z.strictObject({ show: z.literal('list'), ...base, ...extra, item: path.optional(), max }),
     /**
-     * A list's items (a map's values) as rows, a column each of `columns` (a picture, `show:
-     * 'image'`, or a list of them, `show: 'carousel'`); at most `max` rows; a button per row for
-     * each of `actions` (D157).
+     * A list's items (a map's values) as rows, a column each of `columns`; at most `max` rows; a
+     * button per row for each of `actions` (D157); searched, sorted and paged when it says so, and
+     * a drawer per row (`detail`), its rows told apart by `key` (`id` by default).
      */
     z.strictObject({
       show: z.literal('table'),
@@ -129,6 +220,13 @@ function sectionKinds<E extends z.ZodRawShape>(extra: E) {
       columns: z.array(column).min(1),
       max,
       actions: z.array(rowAction).min(1).optional(),
+      search,
+      sort: z.literal(true).optional(),
+      defaultSort: z
+        .strictObject({ path, direction: z.enum(['asc', 'desc']).default('asc') })
+        .optional(),
+      pageSize,
+      ...opening,
     }),
     /** An amount out of a total: `of`, a number, or the path to it in the read's output. */
     z.strictObject({
@@ -139,11 +237,101 @@ function sectionKinds<E extends z.ZodRawShape>(extra: E) {
     }),
     /** A time (ms since the epoch, or an ISO string): how long until it, or since. */
     z.strictObject({ show: z.literal('until'), ...base, ...extra }),
-  ]);
+  ] as const;
 }
 
+/** A view's own leaves (D170): a stat tile and a gallery, as its page allows them. */
+function viewLeafKinds<O extends z.ZodRawShape>(opening: O) {
+  return [
+    /**
+     * A tile (D170): one value, large, formatted (`format`, `unit`), its label under it, `of` a
+     * total beside it, its colour a `tone`, or its value's (`tones`).
+     */
+    z.strictObject({
+      show: z.literal('stat'),
+      ...base,
+      from: inputPort,
+      format: format.optional(),
+      unit: z.string().min(1).optional(),
+      of: z.union([z.number().positive(), path]).optional(),
+      tone: tone.optional(),
+      tones: tones.optional(),
+    }),
+    /**
+     * A list's items as cards (D170): each its picture (`image`: a path, its `source`, and
+     * `carousel` for a list of them), a caption, badges, the item's actions; searched and paged
+     * when it says so, and a drawer per item (`detail`), told apart by `key` (`id` by default).
+     */
+    z.strictObject({
+      show: z.literal('gallery'),
+      ...base,
+      from: inputPort,
+      image: z.strictObject({
+        path,
+        source: source.optional(),
+        carousel: z.literal(true).optional(),
+      }),
+      caption: path.optional(),
+      badges: z.array(column).min(1).optional(),
+      actions: z.array(rowAction).min(1).optional(),
+      search,
+      pageSize,
+      ...opening,
+    }),
+  ] as const;
+}
+
+/**
+ * A form (D170): several fields set at once, then sent: an action's input (`action`), its fields
+ * the owner's but those `input` gives (constants, `'$selector'`), shown only those of `fields` if
+ * named, preset from a read (`current`); or the node's live settings (`settings`, their keys),
+ * each changed one set.
+ */
+const formSchema = z
+  .strictObject({
+    show: z.literal('form'),
+    from: inputPort,
+    label: label.optional(),
+    action: z
+      .string()
+      .regex(/^[a-z][A-Za-z0-9_]*$/u, 'expected an action’s name such as repaint')
+      .optional(),
+    settings: z.array(z.string().min(1)).min(1).optional(),
+    input: z.record(z.string(), z.unknown()).optional(),
+    fields: z.array(z.string().min(1)).min(1).optional(),
+    current: z
+      .strictObject({ read: readName, input: base.input, path: path.optional() })
+      .optional(),
+    submit: label.optional(),
+    confirm: z.string().min(1).optional(),
+  })
+  .superRefine((f, ctx) => {
+    if ((f.action === undefined) === (f.settings === undefined))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['action'],
+        message: 'a form runs an action (action) or sets settings (settings): name one',
+      });
+    if (f.settings !== undefined)
+      for (const k of ['input', 'fields', 'current'] as const)
+        if (f[k] !== undefined)
+          ctx.addIssue({ code: 'custom', path: [k], message: `a settings form takes no ${k}` });
+  });
+
+/** An error that names every kind a section may be. */
+const kinds = (names: readonly string[]) => ({
+  error: `expected show to be one of: ${names.join(', ')}`,
+});
+const LEAF_KINDS = ['keyValue', 'counter', 'list', 'table', 'progress', 'until'] as const;
+const VIEW_LEAF_KINDS = [...LEAF_KINDS, 'stat', 'gallery', 'form'] as const;
+const LAYOUTS = ['tabs', 'grid', 'card'] as const;
+
 /** One section of a widget or a page, by the way it shows its value. */
-export const widgetSchema = sectionKinds({});
+export const widgetSchema = z.discriminatedUnion(
+  'show',
+  leafKinds({}, { key: path.optional(), detail: z.strictObject(detailBase).optional() }),
+  kinds(LEAF_KINDS)
+);
 
 /** A page: its title, and its sections, in order. */
 export const pageSchema = z.strictObject({
@@ -157,16 +345,70 @@ export const pageSchema = z.strictObject({
  */
 export const SELECTOR_REF = '$selector';
 
-/** An input port's name, as a view's section names the one its node is bound to. */
-const inputPort = z
-  .string()
-  .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u, 'expected an input port’s name');
+/** A drawer's sections (D170): a view's leaves, read with the row's values, opening no drawer. */
+const drawerSectionSchema = z.discriminatedUnion(
+  'show',
+  [...leafKinds({ from: inputPort }, {}), ...viewLeafKinds({}), formSchema],
+  kinds(VIEW_LEAF_KINDS)
+);
+
+/** A view's row drawer (D170): a page's, and sections read with the row's values. */
+const viewDetail = z.strictObject({
+  ...detailBase,
+  sections: z.array(drawerSectionSchema).min(1).optional(),
+});
+const viewOpening = { key: path.optional(), detail: viewDetail.optional() };
+/** A view's leaves (D170): the sections that show a value, each read from an input, and a form. */
+const viewLeafOptions = [
+  ...leafKinds({ from: inputPort }, viewOpening),
+  ...viewLeafKinds(viewOpening),
+  formSchema,
+] as const;
+
+/** A tab's count, beside its title: a number, or a list's or a map's size, of a read. */
+const countSchema = z.strictObject({
+  from: inputPort,
+  read: readName,
+  input: base.input,
+  path: path.optional(),
+});
 
 /**
- * A view's section (D170): a section of a page, read from the node bound to its view's input
- * `from` (an interface input), its reads and actions that node's.
+ * A view's section (D170): a leaf, read from the node bound to its view's input `from` (an
+ * interface input), its reads and actions that node's; or a layout that holds others: `tabs`
+ * (one shown at a time, each in the address, `?tab=`), a `grid` of `columns`, or a `card`.
  */
-export const viewSectionSchema = sectionKinds({ from: inputPort });
+export const viewSectionSchema: z.ZodType<ViewSection> = z.lazy(() =>
+  z.discriminatedUnion(
+    'show',
+    [
+      ...viewLeafOptions,
+      z.strictObject({
+        show: z.literal('tabs'),
+        tabs: z
+          .array(
+            z.strictObject({
+              title: label,
+              count: countSchema.optional(),
+              sections: z.array(viewSectionSchema),
+            })
+          )
+          .min(1),
+      }),
+      z.strictObject({
+        show: z.literal('grid'),
+        columns: z.number().int().min(1).max(6).optional(),
+        sections: z.array(viewSectionSchema),
+      }),
+      z.strictObject({
+        show: z.literal('card'),
+        title: label.optional(),
+        sections: z.array(viewSectionSchema),
+      }),
+    ],
+    kinds([...VIEW_LEAF_KINDS, ...LAYOUTS])
+  )
+) as unknown as z.ZodType<ViewSection>;
 
 /**
  * A view's selector (D170): one choice on the page, its options the items at `path` of a read of
@@ -185,9 +427,8 @@ export const selectorSchema = z.strictObject({
 });
 
 /**
- * A view (D170): a title, an optional selector, and its sections, in order, each read from one of
- * its inputs; none yet, an empty page (a view node just added). Its layout is a list for now: a
- * later kind of section may hold others.
+ * A view (D170): a title, an optional selector, and its sections, in order, each a leaf read from
+ * one of its inputs or a layout of others; none yet, an empty page (a view node just added).
  */
 export const viewSchema = z.strictObject({
   title: z.string().min(1),
@@ -197,17 +438,58 @@ export const viewSchema = z.strictObject({
 
 /** One section of a widget or a page, as a plugin declares it. */
 export type Widget = z.output<typeof widgetSchema>;
+/** A view's leaf (D170): a section that shows a value, read from an input, or a form. */
+export type ViewLeaf = z.output<(typeof viewLeafOptions)[number]>;
+/** A view's form (D170). */
+export type ViewForm = z.output<typeof formSchema>;
+/** A drawer's section: a leaf that opens no drawer. */
+export type DrawerSection = z.output<typeof drawerSectionSchema>;
+/** A view's tabs, grid and card (D170): layouts that hold sections. */
+export interface ViewTabs {
+  show: 'tabs';
+  tabs: { title: string; count?: ViewCount | undefined; sections: ViewSection[] }[];
+}
+export interface ViewGrid {
+  show: 'grid';
+  columns?: number | undefined;
+  sections: ViewSection[];
+}
+export interface ViewCard {
+  show: 'card';
+  title?: string | undefined;
+  sections: ViewSection[];
+}
+export type ViewCount = z.output<typeof countSchema>;
 /** A view's section, its selector, and the view, as a plugin declares them (D170). */
-export type ViewSection = z.output<typeof viewSectionSchema>;
+export type ViewSection = ViewLeaf | ViewTabs | ViewGrid | ViewCard;
 export type ViewSelector = z.output<typeof selectorSchema>;
 export type View = z.output<typeof viewSchema>;
 export type WidgetShow = Widget['show'];
-/** A field or a column: a path, or a path with its label (a column, maybe a picture's). */
+/** A field or a column: a path, or a path with its label and its format. */
 export type WidgetField = z.output<typeof column>;
 /** A table's row action (D157). */
 export type RowAction = z.output<typeof rowAction>;
+/** A row's drawer (D170): a view's, its sections too. */
+export type Detail = z.output<typeof viewDetail>;
 /** A plugin's full page. */
 export type WidgetPage = z.output<typeof pageSchema>;
+
+/** Whether a section is a layout (D170): tabs, a grid or a card. */
+export const isLayout = (s: ViewSection): s is ViewTabs | ViewGrid | ViewCard =>
+  s.show === 'tabs' || s.show === 'grid' || s.show === 'card';
+
+/** A tab's slug (D170), its title's, as the address names it (`?tab=`). */
+export const tabSlug = (title: string): string =>
+  title
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '') || 'tab';
+
+/** A column's format: its own, else a text. */
+export const formatOf = (f: WidgetField): Format =>
+  typeof f === 'string' ? 'text' : (f.format ?? 'text');
 
 /** The path of a field or a column. */
 export const fieldPath = (f: WidgetField): string => (typeof f === 'string' ? f : f.path);
@@ -284,23 +566,35 @@ function outputSchema(read: DeclaredRead): JsonSchema {
   }
 }
 
+/** What a view's check knows beside the bound node's reads and actions (D170). */
+export interface CheckOptions {
+  /** Its view has a selector: `'$selector'` stands for its value. */
+  selector?: boolean;
+  /** Its section is in a row's drawer: `'$row.<path>'` stands for a value of that row's. */
+  rows?: JsonSchema | 'open' | undefined;
+}
+
+/** A leaf that shows a value of a read: every section but a form and a layout. */
+export type ReadLeaf = Widget | Exclude<ViewLeaf, ViewForm>;
+
 /**
- * What is wrong with a section, given the reads its plugin declares: a read it does not declare,
- * an input its schema refuses (or given to a read that takes none), a path its output has not, or
- * a value of a kind the section cannot show. Empty when it stands.
+ * What is wrong with a section, given the reads and actions of the node it shows: a read it does
+ * not declare, an input its schema refuses (or given to a read that takes none), a path its output
+ * has not, a value of a kind the section cannot show, a column, a badge or a picture its rows have
+ * not, an action they cannot run. Empty when it stands. A drawer's sections, read from other inputs,
+ * are checked on their own.
  */
 export function widgetIssues(
-  w: Widget,
+  w: ReadLeaf,
   reads: Readonly<Record<string, DeclaredRead>>,
   actions: Readonly<Record<string, DeclaredAction>> = {},
-  /** A view's (D170): its sections may take its selector's value, `'$selector'`. */
-  options: { selector?: boolean } = {}
+  options: CheckOptions = {}
 ): WidgetIssue[] {
   const read = Object.hasOwn(reads, w.read) ? reads[w.read] : undefined;
   if (read === undefined)
     return [{ path: ['read'], message: `${w.read} is not among its reads (interface.state)` }];
   const issues: WidgetIssue[] = [];
-  issues.push(...readInputIssues(read, w.read, w.input, options.selector === true));
+  issues.push(...readInputIssues(read, w.read, w.input, options.selector === true, options.rows));
   const root = outputSchema(read);
   const at = schemaAt(root, w.path);
   if (at === undefined) {
@@ -312,42 +606,119 @@ export function widgetIssues(
     issues.push({ path: where, message });
   };
   const where = w.path === undefined ? `the read ${w.read}` : w.path;
-  /** Each field's path within `s`, checked. */
-  const fieldsIn = (s: JsonSchema | 'open', list: readonly WidgetField[], key: string): void => {
-    if (s === 'open') return;
-    list.forEach((f, i) => {
-      if (schemaAt(s, fieldPath(f)) === undefined) no(`${where} has no ${fieldPath(f)}`, [key, i]);
+  /** A list's items, or a problem said. */
+  const listOf = (): JsonSchema | 'open' | undefined => {
+    const items = itemsOf(at);
+    if (items === undefined) no(`${where} is not a list or a map`);
+    return items;
+  };
+  /** Paths within the rows, each checked: `key` names where, its entry each the index. */
+  const pathsIn = (
+    rows: JsonSchema | 'open',
+    list: readonly string[],
+    key: (string | number)[]
+  ): void => {
+    if (rows === 'open') return;
+    list.forEach((p, i) => {
+      if (schemaAt(rows, p) === undefined)
+        no(`${where} has no ${p}`, list.length === 1 && key.length > 1 ? key : [...key, i]);
     });
+  };
+  const columns = (
+    rows: JsonSchema | 'open',
+    list: readonly WidgetField[],
+    key: (string | number)[]
+  ): void => {
+    list.forEach((c, i) => {
+      for (const m of columnIssues(c, rows, where)) no(m.message, [...key, i, ...m.path]);
+    });
+  };
+  const rowActions = (
+    rows: JsonSchema | 'open',
+    list: readonly RowAction[] | undefined,
+    key: (string | number)[]
+  ): void => {
+    (list ?? []).forEach((a, i) => {
+      for (const issue of rowActionIssues(a, rows, actions, options))
+        no(issue.message, [...key, i, ...issue.path]);
+    });
+  };
+  /** A table's or a gallery's search, key and drawer, within its rows. */
+  const opening = (
+    rows: JsonSchema | 'open',
+    o: {
+      search?: true | string[] | undefined;
+      key?: string | undefined;
+      detail?:
+        | {
+            title?: string | undefined;
+            fields?: WidgetField[] | undefined;
+            actions?: RowAction[] | undefined;
+          }
+        | undefined;
+    }
+  ): void => {
+    if (Array.isArray(o.search)) pathsIn(rows, o.search, ['search']);
+    if (o.detail === undefined) return;
+    if (rows !== 'open' && schemaAt(rows, o.key ?? 'id') === undefined)
+      no(
+        o.key === undefined
+          ? 'its rows have no id: a drawer needs a key that tells its rows apart (key)'
+          : `its rows have no ${o.key}`,
+        ['key']
+      );
+    if (o.detail.title !== undefined) pathsIn(rows, [o.detail.title], ['detail', 'title']);
+    columns(rows, o.detail.fields ?? [], ['detail', 'fields']);
+    rowActions(rows, o.detail.actions, ['detail', 'actions']);
   };
   switch (w.show) {
     case 'keyValue':
-      fieldsIn(at, w.fields ?? [], 'fields');
+      columns(at, w.fields ?? [], ['fields']);
       break;
     case 'counter':
       if (!isNumber(at) && itemsOf(at) === undefined && !types(at).includes('object'))
         no(`${where} is not a number, a list or a map`);
       break;
-    case 'list':
+    case 'list': {
+      const items = listOf();
+      if (items !== undefined && w.item !== undefined) pathsIn(items, [w.item], ['item']);
+      break;
+    }
     case 'table': {
-      const items = itemsOf(at);
-      if (items === undefined) {
-        no(`${where} is not a list or a map`);
-        break;
-      }
-      if (w.show === 'list' && w.item !== undefined) fieldsIn(items, [w.item], 'item');
-      if (w.show === 'table') {
-        fieldsIn(items, w.columns, 'columns');
-        // A carousel's value is a list of pictures (D163).
-        w.columns.forEach((c, i) => {
-          if (typeof c !== 'object' || !('show' in c) || c.show !== 'carousel') return;
-          const s = items === 'open' ? 'open' : schemaAt(items, c.path);
-          if (s !== undefined && s !== 'open' && !types(s).includes('array'))
-            no(`${c.path} is not a list of pictures`, ['columns', i]);
-        });
-        (w.actions ?? []).forEach((a, i) => {
-          for (const issue of rowActionIssues(a, items, actions, options))
-            no(issue.message, ['actions', i, ...issue.path]);
-        });
+      const items = listOf();
+      if (items === undefined) break;
+      columns(items, w.columns, ['columns']);
+      rowActions(items, w.actions, ['actions']);
+      if (w.defaultSort !== undefined)
+        pathsIn(items, [w.defaultSort.path], ['defaultSort', 'path']);
+      opening(items, w);
+      break;
+    }
+    case 'gallery': {
+      const items = listOf();
+      if (items === undefined) break;
+      for (const m of columnIssues(
+        { path: w.image.path, format: w.image.carousel === true ? 'carousel' : 'image' },
+        items
+      ))
+        no(m.message, ['image', ...m.path]);
+      if (w.caption !== undefined) pathsIn(items, [w.caption], ['caption']);
+      columns(items, w.badges ?? [], ['badges']);
+      rowActions(items, w.actions, ['actions']);
+      opening(items, w);
+      break;
+    }
+    case 'stat': {
+      const f = w.format ?? 'text';
+      if ((f === 'number' || f === 'percent') && !isNumber(at)) no(`${where} is not a number`);
+      if ((f === 'datetime' || f === 'relative') && !isNumber(at) && !types(at).includes('string'))
+        no(`${where} is not a time (ms since the epoch, or an ISO string)`);
+      if (f === 'image' || f === 'carousel' || f === 'tags')
+        no(`a stat shows one value: format ${f} is a column’s`, ['format']);
+      if (typeof w.of === 'string') {
+        const of = schemaAt(root, w.of);
+        if (of === undefined) no(`the read ${w.read} has no ${w.of}`, ['of']);
+        else if (of !== 'open' && !isNumber(of)) no(`${w.of} is not a number`, ['of']);
       }
       break;
     }
@@ -368,6 +739,116 @@ export function widgetIssues(
 }
 
 /**
+ * What is wrong with a column (or a drawer's field, a gallery's badge) within its rows: a path
+ * they have not, a list format (`carousel`, `tags`) on a value that is no list, a number format on
+ * one that is no number.
+ */
+function columnIssues(
+  c: WidgetField,
+  rows: JsonSchema | 'open',
+  where = 'its rows'
+): WidgetIssue[] {
+  const p = fieldPath(c);
+  const s = rows === 'open' ? 'open' : schemaAt(rows, p);
+  if (s === undefined) return [{ path: [], message: `${where} has no ${p}` }];
+  if (s === 'open') return [];
+  const f = formatOf(c);
+  if ((f === 'carousel' || f === 'tags') && !types(s).includes('array'))
+    return [
+      {
+        path: [],
+        message: `${p} is not a list${f === 'carousel' ? ' of pictures' : ' of texts'}`,
+      },
+    ];
+  if ((f === 'number' || f === 'percent') && !isNumber(s))
+    return [{ path: [], message: `${p} is not a number` }];
+  return [];
+}
+
+/**
+ * What is wrong with a tab's count (D170), given the reads of the node its input is bound to: a
+ * read it has not, an input it refuses, a path that is no number, list or map.
+ */
+export function countIssues(
+  c: ViewCount,
+  reads: Readonly<Record<string, DeclaredRead>>,
+  options: CheckOptions = {}
+): WidgetIssue[] {
+  return widgetIssues({ show: 'counter', ...c } as ReadLeaf, reads, {}, options);
+}
+
+/**
+ * What is wrong with a form (D170), given the node its input is bound to: an action it has not, a
+ * key its input has not or a constant it refuses, a field it has not, a `current` read it has not
+ * or whose value is no object; or a setting it does not declare.
+ */
+export function formIssues(
+  f: ViewForm,
+  node: {
+    reads: Readonly<Record<string, DeclaredRead>>;
+    actions: Readonly<Record<string, DeclaredAction>>;
+    settings?: z.ZodType | undefined;
+  },
+  options: CheckOptions = {}
+): WidgetIssue[] {
+  if (f.settings !== undefined) {
+    const keys = inputKeys(node.settings ?? z.object({}))?.keys ?? [];
+    return f.settings.flatMap((k, i) =>
+      keys.includes(k) ? [] : [{ path: ['settings', i], message: `${k} is not among its settings` }]
+    );
+  }
+  const name = f.action ?? '';
+  const action = Object.hasOwn(node.actions, name) ? node.actions[name] : undefined;
+  if (action === undefined)
+    return [{ path: ['action'], message: `${name} is not among its actions (interface.actions)` }];
+  const issues = rowActionIssues(
+    { label: 'form', action: name, ...(f.input === undefined ? {} : { input: f.input }) },
+    options.rows ?? 'open',
+    node.actions,
+    options
+  );
+  if (options.rows === undefined)
+    for (const [k, v] of Object.entries(f.input ?? {}))
+      if (typeof v === 'string' && v.startsWith('$row'))
+        issues.push({ path: ['input', k], message: 'only a form in a drawer has a row ($row)' });
+  const known = inputKeys(action.input);
+  (f.fields ?? []).forEach((k, i) => {
+    if (known !== undefined && !known.keys.includes(k))
+      issues.push({ path: ['fields', i], message: `the action ${name} takes no ${k}` });
+  });
+  if (f.current !== undefined) {
+    const read = Object.hasOwn(node.reads, f.current.read) ? node.reads[f.current.read] : undefined;
+    if (read === undefined)
+      issues.push({
+        path: ['current', 'read'],
+        message: `${f.current.read} is not among its reads (interface.state)`,
+      });
+    else {
+      for (const i of readInputIssues(
+        read,
+        f.current.read,
+        f.current.input,
+        options.selector === true,
+        options.rows
+      ))
+        issues.push({ ...i, path: ['current', ...i.path] });
+      const at = schemaAt(outputSchema(read), f.current.path);
+      if (at === undefined)
+        issues.push({
+          path: ['current', 'path'],
+          message: `the read ${f.current.read} has no ${f.current.path ?? ''}`,
+        });
+      else if (at !== 'open' && !types(at).includes('object'))
+        issues.push({
+          path: ['current', 'path'],
+          message: `${f.current.path ?? `the read ${f.current.read}`} is not an object of the form’s fields`,
+        });
+    }
+  }
+  return issues;
+}
+
+/**
  * What is wrong with a read's input: given to a read that takes none, or refused by its schema. In
  * a view (`selector`), a key whose value is `'$selector'` is the page's choice, so its schema is
  * not asked of it, only of the others.
@@ -376,8 +857,18 @@ function readInputIssues(
   read: DeclaredRead,
   name: string,
   input: Record<string, unknown> | undefined,
-  selector: boolean
+  selector: boolean,
+  /** In a drawer (D170): its row's schema, whose values `'$row.<path>'` names. */
+  rows?: JsonSchema | 'open'
 ): WidgetIssue[] {
+  const fromRows: WidgetIssue[] = [];
+  if (rows !== undefined)
+    for (const [k, v] of Object.entries(input ?? {}))
+      if (typeof v === 'string' && ROW_REF.test(v) && v !== '$row' && rows !== 'open') {
+        const p = v.slice('$row.'.length);
+        if (schemaAt(rows, p) === undefined)
+          fromRows.push({ path: ['input', k], message: `its row has no ${p}` });
+      }
   if (read.input === undefined)
     return input === undefined
       ? []
@@ -385,19 +876,23 @@ function readInputIssues(
   // The keys the selector gives that the schema names: those left out of its check. Any other is
   // checked as given, so that a key the read does not take is still refused.
   const shape = read.input instanceof z.ZodObject ? read.input.shape : {};
-  const chosen = selector
-    ? Object.keys(input ?? {}).filter((k) => input?.[k] === SELECTOR_REF && Object.hasOwn(shape, k))
-    : [];
+  const given = (k: string): boolean => {
+    const v = input?.[k];
+    return (
+      (selector && v === SELECTOR_REF) ||
+      (rows !== undefined && typeof v === 'string' && ROW_REF.test(v))
+    );
+  };
+  const chosen = Object.keys(input ?? {}).filter((k) => given(k) && Object.hasOwn(shape, k));
   const schema =
     chosen.length > 0 && read.input instanceof z.ZodObject
       ? read.input.partial(Object.fromEntries(chosen.map((k) => [k, true])) as never)
       : read.input;
-  const given = Object.fromEntries(
-    Object.entries(input ?? {}).filter(([k]) => !chosen.includes(k))
-  );
-  const parsed = schema.safeParse(given);
-  if (parsed.success) return [];
+  const left = Object.fromEntries(Object.entries(input ?? {}).filter(([k]) => !chosen.includes(k)));
+  const parsed = schema.safeParse(left);
+  if (parsed.success) return fromRows;
   return [
+    ...fromRows,
     {
       path: ['input'],
       message: parsed.error.issues
@@ -585,4 +1080,124 @@ export function optionsIssues(
       });
   }
   return issues;
+}
+
+/** A leaf of a view (D170), with its place: its path in the manifest, its tab, its drawer's row. */
+export interface LeafAt {
+  leaf: ViewLeaf;
+  /** Its path from the view: `['sections', 0, 'tabs', 1, 'sections', 2]`. */
+  path: (string | number)[];
+  /** The slug of the tab it is in; none, outside the tabs. */
+  tab?: string;
+  /** The leaf whose row's drawer it is in: its sections read that row's values. */
+  drawerOf?: ViewLeaf;
+}
+
+/** A tab's count (D170), with its path in the manifest. */
+export interface CountAt {
+  count: ViewCount;
+  path: (string | number)[];
+}
+
+/** Every leaf of a view (D170), in order, a drawer's sections after the leaf that opens it. */
+export function viewLeaves(view: { sections: readonly ViewSection[] }): LeafAt[] {
+  const out: LeafAt[] = [];
+  const walk = (list: readonly ViewSection[], at: (string | number)[], tab?: string): void => {
+    list.forEach((s, i) => {
+      const path = [...at, 'sections', i];
+      const here = tab === undefined ? {} : { tab };
+      if (s.show === 'tabs')
+        s.tabs.forEach((t, j) => walk(t.sections, [...path, 'tabs', j], tab ?? tabSlug(t.title)));
+      else if (s.show === 'grid' || s.show === 'card') walk(s.sections, path, tab);
+      else {
+        out.push({ leaf: s, path, ...here });
+        const detail = 'detail' in s ? s.detail : undefined;
+        (detail?.sections ?? []).forEach((d, k) =>
+          out.push({
+            leaf: d as ViewLeaf,
+            path: [...path, 'detail', 'sections', k],
+            ...here,
+            drawerOf: s,
+          })
+        );
+      }
+    });
+  };
+  walk(view.sections, []);
+  return out;
+}
+
+/** Every tab's count of a view (D170). */
+export function viewCounts(view: { sections: readonly ViewSection[] }): CountAt[] {
+  const out: CountAt[] = [];
+  const walk = (list: readonly ViewSection[], at: (string | number)[]): void => {
+    list.forEach((s, i) => {
+      const path = [...at, 'sections', i];
+      if (s.show === 'tabs')
+        s.tabs.forEach((t, j) => {
+          if (t.count !== undefined)
+            out.push({ count: t.count, path: [...path, 'tabs', j, 'count'] });
+          walk(t.sections, [...path, 'tabs', j]);
+        });
+      else if (s.show === 'grid' || s.show === 'card') walk(s.sections, path);
+    });
+  };
+  walk(view.sections, []);
+  return out;
+}
+
+/**
+ * What a view's layout refuses (D170), whatever its nodes: tabs within tabs (one level of tabs),
+ * two tabs of one slug (the address could not tell them apart), and two drawers on one tab (or
+ * outside the tabs): `?row=` names one row of one leaf.
+ */
+export function layoutIssues(view: { sections: readonly ViewSection[] }): WidgetIssue[] {
+  const issues: WidgetIssue[] = [];
+  const walk = (list: readonly ViewSection[], at: (string | number)[], inTab: boolean): void => {
+    list.forEach((s, i) => {
+      const path = [...at, 'sections', i];
+      if (s.show === 'tabs') {
+        if (inTab) issues.push({ path, message: 'tabs within tabs: a view has one level of tabs' });
+        const seen = new Map<string, number>();
+        s.tabs.forEach((t, j) => {
+          const slug = tabSlug(t.title);
+          const other = seen.get(slug);
+          if (other !== undefined)
+            issues.push({
+              path: [...path, 'tabs', j, 'title'],
+              message: `its address is tab ${other}'s too (?tab=${slug}): give it another title`,
+            });
+          else seen.set(slug, j);
+          walk(t.sections, [...path, 'tabs', j], true);
+        });
+      } else if (s.show === 'grid' || s.show === 'card') walk(s.sections, path, inTab);
+    });
+  };
+  walk(view.sections, [], false);
+  const drawers = new Map<string, (string | number)[]>();
+  for (const { leaf, path, tab, drawerOf } of viewLeaves(view)) {
+    if (drawerOf !== undefined || !('detail' in leaf) || leaf.detail === undefined) continue;
+    const where = tab ?? '';
+    const other = drawers.get(where);
+    if (other !== undefined)
+      issues.push({
+        path: [...path, 'detail'],
+        message: `a second drawer ${tab === undefined ? 'outside the tabs' : `on tab ${tab}`} (the first: ${other.join('.')}): ?row= opens one leaf’s`,
+      });
+    else drawers.set(where, path);
+  }
+  return issues;
+}
+
+/** The schema of a leaf's rows (D170), given its node's reads: what its drawer's `$row` names. */
+export function rowsOf(
+  leaf: ViewLeaf,
+  reads: Readonly<Record<string, DeclaredRead>>
+): JsonSchema | 'open' {
+  if (!('read' in leaf)) return 'open';
+  const read = Object.hasOwn(reads, leaf.read) ? reads[leaf.read] : undefined;
+  if (read === undefined) return 'open';
+  const at = schemaAt(outputSchema(read), leaf.path);
+  if (at === undefined || at === 'open') return 'open';
+  return itemsOf(at) ?? 'open';
 }

@@ -296,11 +296,12 @@ describe('a table’s pictures and row actions (D157)', () => {
       }),
     });
     const section = m.page?.sections[0] as Widget & { show: 'table' };
+    // Phase 1's `show` and `from`, read as `format` and `source` (D170).
     expect(section.columns[2]).toEqual({
       path: 'picture',
       label: 'Picture',
-      show: 'image',
-      from: 'files',
+      format: 'image',
+      source: 'files',
     });
     expect(section.actions?.map((a) => a.label)).toEqual(['Re-roll', 'Rehost']);
     // A media column, too.
@@ -360,8 +361,8 @@ describe('a table’s pictures and row actions (D157)', () => {
     expect((m.page?.sections[0] as Widget & { show: 'table' }).columns[1]).toEqual({
       path: 'ads',
       label: 'Ads',
-      show: 'carousel',
-      from: 'files',
+      format: 'carousel',
+      source: 'files',
     });
     // Of media too; a value its schema leaves open stands.
     expect(

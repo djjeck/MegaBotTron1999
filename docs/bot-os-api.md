@@ -333,8 +333,47 @@ nodes it shows, each a link to it in the editor, and keeps the choice in its add
 `GET /graph/view` gives a view node's `view`, its `served` (`{ path, bound }`, the node bound to
 each input) and every node's `shownIn` (the views that show it).
 
-A node page (`page`, above) keeps working as it is; it is deprecated for views (D169), and a later
-release will offer to move each into a view.
+**Its layout** (D170, phase 2; every element with an example in [views.md](views.md), the cookbook):
+a section is a **leaf**, which shows a value, or a **layout**, which holds sections. `show` names
+the kind of section and nothing else; `format` says how a value is drawn.
+
+- **Layouts:** `tabs` (`{ title, count?, sections }` each; the open one in the address, `?tab=`, its
+  title's slug; one level of tabs, no two of one slug; only the open tab's reads are asked), `grid`
+  (`columns`, 1 to 6, one on a phone) and `card` (`title`, a box of sections).
+- **Leaves:** a page's six kinds; `stat`, one value large (`format`, `unit`, `of`, `tone`, `tones`;
+  a list or a map, how many it holds); `gallery`, a list's items as cards
+  (`image: { path, source?, carousel? }`, `caption`, `badges`, `actions`, `search`, `pageSize`);
+  `form`, several fields sent at once: an action's input (`action`, `input`, `fields`, `current` a
+  read that presets them, `submit`, `confirm`) or the node's live settings (`settings`, their keys).
+  Every leaf says what it says when empty (`empty`, else `Nothing yet`), says it is loading while
+  its read is asked, and, when its read fails, says so in its own card, naming its input and its
+  read.
+- **A table** may be searched (`search: true`, every column, or the paths named), sorted
+  (`sort: true`, by its headers; `defaultSort: { path, direction }`) and paged (`pageSize`); it
+  scrolls sideways in its card. **A column** (and a drawer's field, a gallery's badge) is a path or
+  `{ path, label?, format?, unit?, tones?, source? }`, `format` one of `text`, `number`, `percent`,
+  `datetime`, `relative`, `badge` (coloured by `tones`, `'*'` any other value: `neutral`, `info`,
+  `success`, `warning`, `danger`), `tags`, `image`, `carousel`; phase 1's `{ show, from }` of a
+  picture column is still read, as `{ format, source }`.
+- **A drawer** (`detail: { title?, fields?, actions?, sections? }`, on a table or a gallery): a row
+  opens it at the side of the page, the whole screen on a phone; its key (`key`, a path of the rows,
+  `id` by default) is in the address, `?row=`, so that a link opens it. Its `sections` are leaves
+  read with the row's values (`'$row.<path>'` in a read's input), opening no drawer. A tab (or the
+  page outside the tabs) has one leaf with a drawer at most.
+- **The checks** walk the whole tree: the manifest's refuses a `from` that is no interface input,
+  tabs within tabs, two tabs of one slug, two drawers on one tab, a `format`'s option given to
+  another (`tones` but on a badge, `unit` but on a number, `source` but on a picture); the graph's
+  checks each leaf against its bound node (a stat's or a column's format against its value's type, a
+  list format on no list, a key, a search or a sort path the rows have not, a drawer's
+  `'$row.<path>'`, a form's action, fields, preset and settings). Each error names its path into the
+  manifest: `view sections.1.tabs.0.sections.0.columns.2: triggers is not a list of texts`. An
+  unknown `show` lists the kinds there are.
+- **Actions** say they are busy, then their answer or why they were refused, and the leaves read
+  from that node are read again (the rest at their next five seconds).
+
+A node page (`page`, above) keeps working as it is, and its table takes a table's search, sort,
+paging, formats and a drawer of fields and actions too; it is deprecated for views (D169), and a
+later release will offer to move each into a view.
 
 **Chat commands (P11).** A command of `interface.commands` has its `help` (the owner's words: the
 owner's menu, the UI, the agents), its `args`, its `aliases` (other names it answers to, in no menu;

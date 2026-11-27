@@ -109,9 +109,10 @@ the node that tells the owner what needs attention, and a view, a page of the ow
 - `viewPlugin` (`src/view.ts`): the generic `view` (docs/bot-os.md D170), a page of the owner's own
   at `/v/<path>/`: its config's `inputs` (interface inputs, by `plugin` or by contract `members`,
   each optional, added by an edge dropped on its card), `title`, `selector` and `sections` (a
-  page's, each naming the input it reads, `from`), checked against the node wired to each input. It
-  runs nothing; the web UI reads the bound nodes. A module ships its own view as a plugin whose
-  manifest declares `view` instead.
+  view's: leaves, each naming the input it reads, `from`, and tabs, grids and cards of them, as
+  docs/views.md shows), checked against the node wired to each input. It runs nothing; the web UI
+  reads the bound nodes. A module ships its own view as a plugin whose manifest declares `view`
+  instead.
 - `collectionPlugin` (`src/collection.ts`): the `collection`, records of a schema its config gives
   (docs/bot-os.md D155): its `fields`, each a `text` (one line or `long`), `number`, `boolean`,
   `choice` of its `options`, `list` of texts or `media` (a `Media` within its `kinds`, `mimes` and

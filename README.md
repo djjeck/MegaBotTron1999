@@ -212,12 +212,13 @@ export const greeter = definePlugin({
   alone, on `react()`, which any plugin may call too), the `script` node, the `collection`, records
   of a schema its config gives, media included, edited in its node's panel and read by other nodes
   through its interface (docs/bot-os.md D155), the `view`, a page of the owner's own at `/v/<path>/`
-  showing the nodes wired to it (docs/bot-os.md D170), and `owner-notice`, the one node that reports
-  to a chat: it tells the owner what needs attention (refused events, coalesced sends, drift,
-  cascades, failures, stalled sends, the graph's warnings), grouped and paced per kind, and the
-  plugins' messages (`ctx.notify`) at once with their buttons, to every chat its edges name (a
-  `telegram-bot`'s owner's private chat, an IRC channel, both at once); everything that knows a game
-  comes from a module.
+  showing the nodes wired to it (docs/bot-os.md D170; how to write one:
+  [docs/views.md](docs/views.md)), and `owner-notice`, the one node that reports to a chat: it tells
+  the owner what needs attention (refused events, coalesced sends, drift, cascades, failures,
+  stalled sends, the graph's warnings), grouped and paced per kind, and the plugins' messages
+  (`ctx.notify`) at once with their buttons, to every chat its edges name (a `telegram-bot`'s
+  owner's private chat, an IRC channel, both at once); everything that knows a game comes from a
+  module.
 - **Standard services,** implemented once by the shell (D52): SVG to PNG in every plugin's context
   (`ctx.render.svgToPng`), and asking an LLM through the `anthropic` connector (`ask`, with
   structured output, and images the model sees beside the prompt, D152), for the plugins an edge

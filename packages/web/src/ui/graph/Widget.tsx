@@ -6,14 +6,16 @@
  * a table's picture columns show thumbnails (a carousel's, one at a time, D163), and its row
  * actions a button per row (D157, `TableRow.tsx`).
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { MemberView, Widget } from '#src/ui/api.ts';
-import type { CarouselAt } from './TableRow.tsx';
-import { CarouselCell, PictureCell, pictureSrc, RowActionButton } from './TableRow.tsx';
+import { Cell, colsOf } from '#src/ui/view/cells.tsx';
+import type { Opening } from '#src/ui/view/DataTable.tsx';
+import { DataTable } from '#src/ui/view/DataTable.tsx';
+
+export { rowKeys } from '#src/ui/view/list.tsx';
 import {
   at,
   countOf,
-  fieldsOf,
   itemsOf,
   relative,
   sectionLabel,
@@ -109,7 +111,14 @@ export function WidgetSection(props: {
   );
 }
 
-function SectionBody(props: {
+/** What a section says with no value: its own `empty`, else `Nothing yet`. */
+export const emptyOf = (w: { empty?: string | undefined }): string => w.empty ?? 'Nothing yet';
+
+/**
+ * A section's body, from its read's output: a node page's, and a view's leaves of the same kinds
+ * (D170), a table's drawer opened as the view says (`opening`).
+ */
+export function SectionBody(props: {
   widget: Widget;
   reads: readonly MemberView[];
   output: unknown;
@@ -119,22 +128,23 @@ function SectionBody(props: {
   actions: readonly MemberView[];
   reload: (() => void) | undefined;
   selector: string | undefined;
+  opening?: Opening | undefined;
 }) {
   const { widget: w, reads, output, now, node } = props;
-  // The picture each carousel shows, by its column and row, kept as the page reads again (D163).
-  const carousels = useRef(new Map<string, CarouselAt>()).current;
   const v = at(output, w.path);
-  if (v === undefined) return <p className="muted">—</p>;
+  if (v === undefined || v === null) return <p className="empty">{emptyOf(w)}</p>;
   switch (w.show) {
     case 'keyValue': {
-      const fields = fieldsOf(w, reads, v, w.fields);
-      if (fields.length === 0) return <p>{words(v)}</p>;
+      const cols = colsOf(w, reads, v, w.fields);
+      if (cols.length === 0) return <p>{words(v)}</p>;
       return (
         <dl>
-          {fields.map((f) => (
-            <div key={f.path} className="pair">
-              <dt>{f.label}</dt>
-              <dd>{words(at(v, f.path))}</dd>
+          {cols.map((c) => (
+            <div key={c.path} className="pair">
+              <dt>{c.label}</dt>
+              <dd>
+                <Cell col={c} row={v} node={node} name={props.label} now={now} />
+              </dd>
             </div>
           ))}
         </dl>
@@ -149,7 +159,7 @@ function SectionBody(props: {
     case 'list': {
       const items = itemsOf(v) ?? [];
       const shown = items.slice(0, w.max ?? items.length);
-      if (items.length === 0) return <p className="muted">none</p>;
+      if (items.length === 0) return <p className="empty">{emptyOf(w)}</p>;
       return (
         <>
           <ul>
@@ -163,85 +173,22 @@ function SectionBody(props: {
     }
     case 'table': {
       const rows = itemsOf(v) ?? [];
-      const shown = rows.slice(0, w.max ?? rows.length);
-      const keys = rowKeys(shown);
-      const columns = fieldsOf(w, reads, v, w.columns, '0').map((c, i) => {
-        const spec = w.columns[i];
-        return typeof spec === 'object' && 'show' in spec
-          ? { ...c, from: spec.from, carousel: spec.show === 'carousel' }
-          : c;
-      });
-      // Row actions need the node to run on: none outside a page.
-      const rowActions = node === undefined ? [] : (w.actions ?? []);
-      if (rows.length === 0) return <p className="muted">none</p>;
       return (
-        <>
-          <table aria-label={props.label}>
-            <thead>
-              <tr>
-                {columns.map((c) => (
-                  <th key={c.path} scope="col">
-                    {c.label}
-                  </th>
-                ))}
-                {rowActions.length === 0 ? null : (
-                  <th scope="col">
-                    <span className="visually-hidden">Actions</span>
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((row, i) => {
-                // The row's name: its first column's text, for its buttons and pictures.
-                const first = columns[0];
-                const name = first === undefined ? `row ${i + 1}` : words(at(row, first.path));
-                return (
-                  <tr key={keys[i]}>
-                    {columns.map((c) => (
-                      <td key={c.path}>
-                        {'from' in c && c.from !== undefined ? (
-                          node === undefined ? null : c.carousel ? (
-                            <CarouselCell
-                              srcs={pictures(node, c.from, at(row, c.path))}
-                              alt={`${c.label} of ${name}`}
-                              memory={carousels}
-                              memoryKey={`${c.path}\n${name}`}
-                            />
-                          ) : (
-                            <PictureCell
-                              src={pictureSrc(node, c.from, at(row, c.path))}
-                              alt={`${c.label} of ${name}`}
-                            />
-                          )
-                        ) : (
-                          words(at(row, c.path))
-                        )}
-                      </td>
-                    ))}
-                    {rowActions.length === 0 || node === undefined ? null : (
-                      <td className="row-actions">
-                        {rowActions.map((a) => (
-                          <RowActionButton
-                            key={a.label}
-                            node={node}
-                            action={a}
-                            row={row}
-                            rowName={name}
-                            members={props.actions}
-                            done={props.reload}
-                            selector={props.selector}
-                          />
-                        ))}
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <More shown={shown.length} all={rows.length} />
-        </>
+        <DataTable
+          label={props.label}
+          spec={w}
+          rows={rows}
+          cols={colsOf(w, reads, v, w.columns, '0')}
+          detailCols={
+            w.detail?.fields === undefined ? [] : colsOf(w, reads, v, w.detail.fields, '0')
+          }
+          empty={emptyOf(w)}
+          node={node}
+          members={props.actions}
+          reload={props.reload}
+          selector={props.selector}
+          opening={props.opening}
+        />
       );
     }
     case 'progress': {
@@ -265,26 +212,7 @@ function SectionBody(props: {
   }
 }
 
-/** The addresses of a carousel's pictures (D163): those of its list that are one. */
-function pictures(node: string, from: 'files' | 'media', value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((p: unknown) => pictureSrc(node, from, p) ?? []);
-}
-
 /** How many more items there are than shown. */
-/**
- * Each row's key, by what it holds (a repeat counted apart): a row keyed by its place would hand its
- * buttons' state, an action's answer among it, to the row that takes its place when it goes.
- */
-export function rowKeys(rows: readonly unknown[]): string[] {
-  const seen = new Map<string, number>();
-  return rows.map((row) => {
-    const text = JSON.stringify(row) ?? String(row);
-    const n = seen.get(text) ?? 0;
-    seen.set(text, n + 1);
-    return `${String(n)}:${text}`;
-  });
-}
 
 function More(props: { shown: number; all: number }) {
   return props.all > props.shown ? (
