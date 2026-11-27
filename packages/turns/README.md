@@ -2,7 +2,7 @@
 
 The base plugins for automation: three for a game bot played by a simulated person (its parser, the
 person, the player), one reaction, a game's player state, the script node, a collection of records,
-and the node that tells the owner what needs attention.
+the node that tells the owner what needs attention, and a view, a page of the owner's own.
 
 - `turnParserPlugin` (`src/turn-parser.ts`): a parser of one bot's answers on a Telegram user
   account (a chat-in input: it reads, never sends), from a grammar the game provides with its bot's
@@ -106,6 +106,12 @@ and the node that tells the owner what needs attention.
   applied and refused, answers read, turns). Its view, in its node's panel, shows what waits to be
   told and when, its last tells, the start notice's and the summary's times, and the last message
   each chat refused (`notSent`, D95).
+- `viewPlugin` (`src/view.ts`): the generic `view` (docs/bot-os.md D170), a page of the owner's own
+  at `/v/<path>/`: its config's `inputs` (interface inputs, by `plugin` or by contract `members`,
+  each optional, added by an edge dropped on its card), `title`, `selector` and `sections` (a
+  page's, each naming the input it reads, `from`), checked against the node wired to each input. It
+  runs nothing; the web UI reads the bound nodes. A module ships its own view as a plugin whose
+  manifest declares `view` instead.
 - `collectionPlugin` (`src/collection.ts`): the `collection`, records of a schema its config gives
   (docs/bot-os.md D155): its `fields`, each a `text` (one line or `long`), `number`, `boolean`,
   `choice` of its `options`, `list` of texts or `media` (a `Media` within its `kinds`, `mimes` and

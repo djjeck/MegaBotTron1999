@@ -100,38 +100,50 @@ const base = {
 
 const max = z.number().int().positive().optional();
 
+/**
+ * The kinds of section, each with `extra` beside what every section says: a view's (D170) name the
+ * input their node is bound to, a page's none.
+ */
+function sectionKinds<E extends z.ZodRawShape>(extra: E) {
+  return z.discriminatedUnion('show', [
+    /** Its value's fields (those named, or every one), each `label: value`. */
+    z.strictObject({
+      show: z.literal('keyValue'),
+      ...base,
+      ...extra,
+      fields: z.array(field).min(1).optional(),
+    }),
+    /** A number, or how many items a list or a map holds. */
+    z.strictObject({ show: z.literal('counter'), ...base, ...extra }),
+    /** A list's items (a map's values), each its `item` path's value, or itself; at most `max`. */
+    z.strictObject({ show: z.literal('list'), ...base, ...extra, item: path.optional(), max }),
+    /**
+     * A list's items (a map's values) as rows, a column each of `columns` (a picture, `show:
+     * 'image'`, or a list of them, `show: 'carousel'`); at most `max` rows; a button per row for
+     * each of `actions` (D157).
+     */
+    z.strictObject({
+      show: z.literal('table'),
+      ...base,
+      ...extra,
+      columns: z.array(column).min(1),
+      max,
+      actions: z.array(rowAction).min(1).optional(),
+    }),
+    /** An amount out of a total: `of`, a number, or the path to it in the read's output. */
+    z.strictObject({
+      show: z.literal('progress'),
+      ...base,
+      ...extra,
+      of: z.union([z.number().positive(), path]),
+    }),
+    /** A time (ms since the epoch, or an ISO string): how long until it, or since. */
+    z.strictObject({ show: z.literal('until'), ...base, ...extra }),
+  ]);
+}
+
 /** One section of a widget or a page, by the way it shows its value. */
-export const widgetSchema = z.discriminatedUnion('show', [
-  /** Its value's fields (those named, or every one), each `label: value`. */
-  z.strictObject({
-    show: z.literal('keyValue'),
-    ...base,
-    fields: z.array(field).min(1).optional(),
-  }),
-  /** A number, or how many items a list or a map holds. */
-  z.strictObject({ show: z.literal('counter'), ...base }),
-  /** A list's items (a map's values), each its `item` path's value, or itself; at most `max`. */
-  z.strictObject({ show: z.literal('list'), ...base, item: path.optional(), max }),
-  /**
-   * A list's items (a map's values) as rows, a column each of `columns` (a picture, `show:
-   * 'image'`, or a list of them, `show: 'carousel'`); at most `max` rows; a button per row for each of `actions` (D157).
-   */
-  z.strictObject({
-    show: z.literal('table'),
-    ...base,
-    columns: z.array(column).min(1),
-    max,
-    actions: z.array(rowAction).min(1).optional(),
-  }),
-  /** An amount out of a total: `of`, a number, or the path to it in the read's output. */
-  z.strictObject({
-    show: z.literal('progress'),
-    ...base,
-    of: z.union([z.number().positive(), path]),
-  }),
-  /** A time (ms since the epoch, or an ISO string): how long until it, or since. */
-  z.strictObject({ show: z.literal('until'), ...base }),
-]);
+export const widgetSchema = sectionKinds({});
 
 /** A page: its title, and its sections, in order. */
 export const pageSchema = z.strictObject({
@@ -139,8 +151,56 @@ export const pageSchema = z.strictObject({
   sections: z.array(widgetSchema).min(1),
 });
 
+/**
+ * In a view's section (D170): the page's selected value, in a read's input or a row action's
+ * (`{ player: '$selector' }`).
+ */
+export const SELECTOR_REF = '$selector';
+
+/** An input port's name, as a view's section names the one its node is bound to. */
+const inputPort = z
+  .string()
+  .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u, 'expected an input port’s name');
+
+/**
+ * A view's section (D170): a section of a page, read from the node bound to its view's input
+ * `from` (an interface input), its reads and actions that node's.
+ */
+export const viewSectionSchema = sectionKinds({ from: inputPort });
+
+/**
+ * A view's selector (D170): one choice on the page, its options the items at `path` of a read of
+ * the node bound to `from`, each option's value at `value` (the item itself for none) and its
+ * label at `label` (its value for none); its sections take the value chosen as `'$selector'`.
+ */
+export const selectorSchema = z.strictObject({
+  from: inputPort,
+  read: base.read,
+  input: base.input,
+  path: path.optional(),
+  value: path.optional(),
+  label: path.optional(),
+  /** What it is a choice of, shown beside it; none: the read's description. */
+  title: label.optional(),
+});
+
+/**
+ * A view (D170): a title, an optional selector, and its sections, in order, each read from one of
+ * its inputs; none yet, an empty page (a view node just added). Its layout is a list for now: a
+ * later kind of section may hold others.
+ */
+export const viewSchema = z.strictObject({
+  title: z.string().min(1),
+  selector: selectorSchema.optional(),
+  sections: z.array(viewSectionSchema).default([]),
+});
+
 /** One section of a widget or a page, as a plugin declares it. */
 export type Widget = z.output<typeof widgetSchema>;
+/** A view's section, its selector, and the view, as a plugin declares them (D170). */
+export type ViewSection = z.output<typeof viewSectionSchema>;
+export type ViewSelector = z.output<typeof selectorSchema>;
+export type View = z.output<typeof viewSchema>;
 export type WidgetShow = Widget['show'];
 /** A field or a column: a path, or a path with its label (a column, maybe a picture's). */
 export type WidgetField = z.output<typeof column>;
@@ -232,25 +292,15 @@ function outputSchema(read: DeclaredRead): JsonSchema {
 export function widgetIssues(
   w: Widget,
   reads: Readonly<Record<string, DeclaredRead>>,
-  actions: Readonly<Record<string, DeclaredAction>> = {}
+  actions: Readonly<Record<string, DeclaredAction>> = {},
+  /** A view's (D170): its sections may take its selector's value, `'$selector'`. */
+  options: { selector?: boolean } = {}
 ): WidgetIssue[] {
   const read = Object.hasOwn(reads, w.read) ? reads[w.read] : undefined;
   if (read === undefined)
     return [{ path: ['read'], message: `${w.read} is not among its reads (interface.state)` }];
   const issues: WidgetIssue[] = [];
-  if (read.input === undefined) {
-    if (w.input !== undefined)
-      issues.push({ path: ['input'], message: `the read ${w.read} takes no input` });
-  } else {
-    const parsed = read.input.safeParse(w.input ?? {});
-    if (!parsed.success)
-      issues.push({
-        path: ['input'],
-        message: parsed.error.issues
-          .map((i) => `${i.path.map(String).join('.') || 'input'}: ${i.message}`)
-          .join('; '),
-      });
-  }
+  issues.push(...readInputIssues(read, w.read, w.input, options.selector === true));
   const root = outputSchema(read);
   const at = schemaAt(root, w.path);
   if (at === undefined) {
@@ -295,7 +345,7 @@ export function widgetIssues(
             no(`${c.path} is not a list of pictures`, ['columns', i]);
         });
         (w.actions ?? []).forEach((a, i) => {
-          for (const issue of rowActionIssues(a, items, actions))
+          for (const issue of rowActionIssues(a, items, actions, options))
             no(issue.message, ['actions', i, ...issue.path]);
         });
       }
@@ -313,6 +363,80 @@ export function widgetIssues(
       if (!isNumber(at) && !types(at).includes('string'))
         no(`${where} is not a time (ms since the epoch, or an ISO string)`);
       break;
+  }
+  return issues;
+}
+
+/**
+ * What is wrong with a read's input: given to a read that takes none, or refused by its schema. In
+ * a view (`selector`), a key whose value is `'$selector'` is the page's choice, so its schema is
+ * not asked of it, only of the others.
+ */
+function readInputIssues(
+  read: DeclaredRead,
+  name: string,
+  input: Record<string, unknown> | undefined,
+  selector: boolean
+): WidgetIssue[] {
+  if (read.input === undefined)
+    return input === undefined
+      ? []
+      : [{ path: ['input'], message: `the read ${name} takes no input` }];
+  // The keys the selector gives that the schema names: those left out of its check. Any other is
+  // checked as given, so that a key the read does not take is still refused.
+  const shape = read.input instanceof z.ZodObject ? read.input.shape : {};
+  const chosen = selector
+    ? Object.keys(input ?? {}).filter((k) => input?.[k] === SELECTOR_REF && Object.hasOwn(shape, k))
+    : [];
+  const schema =
+    chosen.length > 0 && read.input instanceof z.ZodObject
+      ? read.input.partial(Object.fromEntries(chosen.map((k) => [k, true])) as never)
+      : read.input;
+  const given = Object.fromEntries(
+    Object.entries(input ?? {}).filter(([k]) => !chosen.includes(k))
+  );
+  const parsed = schema.safeParse(given);
+  if (parsed.success) return [];
+  return [
+    {
+      path: ['input'],
+      message: parsed.error.issues
+        .map((i) => `${i.path.map(String).join('.') || 'input'}: ${i.message}`)
+        .join('; '),
+    },
+  ];
+}
+
+/**
+ * What is wrong with a view's selector (D170), given the reads of the node its input is bound to:
+ * a read it does not declare, an input it refuses, a path that is no list, an option's value or
+ * label its items have not.
+ */
+export function selectorIssues(
+  sel: ViewSelector,
+  reads: Readonly<Record<string, DeclaredRead>>
+): WidgetIssue[] {
+  const read = Object.hasOwn(reads, sel.read) ? reads[sel.read] : undefined;
+  if (read === undefined)
+    return [{ path: ['read'], message: `${sel.read} is not among its reads (interface.state)` }];
+  const issues = readInputIssues(read, sel.read, sel.input, false);
+  const at = schemaAt(outputSchema(read), sel.path);
+  if (at === undefined)
+    return [
+      ...issues,
+      { path: ['path'], message: `the read ${sel.read} has no ${sel.path ?? ''}` },
+    ];
+  if (at === 'open') return issues;
+  const items = itemsOf(at);
+  if (items === undefined)
+    return [
+      ...issues,
+      { path: ['path'], message: `${sel.path ?? `the read ${sel.read}`} is not a list or a map` },
+    ];
+  for (const key of ['value', 'label'] as const) {
+    const p = sel[key];
+    if (p !== undefined && items !== 'open' && schemaAt(items, p) === undefined)
+      issues.push({ path: [key], message: `its options have no ${p}` });
   }
   return issues;
 }
@@ -345,7 +469,9 @@ function keySchema(schema: z.ZodType, key: string): z.ZodType | undefined {
 export function rowActionIssues(
   a: RowAction,
   rows: JsonSchema | 'open',
-  actions: Readonly<Record<string, DeclaredAction>>
+  actions: Readonly<Record<string, DeclaredAction>>,
+  /** A view's (D170): a key may take its selector's value, `'$selector'`. */
+  options: { selector?: boolean } = {}
 ): WidgetIssue[] {
   const action = Object.hasOwn(actions, a.action) ? actions[a.action] : undefined;
   if (action === undefined)
@@ -370,6 +496,7 @@ export function rowActionIssues(
       else issues.push({ path: ['input', key], message: `expected $row.<path>, as $row.place` });
       continue;
     }
+    if (options.selector === true && v === SELECTOR_REF) continue;
     const s = keySchema(action.input, key);
     const parsed = s?.safeParse(v);
     if (parsed !== undefined && !parsed.success)

@@ -30,6 +30,7 @@ import { DriftPage } from './pages/DriftPage.tsx';
 import { EventsPage } from './pages/EventsPage.tsx';
 import { ModulesPage } from './pages/ModulesPage.tsx';
 import { NodePage } from './pages/NodePage.tsx';
+import { ViewPage } from './pages/ViewPage.tsx';
 import { appChanged } from './stale.ts';
 
 /**
@@ -99,6 +100,9 @@ export function resolve(path: string): { page: Page; section?: string } {
   const [route = '', ...rest] = path.split('/');
   if (route === NODE_PAGE.route && rest.length > 0)
     return { page: NODE_PAGE, section: decodeURIComponent(rest.join('/')) };
+  // A node of the graph, opened in the editor (`graph/<id>`): a view's links to its nodes (D170).
+  if (route === 'graph' && rest.length > 0)
+    return { page: PAGES[0] as Page, section: `node/${decodeURIComponent(rest.join('/'))}` };
   const page = PAGES.find((p) => p.route === route);
   if (page !== undefined) return { page };
   if (ADMIN_SECTIONS.some((s) => s.id === route))
@@ -109,6 +113,22 @@ export function resolve(path: string): { page: Page; section?: string } {
     return sheet === undefined ? { page: home } : { page: home, section: sheet };
   }
   return { page: home };
+}
+
+/**
+ * A view's page (D170), at `/v/<path>/`: in no menu; its path is its section. The app is the same
+ * under that address, whose links lead back to the root's routes.
+ */
+export const VIEW_PAGE: Page = {
+  route: 'v',
+  title: 'View',
+  wide: true,
+  page: (p) => <ViewPage {...p} />,
+};
+
+/** A view's path, when the page is a view's (D170): its address ends in `/v/<path>/`. */
+export function viewPathOf(pathname: string): string | undefined {
+  return /\/v\/([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\/$/u.exec(pathname)?.[1];
 }
 
 /** How the instance is, in the bottom bar: how long it has run and its memory. */
@@ -177,9 +197,13 @@ export function App() {
         }}
       />
     );
-  const { page: current, section } = resolve(route);
+  // A view's page (D170) is its own, under its address; its menu leads back to the root's pages.
+  const viewAt = viewPathOf(window.location.pathname);
+  const { page: current, section } =
+    viewAt === undefined ? resolve(route) : { page: VIEW_PAGE, section: viewAt };
+  const root = viewAt === undefined ? '' : '../../';
   const link = (p: Page) => (
-    <a key={p.route} href={`#/${p.route}`} aria-current={p === current ? 'page' : undefined}>
+    <a key={p.route} href={`${root}#/${p.route}`} aria-current={p === current ? 'page' : undefined}>
       {p.title}
     </a>
   );

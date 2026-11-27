@@ -28,7 +28,7 @@
  * and actions, called from the panel (`NodeControls.tsx`). A node whose plugin declares a page
  * (D112) has a link to it, while it runs.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type {
   AccountControl,
   BotCommand,
@@ -632,6 +632,80 @@ function ScriptSection(props: {
   );
 }
 
+/**
+ * A node's links to views (D170): a view's to its own page, `/v/<path>/`; any node's to the views
+ * that show it.
+ */
+export function ViewLinks(props: { view: Pick<NodeView, 'served' | 'shownIn'>; running: boolean }) {
+  const { served, shownIn } = props.view;
+  return (
+    <>
+      {served === undefined ? null : (
+        <p>
+          <a href={`v/${served.path}/`}>Open its view: /v/{served.path}/</a>
+          {props.running ? null : <span className="muted small"> (once applied)</span>}
+        </p>
+      )}
+      {shownIn === undefined ? null : (
+        <p className="small" aria-label="its views">
+          Shown in{' '}
+          {shownIn.map((v, i) => (
+            <span key={v.node}>
+              {i === 0 ? '' : ', '}
+              <a href={`v/${v.path}/`}>{v.node}</a>
+            </span>
+          ))}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** A view's path (D170): lower-case words and dashes, as a node's id. */
+const VIEW_PATH = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+
+/**
+ * A view's path (D170): where it is served, `/v/<path>/`; empty, its id. Set with Set (or Enter);
+ * a path that is no lower-case words and dashes is not set, and says so.
+ */
+export function PathField(props: {
+  id: string;
+  path: string | undefined;
+  set: (path: string | undefined) => void;
+}) {
+  const [text, setText] = useState(props.path ?? '');
+  useEffect(() => setText(props.path ?? ''), [props.path]);
+  const typed = text.trim();
+  const bad = typed !== '' && !VIEW_PATH.test(typed);
+  const set = (): void => {
+    if (!bad) props.set(typed === '' || typed === props.id ? undefined : typed);
+  };
+  return (
+    <div className="field path-field">
+      <label>
+        Path{' '}
+        <input
+          aria-label="path"
+          value={text}
+          placeholder={props.id}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') set();
+          }}
+        />
+      </label>{' '}
+      <button type="button" disabled={bad || typed === (props.path ?? '')} onClick={set}>
+        Set
+      </button>
+      <small className={bad ? 'error' : 'muted'}>
+        {bad
+          ? 'Lower-case words and dashes, as an id.'
+          : `Served at /v/${typed === '' ? props.id : typed}/, behind the login. Applied with Apply.`}
+      </small>
+    </div>
+  );
+}
+
 /** The choice of a new group, in the Group field. */
 const NEW_GROUP = '\u0000new';
 
@@ -923,6 +997,13 @@ export function NodeDetails(props: {
         connector={isSplit(view)}
         set={(group) => props.change({ group })}
       />
+      {view.kinds.includes('view') ? (
+        <PathField
+          id={node.id}
+          path={node.path}
+          set={(path) => props.change(path === undefined ? { path: undefined } : { path })}
+        />
+      ) : null}
       {stop === undefined ? null : (
         <div className={`stop-note${props.cleared ? ' cleared' : ''}`} role="note">
           <p>
@@ -986,6 +1067,7 @@ export function NodeDetails(props: {
           <a href={`#/node/${encodeURIComponent(view.id)}`}>Open its page: {view.page.title}</a>
         </p>
       ) : null}
+      <ViewLinks view={view} running={running} />
       {running || live?.state === 'stopped' ? <NodeState id={view.id} /> : null}
       {connector && running ? <ConnectorQueue id={view.id} /> : null}
       {live === undefined ? null : <NodeFiles id={view.id} />}

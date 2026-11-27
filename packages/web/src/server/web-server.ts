@@ -10,6 +10,8 @@
  *   limit of failed logins (`auth.ts`).
  * - `POST /api/logout`: the session ended, the cookie cleared.
  * - `/api/<route>`: the control API's `/<route>`, logged in only (401 otherwise).
+ * - `/v/<path>/…` (docs/bot-os.md D170): a view's page, the app and the API as at the root, so that
+ *   the app's addresses, all relative, hold under it; `/v/<path>` is sent on to `/v/<path>/`.
  * - Anything else: a file of the built app, `index.html` for a path it does not have; 503 while
  *   the app is not built.
  *
@@ -79,6 +81,9 @@ const SECURITY_HEADERS: Record<string, string> = {
   'x-frame-options': 'DENY',
   'referrer-policy': 'no-referrer',
 };
+
+/** A view's page (D170): `/v/<path>`, then what it serves under it, the app or the API. */
+export const VIEW_ROUTE = /^\/v\/([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(\/.*)?$/u;
 
 /** The largest body a login may have. */
 const MAX_LOGIN = 4096;
@@ -229,7 +234,14 @@ export function webHandler(o: WebOptions): Handler {
     delete req.headers[ACTOR_HEADER];
     const handle = async (): Promise<void> => {
       const url = new URL(req.url ?? '/', 'http://web');
-      const route = url.pathname;
+      // A view's page (D170): the app under /v/<path>/, as at the root.
+      const view = VIEW_ROUTE.exec(url.pathname);
+      if (view !== null && view[2] === undefined) {
+        res.writeHead(308, { location: `${view[1] ?? ''}/${url.search}` });
+        res.end();
+        return;
+      }
+      const route = view === null ? url.pathname : (view[2] as string);
       if (route !== '/api' && !route.startsWith('/api/')) return serveFile(req, res, route);
       const post = req.method === 'POST';
       // Every request that changes something (a POST, the graph's PUT, a module's DELETE) is the

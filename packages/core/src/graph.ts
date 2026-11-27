@@ -53,6 +53,7 @@ import {
   readsSchema,
   resolveInputs,
 } from './ports.ts';
+import { selectorIssues, type WidgetIssue, widgetIssues } from './widgets.ts';
 
 /**
  * The format of the graph file; a change that old files cannot be read with bumps it. Version 2
@@ -103,6 +104,11 @@ export const graphSchema = z.strictObject({
         .string()
         .refine((g) => g !== '' && g.trim() === g, 'expected a name, without spaces at its ends')
         .optional(),
+      /**
+       * A view's path (bot-os.md D170): it is served at `/v/<path>/`; absent, its id. Only a view
+       * has one, and no two views one.
+       */
+      path: z.string().regex(PLUGIN_ID, 'expected lower-case words and dashes').optional(),
     })
   ),
   edges: z
@@ -862,6 +868,7 @@ export function resolveGraph(
       );
     }
   for (const n of nodes.values()) problems.push(...oneChatProblems(n));
+  problems.push(...viewProblems(parsed.data.nodes, nodes));
   if (problems.length > 0) throw new GraphError(problems, warnings);
   return {
     graph: { version: parsed.data.version, nodes: parsed.data.nodes, edges },
@@ -869,6 +876,69 @@ export function resolveGraph(
     warnings,
   };
 }
+
+/**
+ * What the views of a graph refuse (bot-os.md D170): a path on a node that is no view, two views of
+ * one path (a view's is its node's `path`, else its id), and each section, and the selector, as the
+ * node bound to its input declares its reads and actions: a read it has not, an input it refuses, a
+ * path its output has not, an action its rows cannot run. An input left unbound is checked when
+ * it is bound.
+ */
+function viewProblems(
+  written: readonly { id: string; path?: string | undefined }[],
+  nodes: ReadonlyMap<string, ResolvedNode>
+): string[] {
+  const out: string[] = [];
+  const paths = new Map<string, string>();
+  for (const w of written) {
+    const n = nodes.get(w.id);
+    if (n === undefined) continue;
+    const view = n.manifest.view;
+    if (view === undefined) {
+      if (w.path !== undefined) out.push(`node ${n.id}: only a view has a path`);
+      continue;
+    }
+    const at = w.path ?? n.id;
+    const other = paths.get(at);
+    if (other !== undefined) out.push(`node ${n.id}: the path /v/${at}/ is ${other}'s`);
+    else paths.set(at, n.id);
+    const boundTo = (port: string): ResolvedNode | undefined => {
+      const b = n.inputs.get(port)?.[0];
+      return b === undefined ? undefined : nodes.get(b.node);
+    };
+    const said = (where: string, port: string, of: ResolvedNode, issues: WidgetIssue[]): void => {
+      for (const i of issues)
+        out.push(
+          `node ${n.id}: view ${[where, ...i.path].join('.')}: ${i.message} (from ${port}, bound to ${of.id})`
+        );
+    };
+    if (view.selector !== undefined) {
+      const of = boundTo(view.selector.from);
+      if (of !== undefined)
+        said(
+          'selector',
+          view.selector.from,
+          of,
+          selectorIssues(view.selector, of.manifest.interface.state ?? {})
+        );
+    }
+    view.sections.forEach((sec, i) => {
+      const of = boundTo(sec.from);
+      if (of === undefined) return;
+      const issues = widgetIssues(
+        sec,
+        of.manifest.interface.state ?? {},
+        of.manifest.interface.actions ?? {},
+        { selector: view.selector !== undefined }
+      );
+      said(`sections.${i}`, sec.from, of, issues);
+    });
+  }
+  return out;
+}
+
+/** A view node's path (D170): its own, else its id. */
+export const viewPath = (n: { id: string; path?: string | undefined }): string => n.path ?? n.id;
 
 /**
  * What a node's ports of one chat refuse (bot-os.md D97): the edge of a chat-out output declared

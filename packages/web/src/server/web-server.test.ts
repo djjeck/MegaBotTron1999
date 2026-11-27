@@ -142,6 +142,34 @@ describe('webHandler', () => {
     expect((await b.call('/api/status')).status).toBe(401);
   });
 
+  it('serves a view’s page under /v/<path>/, the app and the API as at the root (D170)', async () => {
+    const seen: string[] = [];
+    const base = await serve(
+      webHandler({
+        password: PASSWORD,
+        dist: dist(),
+        api: (req, res) => {
+          seen.push(`${req.method} ${req.url}`);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end('{"ok":true}');
+        },
+      })
+    );
+    const b = browser(base);
+    // Without its slash, sent on to it, so that the app's relative addresses hold.
+    const bare = await b.call('/v/ledger?s=alice', { redirect: 'manual' });
+    expect(bare.status).toBe(308);
+    expect(bare.headers.get('location')).toBe('ledger/?s=alice');
+    expect(await (await b.call('/v/ledger/')).text()).toContain('<title>UI</title>');
+    expect(await (await b.call('/v/ledger/assets/app-1234.js')).text()).toBe('console.log(1)');
+    expect((await b.call('/v/ledger/api/status')).status).toBe(401);
+    await b.call('/v/ledger/api/login', { json: { password: PASSWORD } });
+    expect(await (await b.call('/v/ledger/api/graph/view')).json()).toEqual({ ok: true });
+    expect(seen).toEqual(['GET /graph/view']);
+    // A path no view could have is a page of the app, as any other.
+    expect((await b.call('/v/Not_A_Path/')).status).toBe(200);
+  });
+
   it('keeps the login across a restart, ends it at its logout, and at a new password', async () => {
     const data = fs.mkdtempSync(path.join(os.tmpdir(), 'web-data-'));
     const store = () => new Stores(data).open(CORE_STORE);

@@ -34,10 +34,19 @@ export function fromRow(v: unknown, row: unknown): unknown {
   return v === '$row' ? row : at(row, v.slice('$row.'.length));
 }
 
-/** The input a row action builds from its row: its constants and the row's values. */
-export function rowInput(a: RowAction, row: unknown): Record<string, unknown> {
+/** A view's selected value (docs/bot-os.md D170), as a section names it: the core's `SELECTOR_REF`. */
+export const SELECTOR_REF = '$selector';
+
+/**
+ * The input a row action builds from its row: its constants, the row's values, and on a view the
+ * page's selected value (`'$selector'`, D170).
+ */
+export function rowInput(a: RowAction, row: unknown, selector?: string): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(a.input ?? {}).map(([k, v]) => [k, fromRow(v, row)] as const)
+    Object.entries(a.input ?? {}).map(
+      ([k, v]) =>
+        [k, v === SELECTOR_REF && selector !== undefined ? selector : fromRow(v, row)] as const
+    )
   );
 }
 
@@ -152,6 +161,8 @@ export function RowActionButton(props: {
   members: readonly MemberView[];
   /** Asks the page's reads again, after a run. */
   done?: (() => void) | undefined;
+  /** A view's selected value, for an input that names it (D170). */
+  selector?: string | undefined;
 }) {
   const { node, action: a, row } = props;
   const member = props.members.find((m) => m.name === a.action);
@@ -172,7 +183,7 @@ export function RowActionButton(props: {
     setSaid(undefined);
     api<unknown>(`/plugins/${seg(node)}/actions/${seg(a.action)}`, {
       ...picked,
-      ...rowInput(a, row),
+      ...rowInput(a, row, props.selector),
     })
       .then(
         (out) => {

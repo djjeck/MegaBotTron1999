@@ -151,6 +151,11 @@ const packages: PackageSpec[] = [
     name: '@megabottron1999/turns/collection.ts',
     load: async () => [(await import('@megabottron1999/turns/collection.ts')).collectionPlugin()],
   },
+  // A page of the owner's own, at /v/<path>/, showing the nodes wired to it (docs/bot-os.md D170).
+  {
+    name: '@megabottron1999/turns/view.ts',
+    load: async () => [(await import('@megabottron1999/turns/view.ts')).viewPlugin()],
+  },
   // What needs the owner's attention, told through a connector (docs/bot-os.md D91).
   {
     name: '@megabottron1999/turns/owner-notice.ts',

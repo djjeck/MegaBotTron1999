@@ -220,11 +220,17 @@ the server that guards them.
   `confirm`); one with fields left opens a small form of them under the row, drawn by the shared
   form builder, those of its `current` preselected from the row, and **Run** runs it. The button is
   busy while it runs, its answer or refusal is said under it, and the page's reads are asked again.
-  A field whose schema says `options` (a read of its node gives its choices, `OptionsField.tsx`) is
-  a choice of them in any form that knows its node: a row action's, or an action called from the
-  node's panel. The map's bar heads with the instance's switches: `instance on` or `off`, **Turn
-  off** (asking first) or **Turn on**, and **Kill all** (every plugin's safety stop, asking first).
-  Select one node or several (Shift, Ctrl or Cmd with a click; Shift and drag for a box) and **Kill
+  A **view** (docs/bot-os.md D170) is a page at `/v/<path>/`, the same app under that address
+  (`App.tsx`'s `viewPathOf`; the server serves the app and the API under it, `web-server.ts`'s
+  `VIEW_ROUTE`): `ViewPage.tsx` draws the sections of the view node of that path, each from its
+  bound node, with a choice (`?s=`) where it has a selector and a link to each node it shows
+  (`#/graph/<id>`, which selects the node in the editor). A view node's panel sets its **Path**
+  (none: its id) and has **Open its view**; any node's panel lists the views that show it. A field
+  whose schema says `options` (a read of its node gives its choices, `OptionsField.tsx`) is a choice
+  of them in any form that knows its node: a row action's, or an action called from the node's
+  panel. The map's bar heads with the instance's switches: `instance on` or `off`, **Turn off**
+  (asking first) or **Turn on**, and **Kill all** (every plugin's safety stop, asking first). Select
+  one node or several (Shift, Ctrl or Cmd with a click; Shift and drag for a box) and **Kill
   selected** kills each: its plugin's own safety stop, then stopped, kept across restarts; a stopped
   node's panel has **Clear stop**, a change of the draft that Review lists and Apply makes
   (`clear-stop`, then the restart), and its forms stay editable. Nodes start in columns

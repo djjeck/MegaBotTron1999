@@ -80,6 +80,8 @@ export function WidgetSection(props: {
   actions?: readonly MemberView[] | undefined;
   /** Asks the page's reads again, after a row's action ran. */
   reload?: (() => void) | undefined;
+  /** A view's selected value, for a row action's input that names it (D170). */
+  selector?: string | undefined;
 }) {
   const { widget: w, reads, value, error } = props;
   const now = useNow(w.show === 'until');
@@ -98,6 +100,7 @@ export function WidgetSection(props: {
           node={props.node}
           actions={props.actions ?? []}
           reload={props.reload}
+          selector={props.selector}
         />
       ) : (
         <p className="error">{error}</p>
@@ -115,6 +118,7 @@ function SectionBody(props: {
   node: string | undefined;
   actions: readonly MemberView[];
   reload: (() => void) | undefined;
+  selector: string | undefined;
 }) {
   const { widget: w, reads, output, now, node } = props;
   // The picture each carousel shows, by its column and row, kept as the page reads again (D163).
@@ -226,6 +230,7 @@ function SectionBody(props: {
                             rowName={name}
                             members={props.actions}
                             done={props.reload}
+                            selector={props.selector}
                           />
                         ))}
                       </td>

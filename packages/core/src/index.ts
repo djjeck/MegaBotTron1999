@@ -180,6 +180,7 @@ export {
   nodeStates,
   type ResolvedNode,
   resolveGraph,
+  viewPath,
   withInstances,
 } from './graph.ts';
 export {
@@ -534,6 +535,14 @@ export {
   ROW_REF,
   type RowAction,
   schemaAt,
+  SELECTOR_REF,
+  selectorIssues,
+  selectorSchema,
+  type View,
+  viewSchema,
+  type ViewSection,
+  viewSectionSchema,
+  type ViewSelector,
   type Widget,
   WIDGET_PATH,
   type WidgetField,

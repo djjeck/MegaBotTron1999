@@ -15,9 +15,24 @@ import {
   outputSchema,
   PORT_NAME,
 } from './ports.ts';
-import { optionsIssues, pageSchema, widgetIssues, widgetSchema } from './widgets.ts';
+import {
+  optionsIssues,
+  pageSchema,
+  type View,
+  viewSchema,
+  widgetIssues,
+  widgetSchema,
+} from './widgets.ts';
 
-export const KINDS = ['connector', 'parser', 'actor', 'stats', 'agent', 'simulator'] as const;
+export const KINDS = [
+  'connector',
+  'parser',
+  'actor',
+  'stats',
+  'agent',
+  'simulator',
+  'view',
+] as const;
 export type Kind = (typeof KINDS)[number];
 
 /** A plugin's id: lower-case words and dashes; `core` is the core's. */
@@ -366,6 +381,11 @@ export const manifestSchema = z
      * not fit on its card, opened from its node's panel.
      */
     page: pageSchema.optional(),
+    /**
+     * A view's (D170): its title, its selector and its sections, each read from the node bound to
+     * one of its interface inputs. Served at `/v/<path>/`, the node's `path` or its id.
+     */
+    view: viewSchema.optional(),
   })
   .superRefine((m, ctx) => {
     const reads = m.interface.state ?? {};
@@ -381,6 +401,29 @@ export const manifestSchema = z
           message: i.message,
         });
     });
+    // A view's sections read the nodes on its interface inputs (D170).
+    if (m.view !== undefined) {
+      if (!m.kinds.includes('view'))
+        ctx.addIssue({ code: 'custom', path: ['view'], message: 'only a view declares one' });
+      if (m.page !== undefined)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['page'],
+          message: 'a view is its own page: declare its sections in view',
+        });
+      const from = (port: string, at: (string | number)[]): void => {
+        const input = Object.hasOwn(m.inputs, port) ? m.inputs[port] : undefined;
+        if (input?.type !== 'interface')
+          ctx.addIssue({
+            code: 'custom',
+            path: [...at, 'from'],
+            message: `${port} is not among its interface inputs`,
+          });
+      };
+      if (m.view.selector !== undefined) from(m.view.selector.from, ['view', 'selector']);
+      m.view.sections.forEach((sec, n) => from(sec.from, ['view', 'sections', n]));
+    } else if (m.kinds.includes('view'))
+      ctx.addIssue({ code: 'custom', path: ['view'], message: 'a view declares its view' });
     // An action's field whose options a read gives (D157) names a read it declares.
     for (const [name, a] of Object.entries(actions))
       for (const i of optionsIssues(a.input, reads))
@@ -655,7 +698,39 @@ export const manifestSchema = z
           message: `the output ${port} is derived: name its chat-out otherwise`,
         });
   })
-  .transform(normalise);
+  .transform(normalise)
+  .transform(withViewMembers);
+
+/**
+ * A view's interface inputs (D170), each with the members its sections and selector use added:
+ * the reads they show (`state.<read>`) and the actions their rows run (`actions.<action>`), so that
+ * the check binds an input only to a node that offers them, as any interface input's members.
+ */
+function withViewMembers<
+  M extends { view?: View | undefined; inputs: Record<string, ManifestInputPort> },
+>(m: M): M {
+  if (m.view === undefined) return m;
+  const used = new Map<string, Set<string>>();
+  const use = (port: string, member: string): void => {
+    const set = used.get(port) ?? new Set<string>();
+    set.add(member);
+    used.set(port, set);
+  };
+  if (m.view.selector !== undefined) use(m.view.selector.from, `state.${m.view.selector.read}`);
+  for (const sec of m.view.sections) {
+    use(sec.from, `state.${sec.read}`);
+    if (sec.show === 'table')
+      for (const a of sec.actions ?? []) use(sec.from, `actions.${a.action}`);
+  }
+  const inputs = Object.fromEntries(
+    Object.entries(m.inputs).map(([port, input]) => {
+      const more = used.get(port);
+      if (more === undefined || input.type !== 'interface') return [port, input];
+      return [port, { ...input, members: [...new Set([...input.members, ...more])] }];
+    })
+  );
+  return { ...m, inputs };
+}
 
 /** Why `pattern` is not a regular expression, or undefined. */
 function regexProblem(pattern: string): string | undefined {

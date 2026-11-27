@@ -9,7 +9,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { type Graph, type GraphEdge, networkOf, nodeAccount, nodeInputs } from './graph.ts';
+import {
+  type Graph,
+  type GraphEdge,
+  networkOf,
+  nodeAccount,
+  nodeInputs,
+  viewPath,
+} from './graph.ts';
 import { type BotCommand, type Manifest } from './manifest.ts';
 import { HIDDEN, isSensitiveForm, SENSITIVE_TEXT } from './sensitive.ts';
 
@@ -28,7 +35,7 @@ import {
   type OutputPort,
   PORT_TYPE_INFO,
 } from './ports.ts';
-import { type Widget, type WidgetPage } from './widgets.ts';
+import { type View, type Widget, type WidgetPage } from './widgets.ts';
 
 /** The graph file, in the data volume. */
 export const GRAPH_FILE = 'graph.json';
@@ -85,6 +92,7 @@ export function graphText(graph: Graph): string {
       n.disabled === true ? 'disabled' : '',
       n.account === undefined ? '' : `account ${n.account}`,
       n.group === undefined ? '' : `group ${n.group}`,
+      n.path === undefined ? '' : `path ${n.path}`,
     ].filter((x) => x !== '');
     lines.push(`  ${n.id} (${n.plugin})${about.map((x) => `, ${x}`).join('')}`);
     for (const [part, values] of [
@@ -345,6 +353,8 @@ export interface PluginView {
   /** Its node's widget, drawn on its card, and its full page, opened from its panel (D112). */
   widget?: Widget;
   page?: WidgetPage;
+  /** A view's (D170): its title, selector and sections, each read from one of its inputs. */
+  view?: View;
 }
 
 /** A key of a config that names a chat (bot-os.md D96), as the editor picks it. */
@@ -366,6 +376,13 @@ export interface NodeView extends PluginView {
   id: string;
   /** Its configuration, as the graph gives it (defaults are the schema's). */
   config?: Record<string, unknown>;
+  /**
+   * A view's (D170): where it is served (`/v/<path>/`), and the node bound to each of its
+   * interface inputs, by port (an input left unbound, none).
+   */
+  served?: { path: string; bound: Record<string, string> };
+  /** The views whose inputs are bound to this node (D170): each view's node and its path. */
+  shownIn?: { node: string; path: string }[];
 }
 
 /** A zod schema as a JSON Schema, for a form: as its input, what zod cannot say left open. */
@@ -529,6 +546,7 @@ export function describePlugin(m: Manifest): PluginView {
     ...(m.configPlays === undefined ? {} : { configPlays: { ...m.configPlays } }),
     ...(m.widget === undefined ? {} : { widget: structuredClone(m.widget) }),
     ...(m.page === undefined ? {} : { page: structuredClone(m.page) }),
+    ...(m.view === undefined ? {} : { view: structuredClone(m.view) }),
   };
 }
 
@@ -554,11 +572,27 @@ export function describeNodes(
   nodes: readonly { id: string; manifest: Manifest; ports?: Record<string, InputPort> }[],
   graph: Graph
 ): NodeView[] {
+  // Each view's bound nodes (D170), by its inputs: an edge's output node, to the view's port.
+  const served = new Map<string, { path: string; bound: Record<string, string> }>();
+  for (const { id, manifest: m } of nodes) {
+    if (m.view === undefined) continue;
+    const bound: Record<string, string> = {};
+    for (const e of graph.edges) {
+      const [to = '', port = ''] = e.to.split('.');
+      if (to !== id || m.inputs[port]?.type !== 'interface') continue;
+      bound[port] = e.from.split('.')[0] ?? '';
+    }
+    served.set(id, { path: viewPath(graph.nodes.find((n) => n.id === id) ?? { id }), bound });
+  }
   return nodes.map(({ id, manifest: m, ports }) => {
     const node = graph.nodes.find((n) => n.id === id);
     const { account: _, ...plugin } = describePlugin(m);
     const account = nodeAccount(id, m, node?.account);
     const resolved = ports ?? nodeInputs(m, node?.config).ports;
+    const view = served.get(id);
+    const shownIn = [...served]
+      .filter(([, v]) => Object.values(v.bound).includes(id))
+      .map(([node, v]) => ({ node, path: v.path }));
     return {
       id,
       ...plugin,
@@ -566,6 +600,8 @@ export function describeNodes(
       ...(account === undefined ? {} : { account }),
       // Its sensitive values shown as set, never as they are (D124).
       ...(node?.config === undefined ? {} : { config: hideConfig(node.config, m.configSensitive) }),
+      ...(view === undefined ? {} : { served: view }),
+      ...(shownIn.length === 0 ? {} : { shownIn }),
     };
   });
 }

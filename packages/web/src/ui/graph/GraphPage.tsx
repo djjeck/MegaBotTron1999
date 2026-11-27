@@ -233,6 +233,11 @@ export function GraphPage({
     const sheet = SHEETS.find((x) => x === section);
     if (sheet !== undefined) setPanel(sheet);
   }, [section]);
+  // A route that names a node (`#/graph/<id>`, a view's link to its nodes, D170) selects it.
+  useEffect(() => {
+    if (section?.startsWith('node/') === true)
+      setSelected({ nodes: [section.slice('node/'.length)], edges: [] });
+  }, [section]);
   const [busy, setBusy] = useState(false);
   /** Why the last Apply was refused. */
   const [refusedApply, setRefusedApply] = useState<{ error: string; problems: GraphProblem[] }>();
