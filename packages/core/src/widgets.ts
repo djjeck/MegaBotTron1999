@@ -16,6 +16,7 @@
  * a row path the rows have not. An action's input field may take its options from a read
  * (`.meta({ options: { read, path?, value?, label? } })`, `optionsIssues`).
  */
+import { INTERVALS, MARKS, REDUCES } from '@megabottron1999/chart/chart.ts';
 import { z } from 'zod';
 
 /**
@@ -239,13 +240,6 @@ function leafKinds<E extends z.ZodRawShape, O extends z.ZodRawShape>(extra: E, o
     z.strictObject({ show: z.literal('until'), ...base, ...extra }),
   ] as const;
 }
-
-/** How the rows of one point of a chart are reduced to its measure (D174). */
-export const REDUCES = ['sum', 'count', 'mean', 'min', 'max'] as const;
-/** How a chart draws its points (D174). */
-export const MARKS = ['bar', 'line', 'area', 'dot'] as const;
-/** The spans a time series gathers its rows by, in its time zone (D174). */
-export const INTERVALS = ['minute', 'hour', 'day', 'week', 'month'] as const;
 
 /** Whether a time zone is one this runtime knows (`Europe/Rome`, `UTC`). */
 export function knownZone(timeZone: string): boolean {

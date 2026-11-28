@@ -1,6 +1,6 @@
 /**
  * A chart as a picture (docs/bot-os.md D174, bot-os-api.md §4.13): the same chart a view draws
- * (`chart.ts`), drawn by Plot on the server, in a DOM of its own (linkedom), as an SVG, then a PNG
+ * (`@megabottron1999/chart`), drawn by Plot on the server, in a DOM of its own (linkedom), as an SVG, then a PNG
  * through the render service (`svgToPng`), for a plugin to send to the owner's chat (P18: what fits
  * one plotted picture). Its text is in the font the shell ships (`assets/fonts`, DejaVu Sans, which
  * has the currency signs, ₭ among them), so that it looks the same on every host; its title and its
@@ -8,8 +8,8 @@
  *
  * Plot and linkedom are loaded at the first chart.
  */
+import { CHART_FONT, chartData, chartPlot, chartTheme } from '@megabottron1999/chart/chart.ts';
 import { fileURLToPath } from 'node:url';
-import { CHART_FONT, chartData, chartPlot, chartTheme } from './chart.ts';
 import { svgToPng, type SvgToPngOptions } from './render.ts';
 import { type ChartSpec, chartSpecSchema } from './widgets.ts';
 

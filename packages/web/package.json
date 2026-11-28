@@ -20,6 +20,7 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@megabottron1999/chart": "0.1.76",
     "@megabottron1999/core": "0.1.76"
   },
   "devDependencies": {

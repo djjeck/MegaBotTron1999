@@ -67,12 +67,13 @@ export default tseslint.config(
   },
   {
     // The shell's core knows nothing of any game, nor of the other packages (docs/bot-os-api.md
-    // §6): only itself, zod, resvg (the render service) and Node.
+    // §6): only itself, the charts' package (D174), zod, resvg (the render service), Plot and
+    // linkedom (a chart's picture) and Node.
     files: ['packages/core/src/**/*.ts'],
     ignores: TESTS,
     rules: restrict(TEST_IMPORTS, {
-      regex: '^@megabottron1999/',
-      message: 'The core imports only itself.',
+      regex: '^@megabottron1999/(?!chart/)',
+      message: 'The core imports only itself, and the charts’ package.',
     }),
   },
   {
@@ -92,9 +93,9 @@ export default tseslint.config(
         {
           patterns: [
             {
-              // But the chart's code (bot-os.md D174), shared with the server's picture so that both
-              // draw alike: it imports nothing but types itself (the rule below).
-              regex: '^@megabottron1999/(?!core/chart\\.ts$)',
+              // But the charts' package (bot-os.md D174), made to be shared with the server's
+              // picture: it imports nothing of the shell (the rule below).
+              regex: '^@megabottron1999/(?!chart/)',
               allowTypeImports: true,
               message: 'The app imports only the shell’s types (`import type … from`).',
             },
@@ -104,23 +105,14 @@ export default tseslint.config(
     },
   },
   {
-    // The chart's code is the app's too (D174): it imports types alone, so that the browser's
-    // bundle takes none of the core's Node modules with it.
-    files: ['packages/core/src/chart.ts'],
-    rules: {
-      '@typescript-eslint/no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              regex: '.',
-              allowTypeImports: true,
-              message: 'chart.ts is bundled for the browser: it imports types only (D174).',
-            },
-          ],
-        },
-      ],
-    },
+    // The charts' package (bot-os.md D174) is the core's and the app's alike: it imports nothing
+    // of the shell, so that the app's bundle takes none of the core's Node modules with it.
+    files: ['packages/chart/src/**/*.ts'],
+    ignores: TESTS,
+    rules: restrict(TEST_IMPORTS, {
+      regex: '^@megabottron1999/',
+      message: 'The charts’ package imports nothing of the shell.',
+    }),
   },
   {
     // The app's tests are not bundled: one may run what the app makes against the shell itself (a

@@ -28,24 +28,6 @@ export {
   type PackageSpec,
 } from './boot.ts';
 export { type BusEvent, type BusHandle, type EventHandler } from './bus.ts';
-export {
-  CHART_COLORS,
-  CHART_COLORS_DARK,
-  CHART_FONT,
-  type ChartData,
-  chartData,
-  type ChartDraw,
-  chartPlot,
-  type ChartPoint,
-  type ChartShape,
-  type ChartTheme,
-  chartTheme,
-  intervalStart,
-  type Measure,
-  measureText,
-  wallLabel,
-  wallTime,
-} from './chart.ts';
 export { chartFontFile, type ChartPictureOptions, chartPng, chartSvg } from './chart-render.ts';
 export { type Clock, type TimerHandle, VirtualClock, wallClock } from './clock.ts';
 export {
@@ -574,17 +556,14 @@ export {
   formatOf,
   FORMATS,
   formIssues,
-  INTERVALS,
   isLayout,
   knownZone,
   layoutIssues,
   type LeafAt,
-  MARKS,
   optionsSchema,
   type OptionsSource,
   pageSchema,
   type ReadLeaf,
-  REDUCES,
   ROW_REF,
   type RowAction,
   rowsOf,

@@ -2594,8 +2594,8 @@ replaces it (a test's stub); the dev kit's core has the real one.
 chat (P18: monitoring that fits one plotted picture): the chart a view's `chart` or `timeseries`
 leaf draws (§2, Views), its spec that leaf without its `from`, `read`, `input`, `path` and `empty`
 (`ChartSpec`, checked by `chartSpecSchema`, rejected with why), its `rows` given (a list's items, a
-map's values), drawn by the same code as in a view (`chart.ts`), by Plot on the server (in
-linkedom's DOM), its `label` as a title and its series' legend above it, then a PNG through
+map's values), drawn by the same code as in a view (`@megabottron1999/chart`), by Plot on the server
+(in linkedom's DOM), its `label` as a title and its series' legend above it, then a PNG through
 `svgToPng` in the font the shell ships (DejaVu Sans, `packages/core/assets/fonts`, with the currency
 signs). `ChartPictureOptions`: `width` (640 by default, in the SVG's pixels), `dark`, `scale` (2 by
 default) and `maxSide`. `chartSvg` gives the SVG's text. Plot and the DOM load at the first chart.
@@ -3739,8 +3739,13 @@ its bytes is for later.
 
 ## 6. Boundaries
 
-- `packages/core/src/` imports nothing of any game, nor any other package: ESLint refuses imports of
-  the other workspaces there. Its npm dependencies are zod and resvg (the render service, §4.13).
+- `packages/core/src/` imports nothing of any game, nor any other package but the charts'
+  (`@megabottron1999/chart`, bot-os.md D174): ESLint refuses imports of the other workspaces there.
+  Its npm dependencies are zod, resvg (the render service, §4.13), and Plot and linkedom (a chart's
+  picture, §4.13).
+- `packages/chart/src/` (a chart's points and Plot's options, the core's and the web UI's alike)
+  imports nothing of the shell, and only Plot's types, so that the web UI's bundle takes none of the
+  core's Node modules with it.
 - A plugin reaches the core only through its context; it never imports `packages/core/src/`
   internals, only its public API (`@megabottron1999/core`, its `src/index.ts`), and the subpaths the
   packages export (`@megabottron1999/<name>/<path under src/>`).
@@ -3748,7 +3753,7 @@ its bytes is for later.
   refuses it.
 - The web UI's React app (`packages/web/src/ui/`, D43) reaches the instance through the control API
   only, and imports the core's types alone (`import type`; ESLint refuses a value import of the
-  shell there), so its bundle holds none of the shell's code and no game.
+  shell there, but of the charts' package), so its bundle holds none of the core's code and no game.
 - Nothing in this repository names a game other than the made-up ones of its tests, a person, a
   chat, or a host (CLAUDE.md).
 

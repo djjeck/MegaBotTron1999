@@ -92,8 +92,10 @@ Address every error before marking a sub-task complete.
   `@megabottron1999/<name>/test/<path>` (the core's index is `@megabottron1999/core` itself). The
   root holds the workspaces, the dev dependencies, the scripts, the image's entry point
   (`src/main.ts`) and the docs.
-- **Boundaries** (bot-os-api.md §6): `packages/core/src/` imports no other package; production code
-  never imports test helpers; the web UI's app imports only the core's types. ESLint enforces them.
+- **Boundaries** (bot-os-api.md §6): `packages/core/src/` imports no other package but
+  `packages/chart` (a chart's code, the core's and the web UI's, which imports nothing of the
+  shell); production code never imports test helpers; the web UI's app imports only the core's
+  types, and the charts' package. ESLint enforces them.
 - **Imports:** ESLint owns their style (sorted in one group, inline `type` specifiers, unused ones
   removed; `npm run lint:fix`). Within a package, import across directories through its own `#src/*`
   and `#test/*` aliases; from another package, by its name; never with `../`.

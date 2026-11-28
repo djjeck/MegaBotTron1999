@@ -1,7 +1,9 @@
 /**
  * A chart's points and its Plot options (docs/bot-os.md D174, #87 phase 4), one code for the web
- * UI's view (in the browser) and for a picture sent to the owner's chat (`chart-render.ts`, on the
- * server), so that both draw alike.
+ * UI's view (in the browser) and for a picture sent to the owner's chat (the core's
+ * `chart-render.ts`, on the server), so that both draw alike. A package of its own, which the core
+ * and the web UI both import, so that the web UI imports nothing of the core but its types: it
+ * imports nothing of the shell, and only Plot's types.
  *
  * - **Its points** (`chartData`): the rows (a list's items, a map's values) gathered by `x` and by
  *   series, each measure reduced over the rows of a point (`sum`, `count`, `mean`, `min`, `max`).
@@ -16,19 +18,61 @@
  * on a view with a chart, and the server at its first chart.
  */
 import type * as PlotModule from '@observablehq/plot';
-import { type ChartMeasure, type ViewChart } from './widgets.ts';
 
-/** A chart as drawn: a leaf's, or a plugin's (`ChartSpec`), without the read it shows. */
-export type ChartShape = ViewChart extends infer T
-  ? T extends ViewChart
-    ? Omit<T, 'from' | 'read' | 'input' | 'path' | 'empty'> & { label?: string | undefined }
-    : never
-  : never;
+/** How the rows of one point of a chart are reduced to its measure. */
+export const REDUCES = ['sum', 'count', 'mean', 'min', 'max'] as const;
+/** How a chart draws its points. */
+export const MARKS = ['bar', 'line', 'area', 'dot'] as const;
+/** The spans a time series gathers its rows by, in its time zone. */
+export const INTERVALS = ['minute', 'hour', 'day', 'week', 'month'] as const;
+export type Reduce = (typeof REDUCES)[number];
+export type Mark = (typeof MARKS)[number];
+export type Interval = (typeof INTERVALS)[number];
+
+/**
+ * A chart's measure: a path of its rows' numbers, summed per point; or with its `reduce`, its
+ * `label`, its `format` and its `unit`. No path: its rows counted.
+ */
+export type ChartMeasure =
+  | string
+  | {
+      path?: string | undefined;
+      reduce?: Reduce | undefined;
+      label?: string | undefined;
+      format?: 'number' | 'percent' | undefined;
+      unit?: string | undefined;
+    };
+
+/** What a chart and a time series say, as a view's leaf or a plugin's picture does. */
+interface ChartCommon {
+  label?: string | undefined;
+  mark?: Mark | undefined;
+  x: string;
+  y?: ChartMeasure | ChartMeasure[] | undefined;
+  series?: string | undefined;
+  seriesLabels?: Record<string, string> | undefined;
+  stack?: true | undefined;
+  value?: ChartMeasure | undefined;
+  height?: number | undefined;
+}
+
+/**
+ * A chart as drawn: a view's leaf without the read it shows, or a plugin's spec (the core checks
+ * both, `widgets.ts`): `chart`, by a category or a number; `timeseries`, by a time, gathered by
+ * `interval` in `timeZone`.
+ */
+export type ChartShape =
+  | (ChartCommon & { show: 'chart' })
+  | (ChartCommon & {
+      show: 'timeseries';
+      interval?: Interval | undefined;
+      timeZone?: string | undefined;
+    });
 
 /** A measure with its defaults: its path (none: rows counted), reduce, label, format and unit. */
 export interface Measure {
   path?: string;
-  reduce: 'sum' | 'count' | 'mean' | 'min' | 'max';
+  reduce: Reduce;
   label: string;
   format: 'number' | 'percent';
   unit?: string;
@@ -67,7 +111,7 @@ export interface ChartData {
 export const MAX_INTERVALS = 1000;
 
 /** The interval after a wall time's. */
-function nextInterval(w: number, interval: 'minute' | 'hour' | 'day' | 'week' | 'month'): number {
+function nextInterval(w: number, interval: Interval): number {
   const d = new Date(w);
   switch (interval) {
     case 'minute':
@@ -180,11 +224,7 @@ export function wallTime(t: number, timeZone: string): number {
 }
 
 /** The start of the interval an instant is in, in a zone, as wall time (`wallTime`). */
-export function intervalStart(
-  t: number,
-  interval: 'minute' | 'hour' | 'day' | 'week' | 'month',
-  timeZone: string
-): number {
+export function intervalStart(t: number, interval: Interval, timeZone: string): number {
   const w = new Date(wallTime(t, timeZone));
   const y = w.getUTCFullYear();
   const mo = w.getUTCMonth();

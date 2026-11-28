@@ -1,18 +1,18 @@
 /**
  * A view's chart and time series (docs/bot-os.md D174), drawn by Observable Plot: this module is a
  * chunk of its own (`ViewPage.tsx` loads it lazily), so that only a view with a chart loads Plot.
- * Its points and Plot's options are the core's (`chart.ts`), the same a picture for the owner's
+ * Its points and Plot's options are `@megabottron1999/chart`'s, the same a picture for the owner's
  * chat is drawn from. Its text and axes take the page's colour (`currentColor`), and its series the
  * view's colours (`--chart-1` … `--chart-8`, light and dark), drawn again when the scheme changes;
  * its width is its card's, drawn again as that changes; each point's tooltip on hover.
  */
-import type { ChartShape } from '@megabottron1999/core/chart.ts';
+import type { ChartShape } from '@megabottron1999/chart/chart.ts';
 import {
   CHART_COLORS,
   CHART_COLORS_DARK,
   chartData,
   chartPlot,
-} from '@megabottron1999/core/chart.ts';
+} from '@megabottron1999/chart/chart.ts';
 import * as Plot from '@observablehq/plot';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
