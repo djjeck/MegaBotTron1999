@@ -90,7 +90,9 @@ by their `file_id` in its store.
   (`anthropic.call`: the calling node, the model, the tokens, the cost in USD from its price table,
   Anthropic's published prices kept in its code so that a release updates them, a model of no price
   logged as unknown), and keeps its last 24 hours by node and model in its store (`spend.ts`, which
-  another model connector can reuse), shown on its card, its panel and its page **Spend**.
+  another model connector can reuse), shown on its card, its panel, and its view
+  (`anthropicViewPlugin`, `anthropic-view`, **Spend**, its input `connector` bound to it; its page
+  until 0.1.80, docs/bot-os.md D177).
 
 Their secrets come from Docker secrets, never from variables. The two Telegram connectors take none:
 they log in from their node's panel (docs/bot-os.md D116, D118): `bot-login.ts` takes a bot's token

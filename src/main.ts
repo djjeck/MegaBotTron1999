@@ -125,9 +125,11 @@ const packages: PackageSpec[] = [
   },
   {
     name: '@megabottron1999/connectors/plugins/anthropic.ts',
-    load: async () => [
-      (await import('@megabottron1999/connectors/plugins/anthropic.ts')).anthropicPlugin(),
-    ],
+    // The Claude API, and its spend's view (docs/bot-os.md D177).
+    load: async () => {
+      const m = await import('@megabottron1999/connectors/plugins/anthropic.ts');
+      return [m.anthropicPlugin(), m.anthropicViewPlugin()];
+    },
   },
   {
     name: '@megabottron1999/turns/attention.ts',

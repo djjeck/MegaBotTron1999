@@ -1,5 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { Core, definePlugin, parseManifest, VirtualClock } from '@megabottron1999/core';
+import {
+  Core,
+  definePlugin,
+  parseManifest,
+  viewLeaves,
+  VirtualClock,
+  widgetIssues,
+} from '@megabottron1999/core';
 import { secretsWith } from '@megabottron1999/core/test/secrets.ts';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -7,6 +14,7 @@ import {
   type AnthropicClient,
   anthropicConfig,
   anthropicPlugin,
+  anthropicViewPlugin,
   type Ask,
   askWith,
   DEFAULT_MODEL,
@@ -433,5 +441,18 @@ describe('the anthropic plugin', () => {
     await core.start();
     expect(core.state('anthropic')?.state).toBe('running');
     expect(core.connector('anthropic')?.account).toBe('anthropic:supervisor');
+  });
+});
+
+describe('its spend’s view (D177)', () => {
+  it('shows what its page did, each leaf read from the connector bound to its input', () => {
+    const m = parseManifest(anthropicPlugin().manifest);
+    expect(m.page).toBeUndefined();
+    const v = parseManifest(anthropicViewPlugin().manifest);
+    expect(v.inputs['connector']).toMatchObject({ type: 'interface', plugin: 'anthropic' });
+    const leaves = viewLeaves(v.view ?? { sections: [] });
+    expect(leaves.map((l) => l.leaf.show)).toEqual(['keyValue', 'table', 'table']);
+    for (const { leaf } of leaves)
+      expect(widgetIssues(leaf as never, m.interface.state ?? {})).toEqual([]);
   });
 });

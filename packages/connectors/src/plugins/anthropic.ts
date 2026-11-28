@@ -36,13 +36,39 @@ import {
   OWNER_CALLER,
   priceOf,
   type Prices,
-  SPEND_PAGE,
+  SPEND_VIEW,
   SPEND_WIDGET,
   SpendLedger,
   spendStatus,
 } from './spend.ts';
 
 export const ANTHROPIC = 'anthropic';
+/** Its spend's view (bot-os.md D177): what its page showed, at `/v/<path>/`. */
+export const ANTHROPIC_VIEW = 'anthropic-view';
+
+/**
+ * The anthropic connector's spend as a view (D170, D177): the last 24 hours by calling node and by
+ * model, of the connector node wired to its `connector` input.
+ */
+export function anthropicViewPlugin(): Plugin {
+  return definePlugin({
+    manifest: {
+      id: ANTHROPIC_VIEW,
+      kinds: ['view'],
+      description: 'What a Claude API connector spent over the last 24 hours, by node and by model',
+      inputs: {
+        connector: {
+          type: 'interface',
+          plugin: ANTHROPIC,
+          optional: true,
+          help: 'The anthropic connector it shows',
+        },
+      },
+      view: SPEND_VIEW,
+    },
+    create: () => ({}),
+  });
+}
 export const ANTHROPIC_KEY = 'anthropic_api_key';
 /** The model when neither the request nor the configuration names one. */
 export const DEFAULT_MODEL = 'claude-opus-5-5';
@@ -332,7 +358,6 @@ export function anthropicPlugin(o: AnthropicPluginOptions = {}): Plugin {
       secrets: [ANTHROPIC_KEY],
       config: anthropicConfig,
       widget: SPEND_WIDGET,
-      page: SPEND_PAGE,
       interface: {
         state: {
           status: {

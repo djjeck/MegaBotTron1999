@@ -2996,6 +2996,7 @@ its bytes is for later.
 | `attention`      | actor        | `@megabottron1999/turns`      | A simulated person: when they sit down to play and how fast they act, one node per person, for the players bound to it                                                     |
 | `player`         | actor        | `@megabottron1999/turns`      | One game bot's commands, each when ready, in its person's sittings, run as one node per bot                                                                                |
 | `player-view`    | view         | `@megabottron1999/turns`      | A player's plays at `/v/<path>/`: its chat and commands, its last and next play, of the player on its input (D177)                                                         |
+| `anthropic-view` | view         | `@megabottron1999/connectors` | A Claude API connector's spend at `/v/<path>/`: its last 24 hours, by calling node and by model (D177)                                                                     |
 | `attention-view` | view         | `@megabottron1999/turns`      | A person's sittings at `/v/<path>/`: their mode, players, and last and next sitting, of the attention on its input (D177)                                                  |
 | `reactor`        | actor        | `@megabottron1999/turns`      | One reaction (§4.15) from its config: a command sent when an event is heard or a message matches                                                                           |
 | `script`         | actor, stats | `@megabottron1999/turns`      | TypeScript typed in the editor, on the ports its config declares, in a worker thread of its own                                                                            |
@@ -3123,8 +3124,9 @@ its bytes is for later.
   node and model; the hours that overlap the last 24), so a restart keeps them: its `status` read
   gives `{ calls, cost, usd, unpriced, since, byNode, byModel }` and the four token counts (`cost`
   in words, `$0.42 + 2 unpriced`), its widget shows `Last 24 h — Cost: $0.42 · Calls: 14` on its
-  card, its panel's Status breaks it down by calling node, its page **Spend** has a table by node
-  and one by model, and its `Instance.cost` gives the costs its `spend` (§4.11).
+  card, its panel's Status breaks it down by calling node, a view of its own (`anthropic-view`,
+  **Spend**, its input `connector` bound to it; its page until 0.1.80, D177) has its totals, a table
+  by node and one by model, and its `Instance.cost` gives the costs its `spend` (§4.11).
 - **`turnParserPlugin`** (`packages/turns/src/turn-parser.ts`): one parser plugin per game bot, each
   made from its bot's grammar (`read`), which knows the game. **It turns its bot's messages into
   events, and nothing else** (bot-os.md D141): when a command may be played again is a state's

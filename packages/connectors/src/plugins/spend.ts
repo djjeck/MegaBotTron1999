@@ -3,14 +3,14 @@
  * `model`: each call's cost from a price table per model, a record of it in the event log, and the
  * last 24 hours kept in its store by the hour, by calling node and by model, so that the figure
  * survives a restart without reading the log back. Its `status` read says it; the connector's
- * widget and page show it (D112), and its `Instance.cost` gives the Costs sheet its total (D77).
+ * widget shows it (D112), and a view of it the rest (`SPEND_VIEW`, D177), and its `Instance.cost` gives the Costs sheet its total (D77).
  */
 import {
   type Clock,
+  type ManifestInput,
   type Spend,
   type Store,
   type Widget,
-  type WidgetPage,
 } from '@megabottron1999/core';
 import { z } from 'zod';
 
@@ -146,13 +146,37 @@ const COLUMNS = [
   'cacheReadTokens',
 ];
 
-/** Its page: the last 24 hours in full, by calling node and by model. */
-export const SPEND_PAGE: WidgetPage = {
+/**
+ * A model connector's spend as a view (bot-os.md D177): the last 24 hours in full, by calling node
+ * and by model, of the node bound to the view's `connector` input; the connector's page until
+ * 0.1.80.
+ */
+export const SPEND_VIEW: NonNullable<ManifestInput['view']> = {
   title: 'Spend',
   sections: [
-    { show: 'keyValue', read: 'status', label: 'Last 24 h', fields: ['cost', 'calls', 'unpriced'] },
-    { show: 'table', read: 'status', path: 'byNode', columns: ['node', ...COLUMNS] },
-    { show: 'table', read: 'status', path: 'byModel', columns: ['model', ...COLUMNS] },
+    {
+      show: 'keyValue',
+      from: 'connector',
+      read: 'status',
+      label: 'Last 24 h',
+      fields: ['cost', 'calls', 'unpriced'],
+    },
+    {
+      show: 'table',
+      from: 'connector',
+      read: 'status',
+      label: 'By node',
+      path: 'byNode',
+      columns: ['node', ...COLUMNS],
+    },
+    {
+      show: 'table',
+      from: 'connector',
+      read: 'status',
+      label: 'By model',
+      path: 'byModel',
+      columns: ['model', ...COLUMNS],
+    },
   ],
 };
 
