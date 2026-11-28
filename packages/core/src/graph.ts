@@ -554,6 +554,11 @@ export function resolveGraph(
     if (problem !== undefined) problems.push(problem);
     // What its config makes it do that the owner may not mean: warned of, not refused (D138).
     for (const w of manifest.warns?.(n.config ?? {}) ?? []) warnings.push(`node ${n.id}: ${w}`);
+    // A node page (D112) is deprecated for a view (D169, D170): read still, and warned of (D177).
+    if (manifest.page !== undefined)
+      warnings.push(
+        `node ${n.id}: its plugin ${base.id}'s page is deprecated: move it into a view (its panel in the editor offers to)`
+      );
     const instance = n.instance ?? n.id;
     const holder = instances.get(instance);
     const kept = instanceOf(instance);

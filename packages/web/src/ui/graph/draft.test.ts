@@ -21,6 +21,7 @@ import {
   instanceOf,
   movePort,
   ownerOf,
+  pageToView,
   placeProblems,
   portChanged,
   removeEdge,
@@ -971,5 +972,44 @@ describe('a commands edge (D109)', () => {
       updateEdge(g, key, { serves: ['map'], chats: ['#a'], privateChats: true, dryRun: undefined })
         .edges
     ).toEqual([{ ...e, serves: ['map'], chats: ['#a'], privateChats: true }]);
+  });
+});
+
+describe('pageToView (D177)', () => {
+  it('makes a disabled view node of the page, its sections from one input bound to the node', () => {
+    const page = {
+      title: 'Plays',
+      sections: [
+        { show: 'keyValue' as const, read: 'status', fields: ['chat'] },
+        { show: 'until' as const, read: 'status', path: 'next' },
+      ],
+    };
+    const g = {
+      version: 2 as const,
+      nodes: [
+        { id: 'p', plugin: 'player' },
+        { id: 'p-view', plugin: 'x' },
+      ],
+      edges: [],
+    };
+    const moved = pageToView(g, { id: 'p', plugin: 'player', page });
+    expect(moved.id).toBe('p-view-2');
+    expect(moved.graph.nodes.at(-1)).toEqual({
+      id: 'p-view-2',
+      plugin: 'view',
+      disabled: true,
+      config: {
+        title: 'Plays',
+        inputs: { player: { type: 'interface', plugin: 'player', members: [] } },
+        sections: [
+          { show: 'keyValue', read: 'status', fields: ['chat'], from: 'player' },
+          { show: 'until', read: 'status', path: 'next', from: 'player' },
+        ],
+      },
+    });
+    expect(moved.graph.edges).toEqual([
+      { from: 'p.interface', to: 'p-view-2.player', type: 'interface' },
+    ]);
+    expect(pageToView(g, { id: 'p', plugin: 'Odd_Plugin', page }).input).toBe('node');
   });
 });

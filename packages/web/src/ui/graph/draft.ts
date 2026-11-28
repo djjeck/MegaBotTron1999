@@ -13,6 +13,7 @@ import type {
   NodeView,
   PluginView,
   PortView,
+  WidgetPage,
 } from '#src/ui/api.ts';
 
 export const EMPTY_GRAPH: Graph = { version: 2, nodes: [], edges: [] };
@@ -747,4 +748,31 @@ export function servedNote(node: string, edges: readonly GraphEdge[]): string {
   const serving = edges.filter((e) => e.type === 'commands' && endOf(e.to).node === node);
   if (serving.length === 0) return 'no edge serves its commands: no chat asks it anything';
   return serving.map((e) => `${endOf(e.from).node} ${servesText(e)}`).join('\n');
+}
+
+/**
+ * A node's page (D112), deprecated, moved into a view (D177): a generic `view` node, disabled as a
+ * node the editor adds is (D64), whose config is the page's title and sections, each section's
+ * `from` its one input, an interface input of the node's plugin, bound to the node by an edge.
+ * Its id is the node's with `-view`, made free. Nothing is saved: the owner reviews it, enables it
+ * and applies, as any change.
+ */
+export function pageToView(
+  g: Graph,
+  node: { id: string; plugin: string; page: WidgetPage }
+): { graph: Graph; id: string; input: string } {
+  const taken = new Set(g.nodes.map((n) => n.id));
+  const id = freeId(`${node.id}-view`, taken);
+  const input = NODE_ID.test(node.plugin) ? node.plugin : 'node';
+  const config = {
+    title: node.page.title,
+    inputs: { [input]: { type: 'interface', plugin: node.plugin, members: [] } },
+    sections: node.page.sections.map((s) => ({ ...s, from: input })),
+  };
+  const graph = connect(addNode(g, { id, plugin: 'view', config, disabled: true }), {
+    from: `${node.id}.interface`,
+    to: `${id}.${input}`,
+    type: 'interface',
+  });
+  return { graph, id, input };
 }

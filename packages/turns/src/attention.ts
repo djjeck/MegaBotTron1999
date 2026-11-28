@@ -335,22 +335,56 @@ export function attentionPlugin(): Plugin {
           },
         },
       },
+      // Its next sitting on its card (D112); its page moved into a view (`attention-view`, D177).
       widget: { show: 'until', read: 'status', path: 'next' },
-      page: {
+    },
+    create: (ctx) => new Attention(ctx).instance(),
+  });
+}
+
+/** The attention's view (bot-os.md D177): what its page showed, at `/v/<path>/`, one per person. */
+export const ATTENTION_VIEW = 'attention-view';
+
+/**
+ * A simulated person's sittings as a view (D170, D177): its mode, its players and whether it plays
+ * by hand, and its last and next sitting, of the attention node wired to its input.
+ */
+export function attentionViewPlugin(): Plugin {
+  return definePlugin({
+    manifest: {
+      id: ATTENTION_VIEW,
+      kinds: ['view'],
+      description: 'A person’s sittings: their mode, players, and last and next sitting',
+      inputs: {
+        person: {
+          type: 'interface',
+          plugin: ATTENTION,
+          optional: true,
+          help: 'The person it shows',
+        },
+      },
+      view: {
         title: 'Sittings',
         sections: [
           {
             show: 'keyValue',
+            from: 'person',
             read: 'status',
             label: 'Person',
             fields: ['mode', 'players', 'byHand'],
           },
-          { show: 'until', read: 'status', path: 'last' },
-          { show: 'until', read: 'status', path: 'next' },
+          {
+            show: 'grid',
+            columns: 2,
+            sections: [
+              { show: 'until', from: 'person', read: 'status', path: 'last' },
+              { show: 'until', from: 'person', read: 'status', path: 'next' },
+            ],
+          },
         ],
       },
     },
-    create: (ctx) => new Attention(ctx).instance(),
+    create: () => ({}),
   });
 }
 

@@ -216,8 +216,17 @@ seconds while it is open. **Neither asks while its browser tab is hidden** (bot-
 shows again, each asks at once and its five seconds resume; and none asks a read again while its
 last ask is unanswered. A ticking `until` keeps ticking, which costs no request. A view (below) asks
 only as its nodes change (D173); the editor's `GET /status` stays a poll. The player's, for one
-(§5): `widget: { show: 'until', read: 'status', path: 'next' }`, and a page **Plays** with its chat
-and commands, its last play and its next.
+(§5): `widget: { show: 'until', read: 'status', path: 'next' }`; its page **Plays** moved into a
+view of its own, `player-view` (D177).
+
+**A node page is deprecated** (D177, D169): `page` is read still, for one more release, and the
+graph warns of each node whose plugin has one
+(`node quest-player: its plugin quest's page is deprecated: move it into a view (its panel in the editor offers to)`);
+the node's panel and its page say so, and the panel offers **Move its page into a view**: a generic
+`view` node added to the draft, disabled, its config the page's title and sections, each section's
+`from` its one input (named after the node's plugin), bound to the node by an interface edge; the
+owner enables it, reviews and applies. A module ships its own view plugin in its page's place, as
+the turns package does (`player-view`, `attention-view`, §5). A later release refuses `page`.
 
 **A table's pictures and row actions** (bot-os.md D157). A column `show: 'image'` shows its value as
 a thumbnail that opens it whole, an empty value an empty cell: `from: 'files'` (the default), a file
@@ -411,8 +420,8 @@ the kind of section and nothing else; `format` says how a value is drawn.
   browser's own, no element of the page, so no stylesheet reaches it.
 
 A node page (`page`, above) keeps working as it is, and its table takes a table's search, sort,
-paging, formats and a drawer of fields and actions too; it is deprecated for views (D169), and a
-later release will offer to move each into a view.
+paging, formats and a drawer of fields and actions too; it is deprecated for views (D169, D177): the
+graph warns of it, the editor moves one into a view, and a later release refuses it.
 
 **Chat commands (P11).** A command of `interface.commands` has its `help` (the owner's words: the
 owner's menu, the UI, the agents), its `args`, its `aliases` (other names it answers to, in no menu;
@@ -2976,22 +2985,24 @@ its bytes is for later.
 
 ## 5. The shell's own plugins
 
-| Plugin          | Kinds        | Package                       | What it is                                                                                                                                                                 |
-| --------------- | ------------ | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `irc`           | connector    | `@megabottron1999/connectors` | An IRC account through a ZNC bouncer, with its flood limits and a health endpoint                                                                                          |
-| `telegram-bot`  | connector    | `@megabottron1999/connectors` | A Telegram bot (grammY), and the owner's chat surface                                                                                                                      |
-| `telegram-user` | connector    | `@megabottron1999/connectors` | A Telegram user account (GramJS), reading and sending in the chats it monitors                                                                                             |
-| `anthropic`     | connector    | `@megabottron1999/connectors` | The Claude API: `ask`, with structured output (§4.13)                                                                                                                      |
-| (service)       | connector    | `@megabottron1999/connectors` | `ServiceConnector`: the connector of a plugin that holds secrets for an API client, no chat                                                                                |
-| (turn parsers)  | parser       | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives                                                                               |
-| `attention`     | actor        | `@megabottron1999/turns`      | A simulated person: when they sit down to play and how fast they act, one node per person, for the players bound to it                                                     |
-| `player`        | actor        | `@megabottron1999/turns`      | One game bot's commands, each when ready, in its person's sittings, run as one node per bot                                                                                |
-| `reactor`       | actor        | `@megabottron1999/turns`      | One reaction (§4.15) from its config: a command sent when an event is heard or a message matches                                                                           |
-| `script`        | actor, stats | `@megabottron1999/turns`      | TypeScript typed in the editor, on the ports its config declares, in a worker thread of its own                                                                            |
-| `collection`    | stats        | `@megabottron1999/turns`      | Records of a schema its config gives, media included, edited in its panel and read through its interface (D155)                                                            |
-| `view`          | view         | `@megabottron1999/turns`      | A page of the owner's own at `/v/<path>/`, its sections from its config, each read from a node wired to its inputs (D170)                                                  |
-| `owner-notice`  | stats        | `@megabottron1999/turns`      | Tells the owner what needs attention (§4.16) at once or in a daily digest by level (§4.17), and a notice at each start, through a chat-out edge                            |
-| (states)        | stats        | `@megabottron1999/turns`      | `statePlugin`: a game's player state, kept from its parsers' events, from a spec a game gives, with its commands' readiness; `readinessPlugin`: the readiness alone (D141) |
+| Plugin           | Kinds        | Package                       | What it is                                                                                                                                                                 |
+| ---------------- | ------------ | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `irc`            | connector    | `@megabottron1999/connectors` | An IRC account through a ZNC bouncer, with its flood limits and a health endpoint                                                                                          |
+| `telegram-bot`   | connector    | `@megabottron1999/connectors` | A Telegram bot (grammY), and the owner's chat surface                                                                                                                      |
+| `telegram-user`  | connector    | `@megabottron1999/connectors` | A Telegram user account (GramJS), reading and sending in the chats it monitors                                                                                             |
+| `anthropic`      | connector    | `@megabottron1999/connectors` | The Claude API: `ask`, with structured output (§4.13)                                                                                                                      |
+| (service)        | connector    | `@megabottron1999/connectors` | `ServiceConnector`: the connector of a plugin that holds secrets for an API client, no chat                                                                                |
+| (turn parsers)   | parser       | `@megabottron1999/turns`      | `turnParserPlugin`: a parser of one game bot's answers to turns, from a grammar a game gives                                                                               |
+| `attention`      | actor        | `@megabottron1999/turns`      | A simulated person: when they sit down to play and how fast they act, one node per person, for the players bound to it                                                     |
+| `player`         | actor        | `@megabottron1999/turns`      | One game bot's commands, each when ready, in its person's sittings, run as one node per bot                                                                                |
+| `player-view`    | view         | `@megabottron1999/turns`      | A player's plays at `/v/<path>/`: its chat and commands, its last and next play, of the player on its input (D177)                                                         |
+| `attention-view` | view         | `@megabottron1999/turns`      | A person's sittings at `/v/<path>/`: their mode, players, and last and next sitting, of the attention on its input (D177)                                                  |
+| `reactor`        | actor        | `@megabottron1999/turns`      | One reaction (§4.15) from its config: a command sent when an event is heard or a message matches                                                                           |
+| `script`         | actor, stats | `@megabottron1999/turns`      | TypeScript typed in the editor, on the ports its config declares, in a worker thread of its own                                                                            |
+| `collection`     | stats        | `@megabottron1999/turns`      | Records of a schema its config gives, media included, edited in its panel and read through its interface (D155)                                                            |
+| `view`           | view         | `@megabottron1999/turns`      | A page of the owner's own at `/v/<path>/`, its sections from its config, each read from a node wired to its inputs (D170)                                                  |
+| `owner-notice`   | stats        | `@megabottron1999/turns`      | Tells the owner what needs attention (§4.16) at once or in a daily digest by level (§4.17), and a notice at each start, through a chat-out edge                            |
+| (states)         | stats        | `@megabottron1999/turns`      | `statePlugin`: a game's player state, kept from its parsers' events, from a spec a game gives, with its commands' readiness; `readinessPlugin`: the readiness alone (D141) |
 
 - **`irc`** (`packages/connectors/src/plugins/irc.ts`, on the IRC client of
   `packages/connectors/src/transport/irc-client.ts`): one IRC account through ZNC, its configuration
@@ -3218,10 +3229,11 @@ its bytes is for later.
   stop (`kill`) stops its node, and its players are inactive with it. Its read `status` gives its
   behaviours (`mode`: `scheduled`, `follows your play`, both, or `never plays`), its players, its
   last sitting (and whether by hand) and its next (a time; not scheduled, `follows your play`, or
-  `never: …`), which its node's widget (its next sitting) and page (**Sittings**) show (D112). Each
-  step is published as `attention.step` (`planned`, `sitting`, `seen`, `busy`, `heard`, `stopped`);
-  its sittings (those that followed the owner counted apart: `3 sittings (1 following you)`), and
-  those by hand, go in the owner's summary (§4.17).
+  `never: …`), which its node's widget (its next sitting) and a view (`attention-view`,
+  **Sittings**, its input `person` bound to it; its page until 0.1.79, D177) show (D112). Each step
+  is published as `attention.step` (`planned`, `sitting`, `seen`, `busy`, `heard`, `stopped`); its
+  sittings (those that followed the owner counted apart: `3 sittings (1 following you)`), and those
+  by hand, go in the owner's summary (§4.17).
 - **`player`** (`packages/turns/src/player.ts`, bot-os.md D134): one plugin run as one node per game
   bot (P3, P17), in place of the turn actor, each with its own id, configuration, store, timer and
   state. Its ports: `chat`, a chat-out output on `telegram`, which sends to the private chat with
@@ -3290,15 +3302,16 @@ its bytes is for later.
   clears the stop in the editor. It declares no chat command, since two nodes would clash: the owner
   reaches each with `/plugins <id>` and its read `status` (its chat, its commands, its last play and
   its next: its next step in a sitting, else its person's next sitting, or `follows your play`),
-  which its node's widget and page (**Plays**) show (D112). Each step is published as `player.step`
-  (`sitting`, `sent`, `read`, `done`, `waiting`, `failed`, `stopped`); its commands sent, by
-  command, go in the owner's summary (§4.17, D92). The image offers both (`src/main.ts`): the editor
-  adds one `attention` node per person and one player per bot, each on its own instance, its `chat`
-  edge to the owner's `telegram-user` node, its `state` edge from its bot's readiness state and its
-  `attention` edge from its person. The turn parsers and the readiness states are not the image's:
-  each is made from a game's grammar and mechanics, so a game's module offers them. **A game's
-  module declares its commands' mechanics** on its state's side (`ReadinessSpec.mechanics`, D132,
-  D141): a cooldown (`{ "/daily": { cooldownMin: 1440 } }`), a reset at set wall-clock times
+  which its node's widget and a view (`player-view`, **Plays**, its input `player` bound to it; its
+  page until 0.1.79, D177) show (D112). Each step is published as `player.step` (`sitting`, `sent`,
+  `read`, `done`, `waiting`, `failed`, `stopped`); its commands sent, by command, go in the owner's
+  summary (§4.17, D92). The image offers both (`src/main.ts`): the editor adds one `attention` node
+  per person and one player per bot, each on its own instance, its `chat` edge to the owner's
+  `telegram-user` node, its `state` edge from its bot's readiness state and its `attention` edge
+  from its person. The turn parsers and the readiness states are not the image's: each is made from
+  a game's grammar and mechanics, so a game's module offers them. **A game's module declares its
+  commands' mechanics** on its state's side (`ReadinessSpec.mechanics`, D132, D141): a cooldown
+  (`{ "/daily": { cooldownMin: 1440 } }`), a reset at set wall-clock times
   (`{ "/market": { resetsAt: { times: ["00:00"], timeZone: "Europe/Rome" } } }`, D165), an announced
   unlock (`{ "/chest": { unlock: { forMin: 30 } } }`, the announcement its parser's `announcedBy` or
   a reading's `unlocks`) and a reset

@@ -23,4 +23,15 @@ describe('themeStyle', () => {
       '--view-font': "ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
     });
   });
+
+  it('falls back for a density or a font it does not know, and skips a colour that is no text', () => {
+    expect(
+      themeStyle({
+        light: { accent: 3, chart: 7 } as never,
+        density: 'airy' as never,
+        font: 'comic' as never,
+      })
+    ).toEqual({ '--view-density': '1', '--view-font': 'inherit' });
+    expect(themeStyle({})).toEqual({});
+  });
 });

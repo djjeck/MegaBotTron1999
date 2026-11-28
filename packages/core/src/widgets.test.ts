@@ -398,3 +398,36 @@ describe('a table’s pictures and row actions (D157)', () => {
     expect(withOptions({ read: 'cards', value: 'place' })).toBe('');
   });
 });
+
+describe('a node page, deprecated (D177)', () => {
+  it('is read still, and the graph warns of each node whose plugin has one', async () => {
+    const { resolveGraph } = await import('./graph.ts');
+    const paged = parseManifest({
+      id: 'ledger',
+      kinds: ['stats'],
+      description: 'A ledger',
+      interface: {
+        state: { status: { help: 'Its gold', output: z.object({ gold: z.number() }) } },
+      },
+      page: { title: 'Gold', sections: [{ show: 'counter', read: 'status', path: 'gold' }] },
+    });
+    const plain = parseManifest({ id: 'plain', kinds: ['stats'], description: 'Plain' });
+    const r = resolveGraph(
+      {
+        version: 2,
+        nodes: [
+          { id: 'ledger', plugin: 'ledger' },
+          { id: 'plain', plugin: 'plain' },
+        ],
+        edges: [],
+      },
+      new Map([
+        ['ledger', paged],
+        ['plain', plain],
+      ])
+    );
+    expect(r.warnings).toEqual([
+      "node ledger: its plugin ledger's page is deprecated: move it into a view (its panel in the editor offers to)",
+    ]);
+  });
+});

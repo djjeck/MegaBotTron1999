@@ -32,8 +32,9 @@ the node that tells the owner what needs attention, and a view, a page of the ow
   `listen`s to, through its `listen` chat-in from the owner's own account (network `telegram`: the
   check refuses a bot's; none during a sitting: its players look again instead), counted as the
   owner's own sitting. Both off, the check warns that it never plays. Its card shows its next
-  sitting (`follows your play` when not scheduled), its page (**Sittings**) its behaviours, its last
-  and next.
+  sitting (`follows your play` when not scheduled); its view (`attentionViewPlugin`,
+  `attention-view`, **Sittings**, its input `person` bound to it; its node page until 0.1.79,
+  docs/bot-os.md D177) its behaviours, its last and next.
 - `playerPlugin` (`src/player.ts`): the `player`, one node per bot, in place of the turn actor
   (D134): given a sitting, it plays each of its commands that its bot's readiness state (its `state`
   input, D141) says is ready (`state.ready`, D132) and its policy allows: its config's `commands`
@@ -59,9 +60,10 @@ the node that tells the owner what needs attention, and a view, a page of the ow
   reaches in the same tick. Each command it sends live it tells its state, which hands it to its
   parser, and hands off to every other player of its account, each telling its own. Through a
   dry-run chat-out edge it logs each command and sends nothing; through a live one it waits for the
-  account to be connected. Its card shows its next play, its page (**Plays**) its chat, commands,
-  last and next play (D112). Its safety stop (the kill switch) stops its node (`ctx.stop`,
-  docs/bot-os.md D64), until the owner clears the stop in the editor.
+  account to be connected. Its card shows its next play; its view (`playerViewPlugin`,
+  `player-view`, **Plays**, its input `player` bound to it; its node page until 0.1.79, D177) its
+  chat, commands, last and next play (D112). Its safety stop (the kill switch) stops its node
+  (`ctx.stop`, docs/bot-os.md D64), until the owner clears the stop in the editor.
 - `reactorPlugin` (`src/reactor.ts`): the `reactor`, one reaction (`react()` of the core) from its
   node's config: when an event of its `on` type is heard (on its events input, there only with `on`
   and then required: the check refuses a reactor on events that no edge binds), or a message on its

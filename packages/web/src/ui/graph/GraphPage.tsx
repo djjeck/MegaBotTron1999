@@ -104,6 +104,7 @@ import {
   endOf,
   instanceOf,
   ownerOf,
+  pageToView,
   placeProblems,
   placeWarnings,
   portChanged,
@@ -911,6 +912,23 @@ export function GraphPage({
           setSelected({ nodes: [], edges: [] });
         }}
         kill={kill}
+        {...(view.page === undefined
+          ? {}
+          : {
+              movePage: () => {
+                const page = view.page;
+                if (page === undefined) return;
+                const moved = pageToView(draft, { id: shownNode.id, plugin: view.plugin, page });
+                change(() => moved.graph);
+                setNodes((ns) =>
+                  ns.map((x) => (x.selected === true ? { ...x, selected: false } : x))
+                );
+                setSelected({ nodes: [moved.id], edges: [] });
+                setSaid(
+                  `${shownNode.id}'s page moved into ${moved.id}, a view bound to it by its input ${moved.input}, disabled: enable it, then review and apply; its page goes once its plugin drops it`
+                );
+              },
+            })}
         saved={saved?.nodes.find((n) => n.id === shownNode.id)}
         edges={draft.edges}
         openEdge={openEdge}

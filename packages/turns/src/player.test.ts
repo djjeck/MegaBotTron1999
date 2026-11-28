@@ -7,6 +7,8 @@ import {
   type GraphInput,
   parseManifest,
   resolveGraph,
+  viewLeaves,
+  widgetIssues,
 } from '@megabottron1999/core';
 import { describe, expect, it } from 'vitest';
 import { attentionPlugin } from '#src/attention.ts';
@@ -20,6 +22,7 @@ import {
   PLAYER,
   playerConfig,
   playerPlugin,
+  playerViewPlugin,
   playForms,
   playsOf,
 } from './player.ts';
@@ -533,11 +536,18 @@ describe('a person’s sittings, played on the dev kit (bot-os.md D134)', () => 
     await r.kit.stop();
   });
 
-  it('shows its next play on its card and its plays on its page (D112)', async () => {
+  it('shows its next play on its card, and its plays in its view (D112, D177)', async () => {
     const r = await runSittings();
     const m = parseManifest(playerPlugin().manifest);
     expect(m.widget).toEqual({ show: 'until', read: 'status', path: 'next' });
-    expect(m.page?.sections.map((s) => s.show)).toEqual(['keyValue', 'until', 'until']);
+    // Its page moved into a view of its own, whose every leaf reads what a player answers.
+    expect(m.page).toBeUndefined();
+    const v = parseManifest(playerViewPlugin().manifest);
+    expect(v.inputs['player']).toMatchObject({ type: 'interface', plugin: PLAYER });
+    const leaves = viewLeaves(v.view ?? { sections: [] });
+    expect(leaves.map((l) => l.leaf.show)).toEqual(['keyValue', 'until', 'until']);
+    for (const { leaf } of leaves)
+      expect(widgetIssues(leaf as never, m.interface.state ?? {})).toEqual([]);
     const node = r.kit.core.controls.status().plugins.find((p) => p.id === 'quest-player');
     expect(node?.widget).toEqual(r.status());
     expect(r.status()).toEqual({

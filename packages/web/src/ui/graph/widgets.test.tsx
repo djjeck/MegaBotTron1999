@@ -270,6 +270,11 @@ describe('a node’s widget in the editor', () => {
     expect(
       within(details).getByRole('link', { name: 'Open its page: Counts' }).getAttribute('href')
     ).toBe('#/node/actor-a');
+    // Its page, deprecated (D177), moved into a view node of the draft, bound to it.
+    expect(within(details).getByText(/Node pages are deprecated/u)).toBeDefined();
+    fireEvent.click(within(details).getByRole('button', { name: 'Move its page into a view' }));
+    expect(await screen.findByLabelText('node actor-a-view', {}, slow)).toBeDefined();
+    expect(screen.getByText(/actor-a's page moved into actor-a-view/u)).toBeDefined();
   });
 
   it('is not drawn, nor its page offered, while its node does not run', async () => {

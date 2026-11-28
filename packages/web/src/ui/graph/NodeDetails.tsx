@@ -828,6 +828,8 @@ export function NodeDetails(props: {
   openEdge?: (key: string) => void;
   /** Restarts the instance as Apply does: a connector's new login put in force (D116). */
   restart?: () => void;
+  /** Moves its page, deprecated, into a view node of its own in the draft (D177). */
+  movePage?: () => void;
   /** For a script node (D76, D78): the draft's nodes, each one's view, and the plugins offered. */
   script?: {
     nodes: readonly GraphNode[];
@@ -1062,11 +1064,26 @@ export function NodeDetails(props: {
         )
       ) : null}
       {running && live.status !== undefined ? <NodeStatus status={live.status} /> : null}
-      {running && view.page !== undefined ? (
-        <p>
-          <a href={`#/node/${encodeURIComponent(view.id)}`}>Open its page: {view.page.title}</a>
-        </p>
-      ) : null}
+      {view.page === undefined ? null : (
+        <div className="deprecated-page">
+          {running ? (
+            <p>
+              <a href={`#/node/${encodeURIComponent(view.id)}`}>Open its page: {view.page.title}</a>
+            </p>
+          ) : null}
+          <p className="muted small">
+            Node pages are deprecated (D177): a later release will drop them. Move this one into a
+            view, a page of its own at <code>/v/&lt;path&gt;/</code>, with the same sections.
+          </p>
+          {props.movePage === undefined ? null : (
+            <p>
+              <button type="button" onClick={props.movePage}>
+                Move its page into a view
+              </button>
+            </p>
+          )}
+        </div>
+      )}
       <ViewLinks view={view} running={running} />
       {running || live?.state === 'stopped' ? <NodeState id={view.id} /> : null}
       {connector && running ? <ConnectorQueue id={view.id} /> : null}

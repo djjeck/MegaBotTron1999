@@ -7,6 +7,8 @@ import {
   parseManifest,
   type Plugin,
   resolveGraph,
+  viewLeaves,
+  widgetIssues,
 } from '@megabottron1999/core';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -16,6 +18,7 @@ import {
   type AttentionHandle,
   attentionPlugin,
   type AttentionStatus,
+  attentionViewPlugin,
   FOLLOWS,
   NEVER,
   type Sitting,
@@ -394,11 +397,17 @@ describe('attention', () => {
     await r.kit.stop();
   });
 
-  it('shows its next sitting on its card and its sittings on its page (D112)', async () => {
+  it('shows its next sitting on its card, and its sittings in its view (D112, D177)', async () => {
     const r = await run([fakePlayer('a', [])]);
     const node = r.kit.core.controls.status().plugins.find((p) => p.id === ATTENTION);
     expect(node?.widget).toEqual(r.status());
-    expect(attentionPlugin().manifest.page?.title).toBe('Sittings');
+    const m = parseManifest(attentionPlugin().manifest);
+    expect(m.page).toBeUndefined();
+    const v = parseManifest(attentionViewPlugin().manifest);
+    expect(v.view?.title).toBe('Sittings');
+    expect(v.inputs['person']).toMatchObject({ type: 'interface', plugin: ATTENTION });
+    for (const { leaf } of viewLeaves(v.view ?? { sections: [] }))
+      expect(widgetIssues(leaf as never, m.interface.state ?? {})).toEqual([]);
     expect(SITTING_TIMER).toBe('sitting');
     await r.kit.stop();
   });

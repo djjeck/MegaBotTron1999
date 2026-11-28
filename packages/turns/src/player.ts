@@ -362,19 +362,57 @@ export function playerPlugin(): Plugin {
           },
         },
       },
-      // Its node's widget and page (bot-os.md D112): its next play on its card, its chat, its
-      // commands and its last and next plays on its page, each node its own.
+      // Its node's widget (bot-os.md D112): its next play on its card. Its page moved into a view
+      // of its own (`player-view`, D177).
       widget: { show: 'until', read: 'status', path: 'next' },
-      page: {
+    },
+    create: (ctx) => new Player(ctx, groups).instance(),
+  });
+}
+
+/** The player's view (bot-os.md D177): what its page showed, at `/v/<path>/`, one per player. */
+export const PLAYER_VIEW = 'player-view';
+
+/**
+ * A player's plays as a view (D170, D177): its chat and commands, and its last and next play, of
+ * the player node wired to its input; one view node per player, its path its own.
+ */
+export function playerViewPlugin(): Plugin {
+  return definePlugin({
+    manifest: {
+      id: PLAYER_VIEW,
+      kinds: ['view'],
+      description: 'A player’s plays: its chat and commands, its last and next play',
+      inputs: {
+        player: {
+          type: 'interface',
+          plugin: PLAYER,
+          optional: true,
+          help: 'The player it shows',
+        },
+      },
+      view: {
         title: 'Plays',
         sections: [
-          { show: 'keyValue', read: 'status', label: 'Plays', fields: ['chat', 'commands'] },
-          { show: 'until', read: 'status', path: 'last' },
-          { show: 'until', read: 'status', path: 'next' },
+          {
+            show: 'keyValue',
+            from: 'player',
+            read: 'status',
+            label: 'Plays',
+            fields: ['chat', 'commands'],
+          },
+          {
+            show: 'grid',
+            columns: 2,
+            sections: [
+              { show: 'until', from: 'player', read: 'status', path: 'last' },
+              { show: 'until', from: 'player', read: 'status', path: 'next' },
+            ],
+          },
         ],
       },
     },
-    create: (ctx) => new Player(ctx, groups).instance(),
+    create: () => ({}),
   });
 }
 

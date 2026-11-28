@@ -89,6 +89,9 @@ export function NodePage(props: PageProps) {
       <h2>
         {page.title} <span className="muted small">{id}</span>
       </h2>
+      <p className="muted small">
+        Node pages are deprecated (D177): its node’s panel in the editor moves this one into a view.
+      </p>
       {page.sections.map((s, i) => {
         const a = answers[readKey(s)];
         return (

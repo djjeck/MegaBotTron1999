@@ -131,11 +131,19 @@ const packages: PackageSpec[] = [
   },
   {
     name: '@megabottron1999/turns/attention.ts',
-    load: async () => [(await import('@megabottron1999/turns/attention.ts')).attentionPlugin()],
+    // A simulated person, and its view (docs/bot-os.md D177).
+    load: async () => {
+      const m = await import('@megabottron1999/turns/attention.ts');
+      return [m.attentionPlugin(), m.attentionViewPlugin()];
+    },
   },
   {
     name: '@megabottron1999/turns/player.ts',
-    load: async () => [(await import('@megabottron1999/turns/player.ts')).playerPlugin()],
+    // A game bot's player, and its view (docs/bot-os.md D177).
+    load: async () => {
+      const m = await import('@megabottron1999/turns/player.ts');
+      return [m.playerPlugin(), m.playerViewPlugin()];
+    },
   },
   {
     name: '@megabottron1999/turns/reactor.ts',
