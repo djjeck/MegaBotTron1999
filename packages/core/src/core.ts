@@ -528,6 +528,7 @@ export class Core {
       },
       drift: () => this.drift(),
       cost: (id) => this.cost(id),
+      served: (id, ms, bytes) => this.costs.served(id, ms, bytes),
       backoffs: (id) => this.backoffs(id),
       redact: (text) => this.o.secrets?.redact(text) ?? text,
       sealed: (id) => this.sealedStores.get(id)?.state(),
@@ -736,7 +737,12 @@ export class Core {
     } catch (err) {
       this.logger(id).error(`cost: ${message(err)}`);
     }
-    return { dispatch: this.costs.of(id), ...(own === undefined ? {} : { own }) };
+    const reads = this.costs.reads(id);
+    return {
+      dispatch: this.costs.of(id),
+      ...(reads === undefined ? {} : { reads }),
+      ...(own === undefined ? {} : { own }),
+    };
   }
 
   /** One plugin's state, or undefined for an id not loaded. */

@@ -3,18 +3,20 @@
  * graph editor: the page its plugin declares (`page`: a title and its sections), each section
  * drawn from the output of the read it names (`GET /plugins/<id>/state/<read>`, its input as the
  * query's fields), every read asked once however many sections show it, and asked again every
- * five seconds while the page is open, and at once after a table's row action ran (D157: its
+ * five seconds while the page is open and visible (D172: none while its tab is hidden, at once when
+ * it shows again, never twice while one is unanswered), and at once after a table's row action ran (D157: its
  * pictures from the node's files, its buttons running the node's actions). The node is the
  * running graph's (`GET /graph/view`): its page is its node's, two nodes of one plugin each
  * showing their own.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { GraphViewData, Widget } from '#src/ui/api.ts';
 import { api, ApiError, seg } from '#src/ui/api.ts';
 import type { PageProps } from '#src/ui/App.tsx';
 import { query } from '#src/ui/graph/NodeControls.tsx';
 import { WidgetSection } from '#src/ui/graph/Widget.tsx';
-import { useLoad } from '#src/ui/hooks.ts';
+import type { Poll } from '#src/ui/hooks.ts';
+import { poll, useLoad } from '#src/ui/hooks.ts';
 
 /** How often a page's reads are asked again. */
 export const PAGE_EVERY_MS = 5_000;
@@ -31,16 +33,16 @@ export function NodePage(props: PageProps) {
   const node = view.data?.nodes.find((n) => n.id === id);
   const page = node?.page;
   const [answers, setAnswers] = useState<Answers>({});
-  // Bumped after a row's action ran (D157): the reads asked again at once.
-  const [asked, setAsked] = useState(0);
+  // Asked again at once after a row's action ran (D157).
+  const polling = useRef<Poll | undefined>(undefined);
   const keys = page === undefined ? '' : JSON.stringify(page.sections.map(readKey));
 
   useEffect(() => {
     if (page === undefined) return undefined;
     let live = true;
     const reads = new Map(page.sections.map((s) => [readKey(s), s]));
-    const ask = (): void => {
-      void Promise.all(
+    const ask = (): Promise<void> =>
+      Promise.all(
         [...reads].map(([key, s]) =>
           api<unknown>(`/plugins/${seg(id)}/state/${seg(s.read)}${query(s.input ?? {})}`).then(
             (value) => [key, { value }] as const,
@@ -53,15 +55,14 @@ export function NodePage(props: PageProps) {
       ).then((all) => {
         if (live) setAnswers(Object.fromEntries(all));
       });
-    };
-    ask();
-    const timer = setInterval(ask, PAGE_EVERY_MS);
+    const p = poll(ask, PAGE_EVERY_MS);
+    polling.current = p;
     return () => {
       live = false;
-      clearInterval(timer);
+      p.stop();
     };
-    // The reads are the page's: asked anew when its node or its sections change, or after an action.
-  }, [id, keys, asked]);
+    // The reads are the page's: asked anew when its node or its sections change.
+  }, [id, keys]);
 
   const back = <a href="#/graph">← Graph</a>;
   if (view.data === undefined)
@@ -99,7 +100,7 @@ export function NodePage(props: PageProps) {
             error={a !== undefined && 'error' in a ? a.error : undefined}
             node={id}
             actions={node.interface.actions}
-            reload={() => setAsked((n) => n + 1)}
+            reload={() => polling.current?.now()}
           />
         );
       })}

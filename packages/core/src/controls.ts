@@ -98,6 +98,8 @@ export interface ControlsHost {
   drift(): DriftCounts[];
   /** What a node costs (bot-os.md D77). */
   cost?(id: string): NodeCost | undefined;
+  /** Counts a read served of a node (D172): its time and its answer's bytes. */
+  served?(id: string, ms: number, bytes: number): void;
   /** A node's commands the retry-loop guard holds back (bot-os.md D98). */
   backoffs?(id: string): BackoffView[];
   /** Takes the secrets out of a text (§4.9): a login's error. */
@@ -572,6 +574,11 @@ export class Controls {
    * A read the plugin declares, as its instance offers it now; one that declares an input is given
    * `input` (an object, its fields its arguments) as its schema makes it.
    */
+  /** Counts a read the control API served of a node (D172), in its cost. */
+  served(id: string, ms: number, bytes: number): void {
+    if (this.manifest(id) !== undefined) this.host.served?.(id, ms, bytes);
+  }
+
   read(id: string, name: string, input?: unknown): { value: unknown } | { error: string } {
     const m = this.manifest(id);
     if (m === undefined) return { error: `no plugin ${id}` };

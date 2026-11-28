@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react';
 import type { JsonSchema, SectionFreshness, StateView } from '#src/ui/api.ts';
 import { api, ApiError, seg } from '#src/ui/api.ts';
+import { poll } from '#src/ui/hooks.ts';
 
 /** How often the panel reads the state again while it is open. */
 const EVERY_MS = 5000;
@@ -345,7 +346,7 @@ export function NodeState(props: { id: string }) {
   const [view, setView] = useState<StateView | null | string>();
   useEffect(() => {
     let live = true;
-    const load = (): void => {
+    const load = (): Promise<void> =>
       api<StateView>(`/plugins/${seg(props.id)}/view`).then(
         (v) => {
           if (live) setView(v);
@@ -356,12 +357,10 @@ export function NodeState(props: { id: string }) {
           else setView(e instanceof Error ? e.message : String(e));
         }
       );
-    };
-    load();
-    const timer = setInterval(load, EVERY_MS);
+    const p = poll(load, EVERY_MS);
     return () => {
       live = false;
-      clearInterval(timer);
+      p.stop();
     };
   }, [props.id]);
   if (view === undefined || view === null) return null;

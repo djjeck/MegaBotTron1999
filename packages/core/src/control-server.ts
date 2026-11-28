@@ -329,11 +329,13 @@ export function controlHandler(
 ): (req: http.IncomingMessage, res: http.ServerResponse) => void {
   const { controls, settings } = o;
   return (req, res) => {
-    const reply = (status: number, value: unknown): void => {
+    // Bytes in an answer (a read's media, D155) go as `{ "$bytes": "<base64>" }`.
+    const json = (value: unknown): string => `${JSON.stringify(value, bytesJson)}\n`;
+    const send = (status: number, text: string): void => {
       res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      // Bytes in an answer (a read's media, D155) go as `{ "$bytes": "<base64>" }`.
-      res.end(`${JSON.stringify(value, bytesJson)}\n`);
+      res.end(text);
     };
+    const reply = (status: number, value: unknown): void => send(status, json(value));
     const handle = async (): Promise<void> => {
       const url = new URL(req.url ?? '/', 'http://control');
       const route = url.pathname;
@@ -595,8 +597,12 @@ export function controlHandler(
         if (!post && what === 'state' && name !== undefined) {
           // A read's input is its query's parameters, each a text (`?path=inventory.items`).
           const input = Object.fromEntries(url.searchParams);
+          // Timed with its answer's serialization, and its bytes counted, in the node's cost (D172).
+          const start = performance.now();
           const r = controls.read(id, name, input);
-          return 'error' in r ? reply(404, r) : reply(200, r.value);
+          const text = 'error' in r ? json(r) : json(r.value);
+          controls.served(id, performance.now() - start, Buffer.byteLength(text));
+          return send('error' in r ? 404 : 200, text);
         }
         if (!post && what === 'queue' && name === undefined) {
           const r = controls.queue(id);

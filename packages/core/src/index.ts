@@ -123,7 +123,14 @@ export {
   StartError,
   STOP_DOC,
 } from './core.ts';
-export { Costs, type DispatchCost, type NodeCost, type OwnCost, type Spend } from './costs.ts';
+export {
+  Costs,
+  type DispatchCost,
+  type NodeCost,
+  type OwnCost,
+  type ReadCost,
+  type Spend,
+} from './costs.ts';
 export {
   assertMedia,
   defineSimulator,

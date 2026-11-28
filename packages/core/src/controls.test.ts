@@ -910,6 +910,10 @@ describe('reads with an input, and a node’s state for the viewer (bot-os.md D7
       return [res.status, await res.json()] as const;
     };
     expect(await get('/plugins/keeper/state/at?path=a.b')).toEqual([200, 'a.b']);
+    // Each read served is counted in its node's cost (D172): its time and its answer's bytes.
+    expect(core.cost('keeper')?.reads).toMatchObject({ calls: 1, bytes: '"a.b"\n'.length });
+    expect(await get('/plugins/nobody/state/at')).toEqual([404, { error: 'no plugin nobody' }]);
+    expect(core.cost('broken')?.reads).toBeUndefined();
     expect(await get('/plugins/keeper/view')).toEqual([
       200,
       { schema: { type: 'object' }, state: { n: 1 }, pin: ['n'] },

@@ -249,6 +249,22 @@ describe('a view’s dashboard (D170, phase 2)', () => {
     expect(window.location.search).toBe('');
   });
 
+  it('asks a tab’s reads at once each time it comes on screen (D172)', async () => {
+    const api = serve();
+    render(<ViewPage loggedOut={() => {}} section="shop" />);
+    await screen.findByRole('list', { name: 'Ads' });
+    const players = (): number =>
+      api.calls.filter((c) => c === 'GET /plugins/shop/state/players').length;
+    expect(players()).toBe(0);
+    fireEvent.click(screen.getByRole('tab', { name: 'Players' }));
+    await waitFor(() => expect(players()).toBe(1));
+    fireEvent.click(screen.getByRole('tab', { name: /Catalogue/u }));
+    await screen.findByRole('list', { name: 'Ads' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Players' }));
+    // Its older answer kept and shown, and asked again at once.
+    await waitFor(() => expect(players()).toBe(2));
+  });
+
   it('keeps the tab and the row in the address, the drawer’s sections read with the row', async () => {
     const api = serve();
     window.history.replaceState(null, '', '/v/shop/?tab=players&row=bob');

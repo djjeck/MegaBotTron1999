@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 import type { CoalescedView, QueueEntryView } from '#src/ui/api.ts';
 import { api, seg } from '#src/ui/api.ts';
+import { poll } from '#src/ui/hooks.ts';
 
 const EVERY_MS = 3000;
 
@@ -51,7 +52,7 @@ export function ConnectorQueue(props: { id: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     let live = true;
-    const load = (): void => {
+    const load = (): Promise<void> =>
       api<{ entries: QueueEntryView[]; coalesced?: CoalescedView }>(
         `/plugins/${seg(props.id)}/queue`
       ).then(
@@ -65,12 +66,10 @@ export function ConnectorQueue(props: { id: string }) {
           if (live) setEntries(e instanceof Error ? e.message : String(e));
         }
       );
-    };
-    load();
-    const timer = setInterval(load, EVERY_MS);
+    const p = poll(load, EVERY_MS);
     return () => {
       live = false;
-      clearInterval(timer);
+      p.stop();
     };
   }, [props.id]);
   if (entries === undefined) return null;

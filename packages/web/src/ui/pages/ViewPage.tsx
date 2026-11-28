@@ -10,8 +10,11 @@
  * - **Each leaf's state:** loading, empty (its `empty`), or its read's error, naming its input and
  *   its read: a read that fails breaks its own card, not the page. An input left unbound says so.
  * - **Its reads** are those the page shows now (the open tab's, its tabs' counts, the open drawer's,
- *   a form's preset), each asked once however many leaves show it, again every five seconds while
- *   the page is open, and those of a node at once after an action ran on it. Each is keyed by its
+ *   a form's preset; a tab not on screen asks nothing but its count), each asked once however many
+ *   leaves show it, at once as it comes on screen (a tab switched to, a drawer opened, an older
+ *   answer kept or not), again every five seconds while the page is open and visible (D172: none while its tab is hidden, at once when it shows again),
+ *   never again while its last ask is unanswered, and those of a node at once after an action ran
+ *   on it (once its unanswered ask is answered, if one is). Each is keyed by its
  *   node, its read and its input, so that pushed changes may later ask only theirs.
  */
 import type { ReactNode } from 'react';
@@ -31,7 +34,7 @@ import { query } from '#src/ui/graph/NodeControls.tsx';
 import { SELECTOR_REF } from '#src/ui/graph/TableRow.tsx';
 import { emptyOf, SectionBody, useNow } from '#src/ui/graph/Widget.tsx';
 import { at, countOf, itemsOf, sectionLabel, words } from '#src/ui/graph/widget-text.ts';
-import { useLoad } from '#src/ui/hooks.ts';
+import { poll, useLoad } from '#src/ui/hooks.ts';
 import { colsOf } from '#src/ui/view/cells.tsx';
 import type { Opening } from '#src/ui/view/DataTable.tsx';
 import { Gallery } from '#src/ui/view/Gallery.tsx';
@@ -226,10 +229,19 @@ export function ViewPage(props: PageProps) {
   const current = useRef(asks);
   current.current = asks;
 
+  // The reads unanswered, by key, each with whether it is to be asked again once answered (D172).
+  const inFlight = useRef(new Map<string, { again: boolean; ask: Ask }>());
   const ask = useCallback(
-    (list: readonly Ask[]) => {
-      void Promise.all(
-        list.map((a) =>
+    (list: readonly Ask[], fresh = false): Promise<void> => {
+      const flying = inFlight.current;
+      const sent = list.filter((a) => {
+        const f = flying.get(keyOfAsk(a));
+        if (f !== undefined && fresh) f.again = true;
+        return f === undefined;
+      });
+      for (const a of sent) flying.set(keyOfAsk(a), { again: false, ask: a });
+      return Promise.all(
+        sent.map((a) =>
           api<unknown>(`/plugins/${seg(a.node)}/state/${seg(a.read)}${query(a.input)}`).then(
             (value) => [keyOfAsk(a), { value }] as const,
             (e: unknown) => {
@@ -240,22 +252,47 @@ export function ViewPage(props: PageProps) {
         )
       ).then((all) => {
         if (all.length > 0) setAnswers((was) => ({ ...was, ...Object.fromEntries(all) }));
+        const again = all.flatMap(([key]) => {
+          const f = flying.get(key);
+          flying.delete(key);
+          return f?.again === true ? [f.ask] : [];
+        });
+        if (again.length > 0) void ask(again);
       });
     },
     [props.loggedOut]
   );
-  // What is shown now, asked at once when it changes, and again every five seconds.
+  // What is shown now, asked at once when it changes, and again every five seconds while visible.
+  // A read that comes on screen (a tab switched to, a drawer opened) is asked at once, even with an
+  // older answer kept; the poll asks only those on screen.
+  const shownBefore = useRef(new Set<string>());
   useEffect(() => {
-    const fresh = asks.filter((a) => answers[keyOfAsk(a)] === undefined);
-    if (fresh.length > 0) ask(fresh);
+    const before = shownBefore.current;
+    const fresh = asks.filter((a) => !before.has(keyOfAsk(a)));
+    shownBefore.current = new Set(asks.map(keyOfAsk));
+    if (fresh.length > 0) void ask(fresh);
   }, [keys]);
+  const started = useRef(false);
   useEffect(() => {
-    const timer = setInterval(() => ask(current.current), PAGE_EVERY_MS);
-    return () => clearInterval(timer);
+    // Its first run is the one above, of what is shown; the poll's own asks come after.
+    started.current = false;
+    const p = poll(() => {
+      if (!started.current) {
+        started.current = true;
+        return Promise.resolve();
+      }
+      return ask(current.current);
+    }, PAGE_EVERY_MS);
+    return () => p.stop();
   }, [ask]);
   // After an action ran on a node: the reads of that node asked again at once.
   const refresh = useCallback(
-    (of: string) => ask(current.current.filter((a) => a.node === of)),
+    (of: string) => {
+      void ask(
+        current.current.filter((a) => a.node === of),
+        true
+      );
+    },
     [ask]
   );
 

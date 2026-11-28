@@ -2,7 +2,9 @@
  * What each node costs (docs/bot-os.md D77), to find the top offenders: the time its handlers take
  * where the core hands it an event, a message or a timer, measured around each call; and what a
  * node's instance says of its own (`Instance.cost`: a script's worker thread, its CPU, its heap and
- * its handlers' calls; a model connector's money, D117). Time is the process's own (`performance.now()`), real time, never a
+ * its handlers' calls; a model connector's money, D117); and the reads the control API serves a
+ * page or a view of it (D172: `GET /plugins/<id>/state/<read>`, each timed with its answer's
+ * serialization, its bytes counted). Time is the process's own (`performance.now()`), real time, never a
  * plugin's clock: the dev kit's is virtual. Kept in memory, from the start.
  */
 
@@ -14,6 +16,18 @@ export interface DispatchCost {
   ms: number;
   /** The longest one. */
   maxMs: number;
+}
+
+/** The reads served of a node to a page, a view or a panel (D172), as the control API answered them. */
+export interface ReadCost {
+  /** Reads served. */
+  calls: number;
+  /** Their time, the read and its answer's serialization, in milliseconds. */
+  ms: number;
+  /** The longest one. */
+  maxMs: number;
+  /** Their answers' bytes. */
+  bytes: number;
 }
 
 /** What a node's instance says it costs (`Instance.cost`): a script's worker, for one. */
@@ -49,12 +63,31 @@ export interface Spend {
 /** A node's cost, as `GET /status` gives it (`PluginControl.cost`). */
 export interface NodeCost {
   dispatch: DispatchCost;
+  /** The reads served of it (D172); none until one is. */
+  reads?: ReadCost;
   own?: OwnCost;
 }
 
 /** The handlers' time per node, as the core dispatches to them. */
 export class Costs {
   private readonly byNode = new Map<string, DispatchCost>();
+  private readonly readsByNode = new Map<string, ReadCost>();
+
+  /** Counts a read served of `node` (D172): its time and its answer's bytes. */
+  served(node: string, ms: number, bytes: number): void {
+    let c = this.readsByNode.get(node);
+    if (c === undefined) this.readsByNode.set(node, (c = { calls: 0, ms: 0, maxMs: 0, bytes: 0 }));
+    c.calls += 1;
+    c.ms += ms;
+    c.bytes += bytes;
+    if (ms > c.maxMs) c.maxMs = ms;
+  }
+
+  /** The reads served of a node, so far: undefined before the first. */
+  reads(node: string): ReadCost | undefined {
+    const c = this.readsByNode.get(node);
+    return c === undefined ? undefined : { ...c };
+  }
 
   /** Runs `fn`, a handler of `node`'s, and counts its time; what it returns. */
   time<T>(node: string, fn: () => T): T {

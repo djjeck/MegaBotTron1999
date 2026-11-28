@@ -53,7 +53,10 @@ else. `format` says how a value is drawn (`'number'`, `'badge'`), on a column, a
 Each leaf is a card of its own. It names its input (`from`), its read, the read's `input` if it
 takes one, a `path` into its output, a `label` (else the output's description there), and what it
 says when empty (`empty`, else `Nothing yet`). While its read is asked it says so; a read that fails
-breaks its card alone, naming the input and the read.
+breaks its card alone, naming the input and the read. Its read is asked again every five seconds
+while the page's browser tab is visible: none while it is hidden, at once when it shows again, and
+never while its last ask is unanswered (bot-os.md D172). The editor's **Costs** counts the reads a
+view asks of each node (`reads`).
 
 ### stat: one value, large
 
@@ -209,9 +212,11 @@ Each sends on its button, says it is busy, then done or why not.
 ```
 
 The open tab is in the address, `?tab=<slug>` (its title in lower case, words joined by dashes:
-`Donations & refunds` is `donations-refunds`); only its reads are asked. `count` puts a number by
-its title: a number, or a list's or a map's size. A view has one level of tabs, and no two of one
-slug.
+`Donations & refunds` is `donations-refunds`); only its reads are asked, with those outside the tabs
+and the tabs' counts: a tab not on screen asks nothing else, and one switched to asks its reads at
+once, then every five seconds with the rest. An open drawer (`?row=`) is its tab's. `count` puts a
+number by its title: a number, or a list's or a map's size. A view has one level of tabs, and no two
+of one slug.
 
 ## The selector
 

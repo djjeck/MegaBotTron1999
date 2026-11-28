@@ -212,11 +212,11 @@ the server that guards them.
   time as it is: `follows your play`, D138), from `GET /status`'s `widget`, its card a line taller
   for it; one that declares a page has **Open its page** in its panel while it runs, which leads to
   `#/node/<id>` (`NodePage.tsx`, in no menu): the page's sections drawn in full (`WidgetSection`),
-  each read asked every five seconds. A table there (docs/bot-os.md D157, `TableRow.tsx`) shows a
-  picture column as thumbnails (up to 14rem, whole and in proportion, large enough to judge a
-  picture by), each opening the picture whole (a file of the node's,
-  `GET /api/plugins/<id>/files/<name>`, or a media), and a button per row for each of its row
-  actions: one whose input the row and constants fill runs at once (asking first when it says
+  each read asked every five seconds while its tab is visible (docs/bot-os.md D172). A table there
+  (docs/bot-os.md D157, `TableRow.tsx`) shows a picture column as thumbnails (up to 14rem, whole and
+  in proportion, large enough to judge a picture by), each opening the picture whole (a file of the
+  node's, `GET /api/plugins/<id>/files/<name>`, or a media), and a button per row for each of its
+  row actions: one whose input the row and constants fill runs at once (asking first when it says
   `confirm`); one with fields left opens a small form of them under the row, drawn by the shared
   form builder, those of its `current` preselected from the row, and **Run** runs it. The button is
   busy while it runs, its answer or refusal is said under it, and the page's reads are asked again.

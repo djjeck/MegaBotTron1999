@@ -27,6 +27,16 @@ describe('Costs', () => {
   });
 });
 
+describe('the reads served (D172)', () => {
+  it('counts each read’s time, its longest and its bytes, per node', () => {
+    const c = new Costs();
+    expect(c.reads('a')).toBeUndefined();
+    c.served('a', 2, 100);
+    c.served('a', 5, 20);
+    expect(c.reads('a')).toEqual({ calls: 2, ms: 7, maxMs: 5, bytes: 120 });
+  });
+});
+
 describe('a node’s cost', () => {
   it('counts the events, messages and timers the core hands it, and adds its own', async () => {
     const connector = new FakeConnector({ account: 'irc:alice' });

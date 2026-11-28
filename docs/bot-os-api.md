@@ -212,9 +212,11 @@ progress of no number, an `until` of a list):
 a `.describe()`: it is their label. The core reads the widget's read for each running node with
 `GET /status` (its `widget`, the read's output; none while its read throws), which the editor asks
 every five seconds; the page asks each of its reads (once, however many sections show it) every five
-seconds while it is open. The player's, for one (§5):
-`widget: { show: 'until', read: 'status', path: 'next' }`, and a page **Plays** with its chat and
-commands, its last play and its next.
+seconds while it is open. **Neither asks while its browser tab is hidden** (bot-os.md D172): when it
+shows again, each asks at once and its five seconds resume; and none asks a read again while its
+last ask is unanswered. A ticking `until` keeps ticking, which costs no request. The player's, for
+one (§5): `widget: { show: 'until', read: 'status', path: 'next' }`, and a page **Plays** with its
+chat and commands, its last play and its next.
 
 **A table's pictures and row actions** (bot-os.md D157). A column `show: 'image'` shows its value as
 a thumbnail that opens it whole, an empty value an empty cell: `from: 'files'` (the default), a file
@@ -328,10 +330,12 @@ as the node's own page would be refused (a read it has not, an input it refuses,
 has not, an action its rows cannot run), a `'$selector'` key left out of its schema's check. An
 input left unbound is checked once bound, and its sections say on the page that they wait for an
 edge. The page (`ViewPage.tsx`) asks each read of a bound node once
-(`GET /plugins/<node>/state/<read>`), again every five seconds and after a row's action, names the
-nodes it shows, each a link to it in the editor, and keeps the choice in its address.
-`GET /graph/view` gives a view node's `view`, its `served` (`{ path, bound }`, the node bound to
-each input) and every node's `shownIn` (the views that show it).
+(`GET /plugins/<node>/state/<read>`), again every five seconds while its tab is visible (none while
+hidden, at once when shown, never while the last is unanswered, D172) and after a row's action,
+those of the tab on screen only (a tab switched to asks its reads at once), names the nodes it
+shows, each a link to it in the editor, and keeps the choice in its address. `GET /graph/view` gives
+a view node's `view`, its `served` (`{ path, bound }`, the node bound to each input) and every
+node's `shownIn` (the views that show it).
 
 **Its layout** (D170, phase 2; every element with an example in [views.md](views.md), the cookbook):
 a section is a **leaf**, which shows a value, or a **layout**, which holds sections. `show` names
@@ -369,7 +373,8 @@ the kind of section and nothing else; `format` says how a value is drawn.
   manifest: `view sections.1.tabs.0.sections.0.columns.2: triggers is not a list of texts`. An
   unknown `show` lists the kinds there are.
 - **Actions** say they are busy, then their answer or why they were refused, and the leaves read
-  from that node are read again (the rest at their next five seconds).
+  from that node are read again (the rest at their next five seconds; one still unanswered once its
+  answer comes).
 
 A node page (`page`, above) keeps working as it is, and its table takes a table's search, sort,
 paging, formats and a drawer of fields and actions too; it is deprecated for views (D169), and a
@@ -2218,11 +2223,14 @@ control API, the web UI and later the agents, whose grants will be subsets of it
   the thread is idle again; the thread's start and idle time left out, bot-os.md D87), and
   `heapBytes`, both as the worker last said when it got idle: nothing is polled; and a model
   connector's `spend` (bot-os.md D117), its money over the last 24 hours: `usd`, `calls`, and
-  `unpriced`, the calls of a model with no price, whose cost is unknown. Each node's panel in the
-  editor says its own, and the editor's **Costs** side sheet (`#/resources` opens it, bot-os.md
-  D111) lists the nodes by cost, a worker's CPU or else its handlers' time, most first, sortable by
-  any column (a model's spend one of them), the top three marked with their share. The timing costs
-  about 0.16 µs a handler call.
+  `unpriced`, the calls of a model with no price, whose cost is unknown; and `reads` (bot-os.md
+  D172), the reads the control API served of it (`GET /plugins/<id>/state/<read>`, to a page, a view
+  or a panel), once it served one: their `calls`, their time (`ms`, the read and its answer's
+  serialization, on the core's main thread) and the longest (`maxMs`), and their answers' `bytes`.
+  Each node's panel in the editor says its own, and the editor's **Costs** side sheet (`#/resources`
+  opens it, bot-os.md D111) lists the nodes by cost, a worker's CPU or else its handlers' time, plus
+  its reads' time, most first, sortable by any column (its reads one, a model's spend another), the
+  top three marked with their share. The timing costs about 0.16 µs a handler call.
 - **The owner's changes:** a declared read (`read`) and a declared action (`act`), whose input is
   checked against the action's schema (an error names the field) and which the plugin refuses by
   throwing, with why; a node's stop cleared (`clearStop`), for the next start. No control raises a
@@ -2436,38 +2444,38 @@ running connector's panel lists its queue. **A node's widget and page** (bot-os.
 and pages): a node whose plugin declares a widget shows it in a line on its card while it runs
 (`WidgetLine`, `widget-text.ts`), from `GET /status`'s `widget`; one that declares a page has, in
 its panel while it runs, **Open its page**, which leads to `#/node/<id>` (`NodePage.tsx`, in no
-menu): the page's sections drawn in full (`WidgetSection`) from its reads, asked every five seconds.
-**What the Admin page showed of a node is on it** (bot-os.md D111): a connector's panel says as whom
-it runs, and its connection's state and step (`GET /accounts`), and its cards its connection's
-state; its account is nothing to type, shown read-only under **Advanced** at the panel's foot
-without the network its plugin implies (bot-os.md D119), with **Use its node's id** for a node whose
-graph names another; a node's panel, what it costs (its `cost`, its share of the whole, the top
-three marked), and while it runs its status (its `status`, not offered again among the reads), its
-settings in force, each set at once (`POST /settings`), and its reads and actions, called from forms
-made from their input schemas (`GET /plugins/<id>/state/<name>?<field>=<value>`,
-`POST /plugins/<id>/actions/<name>`), each answer or refusal under it. The map's bar heads with the
-instance's switches: on or off (`POST /off`, asking first, and `POST /on`) and **Kill all**
-(`POST /kill`, asking first); the bottom bar says the instance's release, how long it has run and
-its memory (`GET /instance`). **States and dry runs** (bot-os.md D64, §2.1): a node is drawn greyed
-while disabled in the draft (its panel's **Enabled** switch), in red tones with a warning icon and
-its reason while stopped, greyed with the node it needs while inactive (from `GET /status`); a
-stopped node's panel says why, when and by what, with **Clear stop**. A node added starts disabled,
-each of its required ports (an input, or a chat-out output, not optional) that exactly one port of
-another node serves wired to it (bot-os.md D135; with none or several, left for the owner), and a
-chat-out or a commands edge drawn, or so wired, starts a dry run: its rhombus hollow and its part
-from the rhombus to the connector greyed and dashed, its panel's **Dry-run / Send for real** switch
-setting `dryRun`. All of these are changes of the draft, listed in the review (a stop cleared as
-"Stops cleared") and made by Apply. A connector is drawn as two cards (`cards.ts`, bot-os.md D60),
-one node in the graph all the same (a service connector, with no chat, D148, as one card, as any
-other node): its **in** card (`telegram-user · in`) at the left, with its chat-in output and its
-other ports, and its **out** card (`telegram-user · out`) in a column of its own at the right, with
-its chat-out input, where the senders' edges end. Each card is placed on its own; selecting either
-selects the node and opens its panel (the other card shows itself selected too); removing it removes
-both, after a confirmation that names them. The split lives in the editor's view alone: the graph
-file holds one node. Each edge has a rhombus at its midpoint in its port type's colour
-(`PortEdge.tsx`, React Flow's `EdgeLabelRenderer`), a button named after the edge
-(`edge irc.chat → dice.channel`) that selects it and opens its panel, by a click or the keyboard.
-Its review shows the diff and two actions: Apply, `PUT /graph/file`, then
+menu): the page's sections drawn in full (`WidgetSection`) from its reads, asked every five seconds
+while its tab is visible (D172). **What the Admin page showed of a node is on it** (bot-os.md D111):
+a connector's panel says as whom it runs, and its connection's state and step (`GET /accounts`), and
+its cards its connection's state; its account is nothing to type, shown read-only under **Advanced**
+at the panel's foot without the network its plugin implies (bot-os.md D119), with **Use its node's
+id** for a node whose graph names another; a node's panel, what it costs (its `cost`, its share of
+the whole, the top three marked), and while it runs its status (its `status`, not offered again
+among the reads), its settings in force, each set at once (`POST /settings`), and its reads and
+actions, called from forms made from their input schemas
+(`GET /plugins/<id>/state/<name>?<field>=<value>`, `POST /plugins/<id>/actions/<name>`), each answer
+or refusal under it. The map's bar heads with the instance's switches: on or off (`POST /off`,
+asking first, and `POST /on`) and **Kill all** (`POST /kill`, asking first); the bottom bar says the
+instance's release, how long it has run and its memory (`GET /instance`). **States and dry runs**
+(bot-os.md D64, §2.1): a node is drawn greyed while disabled in the draft (its panel's **Enabled**
+switch), in red tones with a warning icon and its reason while stopped, greyed with the node it
+needs while inactive (from `GET /status`); a stopped node's panel says why, when and by what, with
+**Clear stop**. A node added starts disabled, each of its required ports (an input, or a chat-out
+output, not optional) that exactly one port of another node serves wired to it (bot-os.md D135; with
+none or several, left for the owner), and a chat-out or a commands edge drawn, or so wired, starts a
+dry run: its rhombus hollow and its part from the rhombus to the connector greyed and dashed, its
+panel's **Dry-run / Send for real** switch setting `dryRun`. All of these are changes of the draft,
+listed in the review (a stop cleared as "Stops cleared") and made by Apply. A connector is drawn as
+two cards (`cards.ts`, bot-os.md D60), one node in the graph all the same (a service connector, with
+no chat, D148, as one card, as any other node): its **in** card (`telegram-user · in`) at the left,
+with its chat-in output and its other ports, and its **out** card (`telegram-user · out`) in a
+column of its own at the right, with its chat-out input, where the senders' edges end. Each card is
+placed on its own; selecting either selects the node and opens its panel (the other card shows
+itself selected too); removing it removes both, after a confirmation that names them. The split
+lives in the editor's view alone: the graph file holds one node. Each edge has a rhombus at its
+midpoint in its port type's colour (`PortEdge.tsx`, React Flow's `EdgeLabelRenderer`), a button
+named after the edge (`edge irc.chat → dice.channel`) that selects it and opens its panel, by a
+click or the keyboard. Its review shows the diff and two actions: Apply, `PUT /graph/file`, then
 `POST /plugins/<id>/clear-stop` for each stop cleared, then `POST /restart` (none if the core
 refuses the graph, which the review says, nor if the saved graph is what runs already and no stop
 was cleared), and Revert, the draft back to the saved graph; a banner offers Apply (`POST /restart`)

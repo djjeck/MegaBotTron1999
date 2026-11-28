@@ -2,7 +2,8 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PluginControl } from '#src/ui/api.ts';
-import { CostLine, costRows, CostTable, ranking } from './Costs.tsx';
+import type { Ranked } from './Costs.tsx';
+import { bytes, CostLine, costRows, CostTable, ranking, readsText } from './Costs.tsx';
 
 afterEach(() => {
   cleanup();
@@ -40,6 +41,30 @@ const PLUGINS = [
   node('slow', { dispatch: { calls: 1, ms: 2500, maxMs: 2500 } }),
 ];
 
+describe('the reads served of a node (D172)', () => {
+  it('adds their time to its cost, and shows them in a column and its line', () => {
+    const plugins = [
+      node('shop', {
+        dispatch: { calls: 2, ms: 1, maxMs: 1 },
+        reads: { calls: 120, ms: 3000, maxMs: 90, bytes: 1_250_000 },
+      }),
+      node('quest', { dispatch: { calls: 100, ms: 12, maxMs: 0.5 } }),
+    ];
+    const rows = costRows(plugins);
+    expect(rows[0]).toMatchObject({ costMs: 3001, reads: 120, readMs: 3000, readBytes: 1_250_000 });
+    expect(readsText({ reads: 1, readMs: 0.5, readBytes: 512 })).toBe('1 read, 0.50 ms, 512 B');
+    render(<CostTable plugins={plugins} select={() => {}} />);
+    const table = screen.getByRole('table', { name: 'nodes by cost' });
+    expect(table.textContent).toContain('120 reads, 3.00 s, 1.3 MB');
+    fireEvent.click(within(table).getByRole('button', { name: 'Reads' }));
+    expect(within(table).getAllByRole('row')[1]?.querySelector('code')?.textContent).toBe('shop');
+    cleanup();
+    render(<CostLine cost={ranking(plugins).get('shop') as Ranked} />);
+    expect(document.body.textContent).toContain('120 reads, 3.00 s, 1.3 MB');
+    expect(bytes(3400)).toBe('3.4 kB');
+  });
+});
+
 describe('the nodes by cost (D77)', () => {
   it('ranks a worker by its CPU, any other by its handlers’ time', () => {
     const rows = costRows(PLUGINS);
@@ -53,6 +78,9 @@ describe('the nodes by cost (D77)', () => {
       avgMs: 5,
       maxMs: 9,
       heapMb: 8,
+      reads: 0,
+      readMs: 0,
+      readBytes: 0,
     });
     expect(rows.find((r) => r.id === 'quiet')).toMatchObject({ costMs: 0, calls: 0, avgMs: 0 });
   });

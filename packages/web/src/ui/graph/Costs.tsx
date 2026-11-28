@@ -6,7 +6,9 @@
  * with its share of the whole and whether it is among the top three; all of them in the editor's
  * **Costs** side sheet (`CostTable`), a table sorted by its cost, most first, by any column with a
  * click, the top three marked, each node's name selecting it. A model connector's money over the
- * last 24 hours is beside its time (`own.spend`, D117): what it spent, and its calls.
+ * last 24 hours is beside its time (`own.spend`, D117): what it spent, and its calls. The reads
+ * served of it to a page, a view or a panel (`reads`, D172) are in its cost, the core's main
+ * thread's time either way, and in a column of their own: how many, their time, their bytes.
  */
 import { useState } from 'react';
 import type { NodeCost, PluginControl, Spend } from '#src/ui/api.ts';
@@ -17,12 +19,16 @@ export interface CostRow {
   plugin: string;
   state: string;
   runs: string;
-  /** What it is ranked by, in ms: a worker's CPU, or its handlers' time. */
+  /** What it is ranked by, in ms: a worker's CPU, or its handlers' time; and its reads' (D172). */
   costMs: number;
   calls: number;
   avgMs: number;
   maxMs: number;
   heapMb?: number;
+  /** The reads served of it (D172): how many, their time, their answers' bytes. */
+  reads: number;
+  readMs: number;
+  readBytes: number;
   /** A model connector's money over the last 24 hours (D117). */
   spend?: Spend;
 }
@@ -40,11 +46,14 @@ export function costRows(plugins: readonly PluginControl[]): CostRow[] {
       plugin: p.plugin,
       state: p.state,
       runs: worker ? 'worker' : 'in process',
-      costMs: worker ? (own.cpuMs ?? 0) : c.dispatch.ms,
+      costMs: (worker ? (own.cpuMs ?? 0) : c.dispatch.ms) + (c.reads?.ms ?? 0),
       calls,
       avgMs: calls === 0 ? 0 : ms / calls,
       maxMs: own?.maxMs ?? c.dispatch.maxMs,
       ...(own?.heapBytes === undefined ? {} : { heapMb: own.heapBytes / 2 ** 20 }),
+      reads: c.reads?.calls ?? 0,
+      readMs: c.reads?.ms ?? 0,
+      readBytes: c.reads?.bytes ?? 0,
       ...(own?.spend === undefined ? {} : { spend: own.spend }),
     };
   });
@@ -92,7 +101,8 @@ export function CostLine({ cost }: { cost: Ranked }) {
         {' '}
         · {row.calls} call{row.calls === 1 ? '' : 's'}, {ms(row.avgMs)} on average, at most{' '}
         {ms(row.maxMs)}
-        {row.heapMb === undefined ? '' : ` · ${row.heapMb.toFixed(1)} MB heap`}; since the start
+        {row.heapMb === undefined ? '' : ` · ${row.heapMb.toFixed(1)} MB heap`}
+        {row.reads === 0 ? '' : ` · ${readsText(row)}`}; since the start
       </span>
       {row.spend === undefined ? null : (
         <>
@@ -103,6 +113,15 @@ export function CostLine({ cost }: { cost: Ranked }) {
     </>
   );
 }
+
+/** A node's reads served, in words: `120 reads, 340 ms, 1.2 MB` (D172). */
+export function readsText(r: Pick<CostRow, 'reads' | 'readMs' | 'readBytes'>): string {
+  return `${r.reads} read${r.reads === 1 ? '' : 's'}, ${ms(r.readMs)}, ${bytes(r.readBytes)}`;
+}
+
+/** A size in words: `512 B`, `3.4 kB`, `1.2 MB`. */
+export const bytes = (v: number): string =>
+  v < 1000 ? `${v} B` : v < 1e6 ? `${(v / 1000).toFixed(1)} kB` : `${(v / 1e6).toFixed(1)} MB`;
 
 /** A model's money in words: `$0.42, 14 calls`, and the calls of no price, whose cost is unknown. */
 export function spent(s: Spend): string {
@@ -118,7 +137,12 @@ const COLUMNS: { key: Key; title: string; help: string }[] = [
   {
     key: 'costMs',
     title: 'Cost',
-    help: 'A script’s CPU time running its own code, in its worker; otherwise the time in its handlers, as the core hands it events, messages and timers',
+    help: 'A script’s CPU time running its own code, in its worker; otherwise the time in its handlers, as the core hands it events, messages and timers; and the time of the reads served of it',
+  },
+  {
+    key: 'readMs',
+    title: 'Reads',
+    help: 'The reads served of it to a page, a view or a panel: how many, their time, their answers’ size',
   },
   { key: 'calls', title: 'Calls', help: 'Its handlers’ calls' },
   { key: 'avgMs', title: 'Avg', help: 'A call’s time, on average' },
@@ -158,8 +182,8 @@ export function CostTable(props: {
     <div className="resources">
       <p className="muted small">
         Since the start. A script’s cost is the CPU its worker spent running its code; any other
-        node’s, the time its handlers take as the core hands it events, messages and timers. The top
-        three are marked.
+        node’s, the time its handlers take as the core hands it events, messages and timers; each
+        adds the time of the reads served of it to pages and views. The top three are marked.
       </p>
       <div className="table-scroll">
         <table aria-label="nodes by cost">
@@ -226,6 +250,7 @@ export function CostTable(props: {
                       <span className="muted small"> {Math.round(share * 100)}%</span>
                     )}
                   </td>
+                  <td>{r.reads === 0 ? '' : readsText(r)}</td>
                   <td>{r.calls}</td>
                   <td>{ms(r.avgMs)}</td>
                   <td>{ms(r.maxMs)}</td>
