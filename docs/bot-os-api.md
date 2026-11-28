@@ -214,9 +214,10 @@ a `.describe()`: it is their label. The core reads the widget's read for each ru
 every five seconds; the page asks each of its reads (once, however many sections show it) every five
 seconds while it is open. **Neither asks while its browser tab is hidden** (bot-os.md D172): when it
 shows again, each asks at once and its five seconds resume; and none asks a read again while its
-last ask is unanswered. A ticking `until` keeps ticking, which costs no request. The player's, for
-one (§5): `widget: { show: 'until', read: 'status', path: 'next' }`, and a page **Plays** with its
-chat and commands, its last play and its next.
+last ask is unanswered. A ticking `until` keeps ticking, which costs no request. A view (below) asks
+only as its nodes change (D173); the editor's `GET /status` stays a poll. The player's, for one
+(§5): `widget: { show: 'until', read: 'status', path: 'next' }`, and a page **Plays** with its chat
+and commands, its last play and its next.
 
 **A table's pictures and row actions** (bot-os.md D157). A column `show: 'image'` shows its value as
 a thumbnail that opens it whole, an empty value an empty cell: `from: 'files'` (the default), a file
@@ -329,10 +330,16 @@ graph's check refuses each section and the selector that the node bound to its i
 as the node's own page would be refused (a read it has not, an input it refuses, a path its output
 has not, an action its rows cannot run), a `'$selector'` key left out of its schema's check. An
 input left unbound is checked once bound, and its sections say on the page that they wait for an
-edge. The page (`ViewPage.tsx`) asks each read of a bound node once
-(`GET /plugins/<node>/state/<read>`), again every five seconds while its tab is visible (none while
-hidden, at once when shown, never while the last is unanswered, D172) and after a row's action,
-those of the tab on screen only (a tab switched to asks its reads at once), names the nodes it
+edge. The page (`ViewPage.tsx`) asks the reads on screen, those of the open tab only (a tab switched
+to asks its reads at once), in one batch (`POST /reads`, §4.11), and **again only as their nodes
+change** (bot-os.md D173): it hears its bound nodes' changes on one stream (`GET /changes`), the
+core telling a node changed when it writes its store (a document or a file), publishes an event,
+changes state or settings, or calls `ctx.changed()` (§4), coalesced over half a second and
+propagated along interface edges (a view of donations hears a change of the game state that
+donations reads); it asks again the reads of the nodes changed alone. The stream is closed while the
+page's tab is hidden, and every read asked once when it shows again; while visible, every read is
+asked every `SAFETY_REFRESH_MS` (two minutes, `view/live.ts`) whatever changed; never twice while
+one is unanswered (D172); and those of a node after a row's action on it. It names the nodes it
 shows, each a link to it in the editor, and keeps the choice in its address. `GET /graph/view` gives
 a view node's `view`, its `served` (`{ path, bound }`, the node bound to each input) and every
 node's `shownIn` (the views that show it).
@@ -1115,6 +1122,7 @@ interface PluginContext<Config, Settings> {
   drift: DriftReporter; // §4.7, parsers only
   notify(text: string, buttons?: Buttons): void; // a `told` notice for the owner (§4.8, §4.16)
   notice(kind: string, text: string, detail?: object): void; // for the owner's attention (§4.16)
+  changed(): void; // its reads answer differently without a store write or an event (D173)
   notices?: { subscribe(handler: (n: Notice) => void): () => void }; // with `notices: true` (§4.16)
   summary?: { contribute(lines); collect(window); instance() }; // with `summary: true` (§4.17)
   stop(reason: string): void; // its safety stop: its node stopped, kept (§2.1, Node states)
@@ -2224,13 +2232,14 @@ control API, the web UI and later the agents, whose grants will be subsets of it
   `heapBytes`, both as the worker last said when it got idle: nothing is polled; and a model
   connector's `spend` (bot-os.md D117), its money over the last 24 hours: `usd`, `calls`, and
   `unpriced`, the calls of a model with no price, whose cost is unknown; and `reads` (bot-os.md
-  D172), the reads the control API served of it (`GET /plugins/<id>/state/<read>`, to a page, a view
-  or a panel), once it served one: their `calls`, their time (`ms`, the read and its answer's
-  serialization, on the core's main thread) and the longest (`maxMs`), and their answers' `bytes`.
-  Each node's panel in the editor says its own, and the editor's **Costs** side sheet (`#/resources`
-  opens it, bot-os.md D111) lists the nodes by cost, a worker's CPU or else its handlers' time, plus
-  its reads' time, most first, sortable by any column (its reads one, a model's spend another), the
-  top three marked with their share. The timing costs about 0.16 µs a handler call.
+  D172), the reads the control API served of it (`GET /plugins/<id>/state/<read>` and `POST /reads`,
+  to a page, a view or a panel), once it served one: their `calls`, their time (`ms`, the read and
+  its answer's serialization, on the core's main thread) and the longest (`maxMs`), and their
+  answers' `bytes`. Each node's panel in the editor says its own, and the editor's **Costs** side
+  sheet (`#/resources` opens it, bot-os.md D111) lists the nodes by cost, a worker's CPU or else its
+  handlers' time, plus its reads' time, most first, sortable by any column (its reads one, a model's
+  spend another), the top three marked with their share. The timing costs about 0.16 µs a handler
+  call.
 - **The owner's changes:** a declared read (`read`) and a declared action (`act`), whose input is
   checked against the action's schema (an error names the field) and which the plugin refuses by
   throwing, with why; a node's stop cleared (`clearStop`), for the next start. No control raises a
@@ -2283,7 +2292,13 @@ a name; none from a connector that keeps no directory; 404 for a node that is no
 first); `POST /off`, `/on`, `/kill`; `GET` and `POST /settings`; `GET /graph` and `GET /graph/view`
 (§4.12); `POST /plugins/<id>/kill` and `POST /plugins/<id>/clear-stop` (409 with why when refused,
 such as `actor is not stopped`); `GET /plugins/<id>/state/<name>?<field>=<value>` (a read, its input
-the query's fields, §2); `GET /plugins/<id>/queue` (what waits in a connector's queue, D73:
+the query's fields, §2); `POST /reads {"reads": [{"node", "read", "input"?}]}` (several reads at
+once, at most 200, each input's fields texts as a query's; `{ answers }` in order, each `{ value }`
+or `{ error }`, each counted in its node's cost; bot-os.md D173); `GET /changes?nodes=<id>,…`
+(server-sent events, D173: a `changed` event, `{ "nodes": [...] }`, each time some of those nodes
+change, coalesced over half a second and propagated along interface edges, every node without
+`nodes`; a comment every 25 s keeps it open); `GET /plugins/<id>/queue` (what waits in a connector's
+queue, D73:
 `{ account, entries: [{ chat, text, command, queuedAt, waitingUntil, intervalS, nodes }], coalesced }`,
 each node with its `origin` and its `cancel`, `{ on?, when?, test?, deadline? }`, and `coalesced`
 the sends merged since the start, `{ count, pairs: [{ nodes: [a, b], count }] }`; 404 for a node

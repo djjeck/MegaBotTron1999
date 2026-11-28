@@ -15,7 +15,17 @@ import { fakeApi } from '#test/fake-api.ts';
 import { PORT_TYPES } from '#test/graph-view.ts';
 import { asksOf, tabSlug, ViewPage, withSelected } from './ViewPage.tsx';
 
+/** The page shown or hidden, as a browser says when its tab is switched. */
+function show(visible: boolean): void {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => (visible ? 'visible' : 'hidden'),
+  });
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
 afterEach(() => {
+  show(true);
   cleanup();
   vi.unstubAllGlobals();
   window.history.replaceState(null, '', '/');
@@ -263,6 +273,33 @@ describe('a view’s dashboard (D170, phase 2)', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Players' }));
     // Its older answer kept and shown, and asked again at once.
     await waitFor(() => expect(players()).toBe(2));
+  });
+
+  it('asks again only the reads of the nodes changed, as the stream tells (D173)', async () => {
+    const api = serve();
+    render(<ViewPage loggedOut={() => {}} section="shop" />);
+    await screen.findByRole('list', { name: 'Ads' });
+    // One batch for what is on screen, and one stream of its bound nodes.
+    await waitFor(() => expect(api.batches).toBe(1));
+    expect(api.streams.map((s) => s.url)).toEqual(['/changes?nodes=shop']);
+    const ads = (): number => api.calls.filter((c) => c === 'GET /plugins/shop/state/ads').length;
+    expect(ads()).toBe(1);
+    api.streams[0]?.change(['someone-else']);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(api.batches).toBe(1);
+    api.streams[0]?.change(['shop']);
+    await waitFor(() => expect(ads()).toBe(2));
+    expect(api.batches).toBe(2);
+    // Broken and open again: everything asked once.
+    api.streams[0]?.reopen();
+    await waitFor(() => expect(ads()).toBe(3));
+    // Hidden: the stream closed, nothing asked; shown: a new stream, and everything asked once.
+    show(false);
+    expect(api.streams[0]?.closed).toBe(true);
+    show(true);
+    await waitFor(() => expect(ads()).toBe(4));
+    expect(api.streams).toHaveLength(2);
+    expect(api.streams[1]?.closed).toBe(false);
   });
 
   it('keeps the tab and the row in the address, the drawer’s sections read with the row', async () => {

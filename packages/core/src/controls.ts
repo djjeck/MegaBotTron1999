@@ -100,6 +100,8 @@ export interface ControlsHost {
   cost?(id: string): NodeCost | undefined;
   /** Counts a read served of a node (D172): its time and its answer's bytes. */
   served?(id: string, ms: number, bytes: number): void;
+  /** Hears each set of nodes changed (D173), propagated along interface edges; the way to stop. */
+  changes?(listener: (nodes: ReadonlySet<string>) => void): () => void;
   /** A node's commands the retry-loop guard holds back (bot-os.md D98). */
   backoffs?(id: string): BackoffView[];
   /** Takes the secrets out of a text (§4.9): a login's error. */
@@ -574,6 +576,14 @@ export class Controls {
    * A read the plugin declares, as its instance offers it now; one that declares an input is given
    * `input` (an object, its fields its arguments) as its schema makes it.
    */
+  /**
+   * Hears the nodes changed (D173), each set coalesced and propagated along interface edges, for
+   * the views' live updates (`GET /changes`); the way to stop. Without the core's, never.
+   */
+  changes(listener: (nodes: ReadonlySet<string>) => void): () => void {
+    return this.host.changes?.(listener) ?? (() => {});
+  }
+
   /** Counts a read the control API served of a node (D172), in its cost. */
   served(id: string, ms: number, bytes: number): void {
     if (this.manifest(id) !== undefined) this.host.served?.(id, ms, bytes);

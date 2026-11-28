@@ -11,11 +11,13 @@
  *   its read: a read that fails breaks its own card, not the page. An input left unbound says so.
  * - **Its reads** are those the page shows now (the open tab's, its tabs' counts, the open drawer's,
  *   a form's preset; a tab not on screen asks nothing but its count), each asked once however many
- *   leaves show it, at once as it comes on screen (a tab switched to, a drawer opened, an older
- *   answer kept or not), again every five seconds while the page is open and visible (D172: none while its tab is hidden, at once when it shows again),
- *   never again while its last ask is unanswered, and those of a node at once after an action ran
- *   on it (once its unanswered ask is answered, if one is). Each is keyed by its
- *   node, its read and its input, so that pushed changes may later ask only theirs.
+ *   leaves show it, in one batch (`POST /reads`), at once as it comes on screen (a tab switched to,
+ *   a drawer opened, an older answer kept or not), then **again only as its node changes** (D173):
+ *   the page hears its nodes' changes on one stream (`useLive`: closed while its tab is hidden, every
+ *   read asked once when it shows again, and every `SAFETY_REFRESH_MS` while visible), never twice
+ *   while its last ask is unanswered (D172), and those of a node at once after an action ran on it
+ *   (once its unanswered ask is answered, if one is). Each is keyed by its node, its read and its
+ *   input.
  */
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -28,19 +30,19 @@ import type {
   ViewSelector,
   Widget,
 } from '#src/ui/api.ts';
-import { api, ApiError, seg } from '#src/ui/api.ts';
+import { api, ApiError } from '#src/ui/api.ts';
 import type { PageProps } from '#src/ui/App.tsx';
 import { query } from '#src/ui/graph/NodeControls.tsx';
 import { SELECTOR_REF } from '#src/ui/graph/TableRow.tsx';
 import { emptyOf, SectionBody, useNow } from '#src/ui/graph/Widget.tsx';
 import { at, countOf, itemsOf, sectionLabel, words } from '#src/ui/graph/widget-text.ts';
-import { poll, useLoad } from '#src/ui/hooks.ts';
+import { useLoad } from '#src/ui/hooks.ts';
 import { colsOf } from '#src/ui/view/cells.tsx';
 import type { Opening } from '#src/ui/view/DataTable.tsx';
 import { Gallery } from '#src/ui/view/Gallery.tsx';
 import { ActionForm, SettingsForm, StatTile } from '#src/ui/view/Leaves.tsx';
 import { keyOf } from '#src/ui/view/list.tsx';
-import { PAGE_EVERY_MS } from './NodePage.tsx';
+import { readAll, useLive } from '#src/ui/view/live.ts';
 
 /** A read a view asks: of a node, by name, with its input. */
 interface Ask {
@@ -50,6 +52,12 @@ interface Ask {
 }
 
 const keyOfAsk = (a: Ask): string => `${a.node}\n${a.read}${query(a.input)}`;
+
+/** An input's fields as a query gives them: a text as it is, anything else as JSON (`query`). */
+const fieldsOf = (input: Record<string, unknown>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(input).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])
+  );
 
 /** Each read's answer, or why not, by its key. */
 type Answers = Record<string, { value: unknown } | { error: string }>;
@@ -239,32 +247,33 @@ export function ViewPage(props: PageProps) {
         if (f !== undefined && fresh) f.again = true;
         return f === undefined;
       });
+      if (sent.length === 0) return Promise.resolve();
       for (const a of sent) flying.set(keyOfAsk(a), { again: false, ask: a });
-      return Promise.all(
-        sent.map((a) =>
-          api<unknown>(`/plugins/${seg(a.node)}/state/${seg(a.read)}${query(a.input)}`).then(
-            (value) => [keyOfAsk(a), { value }] as const,
-            (e: unknown) => {
-              if (e instanceof ApiError && e.status === 401) props.loggedOut();
-              return [keyOfAsk(a), { error: e instanceof Error ? e.message : String(e) }] as const;
-            }
-          )
+      // One batch (`POST /reads`, D173), each input's fields as a query gives them.
+      return readAll(sent.map((a) => ({ node: a.node, read: a.read, input: fieldsOf(a.input) })))
+        .then(
+          (answers) =>
+            sent.map((a, i) => [keyOfAsk(a), answers[i] ?? { error: 'no answer' }] as const),
+          (e: unknown) => {
+            if (e instanceof ApiError && e.status === 401) props.loggedOut();
+            const error = e instanceof Error ? e.message : String(e);
+            return sent.map((a) => [keyOfAsk(a), { error }] as const);
+          }
         )
-      ).then((all) => {
-        if (all.length > 0) setAnswers((was) => ({ ...was, ...Object.fromEntries(all) }));
-        const again = all.flatMap(([key]) => {
-          const f = flying.get(key);
-          flying.delete(key);
-          return f?.again === true ? [f.ask] : [];
+        .then((all) => {
+          setAnswers((was) => ({ ...was, ...Object.fromEntries(all) }));
+          const again = all.flatMap(([key]) => {
+            const f = flying.get(key);
+            flying.delete(key);
+            return f?.again === true ? [f.ask] : [];
+          });
+          if (again.length > 0) void ask(again);
         });
-        if (again.length > 0) void ask(again);
-      });
     },
     [props.loggedOut]
   );
-  // What is shown now, asked at once when it changes, and again every five seconds while visible.
-  // A read that comes on screen (a tab switched to, a drawer opened) is asked at once, even with an
-  // older answer kept; the poll asks only those on screen.
+  // A read that comes on screen (the page opened, a tab switched to, a drawer opened) is asked at
+  // once, even with an older answer kept; then again only as its node changes (D173).
   const shownBefore = useRef(new Set<string>());
   useEffect(() => {
     const before = shownBefore.current;
@@ -272,19 +281,16 @@ export function ViewPage(props: PageProps) {
     shownBefore.current = new Set(asks.map(keyOfAsk));
     if (fresh.length > 0) void ask(fresh);
   }, [keys]);
-  const started = useRef(false);
-  useEffect(() => {
-    // Its first run is the one above, of what is shown; the poll's own asks come after.
-    started.current = false;
-    const p = poll(() => {
-      if (!started.current) {
-        started.current = true;
-        return Promise.resolve();
-      }
-      return ask(current.current);
-    }, PAGE_EVERY_MS);
-    return () => p.stop();
-  }, [ask]);
+  // The changes of the nodes it shows (D173): the reads on screen of those that changed, asked
+  // again; all of them when the tab shows again and at the safety refresh.
+  useLive(
+    Object.values(bound),
+    (changed) =>
+      void ask(
+        current.current.filter((a) => changed === undefined || changed.has(a.node)),
+        true
+      )
+  );
   // After an action ran on a node: the reads of that node asked again at once.
   const refresh = useCallback(
     (of: string) => {

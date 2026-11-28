@@ -263,10 +263,17 @@ class BackendFiles implements StoreFiles {
   readonly backend: FileBackend;
   private readonly limits: FileLimits;
   private readonly now: () => number;
-  constructor(backend: FileBackend, limits: FileLimits, now: () => number) {
+  private readonly changed: () => void;
+  constructor(
+    backend: FileBackend,
+    limits: FileLimits,
+    now: () => number,
+    changed: () => void = () => {}
+  ) {
     this.backend = backend;
     this.limits = limits;
     this.now = now;
+    this.changed = changed;
   }
   write(name: string, bytes: Uint8Array, options: { type?: string } = {}): void {
     checkFileName(name);
@@ -293,6 +300,7 @@ class BackendFiles implements StoreFiles {
       type: type?.toLowerCase() ?? guessType(name),
       written: this.now(),
     });
+    this.changed();
   }
   read(name: string): Uint8Array | undefined {
     checkFileName(name);
@@ -309,6 +317,7 @@ class BackendFiles implements StoreFiles {
   delete(name: string): void {
     checkFileName(name);
     this.backend.delete(name);
+    this.changed();
   }
   /** What every file takes together, in bytes. */
   used(): number {
@@ -386,9 +395,11 @@ class MemoryBackend implements Backend {
 class BackendStore implements Store {
   readonly backend: Backend;
   readonly files: BackendFiles;
-  constructor(backend: Backend, files: BackendFiles) {
+  private readonly changed: () => void;
+  constructor(backend: Backend, files: BackendFiles, changed: () => void = () => {}) {
     this.backend = backend;
     this.files = files;
+    this.changed = changed;
   }
   read<T = unknown>(name: string): T | undefined {
     checkName(name);
@@ -401,6 +412,7 @@ class BackendStore implements Store {
   remove(name: string): void {
     checkName(name);
     this.backend.delete(name);
+    this.changed();
   }
   names(): string[] {
     return this.backend
@@ -421,6 +433,7 @@ class BackendStore implements Store {
   put(name: string, value: unknown): void {
     checkName(name, true);
     this.backend.set(name, `${JSON.stringify(value)}\n`);
+    this.changed();
   }
 }
 
@@ -437,6 +450,11 @@ export interface StoresOptions {
   now?: () => number;
   /** How much an instance's files may take: the core's defaults (`DEFAULT_FILE_LIMITS`) else. */
   fileLimits?: Partial<FileLimits>;
+  /**
+   * An instance's store was written (a document put or removed, a file written or deleted): the
+   * one choke point the views' live updates hear (bot-os.md D173).
+   */
+  changed?: (id: string) => void;
 }
 
 /** The stores of every plugin instance, under one data directory (or in memory). */
@@ -445,17 +463,19 @@ export class Stores {
   private readonly memory = new Map<string, Map<string, string>>();
   private readonly memoryFiles = new Map<string, Map<string, MemoryFile>>();
   private readonly now: () => number;
+  private readonly changed: (id: string) => void;
   /** How much an instance's files may take. */
   readonly fileLimits: FileLimits;
 
   constructor(dataDir?: string, o: StoresOptions = {}) {
     this.dataDir = dataDir;
     this.now = o.now ?? Date.now;
+    this.changed = o.changed ?? (() => {});
     this.fileLimits = { ...DEFAULT_FILE_LIMITS, ...o.fileLimits };
   }
 
-  private filesOn(backend: FileBackend): BackendFiles {
-    return new BackendFiles(backend, this.fileLimits, this.now);
+  private filesOn(backend: FileBackend, id: string): BackendFiles {
+    return new BackendFiles(backend, this.fileLimits, this.now, () => this.changed(id));
   }
 
   /** Where an instance's documents are, on disk: the core's in `core/`, the others' in `instances/`. */
@@ -498,10 +518,12 @@ export class Stores {
   /** The core's documents of a plugin (`_restore`), beside the plugin's own. */
   internal(id: string): BackendStore {
     const dir = this.dirOf(id);
+    const changed = (): void => this.changed(id);
     if (dir !== undefined)
       return new BackendStore(
         new DirBackend(dir),
-        this.filesOn(new DirFiles(path.join(dir, FILES_DIR)))
+        this.filesOn(new DirFiles(path.join(dir, FILES_DIR)), id),
+        changed
       );
     let docs = this.memory.get(id);
     if (docs === undefined) {
@@ -513,7 +535,11 @@ export class Stores {
       files = new Map();
       this.memoryFiles.set(id, files);
     }
-    return new BackendStore(new MemoryBackend(docs), this.filesOn(new MemoryFiles(files)));
+    return new BackendStore(
+      new MemoryBackend(docs),
+      this.filesOn(new MemoryFiles(files), id),
+      changed
+    );
   }
 
   /** The version a plugin's documents are at: 0 for none. */
@@ -582,7 +608,7 @@ export class Stores {
     if (dir === undefined)
       return new BackendStore(
         new MemoryBackend(new Map(this.memory.get(id))),
-        this.filesOn(new MemoryFiles(new Map(this.memoryFiles.get(id))))
+        this.filesOn(new MemoryFiles(new Map(this.memoryFiles.get(id))), id)
       );
     const staging = `${dir}.migrating`;
     fs.rmSync(staging, { recursive: true, force: true });
@@ -593,7 +619,7 @@ export class Stores {
     } else fs.mkdirSync(staging, { recursive: true, mode: 0o700 });
     return new BackendStore(
       new DirBackend(staging),
-      this.filesOn(new DirFiles(path.join(staging, FILES_DIR)))
+      this.filesOn(new DirFiles(path.join(staging, FILES_DIR)), id)
     );
   }
 

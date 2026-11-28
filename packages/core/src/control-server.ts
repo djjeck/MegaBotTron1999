@@ -49,6 +49,14 @@
  * - `POST /plugins/<id>/clear-stop`: that node's stop cleared, for the next start (the editor's
  *   Clear stop, which Apply sends before its restart); 409 when it is not stopped.
  * - `GET /plugins/<id>/state/<name>?<field>=<value>`: a declared read, its input the query's fields.
+ * - `POST /reads {"reads": [{"node", "read", "input"?}, …]}`: several reads at once (bot-os.md
+ *   D173), at most `MAX_READS`, each input's fields as a query gives them; their answers in order,
+ *   each `{ "value" }` or `{ "error" }`; each counted in its node's cost (D172). 400 for a body
+ *   that is no list of reads.
+ * - `GET /changes?nodes=<id>,<id>`: a stream of server-sent events (D173), one `changed` event
+ *   (`{"nodes": [...]}`) each time some of those nodes change, coalesced over about half a second
+ *   and propagated along interface edges; a comment every `HEARTBEAT_MS` keeps it open. Every
+ *   node without `nodes`.
  * - `GET /plugins/<id>/queue`: what waits in a connector's queue (D73), with each send's nodes and
  *   their cancel conditions, and the sends it coalesced since the start, by pair of nodes; 404
  *   for a node that is not a connector.
@@ -120,6 +128,31 @@ import { type ModuleFile, ModuleInUse, type ModuleSource } from './module-store.
 import { ModuleError } from './modules.ts';
 import { PORT_TYPE_INFO } from './ports.ts';
 import { type SettingsRegistry } from './settings.ts';
+
+/** The most reads one `POST /reads` asks (D173). */
+export const MAX_READS = 200;
+/** How often an open `GET /changes` stream hears a comment, so that no proxy closes it idle. */
+export const HEARTBEAT_MS = 25_000;
+
+/** A `POST /reads` body: reads by node, name and input (each field a text, as a query's). */
+function readsOf(body: unknown): { node: string; read: string; input: Record<string, string> }[] {
+  const list = (body as { reads?: unknown } | null)?.reads;
+  if (!Array.isArray(list)) throw new Error('reads: a list of { node, read, input? }');
+  if (list.length > MAX_READS) throw new Error(`reads: at most ${MAX_READS}`);
+  return list.map((r: unknown, i) => {
+    const { node, read, input } = (r ?? {}) as Record<string, unknown>;
+    if (typeof node !== 'string' || typeof read !== 'string')
+      throw new Error(`reads.${i}: a node and a read, each a text`);
+    const fields = input ?? {};
+    if (
+      typeof fields !== 'object' ||
+      Array.isArray(fields) ||
+      Object.values(fields).some((v) => typeof v !== 'string')
+    )
+      throw new Error(`reads.${i}.input: fields, each a text`);
+    return { node, read, input: fields as Record<string, string> };
+  });
+}
 
 /** The largest module uploaded, in bytes (base64 in JSON is a third more). */
 export const MAX_UPLOAD = 64 * 2 ** 20;
@@ -342,6 +375,47 @@ export function controlHandler(
       const post = req.method === 'POST';
       const put = req.method === 'PUT';
       const gf = o.graphFile;
+      if (post && route === '/reads') {
+        let asked: ReturnType<typeof readsOf>;
+        try {
+          asked = readsOf(JSON.parse((await bytes(req)).toString('utf8') || 'null'));
+        } catch (e) {
+          return reply(400, { error: e instanceof Error ? e.message : String(e) });
+        }
+        // Each timed with its answer's serialization, in its node's cost (D172).
+        const parts = asked.map((a) => {
+          const start = performance.now();
+          const r = controls.read(a.node, a.read, a.input);
+          const text = JSON.stringify(r, bytesJson);
+          controls.served(a.node, performance.now() - start, Buffer.byteLength(text));
+          return text;
+        });
+        return send(200, `{"answers":[${parts.join(',')}]}\n`);
+      }
+      if (!post && !put && route === '/changes') {
+        const wanted = url.searchParams.get('nodes');
+        const only = wanted === null ? undefined : new Set(wanted.split(',').filter(Boolean));
+        res.writeHead(200, {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-store',
+          // No proxy buffers it.
+          'x-accel-buffering': 'no',
+        });
+        res.write(': open\n\n');
+        const stop = controls.changes((nodes) => {
+          const told = [...nodes].filter((n) => only === undefined || only.has(n));
+          if (told.length > 0)
+            res.write(`event: changed\ndata: ${JSON.stringify({ nodes: told })}\n\n`);
+        });
+        const beat = setInterval(() => res.write(': beat\n\n'), HEARTBEAT_MS);
+        beat.unref();
+        // The response's close, not the request's (which closes once its empty body is read).
+        res.on('close', () => {
+          clearInterval(beat);
+          stop();
+        });
+        return;
+      }
       if (!post && !put && route === '/status') {
         const refused = gf?.problems() ?? [];
         return reply(200, {

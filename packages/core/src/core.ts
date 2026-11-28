@@ -30,6 +30,7 @@ import path from 'node:path';
 import { type z } from 'zod';
 import { answerWindowMs, type BackoffView, readAnswer } from './answers.ts';
 import { Bus, type BusEvent, type BusHandle } from './bus.ts';
+import { Changes } from './changes.ts';
 import { type Clock } from './clock.ts';
 import {
   type Answer,
@@ -428,6 +429,8 @@ export class Core {
   private shutting: Promise<void> = Promise.resolve();
   /** The owner's notices (D91): what needs their attention, for the nodes that tell them. */
   private readonly noticeFeed: Notices;
+  /** What changed, for the views open (bot-os.md D173): touched nodes, propagated, coalesced. */
+  readonly changes: Changes;
   /** The owner's summary (D92): its contributors, and the core's own counts. */
   private readonly summaries: Summaries;
 
@@ -468,8 +471,14 @@ export class Core {
         new Set([...this.entries.values()].filter((e) => e.manifest.notices).map((e) => e.id)),
       error: (node, line) => this.logger(node).error(line),
     });
+    this.changes = new Changes(options.clock, (node) => this.interfaceReadersOf(node));
     this.stores = new Stores(options.dataDir, {
       now: () => options.clock.now(),
+      // A store written: its nodes' reads may answer differently (D173).
+      changed: (instance) => {
+        for (const e of this.entries.values())
+          if (e.node.instance === instance) this.changes.touch(e.id);
+      },
       ...(options.fileLimits === undefined ? {} : { fileLimits: options.fileLimits }),
     });
     if (options.dataDir === undefined)
@@ -489,6 +498,7 @@ export class Core {
       this.secretStore = new SecretStore(path.join(dir, 'secrets'), secrets);
     this.registry = new InstanceRegistry(this.stores, () => options.clock.now());
     this.settings = new SettingsRegistry((plugin) => {
+      this.changes.touch(plugin);
       const entry = this.entries.get(plugin);
       try {
         entry?.instance?.settingsChanged?.();
@@ -529,6 +539,7 @@ export class Core {
       drift: () => this.drift(),
       cost: (id) => this.cost(id),
       served: (id, ms, bytes) => this.costs.served(id, ms, bytes),
+      changes: (listener) => this.changes.subscribe(listener),
       backoffs: (id) => this.backoffs(id),
       redact: (text) => this.o.secrets?.redact(text) ?? text,
       sealed: (id) => this.sealedStores.get(id)?.state(),
@@ -2006,6 +2017,7 @@ export class Core {
           if (read !== undefined && payload['playback'] !== true) outbox?.answered(m, read);
         }
         own.publish(type, payload, t);
+        this.changes.touch(entry.id);
       },
     };
     const scheduler = new PluginScheduler({
@@ -2184,6 +2196,7 @@ export class Core {
           ...(detail === undefined ? {} : { detail }),
           ...(options?.level === undefined ? {} : { level: options.level }),
         }),
+      changed: () => this.changes.touch(id),
       ...(entry.manifest.notices
         ? {
             notices: {
@@ -2357,6 +2370,16 @@ export class Core {
    * other end's id): undefined while that end is unbound or not running. Refused for an input it
    * does not have.
    */
+  /** The nodes that read `node`'s interface through an input edge of theirs (D173). */
+  private interfaceReadersOf(node: string): string[] {
+    const out: string[] = [];
+    for (const e of this.entries.values())
+      for (const [port, bound] of e.node.inputs)
+        if (e.node.ports[port]?.type === 'interface' && bound.some((b) => b.node === node))
+          out.push(e.id);
+    return out;
+  }
+
   private interfaceOf(entry: Entry, key: string): PluginInterface | undefined {
     const { node } = entry;
     const named = node.ports[key];
@@ -2440,6 +2463,7 @@ export class Core {
       ...(reason === undefined ? {} : { reason }),
       ...(stop === undefined ? {} : { stop }),
     };
+    this.changes.touch(entry.id);
     // A start or a stop of the whole instance folds what goes as expected into its summary (D114).
     if (this.folding && (FOLDED.has(state) || (state === 'stopped' && reason === undefined)))
       return;

@@ -53,10 +53,16 @@ else. `format` says how a value is drawn (`'number'`, `'badge'`), on a column, a
 Each leaf is a card of its own. It names its input (`from`), its read, the read's `input` if it
 takes one, a `path` into its output, a `label` (else the output's description there), and what it
 says when empty (`empty`, else `Nothing yet`). While its read is asked it says so; a read that fails
-breaks its card alone, naming the input and the read. Its read is asked again every five seconds
-while the page's browser tab is visible: none while it is hidden, at once when it shows again, and
-never while its last ask is unanswered (bot-os.md D172). The editor's **Costs** counts the reads a
-view asks of each node (`reads`).
+breaks its card alone, naming the input and the read. **Its read is asked again as its node
+changes** (bot-os.md D173): the view hears its nodes' changes as the core sees them (a write to the
+node's store, an event it publishes, its state or settings, its `ctx.changed()`, or a change of a
+node it reads through an interface edge, within about half a second), and asks again only the reads
+of the nodes changed, in one batch. Nothing is asked while the page's browser tab is hidden; every
+read is asked once when it shows again, and every two minutes while it is visible, whatever changed
+(`SAFETY_REFRESH_MS`). A read whose answer depends on what the core cannot see (the time, a
+connection) calls `ctx.changed()` when it would answer otherwise, or waits for that safety refresh.
+A time shown as `in 5 minutes` ticks in the browser, with no request. The editor's **Costs** counts
+the reads a view asks of each node (`reads`).
 
 ### stat: one value, large
 

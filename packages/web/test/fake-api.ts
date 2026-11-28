@@ -13,6 +13,20 @@ export interface FakeApi {
   routes: Record<string, Answer>;
   /** Every upload fails as a network error does, when set. */
   offline?: boolean;
+  /** How many `POST /reads` batches were asked (D173), each read in it kept in `calls` as a GET. */
+  batches: number;
+  /** The change streams open (`GET /changes`, D173), with a way to tell them a change. */
+  streams: FakeStream[];
+}
+
+/** A change stream as the page opened it: its URL, whether closed, and a change to tell it. */
+export interface FakeStream {
+  url: string;
+  closed: boolean;
+  /** Tells it these nodes changed, as the core's `changed` event does. */
+  change(nodes: string[]): void;
+  /** It broke and opened again, as an `EventSource` does on its own. */
+  reopen(): void;
 }
 
 /**
@@ -21,10 +35,31 @@ export interface FakeApi {
  * network error does.
  */
 export function fakeApi(routes: Record<string, Answer>): FakeApi {
-  const api: FakeApi = { calls: [], routes };
+  const api: FakeApi = { calls: [], routes, batches: 0, streams: [] };
   const answer = (method: string, url: string, text: string | undefined): [number, string] => {
     const path = url.replace(/^api/u, '');
     const body = text === undefined ? undefined : (JSON.parse(text) as unknown);
+    // A batch of reads (D173), unless a test answers it itself: each read answered as its GET.
+    if (method === 'POST' && path === '/reads' && api.routes['POST /reads'] === undefined) {
+      api.batches += 1;
+      const reads = (
+        body as { reads: { node: string; read: string; input?: Record<string, string> }[] }
+      ).reads;
+      const answers = reads.map((r) => {
+        const fields = Object.entries(r.input ?? {});
+        const q = fields.length === 0 ? '' : `?${new URLSearchParams(fields).toString()}`;
+        const [status, value] = answer(
+          'GET',
+          `/plugins/${encodeURIComponent(r.node)}/state/${encodeURIComponent(r.read)}${q}`,
+          undefined
+        );
+        const parsed = value === 'not json' ? null : (JSON.parse(value) as unknown);
+        return status < 300
+          ? { value: parsed }
+          : { error: (parsed as { error?: string } | null)?.error ?? `HTTP ${status}` };
+      });
+      return [200, JSON.stringify({ answers })];
+    }
     api.calls.push(body === undefined ? `${method} ${path}` : `${method} ${path} ${text}`);
     const route = api.routes[`${method} ${path}`] ?? [404, { error: 'not found' }];
     const [status, value] = typeof route === 'function' ? route(body) : route;
@@ -38,6 +73,35 @@ export function fakeApi(routes: Record<string, Answer>): FakeApi {
     );
     return Promise.resolve(new Response(text, { status }));
   });
+  vi.stubGlobal(
+    'EventSource',
+    class {
+      private readonly listeners = new Map<string, ((e: { data: string }) => void)[]>();
+      constructor(url: string) {
+        api.calls.push(`STREAM ${url.replace(/^api/u, '')}`);
+        const stream: FakeStream = {
+          url: url.replace(/^api/u, ''),
+          closed: false,
+          change: (nodes) => this.emit('changed', JSON.stringify({ nodes })),
+          reopen: () => this.emit('open', ''),
+        };
+        this.stream = stream;
+        api.streams.push(stream);
+        setTimeout(() => this.emit('open', ''), 0);
+      }
+      readonly stream: FakeStream;
+      addEventListener(type: string, fn: (e: { data: string }) => void): void {
+        this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
+      }
+      close(): void {
+        this.stream.closed = true;
+      }
+      private emit(type: string, data: string): void {
+        if (this.stream.closed) return;
+        for (const fn of this.listeners.get(type) ?? []) fn({ data });
+      }
+    }
+  );
   vi.stubGlobal(
     'XMLHttpRequest',
     class {

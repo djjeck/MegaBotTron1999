@@ -139,6 +139,12 @@ export interface PluginContext {
    */
   readonly notices?: NoticesHandle;
   /**
+   * Its reads may answer differently now, though it wrote nothing to its store and published no
+   * event (bot-os.md D173): a connection's status, a queue held in memory. The views that show its
+   * reads, or those of a node that reads its interface, ask them again within about half a second.
+   */
+  changed(): void;
+  /**
    * The owner's summary (§4.17, bot-os.md D92): given only to a plugin whose manifest declares
    * `summary: true`. `contribute` adds its lines for a window of time to every summary;
    * `collect` and `instance` are for a node that tells the summary (`owner-notice`).
