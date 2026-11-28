@@ -1,6 +1,6 @@
 {
   "name": "@megabottron1999/web",
-  "version": "0.1.76",
+  "version": "0.1.77",
   "private": true,
   "description": "MegaBotTron1999's web UI: the owner's admin pages, a React app built by Vite, and its server behind a login",
   "license": "MIT",
@@ -20,8 +20,8 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@megabottron1999/chart": "0.1.76",
-    "@megabottron1999/core": "0.1.76"
+    "@megabottron1999/chart": "0.1.77",
+    "@megabottron1999/core": "0.1.77"
   },
   "devDependencies": {
     "@observablehq/plot": "0.6.19",
