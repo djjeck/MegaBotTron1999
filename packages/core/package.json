@@ -1,6 +1,6 @@
 {
   "name": "@megabottron1999/core",
-  "version": "0.1.78",
+  "version": "0.1.79",
   "private": true,
   "description": "MegaBotTron1999's shell: plugins, the bus, the store, the scheduler, the outbox, drift, settings, secrets, the graph and the dev kit",
   "license": "MIT",
@@ -18,7 +18,7 @@
     "node": ">=24"
   },
   "dependencies": {
-    "@megabottron1999/chart": "0.1.78",
+    "@megabottron1999/chart": "0.1.79",
     "@observablehq/plot": "0.6.19",
     "@resvg/resvg-js": "2.6.2",
     "css-tree": "3.2.1",
