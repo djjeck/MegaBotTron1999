@@ -2166,6 +2166,82 @@ textarea.long {
 }
 
 /*
+ * A view's tokens (D175): its colours, density, corners and font. Each is the shell's own unless
+ * the view's theme sets it, light (`--view-light-<name>`) and dark (`--view-dark-<name>`) each, as
+ * its page writes them on its root; every view component draws from these alone. A node's page and
+ * its widgets, outside any view, take the shell's.
+ */
+:root {
+  --view-background: var(--bg);
+  --view-surface: color-mix(in srgb, var(--fg) 3%, var(--bg));
+  --view-text: var(--fg);
+  --view-muted: var(--muted);
+  --view-line: var(--line);
+  --view-accent: var(--accent);
+  --view-info: var(--accent);
+  --view-success: var(--ok);
+  --view-warning: var(--warn);
+  --view-danger: var(--bad);
+  --view-chart-1: var(--chart-1);
+  --view-chart-2: var(--chart-2);
+  --view-chart-3: var(--chart-3);
+  --view-chart-4: var(--chart-4);
+  --view-chart-5: var(--chart-5);
+  --view-chart-6: var(--chart-6);
+  --view-chart-7: var(--chart-7);
+  --view-chart-8: var(--chart-8);
+  --view-radius: 10px;
+  --view-density: 1;
+  --view-space: calc(1rem * var(--view-density));
+  --view-font: inherit;
+}
+
+.view-page {
+  /* Its density is its own (its root's), so its spacing is worked out here, not on :root's. */
+  --view-space: calc(1rem * var(--view-density));
+  --view-background: var(--view-light-background, var(--bg));
+  --view-surface: var(--view-light-surface, color-mix(in srgb, var(--fg) 3%, var(--bg)));
+  --view-text: var(--view-light-text, var(--fg));
+  --view-muted: var(--view-light-muted, var(--muted));
+  --view-line: var(--view-light-line, var(--line));
+  --view-accent: var(--view-light-accent, var(--accent));
+  --view-info: var(--view-light-info, var(--view-light-accent, var(--accent)));
+  --view-success: var(--view-light-success, var(--ok));
+  --view-warning: var(--view-light-warning, var(--warn));
+  --view-danger: var(--view-light-danger, var(--bad));
+  --view-chart-1: var(--view-light-chart-1, var(--chart-1));
+  --view-chart-2: var(--view-light-chart-2, var(--chart-2));
+  --view-chart-3: var(--view-light-chart-3, var(--chart-3));
+  --view-chart-4: var(--view-light-chart-4, var(--chart-4));
+  --view-chart-5: var(--view-light-chart-5, var(--chart-5));
+  --view-chart-6: var(--view-light-chart-6, var(--chart-6));
+  --view-chart-7: var(--view-light-chart-7, var(--chart-7));
+  --view-chart-8: var(--view-light-chart-8, var(--chart-8));
+}
+@media (prefers-color-scheme: dark) {
+  .view-page {
+    --view-background: var(--view-dark-background, var(--bg));
+    --view-surface: var(--view-dark-surface, color-mix(in srgb, var(--fg) 3%, var(--bg)));
+    --view-text: var(--view-dark-text, var(--fg));
+    --view-muted: var(--view-dark-muted, var(--muted));
+    --view-line: var(--view-dark-line, var(--line));
+    --view-accent: var(--view-dark-accent, var(--accent));
+    --view-info: var(--view-dark-info, var(--view-dark-accent, var(--accent)));
+    --view-success: var(--view-dark-success, var(--ok));
+    --view-warning: var(--view-dark-warning, var(--warn));
+    --view-danger: var(--view-dark-danger, var(--bad));
+    --view-chart-1: var(--view-dark-chart-1, var(--chart-1));
+    --view-chart-2: var(--view-dark-chart-2, var(--chart-2));
+    --view-chart-3: var(--view-dark-chart-3, var(--chart-3));
+    --view-chart-4: var(--view-dark-chart-4, var(--chart-4));
+    --view-chart-5: var(--view-dark-chart-5, var(--chart-5));
+    --view-chart-6: var(--view-dark-chart-6, var(--chart-6));
+    --view-chart-7: var(--view-dark-chart-7, var(--chart-7));
+    --view-chart-8: var(--view-dark-chart-8, var(--chart-8));
+  }
+}
+
+/*
  * A view (D170): a dashboard of cards. Each leaf is a card of its own; a grid lays them out in
  * `--columns` columns, one on a phone; tabs show one of their panels; a table scrolls sideways in
  * its card; a row's drawer sits at the side, the whole screen on a phone.
@@ -2173,15 +2249,36 @@ textarea.long {
 .view-page {
   min-width: 0;
   max-width: 100%;
-  --card-bg: color-mix(in srgb, var(--fg) 3%, var(--bg));
-  --tone-neutral: var(--muted);
-  --tone-info: var(--accent);
-  --tone-success: var(--ok);
-  --tone-warning: var(--warn);
-  --tone-danger: var(--bad);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--view-space);
+  font-family: var(--view-font);
+}
+
+/*
+ * A view's body (D175): its sections, on its background, in its text's colour; the scope of its
+ * module's stylesheet, which it clips, in a stacking context of its own, so that nothing drawn in it
+ * reaches past it.
+ */
+.view-body {
+  position: relative;
+  isolation: isolate;
+  overflow: clip;
+  overflow-clip-margin: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--view-space);
+  background: var(--view-background);
+  color: var(--view-text);
+  /* The shell's own colours, as its buttons, fields and tables draw them, are the view's here. */
+  --bg: var(--view-background);
+  --fg: var(--view-text);
+  --muted: var(--view-muted);
+  --line: var(--view-line);
+  --accent: var(--view-accent);
+  --ok: var(--view-success);
+  --warn: var(--view-warning);
+  --bad: var(--view-danger);
 }
 
 .view-page > h2 {
@@ -2189,10 +2286,10 @@ textarea.long {
 }
 
 .view-page .card {
-  background: var(--card-bg);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0.9rem 1rem;
+  background: var(--view-surface);
+  border: 1px solid var(--view-line);
+  border-radius: var(--view-radius);
+  padding: calc(0.9rem * var(--view-density)) calc(1rem * var(--view-density));
   min-width: 0;
 }
 
@@ -2212,7 +2309,7 @@ textarea.long {
 .view-grid {
   display: grid;
   grid-template-columns: repeat(var(--columns, 3), minmax(0, 1fr));
-  gap: 1rem;
+  gap: var(--view-space);
 }
 
 .view-tabs,
@@ -2224,7 +2321,7 @@ textarea.long {
 .view-tabs .tablist {
   display: flex;
   gap: 0.25rem;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--view-line);
   overflow-x: auto;
   margin-bottom: 1rem;
 }
@@ -2235,49 +2332,49 @@ textarea.long {
   border-bottom: 2px solid transparent;
   border-radius: 0;
   padding: 0.55rem 0.9rem;
-  color: var(--muted);
+  color: var(--view-muted);
   cursor: pointer;
   white-space: nowrap;
   font: inherit;
 }
 
 .view-tabs .tab.open {
-  color: var(--fg);
-  border-bottom-color: var(--accent);
+  color: var(--view-text);
+  border-bottom-color: var(--view-accent);
   font-weight: 600;
 }
 
 .view-tabs [role='tabpanel'] {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--view-space);
 }
 
 .tab-count {
   margin-left: 0.4rem;
   padding: 0 0.45rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 15%, var(--bg));
-  color: var(--fg);
+  background: color-mix(in srgb, var(--view-accent) 15%, var(--view-background));
+  color: var(--view-text);
   font-size: 0.8rem;
   font-weight: 500;
 }
 
 /* A stat tile: its value large, its label under it, its tone on its left edge. */
 .stat-card {
-  border-left: 4px solid var(--tone-neutral) !important;
+  border-left: 4px solid var(--view-muted) !important;
 }
 .stat-card:has(.tone-info) {
-  border-left-color: var(--tone-info) !important;
+  border-left-color: var(--view-info) !important;
 }
 .stat-card:has(.tone-success) {
-  border-left-color: var(--tone-success) !important;
+  border-left-color: var(--view-success) !important;
 }
 .stat-card:has(.tone-warning) {
-  border-left-color: var(--tone-warning) !important;
+  border-left-color: var(--view-warning) !important;
 }
 .stat-card:has(.tone-danger) {
-  border-left-color: var(--tone-danger) !important;
+  border-left-color: var(--view-danger) !important;
 }
 .stat {
   display: flex;
@@ -2293,7 +2390,7 @@ textarea.long {
 }
 .stat-label {
   flex-basis: 100%;
-  color: var(--muted);
+  color: var(--view-muted);
   font-size: 0.85rem;
 }
 
@@ -2309,24 +2406,24 @@ textarea.long {
 }
 .badge {
   font-weight: 600;
-  color: var(--tone-neutral);
-  background: color-mix(in srgb, var(--tone-neutral) 14%, var(--bg));
+  color: var(--view-muted);
+  background: color-mix(in srgb, var(--view-muted) 14%, var(--view-background));
 }
 .badge.tone-info {
-  color: var(--tone-info);
-  background: color-mix(in srgb, var(--tone-info) 14%, var(--bg));
+  color: var(--view-info);
+  background: color-mix(in srgb, var(--view-info) 14%, var(--view-background));
 }
 .badge.tone-success {
-  color: var(--tone-success);
-  background: color-mix(in srgb, var(--tone-success) 14%, var(--bg));
+  color: var(--view-success);
+  background: color-mix(in srgb, var(--view-success) 14%, var(--view-background));
 }
 .badge.tone-warning {
-  color: var(--tone-warning);
-  background: color-mix(in srgb, var(--tone-warning) 16%, var(--bg));
+  color: var(--view-warning);
+  background: color-mix(in srgb, var(--view-warning) 16%, var(--view-background));
 }
 .badge.tone-danger {
-  color: var(--tone-danger);
-  background: color-mix(in srgb, var(--tone-danger) 14%, var(--bg));
+  color: var(--view-danger);
+  background: color-mix(in srgb, var(--view-danger) 14%, var(--view-background));
 }
 .tags {
   display: inline-flex;
@@ -2334,7 +2431,7 @@ textarea.long {
   gap: 0.25rem;
 }
 .tag {
-  border: 1px solid var(--line);
+  border: 1px solid var(--view-line);
 }
 
 /* A table in a card: scrolled sideways rather than past the page; a row that opens, a pointer. */
@@ -2352,7 +2449,7 @@ textarea.long {
 }
 .view-page tr.opens:hover,
 .view-page tr[aria-selected='true'] {
-  background: color-mix(in srgb, var(--accent) 7%, var(--bg));
+  background: color-mix(in srgb, var(--view-accent) 7%, var(--view-background));
 }
 button.sort {
   background: none;
@@ -2374,11 +2471,11 @@ button.sort {
   margin-top: 0.6rem;
 }
 .empty {
-  color: var(--muted);
+  color: var(--view-muted);
   font-style: italic;
 }
 .leaf.loading .loading {
-  color: var(--muted);
+  color: var(--view-muted);
 }
 
 /* A gallery: cards of pictures. */
@@ -2391,10 +2488,10 @@ button.sort {
   gap: 0.8rem;
 }
 .gallery-item {
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--view-line);
+  border-radius: calc(var(--view-radius) * 0.8);
   overflow: hidden;
-  background: var(--bg);
+  background: var(--view-background);
   display: flex;
   flex-direction: column;
 }
@@ -2423,7 +2520,7 @@ button.sort {
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, var(--fg) 25%, transparent);
+  background: color-mix(in srgb, var(--view-text) 25%, transparent);
   z-index: 50;
   display: flex;
   justify-content: flex-end;
@@ -2431,28 +2528,28 @@ button.sort {
 .drawer {
   width: min(34rem, 92vw);
   height: 100%;
-  background: var(--bg);
-  border-left: 1px solid var(--line);
+  background: var(--view-background);
+  border-left: 1px solid var(--view-line);
   display: flex;
   flex-direction: column;
-  box-shadow: -8px 0 24px color-mix(in srgb, var(--fg) 15%, transparent);
+  box-shadow: -8px 0 24px color-mix(in srgb, var(--view-text) 15%, transparent);
 }
 .drawer > header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 0.8rem 1rem;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--view-line);
 }
 .drawer > header h3 {
   margin: 0;
 }
 .drawer-body {
   overflow-y: auto;
-  padding: 1rem;
+  padding: var(--view-space);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--view-space);
 }
 .detail-actions {
   display: flex;
@@ -2476,7 +2573,7 @@ button.sort {
   margin: 0.6rem 0 0;
 }
 .view-form .ok {
-  color: var(--ok);
+  color: var(--view-success);
 }
 
 @media (max-width: 640px) {

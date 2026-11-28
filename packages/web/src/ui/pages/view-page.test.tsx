@@ -72,6 +72,12 @@ const view = parseManifest({
       },
       { show: 'counter', from: 'other', read: 'players', label: 'Elsewhere' },
     ],
+    theme: {
+      light: { accent: '#0f766e', chart: ['teal'] },
+      dark: { accent: '#5eead4' },
+      radius: 4,
+    },
+    stylesheet: 'views/ledger.css',
   },
 });
 
@@ -125,6 +131,17 @@ describe('a view’s page (D170)', () => {
     // Its input left unbound says so; a section waiting for the choice asks for one.
     expect(screen.getByText('Its input other is not wired: draw an edge to it.')).toBeDefined();
     expect(screen.getByText('Pick one above.')).toBeDefined();
+    // Its theme on its root (D175), its module's stylesheet served from the instance, scoped to its
+    // body.
+    const root = document.querySelector('.view-page') as HTMLElement;
+    expect(root.style.getPropertyValue('--view-light-accent')).toBe('#0f766e');
+    expect(root.style.getPropertyValue('--view-dark-accent')).toBe('#5eead4');
+    expect(root.style.getPropertyValue('--view-light-chart-1')).toBe('teal');
+    expect(root.style.getPropertyValue('--view-radius')).toBe('4px');
+    expect(document.querySelector('link[rel="stylesheet"]')?.getAttribute('href')).toBe(
+      'api/views/home/style.css'
+    );
+    expect(document.querySelector('[data-view-body="home"]')).not.toBeNull();
     // Each read once, whatever shows it: the selector's and the table's are one.
     expect(api.calls.filter((c) => c === 'GET /plugins/ledger/state/players')).toHaveLength(1);
   });

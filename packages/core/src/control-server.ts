@@ -53,6 +53,9 @@
  *   D173), at most `MAX_READS`, each input's fields as a query gives them; their answers in order,
  *   each `{ "value" }` or `{ "error" }`; each counted in its node's cost (D172). 400 for a body
  *   that is no list of reads.
+ * - `GET /views/<id>/style.css`: a view node's stylesheet (bot-os.md D175), as its module shipped
+ *   it and the check took it, scoped to the view's body; `GET /views/<id>/files/<path>`, a picture
+ *   it points at. 404 for a node that has none.
  * - `GET /changes?nodes=<id>,<id>`: a stream of server-sent events (D173), one `changed` event
  *   (`{"nodes": [...]}`) each time some of those nodes change, coalesced over about half a second
  *   and propagated along interface edges; a comment every `HEARTBEAT_MS` keeps it open. Every
@@ -391,6 +394,29 @@ export function controlHandler(
           return text;
         });
         return send(200, `{"answers":[${parts.join(',')}]}\n`);
+      }
+      const style = /^\/views\/([^/]+)\/(?:(style\.css)|files\/(.+))$/u.exec(route);
+      if (!post && !put && style !== null) {
+        const id = decodeURIComponent(style[1] ?? '');
+        if (style[2] !== undefined) {
+          const css = controls.viewSheet(id);
+          if (css === undefined) return reply(404, { error: `${id} has no stylesheet` });
+          res.writeHead(200, {
+            'content-type': 'text/css; charset=utf-8',
+            'cache-control': 'no-store',
+          });
+          res.end(css);
+          return;
+        }
+        const picture = controls.viewPicture(id, decodeURIComponent(style[3] ?? ''));
+        if (picture === undefined) return reply(404, { error: 'no such picture' });
+        res.writeHead(200, {
+          'content-type': picture.type,
+          'cache-control': 'no-store',
+          'content-security-policy': "default-src 'none'; sandbox",
+        });
+        res.end(picture.data);
+        return;
       }
       if (!post && !put && route === '/changes') {
         const wanted = url.searchParams.get('nodes');

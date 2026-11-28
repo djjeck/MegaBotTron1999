@@ -30,7 +30,7 @@ import type {
   ViewSelector,
   Widget,
 } from '#src/ui/api.ts';
-import { api, ApiError } from '#src/ui/api.ts';
+import { api, ApiError, seg } from '#src/ui/api.ts';
 import type { PageProps } from '#src/ui/App.tsx';
 import { query } from '#src/ui/graph/NodeControls.tsx';
 import { SELECTOR_REF } from '#src/ui/graph/TableRow.tsx';
@@ -43,6 +43,7 @@ import { Gallery } from '#src/ui/view/Gallery.tsx';
 import { ActionForm, SettingsForm, StatTile } from '#src/ui/view/Leaves.tsx';
 import { keyOf } from '#src/ui/view/list.tsx';
 import { readAll, useLive } from '#src/ui/view/live.ts';
+import { themeStyle } from '#src/ui/view/theme.ts';
 
 /** A chart and a time series (D174), drawn by Plot: a chunk of its own, loaded only to draw one. */
 const Chart = lazy(() => import('#src/ui/view/Chart.tsx'));
@@ -333,7 +334,11 @@ export function ViewPage(props: PageProps) {
     now,
   };
   return (
-    <div className="view-page">
+    <div className="view-page" style={themeStyle(page.theme)}>
+      {page.stylesheet === undefined ? null : (
+        // Its module's stylesheet (D175), served from the instance, scoped to its body.
+        <link rel="stylesheet" href={`api/views/${seg(node.id)}/style.css`} />
+      )}
       {home}
       <h2>
         {page.title} <span className="muted small">{node.id}</span>
@@ -354,20 +359,22 @@ export function ViewPage(props: PageProps) {
           </>
         )}
       </p>
-      {page.selector === undefined ? null : (
-        <Selector
-          selector={page.selector}
-          node={bound[page.selector.from]}
-          answer={answerOf(c, page.selector.from, page.selector.read, page.selector.input ?? {})}
-          selected={address.s}
-          choose={(s) => set({ s, row: undefined })}
-        />
-      )}
-      {page.sections.length === 0 ? (
-        <p className="muted">No section yet: add its sections in its node’s config.</p>
-      ) : (
-        <Sections sections={page.sections} c={c} />
-      )}
+      <div className="view-body" data-view-body={node.id}>
+        {page.selector === undefined ? null : (
+          <Selector
+            selector={page.selector}
+            node={bound[page.selector.from]}
+            answer={answerOf(c, page.selector.from, page.selector.read, page.selector.input ?? {})}
+            selected={address.s}
+            choose={(s) => set({ s, row: undefined })}
+          />
+        )}
+        {page.sections.length === 0 ? (
+          <p className="muted">No section yet: add its sections in its node’s config.</p>
+        ) : (
+          <Sections sections={page.sections} c={c} />
+        )}
+      </div>
     </div>
   );
 }

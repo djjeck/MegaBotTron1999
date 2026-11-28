@@ -543,11 +543,65 @@ export const selectorSchema = z.strictObject({
  * A view (D170): a title, an optional selector, and its sections, in order, each a leaf read from
  * one of its inputs or a layout of others; none yet, an empty page (a view node just added).
  */
+/** A colour a view's theme sets (D175): `#2563eb`, `rgb(…)`, `oklch(…)`, a name such as `teal`. */
+const colour = z
+  .string()
+  .regex(
+    /^(?:#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\([0-9a-z.,%\s/+-]*\)|[a-z]{3,20})$/iu,
+    'expected a colour such as #2563eb, rgb(37 99 235) or teal'
+  );
+/** The colours a view's theme may set (D175), each a `--view-<name>` token. */
+export const THEME_COLOURS = [
+  'background',
+  'surface',
+  'text',
+  'muted',
+  'line',
+  'accent',
+  'info',
+  'success',
+  'warning',
+  'danger',
+] as const;
+const colours = z.strictObject({
+  ...Object.fromEntries(THEME_COLOURS.map((c) => [c, colour.optional()])),
+  /** A chart's series (D174), in order: `--view-chart-1` … */
+  chart: z.array(colour).min(1).max(8).optional(),
+}) as z.ZodType<Partial<Record<(typeof THEME_COLOURS)[number], string>> & { chart?: string[] }>;
+/** How close a view's cards and their content sit (D175). */
+export const DENSITIES = ['compact', 'comfortable', 'spacious'] as const;
+/** The families a view's text may take (D175), each a stack of the host's fonts. */
+export const FONTS = ['system', 'sans', 'serif', 'rounded', 'mono'] as const;
+
+/**
+ * A view's theme (D175): its colours, light and dark each (`--view-<name>`, those not given the
+ * shell's), how dense it is, its corners' radius in pixels, and its text's family.
+ */
+export const themeSchema = z.strictObject({
+  light: colours.optional(),
+  dark: colours.optional(),
+  density: z.enum(DENSITIES, { error: `expected a density: ${DENSITIES.join(', ')}` }).optional(),
+  radius: z.number().min(0).max(24).optional(),
+  font: z.enum(FONTS, { error: `expected a font: ${FONTS.join(', ')}` }).optional(),
+});
+
 export const viewSchema = z.strictObject({
   title: z.string().min(1),
   selector: selectorSchema.optional(),
   sections: z.array(viewSectionSchema).default([]),
+  /** Its tokens (D175): colours light and dark, density, radius, font. */
+  theme: themeSchema.optional(),
+  /**
+   * A stylesheet of its module's (D175), `views/<name>.css`, checked as the module loads and
+   * served from the instance, scoped to the view.
+   */
+  stylesheet: z
+    .string()
+    .regex(/^views\/[a-z0-9][a-z0-9-]*\.css$/u, 'expected a stylesheet such as views/shop.css')
+    .optional(),
 });
+/** A view's theme (D175). */
+export type ViewTheme = z.output<typeof themeSchema>;
 
 /** One section of a widget or a page, as a plugin declares it. */
 export type Widget = z.output<typeof widgetSchema>;

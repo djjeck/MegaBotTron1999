@@ -390,6 +390,24 @@ the kind of section and nothing else; `format` says how a value is drawn.
 - **Actions** say they are busy, then their answer or why they were refused, and the leaves read
   from that node are read again (the rest at their next five seconds; one still unanswered once its
   answer comes).
+- **Its look** (D175): `theme` sets its tokens, CSS custom properties on its root that every view
+  component draws from (its cards, tabs, stats, badges, tables, galleries, drawer, forms and charts,
+  and the shell's own buttons and fields within it): its colours, `light` and `dark` each
+  (`background`, `surface`, `text`, `muted`, `line`, `accent`, `info`, `success`, `warning`,
+  `danger`, and `chart`, up to 8 series' colours; each a hex, a colour function or a name; one not
+  given is the shell's), its `density` (`compact`, `comfortable`, `spacious`), its corners' `radius`
+  (0 to 24 pixels) and its `font` (`system`, `sans`, `serif`, `rounded`, `mono`). They are the
+  `--view-<name>` tokens a stylesheet may set too. A module's view plugin may ship a **stylesheet**
+  (`stylesheet: 'views/<name>.css'`, in its module, no script), checked as the module loads and
+  refused, the module with it, unless safe: the shell scopes it to the view's body
+  (`@scope ([data-view-body="<node>"])`), which clips what it holds in a stacking context of its
+  own; only `@media`, `@supports` and `@container` (no `@import`, no `@font-face`); only the
+  properties that arrange and colour (`ALLOWED` in `view-style.ts`), and custom properties; no
+  `!important`; `display` but `none`, `position` but `fixed` and `sticky`, `z-index` from 0 to 10;
+  functions on a list (colours, gradients, `calc`, `var`, …); `url()` only to a PNG, JPEG, GIF or
+  WebP of the module's beside it. At most 64 KiB. The page links it from the instance
+  (`GET /views/<node>/style.css`, §4.11), never inline, the CSP as it was. A confirm is the
+  browser's own, no element of the page, so no stylesheet reaches it.
 
 A node page (`page`, above) keeps working as it is, and its table takes a table's search, sort,
 paging, formats and a drawer of fields and actions too; it is deprecated for views (D169), and a
@@ -2303,10 +2321,12 @@ such as `actor is not stopped`); `GET /plugins/<id>/state/<name>?<field>=<value>
 the query's fields, §2); `POST /reads {"reads": [{"node", "read", "input"?}]}` (several reads at
 once, at most 200, each input's fields texts as a query's; `{ answers }` in order, each `{ value }`
 or `{ error }`, each counted in its node's cost; bot-os.md D173); `GET /changes?nodes=<id>,…`
-(server-sent events, D173: a `changed` event, `{ "nodes": [...] }`, each time some of those nodes
-change, coalesced over half a second and propagated along interface edges, every node without
-`nodes`; a comment every 25 s keeps it open); `GET /plugins/<id>/queue` (what waits in a connector's
-queue, D73:
+`GET /views/<id>/style.css` and `GET /views/<id>/files/<path>` (a view's stylesheet as its module
+shipped it, scoped to its body, and a picture it points at, D175; 404 for none);
+`GET /changes?nodes=<id>,…` (server-sent events, D173: a `changed` event, `{ "nodes": [...] }`, each
+time some of those nodes change, coalesced over half a second and propagated along interface edges,
+every node without `nodes`; a comment every 25 s keeps it open); `GET /plugins/<id>/queue` (what
+waits in a connector's queue, D73:
 `{ account, entries: [{ chat, text, command, queuedAt, waitingUntil, intervalS, nodes }], coalesced }`,
 each node with its `origin` and its `cancel`, `{ on?, when?, test?, deadline? }`, and `coalesced`
 the sends merged since the start, `{ count, pairs: [{ nodes: [a, b], count }] }`; 404 for a node
@@ -3741,8 +3761,8 @@ its bytes is for later.
 
 - `packages/core/src/` imports nothing of any game, nor any other package but the charts'
   (`@megabottron1999/chart`, bot-os.md D174): ESLint refuses imports of the other workspaces there.
-  Its npm dependencies are zod, resvg (the render service, §4.13), and Plot and linkedom (a chart's
-  picture, §4.13).
+  Its npm dependencies are zod, resvg (the render service, §4.13), Plot and linkedom (a chart's
+  picture, §4.13), and css-tree (a view's stylesheet checked, §2, D175).
 - `packages/chart/src/` (a chart's points and Plot's options, the core's and the web UI's alike)
   imports nothing of the shell, and only Plot's types, so that the web UI's bundle takes none of the
   core's Node modules with it.
@@ -3793,6 +3813,9 @@ A module is a directory, `/data/modules/<id>/`, holding its `module.json` and it
 | `plugins`     | Optional: its plugin entry files, relative to its directory; a module without any is a library for others                                                                          |
 | `description` | Optional: one line, for the owner                                                                                                                                                  |
 | `files`       | Optional: what an install keeps, as globs from its directory (`*`, `**`, `?`; a directory names all under it), with its `module.json` always; by default all but its tests (§7.4)  |
+
+A view plugin's stylesheet and its pictures sit in the module's `views/` (§2, Views, D175): read and
+checked as it loads, a stylesheet that is not safe refusing the module, with why at each line.
 
 Nothing else is allowed. A module's files import:
 

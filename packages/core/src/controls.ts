@@ -21,6 +21,7 @@
  *
  * Nothing in here knows of any game or any network.
  */
+import fs from 'node:fs';
 import { type BackoffView } from './answers.ts';
 import { type Buttons } from './commands.ts';
 import { type ConnectorStatus, type Surface, type SurfaceQuery } from './connector.ts';
@@ -36,6 +37,7 @@ import { type SealedState } from './sealed-store.ts';
 import { type SettingsRegistry, type SettingValue } from './settings.ts';
 import { type StateView } from './state-view.ts';
 import { type FileLimits, type StoreFileInfo } from './store.ts';
+import { scopedSheet, type ViewStyle } from './view-style.ts';
 
 /** The core's document of the off switch. */
 export const POWER_DOC = 'power';
@@ -100,6 +102,8 @@ export interface ControlsHost {
   cost?(id: string): NodeCost | undefined;
   /** Counts a read served of a node (D172): its time and its answer's bytes. */
   served?(id: string, ms: number, bytes: number): void;
+  /** A view node's stylesheet (D175), as its module loaded it; none for a node without one. */
+  viewStyle?(id: string): ViewStyle | undefined;
   /** Hears each set of nodes changed (D173), propagated along interface edges; the way to stop. */
   changes?(listener: (nodes: ReadonlySet<string>) => void): () => void;
   /** A node's commands the retry-loop guard holds back (bot-os.md D98). */
@@ -582,6 +586,26 @@ export class Controls {
    */
   changes(listener: (nodes: ReadonlySet<string>) => void): () => void {
     return this.host.changes?.(listener) ?? (() => {});
+  }
+
+  /**
+   * A view node's stylesheet as served (D175): scoped to its view's body; undefined for a node
+   * that has none.
+   */
+  viewSheet(id: string): string | undefined {
+    const style = this.host.viewStyle?.(id);
+    return style === undefined ? undefined : scopedSheet(style, id);
+  }
+
+  /** A picture a view node's stylesheet points at (D175): its bytes and type, or undefined. */
+  viewPicture(id: string, ref: string): { data: Uint8Array; type: string } | undefined {
+    const f = this.host.viewStyle?.(id)?.files[ref];
+    if (f === undefined) return undefined;
+    try {
+      return { data: fs.readFileSync(f.file), type: f.type };
+    } catch {
+      return undefined;
+    }
   }
 
   /** Counts a read the control API served of a node (D172), in its cost. */

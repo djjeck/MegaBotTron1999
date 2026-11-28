@@ -3,7 +3,7 @@
  * chunk of its own (`ViewPage.tsx` loads it lazily), so that only a view with a chart loads Plot.
  * Its points and Plot's options are `@megabottron1999/chart`'s, the same a picture for the owner's
  * chat is drawn from. Its text and axes take the page's colour (`currentColor`), and its series the
- * view's colours (`--chart-1` … `--chart-8`, light and dark), drawn again when the scheme changes;
+ * view's colours (`--view-chart-1` … `--view-chart-8`, light and dark, D175), drawn again when the scheme changes;
  * its width is its card's, drawn again as that changes; each point's tooltip on hover.
  */
 import type { ChartShape } from '@megabottron1999/chart/chart.ts';
@@ -33,11 +33,11 @@ function useDark(): boolean {
   return dark;
 }
 
-/** The view's series colours: its `--chart-<n>` tokens, else the core's palette. */
+/** The view's series colours: its `--view-chart-<n>` tokens, else the palette. */
 function colours(el: HTMLElement, dark: boolean): string[] {
   const style = getComputedStyle(el);
   const fallback = dark ? CHART_COLORS_DARK : CHART_COLORS;
-  return fallback.map((c, i) => style.getPropertyValue(`--chart-${i + 1}`).trim() || c);
+  return fallback.map((c, i) => style.getPropertyValue(`--view-chart-${i + 1}`).trim() || c);
 }
 
 export default function Chart(props: { chart: ChartShape; value: unknown; empty: string }) {

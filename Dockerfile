@@ -33,7 +33,7 @@ COPY --from=manifests /m/ ./
 # for the anthropic connector; resvg, for the render service, whose native binary is a prebuilt
 # optional package per platform (linux-x64-musl, linux-arm64-musl), so no install script runs;
 # Observable Plot and linkedom, for a chart drawn as a picture (docs/bot-os.md D174), in the font
-# packages/core/assets/fonts holds.
+# packages/core/assets/fonts holds; css-tree, for a view's stylesheet checked (D175).
 # htmlparser2 comes too, the dev kit's Telegram export reader's (D130), which the instance never runs.
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 COPY packages/ packages/

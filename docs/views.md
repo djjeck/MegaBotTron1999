@@ -291,11 +291,77 @@ node home: view sections.1.tabs.0.sections.0.key: its rows have no id: a drawer 
 expected show to be one of: keyValue, counter, list, table, progress, until, stat, gallery, form, tabs, grid, card
 ```
 
+## Its look
+
+### theme: tokens, light and dark
+
+```ts
+theme: {
+  light: { accent: '#0f766e', surface: '#f8fafc', chart: ['#0f766e', '#f59e0b'] },
+  dark: { accent: '#5eead4', surface: '#111827', chart: ['#5eead4', '#fbbf24'] },
+  density: 'compact',
+  radius: 6,
+  font: 'rounded',
+}
+```
+
+Beside `title` and `sections` (bot-os.md D175). Every element of the view draws from its tokens: the
+cards, tabs, stats, badges, tables, galleries, drawer, forms and charts, and the shell's own buttons
+and fields within it. Colours are `background`, `surface` (a card's), `text`, `muted`, `line`,
+`accent`, `info`, `success`, `warning`, `danger` and `chart` (its series' colours, up to 8), each
+for the `light` scheme and the `dark` one, as the owner's browser shows; one left out is the
+shell's, so a view with no theme looks as the editor does. `density` is `compact`, `comfortable` or
+`spacious`; `radius` its corners, 0 to 24 pixels; `font` one of `system`, `sans`, `serif`,
+`rounded`, `mono`. The generic `view` takes the same `theme` in its node's config.
+
+### stylesheet: a module's own CSS
+
+```ts
+view: { title: 'Shop ads', sections: [/* … */], stylesheet: 'views/shop.css' }
+```
+
+```css
+/* views/shop.css, in the module */
+:scope {
+  --view-accent: #b45309;
+}
+.stat-value {
+  font-variant-numeric: oldstyle-nums;
+  letter-spacing: -0.02em;
+}
+.leaf-gallery .card {
+  background: url(paper.png) var(--view-surface);
+}
+@media (max-width: 640px) {
+  .gallery {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+```
+
+A view plugin of a module may ship one stylesheet, `views/<name>.css` beside its pictures; no
+script. It is checked as the module loads, and the module is refused, saying why at each line,
+unless it is safe:
+
+- the shell scopes it to the view's body (`:scope` is that body), so it styles the view's sections
+  and nothing of the page around them; the body clips what it holds;
+- `@media`, `@supports` and `@container` only: no `@import`, no `@font-face`;
+- only properties that arrange and colour (colours, backgrounds, borders, shadows, text, spacing,
+  flex and grid, sizes, overflow), and custom properties such as `--view-accent`: no `content`,
+  `opacity`, `visibility`, `transform`, `filter`, `animation`; `display` but `none`; `position` but
+  `fixed` and `sticky`; `z-index` from 0 to 10; no `!important`;
+- `url()` only to a PNG, JPEG, GIF or WebP of the module's, beside the stylesheet;
+- at most 64 KiB.
+
+The page links it from the instance; nothing is inlined. A row action's confirm is the browser's
+own, which no stylesheet reaches.
+
 ## A whole dashboard
 
 ```ts
 view: {
   title: 'Shop ads',
+  theme: { light: { accent: '#0f766e' }, dark: { accent: '#5eead4' }, density: 'comfortable', radius: 8 },
   sections: [
     {
       show: 'grid', columns: 4,

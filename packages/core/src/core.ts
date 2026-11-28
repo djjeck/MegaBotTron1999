@@ -117,6 +117,7 @@ import { hideSensitive, openSensitive, sealSensitive } from './sensitive.ts';
 import { PluginSettings, SETTINGS_DOC, SettingsRegistry } from './settings.ts';
 import { CORE_STORE, type FileLimits, type Migration, Stores } from './store.ts';
 import { Summaries, type SummarySection, type SummaryWindow } from './summary.ts';
+import { type ViewStyle } from './view-style.ts';
 
 /**
  * A node's state (bot-os.md D64): `disabled` by the owner, `stopped` by exception (a safety stop,
@@ -431,6 +432,8 @@ export class Core {
   private readonly noticeFeed: Notices;
   /** What changed, for the views open (bot-os.md D173): touched nodes, propagated, coalesced. */
   readonly changes: Changes;
+  /** The view plugins' stylesheets (D175), by plugin id, as their modules loaded them. */
+  private readonly viewStyles = new Map<string, ViewStyle>();
   /** The owner's summary (D92): its contributors, and the core's own counts. */
   private readonly summaries: Summaries;
 
@@ -540,6 +543,10 @@ export class Core {
       cost: (id) => this.cost(id),
       served: (id, ms, bytes) => this.costs.served(id, ms, bytes),
       changes: (listener) => this.changes.subscribe(listener),
+      viewStyle: (id) => {
+        const plugin = this.entries.get(id)?.manifest.id;
+        return plugin === undefined ? undefined : this.viewStyles.get(plugin);
+      },
       backoffs: (id) => this.backoffs(id),
       redact: (text) => this.o.secrets?.redact(text) ?? text,
       sealed: (id) => this.sealedStores.get(id)?.state(),
@@ -597,8 +604,15 @@ export class Core {
    * Adds the plugins a module offers (§7), as `register` does, remembering their module and the
    * version of it loaded.
    */
-  registerModule(module: string, plugins: readonly Plugin[], version?: string): void {
+  registerModule(
+    module: string,
+    plugins: readonly Plugin[],
+    version?: string,
+    styles: Readonly<Record<string, ViewStyle>> = {}
+  ): void {
     this.register(...plugins);
+    // Its view plugins' stylesheets, checked as it loaded (D175).
+    for (const [plugin, style] of Object.entries(styles)) this.viewStyles.set(plugin, style);
     for (const p of plugins) {
       this.origins.set(p, { module, ...(version === undefined ? {} : { version }) });
       this.sources.set(p, `module ${module}`);

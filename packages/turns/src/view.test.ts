@@ -58,6 +58,11 @@ describe('viewManifest', () => {
     expect(m.view).toMatchObject({ title: 'The cast', selector: { read: 'list' } });
   });
 
+  it('takes its theme from its config (D175)', () => {
+    const theme = { light: { accent: '#0f766e' }, density: 'spacious' as const };
+    expect(viewManifest({ theme }).view).toEqual({ title: 'View', sections: [], theme });
+  });
+
   it('is the base view for a config it cannot read: the config’s check says why', () => {
     expect(viewManifest({ title: 3 }).view).toEqual({ title: 'View', sections: [] });
     expect(viewManifest({ inputs: { cast: { members: ['x'] } } }).inputs).toBeUndefined();

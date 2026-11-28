@@ -19,6 +19,7 @@ import {
   type ManifestInput,
   type Plugin,
   selectorSchema,
+  themeSchema,
   viewSectionSchema,
 } from '@megabottron1999/core';
 import { z } from 'zod';
@@ -28,7 +29,7 @@ export const VIEW = 'view';
 const ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const MEMBER = /^(?:state|actions)\.[a-z][A-Za-z0-9_]*$/u;
 
-/** A generic view's config: its inputs, its title, its selector and its sections. */
+/** A generic view's config: its inputs, its title, its selector, its sections and its theme. */
 export const viewConfig = z.object({
   title: z.string().min(1).default('View').describe('Its title, at the top of its page'),
   inputs: z
@@ -57,6 +58,9 @@ export const viewConfig = z.object({
     .array(viewSectionSchema)
     .default([])
     .describe("Its sections, in order: each a page's section, read from the input it names (from)"),
+  theme: themeSchema
+    .optional()
+    .describe('Its look (D175): colours light and dark, density, corners, font'),
 });
 export type ViewConfig = z.output<typeof viewConfig>;
 
@@ -75,7 +79,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 export function viewManifest(config: Readonly<Record<string, unknown>>): ManifestInput {
   const c = viewConfig.safeParse(config);
   if (!c.success) return BASE;
-  const { title, inputs, selector, sections } = c.data;
+  const { title, inputs, selector, sections, theme } = c.data;
   return {
     ...BASE,
     inputs: Object.fromEntries(
@@ -90,7 +94,12 @@ export function viewManifest(config: Readonly<Record<string, unknown>>): Manifes
         },
       ])
     ),
-    view: { title, ...(selector === undefined ? {} : { selector }), sections },
+    view: {
+      title,
+      ...(selector === undefined ? {} : { selector }),
+      sections,
+      ...(theme === undefined ? {} : { theme }),
+    },
   };
 }
 

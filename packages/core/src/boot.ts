@@ -111,7 +111,8 @@ export async function bootstrap(o: BootstrapOptions): Promise<Bootstrapped> {
         core.registerModule(
           m.id,
           modules.plugins.filter((p) => p.module === m.id).map((p) => p.plugin),
-          m.version
+          m.version,
+          m.styles
         );
       }
       failures.push(

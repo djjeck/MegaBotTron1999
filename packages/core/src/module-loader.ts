@@ -24,6 +24,30 @@ import {
   PLUGIN_API,
 } from './modules.ts';
 import { type Plugin } from './plugin.ts';
+import { checkViewSheet, type ViewStyle } from './view-style.ts';
+
+/**
+ * A view plugin's stylesheet (D175), read from its module's directory and checked; thrown with why.
+ * Its pictures are files beside it, within the module's directory.
+ */
+export function moduleSheet(dir: string, sheet: string): ViewStyle {
+  const root = fs.realpathSync(dir);
+  const inside = (file: string): string | undefined => {
+    try {
+      const real = fs.realpathSync(file);
+      return real.startsWith(`${root}${path.sep}`) && fs.statSync(real).isFile() ? real : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const file = inside(path.join(root, sheet));
+  if (file === undefined) throw new Error(`its stylesheet ${sheet} is not in the module`);
+  const here = path.dirname(file);
+  return checkViewSheet(fs.readFileSync(file, 'utf8'), {
+    name: sheet,
+    picture: (ref) => inside(path.join(here, ref)),
+  });
+}
 
 export interface LoadModulesOptions {
   /** The modules' directory: `<data>/modules`. */
@@ -66,6 +90,8 @@ export interface LoadedModule {
   manifest: ModuleManifest;
   /** The ids of the plugins it offers. */
   plugins: string[];
+  /** Its view plugins' stylesheets (D175), checked, by plugin id; none, none. */
+  styles?: Record<string, ViewStyle>;
 }
 
 export interface ModulesLoad {
@@ -139,14 +165,23 @@ export async function loadModules(o: LoadModulesOptions): Promise<ModulesLoad> {
         plugins.push(...pluginsOf(exported, entry));
       }
       const ids: string[] = [];
+      const styles: Record<string, ViewStyle> = {};
       for (const plugin of plugins) {
-        const { id } = parseManifest(plugin.manifest);
+        const { id, view } = parseManifest(plugin.manifest);
+        if (view?.stylesheet !== undefined) styles[id] = moduleSheet(m.dir, view.stylesheet);
         const other = taken.get(id) ?? (ids.includes(id) ? `module ${m.id}` : undefined);
         if (other !== undefined) throw new Error(`its plugin ${id} is offered by ${other} already`);
         ids.push(id);
       }
       for (const id of ids) taken.set(id, `module ${m.id}`);
-      out.modules.push({ id: m.id, version: manifest.version, dir: m.dir, manifest, plugins: ids });
+      out.modules.push({
+        id: m.id,
+        version: manifest.version,
+        dir: m.dir,
+        manifest,
+        plugins: ids,
+        styles,
+      });
       out.plugins.push(...plugins.map((plugin) => ({ module: m.id, plugin })));
     } catch (e) {
       down.add(m.id);
