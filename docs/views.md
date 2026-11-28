@@ -21,7 +21,7 @@ interface: {
     ads: { help: 'Its ads', output: z.array(z.object({ id: z.string(), item: z.string(), pictures: z.array(z.string()), cover: z.string(), category: z.string(), seller: z.string(), rev: z.number() })) },
     players: { help: 'Its players', output: z.array(z.object({ id: z.string(), name: z.string(), level: z.number(), triggers: z.array(z.string()), lastTurn: z.number() })) },
     player: { help: 'One player', input: z.object({ id: z.string() }), output: z.object({ drops: z.array(z.string()), pricing: z.object({ rate: z.number() }) }) },
-    donations: { help: 'Its donations', output: z.array(z.object({ id: z.string(), from: z.string(), coins: z.number(), verdict: z.string(), at: z.string() })) },
+    donations: { help: 'Its donations', output: z.array(z.object({ id: z.string(), from: z.string(), coins: z.number(), counted: z.boolean(), verdict: z.string(), at: z.string() })) },
   },
   actions: {
     advertise: { help: 'Writes an ad again', input: z.object({ item: z.string(), again: z.boolean().optional() }) },
@@ -189,6 +189,48 @@ Each sends on its button, says it is busy, then done or why not.
 { show: 'until', from: 'shop', read: 'summary', path: 'since' }
 ```
 
+### chart and timeseries: a picture of the rows
+
+```ts
+{
+  show: 'timeseries', from: 'shop', read: 'donations', label: 'Donations per day',
+  x: 'at', interval: 'day', timeZone: 'Europe/Rome',
+  series: 'counted', seriesLabels: { true: 'Counted', false: 'Not counted' }, stack: true,
+  y: { label: 'Donations' },
+  value: { path: 'coins', label: 'Value', unit: '₭' },
+}
+```
+
+A chart (bot-os.md D174), drawn by Observable Plot: the read's rows (a list's items, a map's values,
+at `path`) gathered into points by `x`, and by series. This one counts the donations of each day
+(`y` with no path counts its rows) in the shop's time zone, a bar per day, its two series stacked:
+those counted and those not, by the row's `counted`, each named by `seriesLabels`. Hovering a bar
+shows its series, its day, its count, and its second measure, `value`: the coins given that day, in
+₭. A day with no donation shows as a gap.
+
+- `show`: `chart`, whose `x` is a category (a bar each, in the order they come) or a number; or
+  `timeseries`, whose `x` is a time (ms since the epoch, or an ISO string), gathered by `interval`
+  (`minute`, `hour`, `day`, `week`, `month`; none, each time its own) in `timeZone` (an IANA zone,
+  `UTC` by default).
+- `mark`: `bar` (the default, but a time series of no interval is a `line`), `line`, `area`, `dot`.
+- `y`: a measure, or several (up to 8), each then a series of its own:
+  `y: ['coins', { path: 'coins', reduce: 'max', label: 'Largest' }]`. A measure is a path of a
+  number, summed per point, or `{ path?, reduce?, label?, format?, unit? }`: `reduce` one of `sum`,
+  `count`, `mean`, `min`, `max`; no path counts the rows. None at all: the rows counted.
+- `series`: a row's value that names its series, renamed by `seriesLabels` (by the value as text:
+  `true`, `false`); not with several `y`.
+- `stack`: bars or areas of several series piled up; without it, bars stand side by side.
+- `value`: a second measure, shown in each point's tooltip.
+- `height`: its height in pixels (260 by default); its width is its card's.
+
+Its colours are the view's (`--chart-1` to `--chart-8`, light and dark), its text the page's. Plot
+is loaded only on a view that has a chart. The check refuses an `x`, a measure or a `series` its
+rows have not, a measure that is no number, and a time series' `x` that is no time.
+
+The same chart can go to the owner's chat as one picture: a plugin draws it with
+`ctx.render.chart(spec, rows)`, the leaf without its `from` and `read`, its rows given
+(bot-os-api.md §4.13).
+
 ## The layouts
 
 ### grid: columns of cards
@@ -298,6 +340,12 @@ view: {
         {
           title: 'Donations & refunds',
           sections: [
+            {
+              show: 'timeseries', from: 'shop', read: 'donations', label: 'Donations per day',
+              x: 'at', interval: 'day', timeZone: 'Europe/Rome',
+              series: 'counted', seriesLabels: { true: 'Counted', false: 'Not counted' }, stack: true,
+              y: { label: 'Donations' }, value: { path: 'coins', label: 'Value', unit: '₭' },
+            },
             {
               show: 'table', from: 'shop', read: 'donations', label: 'Donations',
               sort: true, defaultSort: { path: 'at', direction: 'desc' },

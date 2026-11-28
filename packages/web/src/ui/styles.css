@@ -7,6 +7,15 @@
   --ok: #15803d;
   --warn: #b45309;
   --bad: #b91c1c;
+  /* A chart's series (D174), in order. */
+  --chart-1: #2563eb;
+  --chart-2: #f59e0b;
+  --chart-3: #10b981;
+  --chart-4: #ef4444;
+  --chart-5: #8b5cf6;
+  --chart-6: #0ea5e9;
+  --chart-7: #ec4899;
+  --chart-8: #84cc16;
   font-family: system-ui, sans-serif;
   color: var(--fg);
   background: var(--bg);
@@ -22,6 +31,14 @@
     --ok: #4ade80;
     --warn: #fbbf24;
     --bad: #f87171;
+    --chart-1: #60a5fa;
+    --chart-2: #fbbf24;
+    --chart-3: #34d399;
+    --chart-4: #f87171;
+    --chart-5: #a78bfa;
+    --chart-6: #38bdf8;
+    --chart-7: #f472b6;
+    --chart-8: #a3e635;
   }
 }
 
@@ -2473,4 +2490,14 @@ button.sort {
   .gallery {
     grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
   }
+}
+
+/* A view's chart (D174): its card's width, Plot's SVG in the page's colours. */
+.chart {
+  width: 100%;
+  min-height: 2rem;
+}
+.chart svg {
+  max-width: 100%;
+  height: auto;
 }

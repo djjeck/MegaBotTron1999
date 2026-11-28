@@ -65,7 +65,11 @@ describe('svgToPng', () => {
     core.register(plugin);
     await core.start();
     expect(seen[0]?.render).toBe(resvgRender);
-    const other = { svgToPng: () => Promise.resolve(new Uint8Array()) };
+    const other = {
+      svgToPng: () => Promise.resolve(new Uint8Array()),
+      chart: () => Promise.resolve(new Uint8Array()),
+      chartSvg: () => Promise.resolve('<svg/>'),
+    };
     const stubbed = new Core({ clock: new VirtualClock(0), render: other });
     stubbed.register(plugin);
     await stubbed.start();

@@ -20,7 +20,7 @@
  *   input.
  */
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   GraphViewData,
   NodeView,
@@ -43,6 +43,9 @@ import { Gallery } from '#src/ui/view/Gallery.tsx';
 import { ActionForm, SettingsForm, StatTile } from '#src/ui/view/Leaves.tsx';
 import { keyOf } from '#src/ui/view/list.tsx';
 import { readAll, useLive } from '#src/ui/view/live.ts';
+
+/** A chart and a time series (D174), drawn by Plot: a chunk of its own, loaded only to draw one. */
+const Chart = lazy(() => import('#src/ui/view/Chart.tsx'));
 
 /** A read a view asks: of a node, by name, with its input. */
 interface Ask {
@@ -533,6 +536,13 @@ function Leaf(props: { leaf: ViewLeaf; c: Context; row?: unknown; titled?: boole
     return card(
       <StatTile leaf={leaf} label={label} value={value} output={answer.value} />,
       ' stat-card'
+    );
+  if (leaf.show === 'chart' || leaf.show === 'timeseries')
+    return card(
+      <Suspense fallback={<p className="muted loading">Loading the chart…</p>}>
+        <Chart chart={{ ...leaf, label }} value={value} empty={emptyOf(leaf)} />
+      </Suspense>,
+      ' chart-card'
     );
   if (leaf.show === 'gallery') {
     const rows = itemsOf(value) ?? [];

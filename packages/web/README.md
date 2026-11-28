@@ -230,76 +230,77 @@ the server that guards them.
   `src/ui/view/`: tabs (`?tab=`), grids, cards and each leaf a card (`ViewPage.tsx`), stat tiles and
   forms (`Leaves.tsx`), a table searched, sorted and paged (`DataTable.tsx`, a node page's table
   too), a gallery (`Gallery.tsx`), a row's drawer, the whole screen on a phone, its row in the
-  address (`Drawer.tsx`, `?row=`), and values by their format (`cells.tsx`). Each leaf says it is
-  loading, says when it is empty, and says its read's error in its own card; only the open tab's
-  reads are asked, and after an action those of its node. **Live** (docs/bot-os.md D173,
-  `view/live.ts`): a view hears its bound nodes' changes on one stream (`GET /api/changes`, closed
-  while its tab is hidden) and asks again, in one batch (`POST /api/reads`), only the reads of the
-  nodes changed; all of them when the tab shows again and every two minutes (`SAFETY_REFRESH_MS`). A
-  field whose schema says `options` (a read of its node gives its choices, `OptionsField.tsx`) is a
-  choice of them in any form that knows its node: a row action's, or an action called from the
-  node's panel. The map's bar heads with the instance's switches: `instance on` or `off`, **Turn
-  off** (asking first) or **Turn on**, and **Kill all** (every plugin's safety stop, asking first).
-  Select one node or several (Shift, Ctrl or Cmd with a click; Shift and drag for a box) and **Kill
-  selected** kills each: its plugin's own safety stop, then stopped, kept across restarts; a stopped
-  node's panel has **Clear stop**, a change of the draft that Review lists and Apply makes
-  (`clear-stop`, then the restart), and its forms stay editable. Nodes start in columns
-  (`layout.ts`) and can be moved. **Swimlanes** (docs/bot-os.md D69): a node's panel sets its
-  **Group** (none, one of the draft's, or **new group…**, named and set), a change of the draft like
-  any other; a draft with groups is drawn in lanes (`layout.ts`'s `swimlanes`, `lanes.ts`,
-  `LaneNode.tsx`): the same global columns, each group a tinted band with its name at its top left,
-  in the order of its first node, the ungrouped nodes in an unlabelled band last, and the
-  connectors' in and out cards outside every band, at the left and the right (a connector's group is
-  ignored, which its panel says); an ungrouped node with no input port on its card (wired or not),
-  that nothing feeds and that feeds only nodes in lanes (a person's `attention`, shared by the
-  players of several lanes, D136) is drawn under the connectors' in cards, at the left. A card is
-  its lane's child in React Flow, and stays in its lane when dragged. A lane's label zooms to fit
-  it; resting on a node dims what it does not reach, and on a lane's label everything outside the
-  lane but its edges and the connectors they reach; the minimap tints each lane. Its colour comes
-  from a fixed palette, by a hash of its name, the next free one when an earlier lane has it.
-  **Modules** (`#/modules`, `ModulesPage.tsx`, docs/bot-os.md D67, D102) lists the modules
-  installed, each with its version, its source (a folder upload, a tarball, or a repository on
-  GitHub or a self-hosted Git server, linked at its commit) and when it was installed. It installs
-  modules from a folder, chosen (**Choose folder**) or dropped on the page, or from a repository's
-  link: a public GitHub one (`https://github.com/<owner>/<repo>` or `…/tree/<ref>/<path>`), or one
-  on a Git server added under **Git servers** (`GitServers.tsx`: each server with its token's Docker
-  secret, picked from `GET /modules/hosts`'s names, added with `POST /modules/hosts`, removed with
-  `DELETE /modules/hosts/<host>`), a module's own folder or a repository's that holds several. The
-  folder's paths, its `module.json` files and its `.gitignore` files go to `POST /modules/plan`
-  (`src/ui/module-folder.ts`), a link to `POST /modules/link`; the modules found, but those under
-  `vendor/`, are a checklist (`ModuleChecklist.tsx`): each with its path, version, status against
-  the one installed (`new`, `update x → y`, `same version`, `older x → y`), its files and those left
-  out (its tests and a folder's `.gitignore`d paths, unless its `module.json` lists `files`), all
-  checked but downgrades and those refused. **Install** sends each checked module on its own (a
-  folder's files, only that module's, as base64; a repository's module as its source at the commit
-  looked up), with its progress (`Installing 2 of 5: dice…`, and an upload's bytes sent, through
-  `XMLHttpRequest`, whose upload reports them, D104), and lists how each went; the restart is then
-  offered once. A module from a repository with a newer commit that changed its own directory (the
-  shell checks every 6 hours, or **Check for updates**; D103) says `update available` with the
-  commit and its date, linked to its host's comparison (and, when the host's comparison could not
-  tell what changed, says so and why), and **Update** or **Update all** installs it. It also
-  installs a `.tar.gz`, picked or dropped on the page (one dropped named, with its size, beside the
-  input, which cannot show it), and rolls a module back. **Remove** (D68) asks first, in a dialog
-  that names the module, then moves it aside as its previous version (`DELETE /modules/<id>`, sent
-  JSON-typed as the server's same-origin rule asks of every change); it is disabled, its reason
-  shown beside it on hover, while a node of the saved graph (disabled ones too) uses one of its
-  plugins or another module imports it. A module removed is listed as `removed` with **Restore**
-  (its rollback) until an install of its id replaces it, and the restart is offered. **History**
-  (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59, D111), once Admin, keeps what has no
-  node: the graph's history (`#/graph-history`, `GraphHistoryPage.tsx`, docs/bot-os.md D61: each
-  version of the saved graph, newest first, with its time, what changed and how the instance started
-  on it, the last that ran marked "last good"; one opened shows what rolling back to it would
-  change, as the review's diff (**Changes**) and as a line diff of the two printouts (**As text**),
-  and **Roll back to this** asks, repeating the diff, then restarts on it; a version the check
-  refuses now says why, and has no rollback, D110). Its old sections' routes lead to the editor:
-  `#/instance`, `#/accounts` and `#/plugins` to the map, `#/resources` and `#/graph-text` with the
-  Costs or the Text sheet open. Beside it, **Drift** (each parser's counts and the latest reports,
-  by parser: those of the version it runs, and those of earlier versions folded under one line,
-  D113) and **Events** (the event log's latest records, filtered by type). Every page reads the
-  control API only; the app imports the core's types and nothing else of it, so its bundle holds
-  none of the shell's code. All the pages are in one menu, with no admin part apart: the whole app
-  is the owner's console. A page is a line of `PAGES` in `src/ui/App.tsx`; a node's own page
-  (`NODE_PAGE`) is in no menu.
+  address (`Drawer.tsx`, `?row=`), values by their format (`cells.tsx`), and charts and time series
+  drawn by Observable Plot (`Chart.tsx`, docs/bot-os.md D174, a chunk of its own loaded only on a
+  view with a chart, its series in the `--chart-<n>` colours). Each leaf says it is loading, says
+  when it is empty, and says its read's error in its own card; only the open tab's reads are asked,
+  and after an action those of its node. **Live** (docs/bot-os.md D173, `view/live.ts`): a view
+  hears its bound nodes' changes on one stream (`GET /api/changes`, closed while its tab is hidden)
+  and asks again, in one batch (`POST /api/reads`), only the reads of the nodes changed; all of them
+  when the tab shows again and every two minutes (`SAFETY_REFRESH_MS`). A field whose schema says
+  `options` (a read of its node gives its choices, `OptionsField.tsx`) is a choice of them in any
+  form that knows its node: a row action's, or an action called from the node's panel. The map's bar
+  heads with the instance's switches: `instance on` or `off`, **Turn off** (asking first) or **Turn
+  on**, and **Kill all** (every plugin's safety stop, asking first). Select one node or several
+  (Shift, Ctrl or Cmd with a click; Shift and drag for a box) and **Kill selected** kills each: its
+  plugin's own safety stop, then stopped, kept across restarts; a stopped node's panel has **Clear
+  stop**, a change of the draft that Review lists and Apply makes (`clear-stop`, then the restart),
+  and its forms stay editable. Nodes start in columns (`layout.ts`) and can be moved. **Swimlanes**
+  (docs/bot-os.md D69): a node's panel sets its **Group** (none, one of the draft's, or **new
+  group…**, named and set), a change of the draft like any other; a draft with groups is drawn in
+  lanes (`layout.ts`'s `swimlanes`, `lanes.ts`, `LaneNode.tsx`): the same global columns, each group
+  a tinted band with its name at its top left, in the order of its first node, the ungrouped nodes
+  in an unlabelled band last, and the connectors' in and out cards outside every band, at the left
+  and the right (a connector's group is ignored, which its panel says); an ungrouped node with no
+  input port on its card (wired or not), that nothing feeds and that feeds only nodes in lanes (a
+  person's `attention`, shared by the players of several lanes, D136) is drawn under the connectors'
+  in cards, at the left. A card is its lane's child in React Flow, and stays in its lane when
+  dragged. A lane's label zooms to fit it; resting on a node dims what it does not reach, and on a
+  lane's label everything outside the lane but its edges and the connectors they reach; the minimap
+  tints each lane. Its colour comes from a fixed palette, by a hash of its name, the next free one
+  when an earlier lane has it. **Modules** (`#/modules`, `ModulesPage.tsx`, docs/bot-os.md D67,
+  D102) lists the modules installed, each with its version, its source (a folder upload, a tarball,
+  or a repository on GitHub or a self-hosted Git server, linked at its commit) and when it was
+  installed. It installs modules from a folder, chosen (**Choose folder**) or dropped on the page,
+  or from a repository's link: a public GitHub one (`https://github.com/<owner>/<repo>` or
+  `…/tree/<ref>/<path>`), or one on a Git server added under **Git servers** (`GitServers.tsx`: each
+  server with its token's Docker secret, picked from `GET /modules/hosts`'s names, added with
+  `POST /modules/hosts`, removed with `DELETE /modules/hosts/<host>`), a module's own folder or a
+  repository's that holds several. The folder's paths, its `module.json` files and its `.gitignore`
+  files go to `POST /modules/plan` (`src/ui/module-folder.ts`), a link to `POST /modules/link`; the
+  modules found, but those under `vendor/`, are a checklist (`ModuleChecklist.tsx`): each with its
+  path, version, status against the one installed (`new`, `update x → y`, `same version`,
+  `older x → y`), its files and those left out (its tests and a folder's `.gitignore`d paths, unless
+  its `module.json` lists `files`), all checked but downgrades and those refused. **Install** sends
+  each checked module on its own (a folder's files, only that module's, as base64; a repository's
+  module as its source at the commit looked up), with its progress (`Installing 2 of 5: dice…`, and
+  an upload's bytes sent, through `XMLHttpRequest`, whose upload reports them, D104), and lists how
+  each went; the restart is then offered once. A module from a repository with a newer commit that
+  changed its own directory (the shell checks every 6 hours, or **Check for updates**; D103) says
+  `update available` with the commit and its date, linked to its host's comparison (and, when the
+  host's comparison could not tell what changed, says so and why), and **Update** or **Update all**
+  installs it. It also installs a `.tar.gz`, picked or dropped on the page (one dropped named, with
+  its size, beside the input, which cannot show it), and rolls a module back. **Remove** (D68) asks
+  first, in a dialog that names the module, then moves it aside as its previous version
+  (`DELETE /modules/<id>`, sent JSON-typed as the server's same-origin rule asks of every change);
+  it is disabled, its reason shown beside it on hover, while a node of the saved graph (disabled
+  ones too) uses one of its plugins or another module imports it. A module removed is listed as
+  `removed` with **Restore** (its rollback) until an install of its id replaces it, and the restart
+  is offered. **History** (`#/admin`, `src/ui/pages/AdminPage.tsx`, docs/bot-os.md D59, D111), once
+  Admin, keeps what has no node: the graph's history (`#/graph-history`, `GraphHistoryPage.tsx`,
+  docs/bot-os.md D61: each version of the saved graph, newest first, with its time, what changed and
+  how the instance started on it, the last that ran marked "last good"; one opened shows what
+  rolling back to it would change, as the review's diff (**Changes**) and as a line diff of the two
+  printouts (**As text**), and **Roll back to this** asks, repeating the diff, then restarts on it;
+  a version the check refuses now says why, and has no rollback, D110). Its old sections' routes
+  lead to the editor: `#/instance`, `#/accounts` and `#/plugins` to the map, `#/resources` and
+  `#/graph-text` with the Costs or the Text sheet open. Beside it, **Drift** (each parser's counts
+  and the latest reports, by parser: those of the version it runs, and those of earlier versions
+  folded under one line, D113) and **Events** (the event log's latest records, filtered by type).
+  Every page reads the control API only; the app imports the core's types and nothing else of it, so
+  its bundle holds none of the shell's code. All the pages are in one menu, with no admin part
+  apart: the whole app is the owner's console. A page is a line of `PAGES` in `src/ui/App.tsx`; a
+  node's own page (`NODE_PAGE`) is in no menu.
 - `src/server/web-server.ts`: the UI's own listener. It serves the built app, and the core's control
   API (`controlHandler` of `@megabottron1999/core`) under `/api/`, only to a logged-in owner.
   `startWebUi` starts it only when the `web_ui_password` Docker secret is provided (12 characters at

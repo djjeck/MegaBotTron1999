@@ -355,10 +355,18 @@ the kind of section and nothing else; `format` says how a value is drawn.
   a list or a map, how many it holds); `gallery`, a list's items as cards
   (`image: { path, source?, carousel? }`, `caption`, `badges`, `actions`, `search`, `pageSize`);
   `form`, several fields sent at once: an action's input (`action`, `input`, `fields`, `current` a
-  read that presets them, `submit`, `confirm`) or the node's live settings (`settings`, their keys).
-  Every leaf says what it says when empty (`empty`, else `Nothing yet`), says it is loading while
-  its read is asked, and, when its read fails, says so in its own card, naming its input and its
-  read.
+  read that presets them, `submit`, `confirm`) or the node's live settings (`settings`, their keys);
+  `chart` and `timeseries` (D174), a list's items drawn by Observable Plot: points by `x` (a
+  category or a number; a time series' a time, gathered by `interval`, `minute` to `month`, in
+  `timeZone`, UTC by default), `mark` (`bar`, `line`, `area`, `dot`), `y` (a measure or up to 8,
+  each a series; a measure a path, summed, or `{ path?, reduce?, label?, format?, unit? }`, `reduce`
+  `sum`, `count`, `mean`, `min` or `max`, no path counting the rows), `series` (a row's value naming
+  its series, renamed by `seriesLabels`), `stack`, `value` (a second measure, in each point's
+  tooltip) and `height`; its colours the view's `--chart-<n>`, Plot loaded only on a view with a
+  chart (a chunk of its own). The check refuses an `x`, a measure or a `series` its rows have not, a
+  measure that is no number, a time series' `x` that is no time. Every leaf says what it says when
+  empty (`empty`, else `Nothing yet`), says it is loading while its read is asked, and, when its
+  read fails, says so in its own card, naming its input and its read.
 - **A table** may be searched (`search: true`, every column, or the paths named), sorted
   (`sort: true`, by its headers; `defaultSort: { path, direction }`) and paged (`pageSize`); it
   scrolls sideways in its card. **A column** (and a drawer's field, a gallery's badge) is a path or
@@ -2559,6 +2567,8 @@ a module, which has none of its own, is written in those terms. Two kinds, by wh
 ```ts
 interface Render {
   svgToPng(svg: string, options?: SvgToPngOptions): Promise<Uint8Array>;
+  chart(spec: ChartSpec, rows: unknown, options?: ChartPictureOptions): Promise<Uint8Array>; // D174
+  chartSvg(spec: ChartSpec, rows: unknown, options?: ChartPictureOptions): Promise<string>;
 }
 interface SvgToPngOptions {
   width?: number; // the picture's width; its height follows the SVG's proportions
@@ -2579,6 +2589,36 @@ image has none, so a plugin that draws text ships its font files (a module, in i
 `fileURLToPath(new URL('fonts/Example.ttf', import.meta.url))`) and names them in `fonts`. An SVG it
 cannot read, or a size that is not a positive number, rejects with why. `CoreOptions.render`
 replaces it (a test's stub); the dev kit's core has the real one.
+
+**A chart as a picture** (`ctx.render.chart`, bot-os.md D174, `chart-render.ts`), for the owner's
+chat (P18: monitoring that fits one plotted picture): the chart a view's `chart` or `timeseries`
+leaf draws (§2, Views), its spec that leaf without its `from`, `read`, `input`, `path` and `empty`
+(`ChartSpec`, checked by `chartSpecSchema`, rejected with why), its `rows` given (a list's items, a
+map's values), drawn by the same code as in a view (`chart.ts`), by Plot on the server (in
+linkedom's DOM), its `label` as a title and its series' legend above it, then a PNG through
+`svgToPng` in the font the shell ships (DejaVu Sans, `packages/core/assets/fonts`, with the currency
+signs). `ChartPictureOptions`: `width` (640 by default, in the SVG's pixels), `dark`, `scale` (2 by
+default) and `maxSide`. `chartSvg` gives the SVG's text. Plot and the DOM load at the first chart.
+
+```ts
+const png = await ctx.render.chart(
+  {
+    show: 'timeseries',
+    label: 'Donations per day',
+    x: 'at',
+    interval: 'day',
+    timeZone: 'Europe/Rome',
+    series: 'counted',
+    seriesLabels: { true: 'Counted', false: 'Not counted' },
+    stack: true,
+    y: { label: 'Donations' },
+    value: { path: 'coins', label: 'Value', unit: '₭' },
+  },
+  donations, // [{ at: 1795000000000, counted: true, coins: 120 }, …]
+  { maxSide: 2560 }
+);
+ctx.outbox('chat').send(chat, { photo: { data: png, mime: 'image/png' }, caption: 'This week' }); // §4.6
+```
 
 **Asking an LLM** (`ask`, the `anthropic` connector, §5), through a connector. A plugin declares an
 interface input bound to it, and asks through it:
@@ -2641,7 +2681,7 @@ alone (§4) finds each in its context, its config or an edge:
 | the account it plays                                   | its config, or `ctx.connector(port).self()`, the connected account's own name                                           |
 | a group or a chat to post in                           | its config names it, and its chat-out edge carries it in its `sends` (the outbox refuses any other)                     |
 | an LLM's ask function                                  | an interface input bound to the `anthropic` connector, `ctx.use(port).actions.ask` (§4.13)                              |
-| a drawing function                                     | `ctx.render.svgToPng` (§4.13)                                                                                           |
+| a drawing function                                     | `ctx.render.svgToPng`, or `ctx.render.chart` for a chart (§4.13)                                                        |
 | another plugin's object (a game, a ledger, a registry) | that plugin's declared interface (`state`, `actions`), through an interface input an edge binds: `ctx.use(port)` (§2.1) |
 | a callback on a setting                                | its instance's `settingsChanged`, or the other plugin's action                                                          |
 | a credential                                           | only a connector: a secret its manifest declares, or one its config names (`configSecrets`, §4.9)                       |

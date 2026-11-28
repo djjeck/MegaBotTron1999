@@ -60,6 +60,17 @@ const shop = parseManifest({
         input: z.object({ name: z.string() }),
         output: z.object({ drops: z.array(z.string()), pricing: z.object({ rate: z.number() }) }),
       },
+      donations: {
+        help: 'Its donations',
+        output: z.array(
+          z.object({
+            at: z.number(),
+            counted: z.boolean(),
+            amount: z.number(),
+            player: z.string(),
+          })
+        ),
+      },
     },
     actions: {
       advertise: {
@@ -226,10 +237,10 @@ describe('a view’s layout (D170, phase 2)', () => {
   });
 
   it('names the kinds a section may be when its show is none of them', () => {
-    const r = viewSectionSchema.safeParse({ show: 'chart', from: 'shop', read: 'ads' });
+    const r = viewSectionSchema.safeParse({ show: 'map', from: 'shop', read: 'ads' });
     expect(r.success).toBe(false);
     expect(r.error?.issues[0]?.message).toBe(
-      'expected show to be one of: keyValue, counter, list, table, progress, until, stat, gallery, form, tabs, grid, card'
+      'expected show to be one of: keyValue, counter, list, table, progress, until, stat, gallery, chart, timeseries, form, tabs, grid, card'
     );
   });
 
@@ -414,6 +425,78 @@ describe('a view’s layout (D170, phase 2)', () => {
     expect(refused([{ show: 'form', from: 'shop', action: 'gone' }])).toEqual([
       'node home: input port shop: shop does not declare actions.gone (edge shop.interface → home.shop)',
     ]);
+  });
+});
+
+describe('a view’s charts (D174)', () => {
+  const donations = {
+    show: 'timeseries',
+    from: 'shop',
+    read: 'donations',
+    label: 'Donations per day',
+    x: 'at',
+    interval: 'day',
+    timeZone: 'Europe/Rome',
+    mark: 'bar',
+    stack: true,
+    series: 'counted',
+    seriesLabels: { true: 'Counted', false: 'Not counted' },
+    y: { label: 'Donations' },
+    value: { path: 'amount', label: 'Value', unit: '₭' },
+  };
+
+  it('takes a chart and a time series that its node answers', () => {
+    expect(refused([donations])).toEqual([]);
+    expect(
+      refused([
+        {
+          show: 'chart',
+          from: 'shop',
+          read: 'donations',
+          x: 'player',
+          y: ['amount', { path: 'amount', reduce: 'max', label: 'Largest' }],
+        },
+        { show: 'chart', from: 'shop', read: 'players', x: 'level', mark: 'dot' },
+      ])
+    ).toEqual([]);
+  });
+
+  it('refuses a chart its rows cannot draw, naming where', () => {
+    const problems = refused([
+      { ...donations, x: 'counted' },
+      { show: 'chart', from: 'shop', read: 'donations', x: 'when', y: 'player', series: 'kind' },
+      { show: 'chart', from: 'shop', read: 'summary', x: 'ads' },
+      { show: 'chart', from: 'shop', read: 'donations', x: 'at', value: { path: 'nope' } },
+    ]).join('\n');
+    expect(problems).toContain('counted is not a time');
+    expect(problems).toContain('has no when');
+    expect(problems).toContain('player is not a number');
+    expect(problems).toContain('has no kind');
+    expect(problems).toContain('is not a list or a map');
+    expect(problems).toContain('has no nope');
+  });
+
+  it('refuses a chart said wrong, as it is written', () => {
+    const wrong = (extra: Record<string, unknown>): string => {
+      const r = viewSectionSchema.safeParse({ ...donations, ...extra });
+      return r.success ? '' : r.error.issues.map((i) => i.message).join('; ');
+    };
+    expect(wrong({ y: ['amount', 'amount'] })).toContain('not both');
+    expect(wrong({ series: undefined })).toContain('only a chart split by series');
+    expect(wrong({ mark: 'line' })).toContain('only bars and areas stack');
+    expect(wrong({ timeZone: 'Mars/Base' })).toContain('expected a time zone');
+    expect(wrong({ y: { reduce: 'count' } })).toBe('');
+    expect(wrong({ y: { reduce: 'sum' } })).toContain('a measure with no path counts its rows');
+    expect(
+      viewSectionSchema.safeParse({
+        show: 'chart',
+        from: 'shop',
+        read: 'a',
+        x: 'b',
+        y: { reduce: 'max' },
+      }).success
+    ).toBe(false);
+    expect(wrong({ interval: 'year' })).toContain('expected an interval');
   });
 });
 

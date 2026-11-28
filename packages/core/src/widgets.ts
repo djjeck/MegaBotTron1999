@@ -240,6 +240,123 @@ function leafKinds<E extends z.ZodRawShape, O extends z.ZodRawShape>(extra: E, o
   ] as const;
 }
 
+/** How the rows of one point of a chart are reduced to its measure (D174). */
+export const REDUCES = ['sum', 'count', 'mean', 'min', 'max'] as const;
+/** How a chart draws its points (D174). */
+export const MARKS = ['bar', 'line', 'area', 'dot'] as const;
+/** The spans a time series gathers its rows by, in its time zone (D174). */
+export const INTERVALS = ['minute', 'hour', 'day', 'week', 'month'] as const;
+
+/** Whether a time zone is one this runtime knows (`Europe/Rome`, `UTC`). */
+export function knownZone(timeZone: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A chart's measure (D174): a path of its rows' numbers, summed per point; or with its `reduce`
+ * (`sum`, `count`, `mean`, `min`, `max`), its `label` (a series' name, the tooltip's), its
+ * `format` and `unit` (`₭`). No path: its rows counted.
+ */
+const measureObject = z
+  .strictObject({
+    path: path.optional(),
+    reduce: z.enum(REDUCES).optional(),
+    label: label.optional(),
+    format: z.enum(['number', 'percent']).optional(),
+    unit: z.string().min(1).optional(),
+  })
+  .superRefine((m, ctx) => {
+    if (m.path === undefined && m.reduce !== undefined && m.reduce !== 'count')
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reduce'],
+        message: 'a measure with no path counts its rows: name its path to reduce them',
+      });
+  });
+const measure = z.union([path, measureObject]);
+
+/**
+ * What a chart and a time series say (D174): their rows (a list's items, a map's values, at
+ * `path`), `x` (a category or a number, a time for a time series), `y` (one measure, or several,
+ * each a series; none: the rows counted), `series` (a row's value that names its series, each
+ * renamed by `seriesLabels`), `stack` (bars and areas), `value` (a second measure, in each point's
+ * tooltip) and its `height` in pixels.
+ */
+const chartFields = {
+  ...base,
+  from: inputPort,
+  mark: z.enum(MARKS, { error: `expected a mark: ${MARKS.join(', ')}` }).optional(),
+  x: path,
+  y: z.union([measure, z.array(measure).min(1).max(8)]).optional(),
+  series: path.optional(),
+  seriesLabels: z.record(z.string(), label).optional(),
+  stack: z.literal(true).optional(),
+  value: measure.optional(),
+  height: z.number().int().min(120).max(800).optional(),
+};
+const chartRules = (
+  c: {
+    y?: unknown;
+    series?: string | undefined;
+    seriesLabels?: unknown;
+    stack?: true | undefined;
+    mark?: string | undefined;
+  },
+  ctx: z.RefinementCtx
+): void => {
+  if (Array.isArray(c.y) && c.y.length > 1 && c.series !== undefined)
+    ctx.addIssue({
+      code: 'custom',
+      path: ['series'],
+      message: 'a chart splits its rows by series, or shows several measures (y): not both',
+    });
+  if (c.seriesLabels !== undefined && c.series === undefined)
+    ctx.addIssue({
+      code: 'custom',
+      path: ['seriesLabels'],
+      message: 'only a chart split by series renames them',
+    });
+  if (c.stack === true && (c.mark === 'line' || c.mark === 'dot'))
+    ctx.addIssue({ code: 'custom', path: ['stack'], message: 'only bars and areas stack' });
+};
+
+/** A chart (D174): its rows' measures by `x`, a category or a number, drawn by Plot. */
+const chartObject = z.strictObject({ show: z.literal('chart'), ...chartFields });
+/**
+ * A time series (D174): a chart whose `x` is a time (ms since the epoch, or an ISO string), its
+ * rows gathered by `interval` (a `day`, …) in `timeZone` (an IANA zone, UTC by default).
+ */
+const timeseriesObject = z.strictObject({
+  show: z.literal('timeseries'),
+  ...chartFields,
+  interval: z
+    .enum(INTERVALS, { error: `expected an interval: ${INTERVALS.join(', ')}` })
+    .optional(),
+  timeZone: z
+    .string()
+    .refine(knownZone, { error: 'expected a time zone such as Europe/Rome or UTC' })
+    .optional(),
+});
+const notRead = { from: true, read: true, input: true, path: true, empty: true } as const;
+/**
+ * A chart as a plugin draws it for the owner's chat (`ctx.render.chart`, D174): a chart leaf or a
+ * time series without the read it shows, its rows given.
+ */
+export const chartSpecSchema = z.discriminatedUnion(
+  'show',
+  [
+    chartObject.omit(notRead).superRefine(chartRules),
+    timeseriesObject.omit(notRead).superRefine(chartRules),
+  ],
+  { error: 'expected show to be one of: chart, timeseries' }
+);
+export type ChartSpec = z.input<typeof chartSpecSchema>;
+
 /** A view's own leaves (D170): a stat tile and a gallery, as its page allows them. */
 function viewLeafKinds<O extends z.ZodRawShape>(opening: O) {
   return [
@@ -278,6 +395,8 @@ function viewLeafKinds<O extends z.ZodRawShape>(opening: O) {
       pageSize,
       ...opening,
     }),
+    chartObject.superRefine(chartRules),
+    timeseriesObject.superRefine(chartRules),
   ] as const;
 }
 
@@ -323,7 +442,7 @@ const kinds = (names: readonly string[]) => ({
   error: `expected show to be one of: ${names.join(', ')}`,
 });
 const LEAF_KINDS = ['keyValue', 'counter', 'list', 'table', 'progress', 'until'] as const;
-const VIEW_LEAF_KINDS = [...LEAF_KINDS, 'stat', 'gallery', 'form'] as const;
+const VIEW_LEAF_KINDS = [...LEAF_KINDS, 'stat', 'gallery', 'chart', 'timeseries', 'form'] as const;
 const LAYOUTS = ['tabs', 'grid', 'card'] as const;
 
 /** One section of a widget or a page, by the way it shows its value. */
@@ -463,6 +582,10 @@ export type ViewCount = z.output<typeof countSchema>;
 /** A view's section, its selector, and the view, as a plugin declares them (D170). */
 export type ViewSection = ViewLeaf | ViewTabs | ViewGrid | ViewCard;
 export type ViewSelector = z.output<typeof selectorSchema>;
+/** A chart or a time series (D174), as a view's leaf says it. */
+export type ViewChart = Extract<ViewLeaf, { show: 'chart' | 'timeseries' }>;
+/** A chart's measure (D174): a path, or a path with its reduce, label, format and unit. */
+export type ChartMeasure = z.output<typeof measure>;
 export type View = z.output<typeof viewSchema>;
 export type WidgetShow = Widget['show'];
 /** A field or a column: a path, or a path with its label and its format. */
@@ -734,6 +857,32 @@ export function widgetIssues(
       if (!isNumber(at) && !types(at).includes('string'))
         no(`${where} is not a time (ms since the epoch, or an ISO string)`);
       break;
+    case 'chart':
+    case 'timeseries': {
+      const items = listOf();
+      if (items === undefined || items === 'open') break;
+      const x = schemaAt(items, w.x);
+      if (x === undefined) no(`${where} has no ${w.x}`, ['x']);
+      else if (
+        w.show === 'timeseries' &&
+        x !== 'open' &&
+        !isNumber(x) &&
+        !types(x).includes('string')
+      )
+        no(`${w.x} is not a time (ms since the epoch, or an ISO string)`, ['x']);
+      const measureAt = (m: ChartMeasure, key: (string | number)[]): void => {
+        const p = typeof m === 'string' ? m : m.path;
+        if (p === undefined) return;
+        const s = schemaAt(items, p);
+        if (s === undefined) no(`${where} has no ${p}`, key);
+        else if (s !== 'open' && !isNumber(s)) no(`${p} is not a number`, key);
+      };
+      if (Array.isArray(w.y)) w.y.forEach((m, i) => measureAt(m, ['y', i]));
+      else if (w.y !== undefined) measureAt(w.y, ['y']);
+      if (w.value !== undefined) measureAt(w.value, ['value']);
+      if (w.series !== undefined) pathsIn(items, [w.series], ['series']);
+      break;
+    }
   }
   return issues;
 }

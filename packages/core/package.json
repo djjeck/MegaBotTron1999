@@ -18,7 +18,9 @@
     "node": ">=24"
   },
   "dependencies": {
+    "@observablehq/plot": "0.6.19",
     "@resvg/resvg-js": "2.6.2",
+    "linkedom": "0.18.15",
     "zod": "4.6.7"
   }
 }

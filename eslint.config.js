@@ -92,9 +92,30 @@ export default tseslint.config(
         {
           patterns: [
             {
-              regex: '^@megabottron1999/',
+              // But the chart's code (bot-os.md D174), shared with the server's picture so that both
+              // draw alike: it imports nothing but types itself (the rule below).
+              regex: '^@megabottron1999/(?!core/chart\\.ts$)',
               allowTypeImports: true,
               message: 'The app imports only the shell’s types (`import type … from`).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // The chart's code is the app's too (D174): it imports types alone, so that the browser's
+    // bundle takes none of the core's Node modules with it.
+    files: ['packages/core/src/chart.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: '.',
+              allowTypeImports: true,
+              message: 'chart.ts is bundled for the browser: it imports types only (D174).',
             },
           ],
         },

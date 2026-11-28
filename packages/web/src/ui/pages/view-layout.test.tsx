@@ -173,6 +173,14 @@ const view = parseManifest({
                 path: 'nobody',
               },
               { show: 'form', from: 'shop', label: 'Rates', settings: ['rate'] },
+              {
+                show: 'chart',
+                from: 'shop',
+                read: 'players',
+                label: 'Levels',
+                x: 'name',
+                y: { path: 'level', label: 'Level' },
+              },
             ],
           },
         ],
@@ -363,6 +371,9 @@ describe('a view’s dashboard (D170, phase 2)', () => {
     fireEvent.click(within(rates).getByRole('button', { name: 'Save' }));
     expect(await within(rates).findByText('Set rate.')).toBeDefined();
     expect(api.calls).toContain('POST /settings {"key":"shop.rate","value":3}');
+    // A chart (D174), its Plot loaded only now, drawn from the players' read.
+    const levels = await screen.findByRole('figure', { name: 'Levels' });
+    await waitFor(() => expect(levels.querySelector('svg')).not.toBeNull());
   });
 
   it('shows each leaf loading until its read answers', async () => {

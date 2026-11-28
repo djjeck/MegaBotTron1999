@@ -36,7 +36,18 @@ export interface SvgToPngOptions {
 export interface Render {
   /** The SVG as a PNG's bytes; rejected, with why, for an SVG resvg cannot read or a bad option. */
   svgToPng(svg: string, options?: SvgToPngOptions): Promise<Uint8Array>;
+  /**
+   * A chart as a PNG's bytes (bot-os.md D174), drawn as a view's chart leaf is, from its spec and
+   * its rows (a list's items, a map's values), in the shell's font: to send to the owner's chat.
+   * Rejected, with why, for a spec that is no chart.
+   */
+  chart(spec: ChartSpec, rows: unknown, options?: ChartPictureOptions): Promise<Uint8Array>;
+  /** The same chart as an SVG's text. */
+  chartSvg(spec: ChartSpec, rows: unknown, options?: ChartPictureOptions): Promise<string>;
 }
+
+import { type ChartPictureOptions } from './chart-render.ts';
+import { type ChartSpec } from './widgets.ts';
 
 type Resvg = typeof import('@resvg/resvg-js');
 let resvg: Promise<Resvg> | undefined;
@@ -75,5 +86,11 @@ export async function svgToPng(svg: string, o: SvgToPngOptions = {}): Promise<Ui
   return new Uint8Array(image.asPng());
 }
 
-/** The shell's render service. */
-export const resvgRender: Render = { svgToPng };
+/** The shell's render service; its charts' code, Plot and a DOM loaded at the first chart. */
+export const resvgRender: Render = {
+  svgToPng,
+  chart: async (spec, rows, options) =>
+    (await import('./chart-render.ts')).chartPng(spec, rows, options),
+  chartSvg: async (spec, rows, options) =>
+    (await import('./chart-render.ts')).chartSvg(spec, rows, options),
+};
