@@ -362,11 +362,12 @@ the kind of section and nothing else; `format` says how a value is drawn.
   each a series; a measure a path, summed, or `{ path?, reduce?, label?, format?, unit? }`, `reduce`
   `sum`, `count`, `mean`, `min` or `max`, no path counting the rows), `series` (a row's value naming
   its series, renamed by `seriesLabels`), `stack`, `value` (a second measure, in each point's
-  tooltip) and `height`; its colours the view's `--view-chart-<n>` (D175), Plot loaded only on a
-  view with a chart (a chunk of its own). The check refuses an `x`, a measure or a `series` its rows
-  have not, a measure that is no number, a time series' `x` that is no time. Every leaf says what it
-  says when empty (`empty`, else `Nothing yet`), says it is loading while its read is asked, and,
-  when its read fails, says so in its own card, naming its input and its read.
+  tooltip) and `height`; its colours the view's `--view-chart-<n>` (D175), its tooltip's box the
+  card's surface, Plot loaded only on a view with a chart (a chunk of its own). The check refuses an
+  `x`, a measure or a `series` its rows have not, a measure that is no number, a time series' `x`
+  that is no time. Every leaf says what it says when empty (`empty`, else `Nothing yet`), says it is
+  loading while its read is asked, and, when its read fails, says so in its own card, naming its
+  input and its read.
 - **A table** may be searched (`search: true`, every column, or the paths named), sorted
   (`sort: true`, by its headers; `defaultSort: { path, direction }`) and paged (`pageSize`); it
   scrolls sideways in its card. **A column** (and a drawer's field, a gallery's badge) is a path or

@@ -2597,4 +2597,10 @@ button.sort {
 .chart svg {
   max-width: 100%;
   height: auto;
+  /*
+   * The hover tip's box (Plot draws it in --plot-background, white unless told, and its text in
+   * the page's colour): the card's surface, so that its text shows in the dark scheme too (D176).
+   * On the SVG itself, where Plot's own sheet sets it.
+   */
+  --plot-background: var(--view-surface);
 }

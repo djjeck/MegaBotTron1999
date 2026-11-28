@@ -223,9 +223,10 @@ shows its series, its day, its count, and its second measure, `value`: the coins
 - `value`: a second measure, shown in each point's tooltip.
 - `height`: its height in pixels (260 by default); its width is its card's.
 
-Its colours are the view's (`--chart-1` to `--chart-8`, light and dark), its text the page's. Plot
-is loaded only on a view that has a chart. The check refuses an `x`, a measure or a `series` its
-rows have not, a measure that is no number, and a time series' `x` that is no time.
+Its colours are the view's (`--view-chart-1` to `--view-chart-8`, light and dark), its text the
+page's, its tooltip's box the card's surface. Plot is loaded only on a view that has a chart. The
+check refuses an `x`, a measure or a `series` its rows have not, a measure that is no number, and a
+time series' `x` that is no time.
 
 The same chart can go to the owner's chat as one picture: a plugin draws it with
 `ctx.render.chart(spec, rows)`, the leaf without its `from` and `read`, its rows given

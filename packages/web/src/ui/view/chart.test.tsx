@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 /** A view's chart (bot-os.md D174), drawn by Plot in the page's colours, as wide as its card. */
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import fs from 'node:fs';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Chart from './Chart.tsx';
 
@@ -58,5 +60,15 @@ describe('Chart', () => {
     dark = true;
     listeners.forEach((f) => f());
     await waitFor(() => expect(figure.innerHTML).toContain('#60a5fa'));
+  });
+});
+
+describe('the chart’s hover tip (D174)', () => {
+  it('draws its box in the card’s surface, on Plot’s SVG itself, so that its text shows in the dark', () => {
+    // Plot draws the tip's box in --plot-background (white unless told, set by its own sheet on the
+    // SVG) and its text in the page's colour: light text on a white box in the dark scheme.
+    const css = fs.readFileSync(path.join(import.meta.dirname, '../styles.css'), 'utf8');
+    const rule = /\.chart svg \{([^}]*)\}/u.exec(css)?.[1] ?? '';
+    expect(rule).toContain('--plot-background: var(--view-surface);');
   });
 });
