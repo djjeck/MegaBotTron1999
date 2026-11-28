@@ -543,6 +543,7 @@ export class Core {
       cost: (id) => this.cost(id),
       served: (id, ms, bytes) => this.costs.served(id, ms, bytes),
       changes: (listener) => this.changes.subscribe(listener),
+      notice: (n) => this.notice(n),
       viewStyle: (id) => {
         const plugin = this.entries.get(id)?.manifest.id;
         return plugin === undefined ? undefined : this.viewStyles.get(plugin);

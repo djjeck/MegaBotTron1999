@@ -1030,3 +1030,62 @@ describe('a node’s files, listed and downloaded by the owner (bot-os.md D149)'
     expect(core.controls.files('painter')?.files).toHaveLength(2);
   });
 });
+
+describe('a read that answers a promise (D176)', () => {
+  let server: http.Server | undefined;
+  afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r())));
+
+  it('is refused on every route, the widget’s too, and told once per read', async () => {
+    const lazy = definePlugin({
+      manifest: {
+        id: 'lazy',
+        kinds: ['stats'],
+        description: 'Answers late',
+        interface: {
+          state: {
+            later: { help: 'Late', output: z.number() },
+            never: { help: 'Rejected', output: z.number() },
+          },
+        },
+        widget: { show: 'counter', read: 'later' },
+      },
+      create: () => ({
+        interface: {
+          state: {
+            later: () => Promise.resolve(3),
+            never: () => Promise.reject(new Error('no')),
+          },
+        },
+      }),
+    });
+    const records: Record<string, unknown>[] = [];
+    const core = new Core({
+      clock: new VirtualClock(1000),
+      record: (r) => records.push(r as unknown as Record<string, unknown>),
+    });
+    core.register(lazy);
+    await core.start();
+    const said = 'lazy.later answered a promise: a read answers at once';
+    expect(core.controls.read('lazy', 'later')).toEqual({ error: said });
+    expect(core.controls.read('lazy', 'never')).toEqual({
+      error: 'lazy.never answered a promise: a read answers at once',
+    });
+    // The widget's read in the status is refused alike: no widget.
+    expect(core.controls.status().plugins[0]?.widget).toBeUndefined();
+    server = controlServer({ controls: core.controls, settings: core.settings });
+    await new Promise<void>((r) => server?.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as { port: number };
+    const got = await fetch(`http://127.0.0.1:${port}/plugins/lazy/state/later`);
+    expect([got.status, await got.json()]).toEqual([404, { error: said }]);
+    const batch = await fetch(`http://127.0.0.1:${port}/reads`, {
+      method: 'POST',
+      body: JSON.stringify({ reads: [{ node: 'lazy', read: 'later' }] }),
+    });
+    expect(await batch.json()).toEqual({ answers: [{ error: said }] });
+    const told = records.filter((r) => r.type === 'core.notice' && r['kind'] === 'async-read');
+    expect(told.map((r) => [r['text'], r['level']])).toEqual([
+      [said, 'warning'],
+      ['lazy.never answered a promise: a read answers at once', 'warning'],
+    ]);
+  });
+});

@@ -102,6 +102,8 @@ export interface ControlsHost {
   cost?(id: string): NodeCost | undefined;
   /** Counts a read served of a node (D172): its time and its answer's bytes. */
   served?(id: string, ms: number, bytes: number): void;
+  /** Raises a notice about a node for the owner (§4.16): a read that answered a promise (D176). */
+  notice?(n: { kind: string; node: string; text: string; level: 'warning' }): void;
   /** A view node's stylesheet (D175), as its module loaded it; none for a node without one. */
   viewStyle?(id: string): ViewStyle | undefined;
   /** Hears each set of nodes changed (D173), propagated along interface edges; the way to stop. */
@@ -286,7 +288,15 @@ function coalescedText(c: CoalescedView): string | undefined {
 const issues = (list: readonly { path: readonly PropertyKey[]; message: string }[]): string =>
   list.map((i) => `${i.path.map(String).join('.') || 'input'}: ${i.message}`).join('; ');
 
+/** Whether a value is a promise, or any thenable. */
+const isThenable = (v: unknown): v is PromiseLike<unknown> =>
+  (typeof v === 'object' || typeof v === 'function') &&
+  v !== null &&
+  typeof (v as { then?: unknown }).then === 'function';
+
 export class Controls {
+  /** The reads told already to have answered a promise (D176), by `<node>.<read>`. */
+  private readonly promised = new Set<string>();
   private readonly host: ControlsHost;
   private offNow: boolean;
 
@@ -627,11 +637,24 @@ export class Controls {
     const fn = this.host.instance(id)?.interface?.state?.[name] as
       ((input?: unknown) => unknown) | undefined;
     if (typeof fn !== 'function') return { error: `${id} is not running` };
+    let value: unknown;
     try {
-      return { value: declared.input === undefined ? fn() : fn(given) };
+      value = declared.input === undefined ? fn() : fn(given);
     } catch (e) {
       return { error: message(e) };
     }
+    // A read answers at once (D176): a promise would be written as `{}`, with no error.
+    if (isThenable(value)) {
+      // Its rejection, if it comes, is no one's to hear: never an unhandled one.
+      Promise.resolve(value).catch(() => {});
+      const text = `${id}.${name} answered a promise: a read answers at once`;
+      if (!this.promised.has(`${id}.${name}`)) {
+        this.promised.add(`${id}.${name}`);
+        this.host.notice?.({ kind: 'async-read', node: id, text, level: 'warning' });
+      }
+      return { error: text };
+    }
+    return { value };
   }
 
   /**
